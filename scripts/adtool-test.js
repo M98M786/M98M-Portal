@@ -37,7 +37,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_PEAK_FRESHNESS_RULES, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_PEAK_FRESHNESS_RULES, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -928,7 +928,13 @@ function run(argv) {
     if (i < 0) { rgParseFail = rgParseFail || nm + ' is missing'; continue; }
     const j = src.indexOf('\n];', i);
     try {
-      for (const row of new Function('return ' + src.slice(i + ('const ' + nm + ' = ').length, j + 3))()) rgAll.push({ array: nm, id: row[0], name: row[1], formula: row[2], sources: row[3], recompute: row[4], recheck: row[5] });
+      /* 31 Oct, §4: an entry may be written FROM a setting rather than repeating its value in words
+         (the house rule: no config value typed into copy), so the settings an entry may name are in
+         scope here exactly as they are in the engine. A register row is prose and never arithmetic,
+         so only plain numbers are ever handed in. */
+      const rgConsts = ['ADTOOL_VIDEO_RECHECK_DAYS', 'ADTOOL_VIDEO_SWEEP_PER_ACCOUNT', 'ADTOOL_VIDEO_SWEEP_DATES', 'ADTOOL_VIDEO_WINDOW_CAP', 'ADTOOL_VIDEO_WINDOWS'];
+      const rgVals = rgConsts.map(k => F[k]);
+      for (const row of new Function(...rgConsts, 'return ' + src.slice(i + ('const ' + nm + ' = ').length, j + 3))(...rgVals)) rgAll.push({ array: nm, id: row[0], name: row[1], formula: row[2], sources: row[3], recompute: row[4], recheck: row[5] });
     } catch (e) { rgParseFail = rgParseFail || (nm + ': ' + e.message); }
   }
   t('register: all fourteen arrays parse, and together they document every number the tool shows', !rgParseFail && rgAll.length >= 80 && rgAll.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck), rgParseFail || rgAll.length);
@@ -2040,13 +2046,19 @@ function run(argv) {
   t('spend windows: the spend already carries the fee charged on clicks, so the click fee is never added on top of it', !/spend \+ cpc_spend[\s\S]{0,80}AS spend_3d/.test(src) && !/AS spend_3d[\s\S]{0,200}cpc_spend/.test(src), null);
 
   /* (8) the two new pages: born on, gated before the cache, keyed by profit class */
-  t('flags: both new pages are born on, and a switch somebody has already set is left exactly as it stands', (() => { const a = src.indexOf("for (const key of ['adtool_page_livesplit', 'adtool_page_potential'])"); return a > 0 && /ON CONFLICT\(key\) DO NOTHING/.test(src.slice(a, a + 400)); })(), null);
-  t('gates: both new pages refuse by role BEFORE they look for a cached answer, on the memoised path and on the warm\'s raw path, and the key carries the profit class', (() => {
+  /* 31 Oct, §4: Videos joined the same born-on seed, so the list is three and the promise is unchanged. */
+  t('flags: all three of these pages are born on, and a switch somebody has already set is left exactly as it stands', (() => { const a = src.indexOf("for (const key of ['adtool_page_livesplit', 'adtool_page_potential', 'adtool_page_videos'])"); return a > 0 && /ON CONFLICT\(key\) DO NOTHING/.test(src.slice(a, a + 400)); })(), null);
+  /* 31 Oct, §4: the Videos board joined this block, and §3's hourly panel with it. EVERY route in the
+     block is checked rather than a named two, so a route added later cannot slip past the gate order
+     by not being on a list here. */
+  t('gates: every page in this block refuses by role BEFORE it looks for a cached answer, on the memoised path and on the warm\'s raw path, and the key carries the profit class', (() => {
     const blk = src.slice(src.indexOf('const ADTOOL_ACTIONS_P16 = {'), src.indexOf('/* ADTOOL-P16-END'));
-    const ok = ['adtoolLiveSplit', 'adtoolPotentialCpc'].every(a => { const i = blk.indexOf(a + ': {'); if (i < 0) return false; const b = blk.slice(i, i + 1800); const g = b.indexOf('adtGate(ctx, null)'), f = b.indexOf("adtGate(ctx, 'adtool_page_"), m = b.indexOf('adtKvMemo('); return g >= 0 && f > g && m > f; });
-    /* each page has two paths, fn (memoised) and raw (the hourly warm's, no memo): both refuse by role first, so four gates */
+    const names = (blk.match(/\n  (adtool[A-Za-z]+): \{/g) || []).map(s => s.replace(/[^A-Za-z]/g, '').replace(/^n/, ''));
+    const ok = names.every(a => { const i = blk.indexOf(a + ': {'); if (i < 0) return false; const b = blk.slice(i, i + 3200); const g = b.indexOf('adtGate(ctx, null)'), f = b.indexOf("adtGate(ctx, 'adtool_page_"); const m = b.indexOf('adtKvMemo('); return g >= 0 && f > g && (m < 0 || m > f); });
+    /* the two warmed pages have a second path, raw (the hourly warm's, no memo), and it refuses by role first too */
     const rawOk = ['adtoolLiveSplit', 'adtoolPotentialCpc'].every(a => { const i = blk.indexOf(a + ': {'); const b = blk.slice(i, i + 1800); const r = b.indexOf('raw: async'); const rg = b.indexOf('adtGate(ctx, null)', r), rc = b.indexOf('Compute(ctx.env', r); return r > 0 && rg > r && rc > rg; });
-    return ok && rawOk && (blk.match(/adtProfitClass\(ctx\.user\)/g) || []).length === 2 && (blk.match(/adtGate\(ctx, null\)/g) || []).length === 4;
+    /* three memoised pages, and a gate on every path: two paths each for the warmed pair, one each for the other two */
+    return names.length === 4 && ok && rawOk && (blk.match(/adtProfitClass\(ctx\.user\)/g) || []).length === 3 && (blk.match(/adtGate\(ctx, null\)/g) || []).length === 6;
   })(), null);
   t('routes: both new actions carry the advertising prefix, so the router gates them by role and strips collective profit on the way out', /Object\.assign\(ROUTES, ADTOOL_ACTIONS_P16\)/.test(src) && /adtoolLiveSplit: \{/.test(src) && /adtoolPotentialCpc: \{/.test(src) && /adtoolLiveSplit: 120000, adtoolPotentialCpc: 120000/.test(src), null);
   t('bounds: every read the two new pages make is held to a window or a ceiling', (() => {
@@ -2057,7 +2069,7 @@ function run(argv) {
   /* ten rows from 28 Oct: the nine the batch was specified with, plus SUGGESTIONS_WAITING, which the
      Overview prints as a tile of its own and which had stood at a hard nought since the Command
      centre was written. */
-  t('register: the new entries name the rule, the sources, when they recompute and how they are rechecked', (() => { const p16 = rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16'); return p16.length === 20 && p16.some(r => r.id === 'DECISIONS_TODAY') && p16.some(r => r.id === 'PEAK_CAMPAIGN') && !p16.some(r => r.id === 'SUGGESTIONS_WAITING') && ['PEAK_COHORT_LISTINGS', 'PEAK_HOURS_ON_OFF', 'PEAK_SPEND_AVOIDED', 'PEAK_SALES_IN_OUT', 'PEAK_PROFILE', 'PEAK_DEAD_HOURS', 'PEAK_SCHEDULE', 'PEAK_HOLD', 'PEAK_TRACKING'].every(k => p16.some(r => r.id === k)) && p16.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck); })(), rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16').map(r => r.id));
+  t('register: the new entries name the rule, the sources, when they recompute and how they are rechecked', (() => { const p16 = rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16'); return p16.length === 24 && p16.some(r => r.id === 'DECISIONS_TODAY') && p16.some(r => r.id === 'PEAK_CAMPAIGN') && !p16.some(r => r.id === 'SUGGESTIONS_WAITING') && ['PEAK_COHORT_LISTINGS', 'PEAK_HOURS_ON_OFF', 'PEAK_SPEND_AVOIDED', 'PEAK_SALES_IN_OUT', 'PEAK_PROFILE', 'PEAK_DEAD_HOURS', 'PEAK_SCHEDULE', 'PEAK_HOLD', 'PEAK_TRACKING', 'VIDEO_COHORT', 'VIDEO_ADDED_ON', 'VIDEO_BEFORE_AFTER', 'VIDEO_VS_NO_VIDEO'].every(k => p16.some(r => r.id === k)) && p16.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck); })(), rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16').map(r => r.id));
   t('register: there is an entry for every new number the two pages, the switch and the Overview now show', ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'PEAK_CAMPAIGN', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].every(id => rgAll.filter(r => r.id === id).length === 1), ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'PEAK_CAMPAIGN', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].filter(id => rgAll.filter(r => r.id === id).length !== 1));
   t('register: the switch entry says outright that it is sent only for an account whose own switch is on', (() => { const r = rgAll.filter(x => x.id === 'PEAK_SWITCH')[0]; return r && /own live switch is on/.test(r.formula) && /nothing leaves the portal/.test(r.formula); })(), null);
   t('report: yesterday’s report still answers for any day it is asked for, and offers the days it has', /SELECT day, generated_at FROM adtool_reports ORDER BY day DESC LIMIT 60/.test(src) && /const day = String\(\(p && p\.day\) \|\| \(days\[0\] && days\[0\]\.day\) \|\| ''\);/.test(src) && /yesterday_missing: !days\.some\(d => d\.day === ukYesterday\)/.test(src), null);
@@ -2699,9 +2711,12 @@ function run(argv) {
     const canon = F.adtKvCanon('adtoolPlan', { period: 'd30', cohort: 'peak' });
     return a1 !== b1 && a2 !== b2 && b1 !== a3 && canon.cohort === 'peak' && Object.keys(canon).length === 1;
   })(), [F.adtKvKey('adtoolPlan', 'p', { period: 'd30' }), F.adtKvKey('adtoolPlan', 'p', { period: 'd30', cohort: 'peak' })]);
-  t('peak cohort: both actions take cohort ‘peak’, refuse any other, and narrow by ONE join (regex over the real source)', (() => {
-    const refuse = (src.match(/if \(cohort && cohort !== 'peak'\) throw new Error\('SAY: the only cohort this answer knows is the peak list'\);/g) || []).length === 2;
-    const read = (src.match(/const CO = cohort === 'peak' \? await adPeakCohortRead\(env, acct\) : null;/g) || []).length === 2;
+  t('peak cohort: both actions take the cohorts they know, refuse any other, and narrow by ONE join (regex over the real source)', (() => {
+    /* 31 Oct, §4: a second cohort joined these two actions, so the refusal and the read now name both
+       and the list of them lives in one place. The guarantee is the same one: an unknown cohort is
+       refused rather than quietly answered for the whole fleet. */
+    const refuse = (src.match(/if \(cohort && ADTOOL_COHORTS\.indexOf\(cohort\) < 0\) throw new Error\('SAY: the cohorts this answer knows are ' \+ ADTOOL_COHORT_WORDS\);/g) || []).length === 2;
+    const read = (src.match(/const CO = cohort === 'peak' \? await adPeakCohortRead\(env, acct\) : cohort === 'video' \? await adVideoCohortRead\(env, acct\) : null;/g) || []).length === 2;
     const join = (src.match(/const coJoin = \(itemCol, dayCol\) => CO \? adPeakCohortJoin\(CO\.sql, itemCol, dayCol\) : '';/g) || []).length === 2;
     /* and the today grain gets the item list rather than a day rule it has no day column for */
     const today = /await adtoolTodayCompute\(env, \{ account: acct, cohort_items: coToday \}\)/.test(src);
@@ -3415,11 +3430,17 @@ function run(argv) {
     })(), null);
   t('§3 probe: the evidence route is key-gated like backupDump, is not adtool-prefixed, reaches no eBay endpoint, and says what cannot reconcile and why (real source)',
     (() => {
-      const route = src.slice(src.indexOf('  adsPeakPlanProbe: {'), src.indexOf('  backupStamp: {'));
+      /* 31 Oct, §3 item 0: the per-listing assembly moved into adPeakListingProfile, which this route
+         and the Peak page's own hourly panel both call. The route's own promises are asserted here and
+         the four pure calls where they now live, so neither claim went unchecked when the code moved.
+         The slice ENDS at the video probe beside it, which is a different route with its own promises. */
+      const route = src.slice(src.indexOf('  adsPeakPlanProbe: {'), src.indexOf('  adsVideoProbe: {'));
+      const shared = src.slice(src.indexOf('function adPeakListingProfile(row, inp) {'), src.indexOf('/* \u2550\u2550 VIDEOS'));
       return /adsPeakPlanProbe: \{\n\s*auth: 'sync'/.test(src) && !/fetch\(/.test(route) && !/ebayAccessToken/.test(route) &&
-        /reconcile_note:/.test(route) && /daily_totals: perDay/.test(route) && /envelope_note:/.test(route) &&
+        /reconcile_note:/.test(route) && /daily_totals: perDay/.test(shared) && /envelope_note:/.test(route) &&
         /read_errors: readErrors/.test(route) && /sent_to_ebay: false/.test(route) &&
-        /adPeakProfile\(/.test(route) && /adPeakDeadHours\(/.test(route) && /adPeakSchedule\(/.test(route) && /adPeakWantFor\(/.test(route);
+        /adPeakListingProfile\(row, \{/.test(route) &&
+        /adPeakProfile\(/.test(shared) && /adPeakDeadHours\(/.test(shared) && /adPeakSchedule\(/.test(shared) && /adPeakWantFor\(/.test(shared);
     })(), null);
   t('§3 pages: the peak page, the Decision page and the campaigns-per-listing page all read the schedule the planner wrote rather than working it out again (real source)',
     /schedule_today: showSch\(schT\), schedule_tomorrow: showSch\(schM\),/.test(src) &&
@@ -3442,15 +3463,17 @@ function run(argv) {
   t('§3 planner: the dead rule is handed the listing’s own typed hours, and the hours it gave back are written into the row the page reads (real source)',
     (() => {
       const one = src.slice(src.indexOf('async function adtPeakPlanOne(env, row, ctxIn) {'), src.indexOf('function adtPeakScheduleStmt(env, plan) {'));
-      const probe = src.slice(src.indexOf('  adsPeakPlanProbe: {'), src.indexOf('  backupStamp: {'));
+      const probe = src.slice(src.indexOf('  adsPeakPlanProbe: {'), src.indexOf('  adsVideoProbe: {'));
+      const shared = src.slice(src.indexOf('function adPeakListingProfile(row, inp) {'), src.indexOf('/* \u2550\u2550 VIDEOS'));
       const row = src.slice(src.indexOf('function adtPeakScheduleRow(r) {'), src.indexOf('async function adtPeakSchedulesRead('));
       return /const dead = adPeakDeadHours\(profile, Object\.assign\(\{\}, c\.rules, \{ typed_ranges: hours\.ranges \}\)\);/.test(one) &&
         /given_back: sch\.applied \? dead\.given_back : \[\], windows_outside_envelope: dead\.windows_outside_envelope,/.test(one) &&
         /reasons_json = \?6/.test(src) && /JSON\.stringify\(plan\.reasons\)/.test(src) &&
         /given_back: Array\.isArray\(dead\.given_back\) \? dead\.given_back : \[\],/.test(row) &&
         /dead_given_back: schT && schT\.readable \? schT\.given_back : \[\],/.test(src) &&
-        /adPeakDeadHours\(profile, Object\.assign\(\{\}, rules, \{ typed_ranges: hours\.ranges \|\| \[\] \}\)\)/.test(probe) &&
-        /dead_hours: dead,/.test(probe);
+        /adPeakDeadHours\(profile, Object\.assign\(\{\}, rules, \{ typed_ranges: hours\.ranges \|\| \[\] \}\)\)/.test(shared) &&
+        /dead_hours: dead,/.test(shared) &&
+        /const listings = chosen\.map\(row => adPeakListingProfile\(row, \{/.test(probe);
     })(), null);
   t('§3 pages: a row nobody set to switch itself is never shown a wanted state, because nothing is touching it (real source)',
     (() => {
@@ -3460,6 +3483,441 @@ function run(argv) {
       return /const parm = plist\.filter\(r => Number\(r\.auto \|\| 0\) === 1\);/.test(ic) &&
         /const ids = rows\.filter\(r => Number\(r\.auto \|\| 0\) === 1\)\.map\(r => String\(r\.item_id\)\);/.test(off) &&
         /takes_effect_note:/.test(hold) && /this listing is not set to switch itself/.test(hold);
+    })(), null);
+
+
+  /* ══ §4 (31 Oct): VIDEOS ═══════════════════════════════════════════════════════════════════ */
+
+  /* 4.1 the video ids out of a Trading GetItem reply */
+  t('§4 videos: GetItem’s VideoDetails gives the video ids, a listing with none is readable with an empty list, and a refusal is NOT read as "no video"',
+    (() => {
+      const two = F.adVideoIdsFromXml('<GetItemResponse><Ack>Success</Ack><Item><VideoDetails><VideoID>abc123</VideoID><VideoID>def456</VideoID></VideoDetails></Item></GetItemResponse>');
+      const none = F.adVideoIdsFromXml('<GetItemResponse><Ack>Success</Ack><Item></Item></GetItemResponse>');
+      const dup = F.adVideoIdsFromXml('<VideoID>abc123</VideoID><VideoID>abc123</VideoID>');
+      const refused = F.adVideoIdsFromXml('<GetItemResponse><Ack>Failure</Ack><Errors><ShortMessage>Invalid item</ShortMessage></Errors></GetItemResponse>');
+      const nothing = F.adVideoIdsFromXml('');
+      return two.readable && two.ids.length === 2 && two.ids[0] === 'abc123' &&
+        none.readable && none.ids.length === 0 &&
+        dup.ids.length === 1 &&
+        !refused.readable && refused.ids.length === 0 && !nothing.readable;
+    })(), null);
+
+  /* 4.2 the upload date out of the thumbnail picture id — the real ids and the real times the
+     18 October study recovered, one per distinct upload day it found */
+  t('§4 videos: the thumbnail picture id decodes to the video’s own upload time, on eight real thumbnails spanning eight different upload days (18 Oct data)',
+    (() => {
+      const real = [
+        ['odcAAeSww81qO7t9', '2026-06-24 11:11:57'],
+        ['htwAAeSwURVqPQSY', '2026-06-25 10:36:08'],
+        ['BbMAAeSwZlJqVNDT', '2026-07-13 11:49:39'],
+        ['3TQAAeSwu3ZqkIq-', '2026-08-27 19:06:38'],
+        ['b-IAAeSw0O5qtxTQ', '2026-09-26 00:41:52'],
+        ['-vQAAeSwV71qvwbU', '2026-10-02 01:20:20'],
+        ['nNMAAeSwkXNqxYeU', '2026-10-06 23:43:16'],
+        ['yVsAAeSwsgpqxpF8', '2026-10-07 18:37:48'],
+      ];
+      const at = Date.parse('2026-10-31T00:00:00Z');
+      return real.every(r => {
+        const bare = F.adVideoThumbDate(r[0], at);
+        const url = F.adVideoThumbDate('https://i.ebayimg.com/00/s/MTA4MFgxMDgw/z/' + r[0] + '/$_26.PNG?set_id=880000500F', at);
+        return bare.iso === r[1] && url.iso === r[1] && url.day === r[1].slice(0, 10) && url.picture_id === r[0];
+      });
+    })(), null);
+  t('§4 videos: a picture id that is not a believable upload time, a short id and an empty address all come back NULL with the reason, never as a date',
+    (() => {
+      const at = Date.parse('2026-10-31T00:00:00Z');
+      const zeros = F.adVideoThumbDate('AAAAAAAAAAAAAAAA', at);          /* decodes to timestamp 0 */
+      const short = F.adVideoThumbDate('abc', at);
+      const none = F.adVideoThumbDate('', at);
+      const future = F.adVideoThumbDate('odcAAeSww81qO7t9', Date.parse('2020-01-01T00:00:00Z'));
+      return zeros.day === null && zeros.note && short.day === null && none.day === null && future.day === null;
+    })(), null);
+  t('§4 videos: a listing PHOTO address under /g/ decodes the same way, which is why only the video thumbnail is ever read for a video date (real photo id)',
+    F.adVideoThumbDate('https://i.ebayimg.com/images/g/odcAAeSww81qO7t9/s-l140.jpg', Date.parse('2026-10-31T00:00:00Z')).iso === '2026-06-24 11:11:57', null);
+
+  /* 4.3 THE BEFORE-AND-AFTER, against the 18 October workbook’s own listings and its own figures.
+     Three real listings out of final.json: the windows, both sides, the change and the rest of the
+     account. If this port ever disagrees with that workbook, these three say so. */
+  (() => {
+    const vcases = [
+    { item: '236997583159', account: 'Sir Hasib', video: '2026-10-02', listed: '2026-08-10', N: 15, ub: 207, ua: 130, rb: 1786.15, ra: 1241.8, adb: 437.88, ada: 300.62, cb: 318, ca: 329,
+      rows: [['2026-09-17',13,104.92,24.88],['2026-09-18',13,104.91,27.97],['2026-09-19',11,88.77,29.0],['2026-09-20',9,72.63,31.02],['2026-09-21',17,137.19,28.23],['2026-09-22',13,106.63,13.17],['2026-09-23',4,34.45,18.95],['2026-09-24',16,143.2,29.88],['2026-09-25',8,71.6,21.66],['2026-09-26',16,143.2,32.65],['2026-09-27',12,107.4,38.44],['2026-09-28',7,62.65,21.11],['2026-09-29',23,205.85,40.63],['2026-09-30',38,340.1,65.5],['2026-10-01',7,62.65,14.79],['2026-10-02',10,89.5,14.41],['2026-10-03',11,98.45,18.61],['2026-10-04',13,116.35,25.28],['2026-10-05',14,125.3,28.09],['2026-10-06',5,44.75,16.03],['2026-10-07',10,89.5,18.26],['2026-10-08',9,79.2,22.9],['2026-10-09',7,62.65,15.0],['2026-10-10',5,43.4,18.35],['2026-10-11',8,71.6,20.49],['2026-10-12',10,89.5,23.17],['2026-10-13',3,26.85,16.59],['2026-10-14',11,107.45,30.28],['2026-10-15',13,155.35,30.92],['2026-10-16',7,83.65,16.65],['2026-10-17',4,47.8,0]],
+      crows: [['2026-09-17',18,155.31],['2026-09-18',23,200.65],['2026-09-19',28,283.07],['2026-09-20',21,174.12],['2026-09-21',21,173.21],['2026-09-22',8,67.48],['2026-09-23',22,194.64],['2026-09-24',12,116.92],['2026-09-25',23,216.57],['2026-09-26',23,231.97],['2026-09-27',21,195.78],['2026-09-28',24,231.15],['2026-09-29',24,229.82],['2026-09-30',31,279.93],['2026-10-01',19,189.67],['2026-10-02',15,165.45],['2026-10-03',21,188.12],['2026-10-04',23,215.61],['2026-10-05',21,217.33],['2026-10-06',21,213.91],['2026-10-07',34,340.07],['2026-10-08',19,180.71],['2026-10-09',17,154.64],['2026-10-10',23,225.37],['2026-10-11',25,268.95],['2026-10-12',21,208.37],['2026-10-13',19,190.08],['2026-10-14',28,286.22],['2026-10-15',22,200.92],['2026-10-16',14,161.79],['2026-10-17',21,248.79]] },
+    { item: '407239436234', account: 'Azhar Bhai', video: '2026-10-07', listed: '2026-09-23', N: 10, ub: 20, ua: 34, rb: 215.0, ra: 364.96, adb: 47.92, ada: 70.17, cb: 246, ca: 285,
+      rows: [['2026-09-30',1,10.75,3.49],['2026-10-01',5,53.75,8.96],['2026-10-02',1,10.75,6.3],['2026-10-03',3,32.25,6.53],['2026-10-04',5,53.75,9.46],['2026-10-05',4,43.0,9.13],['2026-10-06',1,10.75,4.05],['2026-10-07',3,31.71,7.66],['2026-10-08',3,31.71,4.16],['2026-10-09',5,53.75,11.13],['2026-10-10',2,21.5,8.62],['2026-10-11',1,10.75,8.77],['2026-10-12',2,21.5,4.93],['2026-10-13',2,21.5,6.12],['2026-10-14',4,43.0,6.06],['2026-10-15',5,53.75,11.25],['2026-10-16',5,53.75,9.13],['2026-10-17',5,53.75,0]],
+      crows: [['2026-09-27',12,129.59],['2026-09-28',15,150.43],['2026-09-29',25,250.5],['2026-09-30',30,316.11],['2026-10-01',23,191.81],['2026-10-02',24,255.53],['2026-10-03',39,373.8],['2026-10-04',25,239.72],['2026-10-05',21,213.89],['2026-10-06',32,287.64],['2026-10-07',32,311.78],['2026-10-08',22,183.28],['2026-10-09',34,327.71],['2026-10-10',28,240.47],['2026-10-11',33,286.53],['2026-10-12',42,380.18],['2026-10-13',25,236.32],['2026-10-14',20,191.36],['2026-10-15',18,167.8],['2026-10-16',28,248.06],['2026-10-17',35,313.08]] },
+    { item: '136854829678', account: 'Saif Bhai', video: '2026-10-08', listed: '2025-12-16', N: 9, ub: 98, ua: 53, rb: 673.11, ra: 367.9, adb: 125.21, ada: 44.24, cb: 349, ca: 411,
+      rows: [['2026-09-29',21,145.67,23.31],['2026-09-30',20,138.72,47.76],['2026-10-01',11,76.45,7.23],['2026-10-02',11,72.08,8.64],['2026-10-03',11,73.39,5.04],['2026-10-04',5,34.75,9.2],['2026-10-05',8,55.6,9.59],['2026-10-06',5,34.75,6.61],['2026-10-07',6,41.7,7.83],['2026-10-08',4,27.8,5.1],['2026-10-09',5,34.75,3.1],['2026-10-10',7,48.65,4.66],['2026-10-11',5,34.75,4.24],['2026-10-12',6,41.65,4.52],['2026-10-13',7,48.3,3.99],['2026-10-14',4,27.75,8.89],['2026-10-15',7,48.65,7.48],['2026-10-16',2,13.9,7.36],['2026-10-17',10,69.5,0]],
+      crows: [['2026-09-29',43,408.24],['2026-09-30',43,404.67],['2026-10-01',37,357.84],['2026-10-02',32,329.61],['2026-10-03',22,202.97],['2026-10-04',42,377.7],['2026-10-05',46,426.2],['2026-10-06',47,454.91],['2026-10-07',37,353.14],['2026-10-08',47,453.05],['2026-10-09',51,468.19],['2026-10-10',47,434.4],['2026-10-11',35,358.42],['2026-10-12',45,434.76],['2026-10-13',42,401.64],['2026-10-14',36,362.72],['2026-10-15',55,566.57],['2026-10-16',51,511.75],['2026-10-17',49,490.03]] },
+    ];
+    const mk = a => a.map(r => ({ day: r[0], units: r[1], revenue: r[2], spend: r[3] }));
+    const mkc = a => a.map(r => ({ day: r[0], units: r[1], revenue: r[2] }));
+    const LAST = '2026-10-17';   /* the last complete UK day in the 18 Oct dump */
+    for (const c of vcases) {
+      const got = F.adVideoBeforeAfter(mk(c.rows), c.video, LAST, { listed_day: c.listed, data_start: '2026-05-16', cap: 30, control_rows: mkc(c.crows) });
+      t('§4 videos: ' + c.item + ' (' + c.account + ') — the 18 Oct workbook’s own window, both sides, the change and the rest of the account',
+        got.window_days === c.N &&
+        got.before.units === c.ub && got.after.units === c.ua &&
+        near(got.before.revenue, c.rb, 0.02) && near(got.after.revenue, c.ra, 0.02) &&
+        near(got.before.spend, c.adb, 0.02) && near(got.after.spend, c.ada, 0.02) &&
+        near(got.change.units, (c.ua - c.ub) / c.ub, 0.0002) &&
+        got.control.before_units === c.cb && got.control.after_units === c.ca &&
+        near(got.control.change, (c.ca - c.cb) / c.cb, 0.0002) &&
+        got.before.from === new Date(Date.parse(c.video + 'T12:00:00Z') - c.N * 86400000).toISOString().slice(0, 10) &&
+        got.after.to === new Date(Date.parse(c.video + 'T12:00:00Z') + c.N * 86400000).toISOString().slice(0, 10),
+        { item: c.item, N: got.window_days, ub: got.before.units, ua: got.after.units, rb: got.before.revenue, ra: got.after.revenue, adb: got.before.spend, ada: got.after.spend, cb: got.control.before_units, ca: got.control.after_units });
+    }
+    /* the upload day is in NEITHER window, and is handed back on its own */
+    const c = vcases[0];
+    const got = F.adVideoBeforeAfter(mk(c.rows), c.video, LAST, { listed_day: c.listed, data_start: '2026-05-16', cap: 30, control_rows: mkc(c.crows) });
+    const onDay = (c.rows.filter(r => r[0] === c.video)[0] || [null, 0, 0, 0]);
+    t('§4 videos: the upload day itself is in neither window and comes back on its own',
+      got.before.to < c.video && got.after.from > c.video && got.upload_day.day === c.video && got.upload_day.units === onDay[1], { upload: got.upload_day });
+    /* the two windows the Decision page asks for narrow the same answer and never widen it */
+    const w14 = F.adVideoBeforeAfter(mk(c.rows), c.video, LAST, { listed_day: c.listed, data_start: '2026-05-16', cap: 14, control_rows: mkc(c.crows) });
+    const w28 = F.adVideoBeforeAfter(mk(c.rows), c.video, LAST, { listed_day: c.listed, data_start: '2026-05-16', cap: 28, control_rows: mkc(c.crows) });
+    t('§4 videos: the 14-day ceiling narrows the window and the 28-day one cannot widen it past the days that exist',
+      w14.window_days === 14 && w28.window_days === c.N && w14.before.units <= got.before.units && w14.window_days <= w28.window_days,
+      [w14.window_days, w28.window_days, got.window_days]);
+  })();
+  t('§4 videos: a window is EQUAL on both sides and is the shorter of the days since the video, the history before it and the ceiling',
+    (() => {
+      const rows = [];
+      for (let i = 1; i <= 40; i++) rows.push({ day: F.adtAddDays('2026-09-01', i), units: 1, revenue: 10, spend: 1 });
+      /* video on 2026-09-11, listed 2026-09-08: only 3 days of history before it */
+      const a = F.adVideoBeforeAfter(rows, '2026-09-11', '2026-10-10', { listed_day: '2026-09-08', data_start: '2026-05-16', cap: 30 });
+      /* video on 2026-10-08, two finished days since */
+      const b = F.adVideoBeforeAfter(rows, '2026-10-08', '2026-10-10', { listed_day: '2026-09-01', data_start: '2026-05-16', cap: 30 });
+      return a.window_days === 3 && a.before.days === 3 && a.after.days === 3 &&
+        b.window_days === 2 && b.before.days === 2 && b.after.days === 2;
+    })(), null);
+  t('§4 videos: a video on from the listing day has NO before-period, so the answer is blank with the reason and never a nought',
+    (() => {
+      const r = F.adVideoBeforeAfter([{ day: '2026-10-02', units: 3, revenue: 30, spend: 3 }], '2026-10-01', '2026-10-17', { listed_day: '2026-10-01', data_start: '2026-05-16', cap: 30 });
+      return r.window_days === 0 && r.before === null && r.after === null && r.change === null &&
+        r.notes.join(' ').indexOf('no before-period') >= 0;
+    })(), null);
+  t('§4 videos: a change against a before-side of nought is NULL, never a percentage',
+    (() => {
+      const rows = [{ day: '2026-10-05', units: 4, revenue: 40, spend: 4 }];
+      const r = F.adVideoBeforeAfter(rows, '2026-10-02', '2026-10-10', { listed_day: '2026-08-01', data_start: '2026-05-16', cap: 30 });
+      return r.window_days === 8 && r.before.units === 0 && r.after.units === 4 && r.change.units === null && r.change.units_abs === 4;
+    })(), null);
+  t('§4 videos: the ad spend either side is read from the click fee, and a spend that moved by half says so, so the two sides are not read as equal money',
+    (() => {
+      const rows = [];
+      for (let i = 0; i <= 9; i++) rows.push({ day: F.adtAddDays('2026-09-20', i), units: 1, revenue: 10, spend: 10 });
+      for (let i = 11; i <= 20; i++) rows.push({ day: F.adtAddDays('2026-09-20', i), units: 2, revenue: 20, spend: 30 });
+      const r = F.adVideoBeforeAfter(rows, '2026-09-30', '2026-10-17', { listed_day: '2026-06-01', data_start: '2026-05-16', cap: 10 });
+      return r.before.spend === 100 && r.after.spend === 300 && r.notes.join(' ').indexOf('Ad spend rose 200%') >= 0;
+    })(), null);
+
+  /* 4.4 the cohort: the day a listing joins, and the ONE membership rule the peak list already has */
+  t('§4 videos: a listing counts from its video’s own upload day, and from the day the sweep first saw the video when the day could not be decoded; a row with neither is left out',
+    (() => {
+      const dated = F.adVideoCohortEntry({ item_id: '123456789012', account: 'A', video_count: 1, video_added_on: '2026-10-09', first_seen: '2026-10-20' });
+      const undated = F.adVideoCohortEntry({ item_id: '123456789013', account: 'A', video_count: 1, video_added_on: null, first_seen: '2026-10-20' });
+      const neither = F.adVideoCohortEntry({ item_id: '123456789014', account: 'A', video_count: 1 });
+      const notAnId = F.adVideoCohortEntry({ item_id: '', account: 'A', video_added_on: '2026-10-09' });
+      const list = F.adVideoCohortEntries([{ item_id: '1', video_added_on: '2026-10-09' }, { item_id: '2' }]);
+      return dated.added_day === '2026-10-09' && dated.removed_day === '' && dated.from_source.indexOf('upload day') >= 0 &&
+        undated.added_day === '2026-10-20' && undated.from_source.indexOf('sweep') >= 0 &&
+        neither === null && notAnId === null && list.length === 1;
+    })(), null);
+  t('§4 videos: the cohort is joined by the SAME builder the peak cohort uses, so a day before the video never counts',
+    (() => {
+      const ents = F.adVideoCohortEntries([{ item_id: '123456789012', video_added_on: '2026-10-09' }]);
+      const sql = F.adPeakCohortSql(ents);
+      const join = F.adPeakCohortJoin(sql, 'd.item_id', 'd.day');
+      return /pk_item/.test(sql) && /123456789012/.test(sql) && /2026-10-09/.test(sql) &&
+        /d\.day >= pkc\.pk_from/.test(join) && F.adPeakInCohort(ents[0], '2026-10-08') === false && F.adPeakInCohort(ents[0], '2026-10-09') === true;
+    })(), null);
+  t('§4 videos: an EMPTY video cohort is a table with no rows and never a vanished filter, so a page can never answer for the whole fleet under a cohort heading',
+    F.adPeakCohortSql(F.adVideoCohortEntries([])).indexOf('WHERE 1 = 0') > 0, null);
+
+  /* 4.5 on eBay against the listers’ own record */
+  t('§4 videos: eBay’s answer and the lister record are counted apart, and both differences are listed rather than reconciled away',
+    (() => {
+      const c = F.adVideoCohortCounts(
+        [{ item_id: '1', account: 'A', video_count: 1 }, { item_id: '2', account: 'A', video_count: 2 }, { item_id: '3', account: 'A', video_count: 0 }],
+        [{ item_id: '2', account: 'A', video_status: 'DONE', video_link: 'x' }, { item_id: '9', account: 'A', video_status: 'done' }, { item_id: '8', account: 'A', video_status: '' }]);
+      return c.on_ebay === 2 && c.recorded === 2 && c.both === 1 &&
+        c.ebay_only.length === 1 && c.ebay_only[0].item_id === '1' &&
+        c.recorded_only.length === 1 && c.recorded_only[0].item_id === '9';
+    })(), null);
+
+  /* 4.6 with a video against without one */
+  t('§4 videos: each side is divided by its OWN number of listings, so four videos against four hundred other listings is not read as a collapse',
+    (() => {
+      const rows = [
+        { key: 'A', has_video: true, listings: 1, listings_with_traffic: 1, views: 1000, impressions: 10000, units: 10, revenue: 100, spend: 20, attr_revenue: 60, attr_units: 6, clicks: 100, orders: 9 },
+        { key: 'A', has_video: false, listings: 1, listings_with_traffic: 1, views: 100, impressions: 2000, units: 1, revenue: 10, spend: 4, attr_revenue: 4, attr_units: 1, clicks: 20, orders: 1 },
+        { key: 'A', has_video: false, listings: 1, listings_with_traffic: 1, views: 100, impressions: 2000, units: 1, revenue: 10, spend: 4, attr_revenue: 4, attr_units: 1, clicks: 20, orders: 1 },
+      ];
+      const out = F.adVideoVsNoVideo(rows);
+      const a = out[0];
+      return out.length === 1 && a.with.listings === 1 && a.without.listings === 2 &&
+        a.with.views_listing === 1000 && a.without.views_listing === 100 &&
+        a.with.ctr === 0.1 && a.without.ctr === 0.05 &&
+        a.lift.views === 9 && a.lift.ctr === 1 && a.with.roas === 3 && a.without.roas === 1;
+    })(), null);
+  t('§4 videos: a group with nothing on one side has no lift and says why, because a comparison against nought is not a comparison',
+    (() => {
+      const out = F.adVideoVsNoVideo([{ key: 'B', has_video: true, listings: 1, views: 10, impressions: 100, units: 1, revenue: 10, spend: 1, attr_revenue: 1, attr_units: 1, clicks: 2, orders: 1 }]);
+      return out[0].lift === null && out[0].without === null && out[0].note.indexOf('nothing to compare against') >= 0;
+    })(), null);
+  t('§4 videos: a rate on a side with no views and no spend is NULL and never nought',
+    (() => {
+      const out = F.adVideoVsNoVideo([
+        { key: 'C', has_video: true, listings: 1, views: 0, impressions: 0, units: 0, revenue: 0, spend: 0, attr_revenue: 0, attr_units: 0, clicks: 0, orders: 0 },
+        { key: 'C', has_video: false, listings: 1, views: 0, impressions: 0, units: 0, revenue: 0, spend: 0, attr_revenue: 0, attr_units: 0, clicks: 0, orders: 0 },
+      ]);
+      return out[0].with.ctr === null && out[0].with.conversion === null && out[0].with.roas === null && out[0].lift.ctr === null;
+    })(), null);
+
+  /* 4.7 the real source: the sweep, the cohort plumbing, the gates and the one-way-only promise */
+  t('§4 videos (real source): the sweep rides an hourly slot that is ALREADY registered, last in it, with its own per-account ceiling, its own fleet-wide fetch cap and its own clock',
+    /'25 \* \* \* \*': \[adtoolAlerts, adtoolVideoSweep\]/.test(src) &&
+    /ADTOOL_VIDEO_SWEEP_PER_ACCOUNT = 120/.test(src) && /ADTOOL_VIDEO_SWEEP_FETCH_CAP = 700/.test(src) &&
+    /ADTOOL_VIDEO_SWEEP_MS = 40000/.test(src) && /ADTOOL_VIDEO_RECHECK_DAYS = 7/.test(src) &&
+    /fetches >= ADTOOL_VIDEO_SWEEP_FETCH_CAP/.test(src) && /Date\.now\(\) > deadline/.test(src), null);
+  t('§4 videos (real source): the sweep asks about ACTIVE listings first and longest-unchecked first, and re-asks a week after a listing was last asked about',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolVideoSweep(env) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
+      return /ORDER BY \(i\.status = 'ACTIVE'\) DESC, COALESCE\(v\.checked_at, ''\) ASC LIMIT/.test(job) &&
+        /adtAddDays\(today, -ADTOOL_VIDEO_RECHECK_DAYS\)/.test(job) &&
+        /first_seen = CASE WHEN \?4 > 0 AND COALESCE\(first_seen, ''\) = '' THEN \?5 ELSE first_seen END/.test(job) &&
+        /OutputSelector>Item\.VideoDetails</.test(job);
+    })(), null);
+  t('§4 videos (real source): NOTHING new reaches eBay — every eBay call the video code makes is a read: the GetItem POST carries only an item id and an output selector, and the media and item-page calls are plain GETs',
+    (() => {
+      const block = src.slice(src.indexOf('async function adVideoThumbFetch(env, acct, videoId, itemId) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
+      const board = src.slice(src.indexOf('async function adtoolVideoBoardCompute(env, p, ctx) {'), src.indexOf('function adtPeriodParamsOf(w) {'));
+      /* one POST in the whole section, and it is GetItem */
+      const posts = (block.match(/method: 'POST'/g) || []).length;
+      return posts === 1 && /'X-EBAY-API-CALL-NAME': 'GetItem'/.test(block) &&
+        /apim\.ebay\.com\/commerce\/media\/v1_beta\/video\//.test(block) &&
+        /www\.ebay\.co\.uk\/itm\//.test(block) &&
+        !/method: '(PUT|DELETE|PATCH)'/.test(block) && !/fetch\(/.test(board);
+    })(), null);
+  t('§4 videos (real source): the media read is allowed as a GET on its own host and nothing else on /commerce/media/ can be written',
+    (() => {
+      const rest = src.slice(src.indexOf('  ebayRestCall: {'), src.indexOf('  ebayFinanceRead: {'));
+      return /\^\\\/commerce\\\/media\\\/v1_beta\\\/video/.test(rest) &&
+        /if \(media && method !== 'GET'\) throw new Error\('SAY: the video read is GET only'\);/.test(rest) &&
+        /\(media \? 'https:\/\/apim\.ebay\.com' : 'https:\/\/api\.ebay\.com'\)/.test(rest);
+    })(), null);
+  t('§4 videos (real source): both cohorts are named in ONE place and an unknown cohort is refused by BOTH of the Overview’s actions, never answered for the whole fleet',
+    (() => {
+      const cmd = src.slice(src.indexOf('  adtoolCommand: {'), src.indexOf('  adtoolToday: {'));
+      const plan = src.slice(src.indexOf('  adtoolPlan: {'), src.indexOf('  adtoolSales: {'));
+      const refuse = /if \(cohort && ADTOOL_COHORTS\.indexOf\(cohort\) < 0\) throw new Error\('SAY: the cohorts this answer knows are ' \+ ADTOOL_COHORT_WORDS\);/;
+      const read = /const CO = cohort === 'peak' \? await adPeakCohortRead\(env, acct\) : cohort === 'video' \? await adVideoCohortRead\(env, acct\) : null;/;
+      return /const ADTOOL_COHORTS = \['peak', 'video'\];/.test(src) &&
+        refuse.test(cmd) && refuse.test(plan) && read.test(cmd) && read.test(plan) &&
+        (src.match(/ADTOOL_COHORTS\.indexOf/g) || []).length === 2;
+    })(), null);
+  t('§4 videos (real source): the Videos page is role-gated and flag-gated with the gate BEFORE the cache, the flag is born on, and the board carries the API-truth sentence and the cohort rule',
+    (() => {
+      const route = src.slice(src.indexOf('  adtoolVideoBoard: {'), src.indexOf('  adtoolPeakProfile: {'));
+      return /await adtGate\(ctx, null\);/.test(route) && /await adtGate\(ctx, 'adtool_page_videos'\);/.test(route) &&
+        route.indexOf('adtGate(ctx, null)') < route.indexOf('adtKvMemo') &&
+        /'adtool_page_livesplit', 'adtool_page_potential', 'adtool_page_videos'/.test(src) &&
+        /one\('adtool_job_videosweep', 'on'\), one\('adtool_page_videos', 'on'\)/.test(src) &&
+        /api_truth: ADTOOL_VIDEO_API_TRUTH,/.test(src) && /cohort_rule: 'A listing counts from the day/.test(src) &&
+        /ADTOOL_VIDEO_API_TRUTH = 'These are listing-level metrics for listings with video\./.test(src);
+    })(), null);
+  t('§4 videos (real source): the board says there is no traffic reading from before the video, because eBay publishes views as a rolling window the portal keeps only the latest of',
+    (() => {
+      const board = src.slice(src.indexOf('async function adtoolVideoBoardCompute(env, p, ctx) {'), src.indexOf('function adtPeriodParamsOf(w) {'));
+      return /traffic_available: false,/.test(board) && /No traffic reading from before the video\./.test(board) &&
+        /range_days = 30/.test(board);
+    })(), null);
+  t('§4 videos (real source): the Overview blocks on the Videos page come from the Overview’s OWN two actions asked for the video cohort, not from a copy of their arithmetic',
+    (() => {
+      const board = src.slice(src.indexOf('async function adtoolVideoBoardCompute(env, p, ctx) {'), src.indexOf('function adtPeriodParamsOf(w) {'));
+      return /const route = ROUTES\[name\]; if \(!route\) return null;/.test(board) &&
+        /\(route\.raw \|\| route\.fn\)\(pay, ctx\)/.test(board) &&
+        /call\('adtoolPlan', planPay\)/.test(board) && /call\('adtoolCommand', cmdPay\)/.test(board) &&
+        /cohort: 'video'/.test(board);
+    })(), null);
+  t('§4 videos (real source): the register carries the four figures and the probe is a sync-key read that sends nothing',
+    (() => {
+      const probe = src.slice(src.indexOf('  adsVideoProbe: {'), src.indexOf('  backupStamp: {'));
+      return /\['VIDEO_COHORT',/.test(src) && /\['VIDEO_ADDED_ON',/.test(src) && /\['VIDEO_BEFORE_AFTER',/.test(src) && /\['VIDEO_VS_NO_VIDEO',/.test(src) &&
+        /auth: 'sync'/.test(probe) && /sent_to_ebay: false,/.test(probe) && /agreement: agreement,/.test(probe) &&
+        !/method: 'POST'/.test(probe);
+    })(), null);
+  t('§4 videos (real source): the video table keeps a listing asked about and found to carry none, which is what orders the rotation, and the cohort is built on the count and not on a row existing',
+    (() => {
+      const sch = src.slice(src.indexOf('async function ensureAdtoolVideoSchema(env) {'), src.indexOf('async function adVideoThumbFetch('));
+      const read = src.slice(src.indexOf('async function adVideoCohortRead(env, acct) {'), src.indexOf('function adVideoIdList(ids) {'));
+      const job = src.slice(src.indexOf('async function adtoolVideoSweep(env) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
+      return /CREATE TABLE IF NOT EXISTS adtool_listing_video \(account TEXT NOT NULL, item_id TEXT NOT NULL, video_ids_json TEXT, video_count INTEGER DEFAULT 0, video_added_on TEXT, video_gone_on TEXT, date_source TEXT, source TEXT, thumb_url TEXT, first_seen TEXT, checked_at TEXT, date_checked_at TEXT, note TEXT, PRIMARY KEY \(account, item_id\)\)/.test(sch) &&
+        /WHERE video_count > 0/.test(read) && /adPeakCohortSql\(entries\)/.test(read) &&
+        /* a video that has gone is written down rather than forgotten, and one that comes back clears the day */
+        /video_gone_on = CASE WHEN \?4 > 0 THEN '' WHEN COALESCE\(video_count, 0\) > 0 AND COALESCE\(video_gone_on, ''\) = '' THEN \?6 ELSE video_gone_on END/.test(job) &&
+        /* an ended listing is asked about once, ever; a live one again every week */
+        /i\.status = 'ACTIVE' AND substr\(v\.checked_at, 1, 10\) < \?2/.test(job);
+    })(), null);
+
+  /* 4.8 ITEM 0 (§3 leftover): the real hours one click away, from the SAME assembling function the
+     evidence probe calls, so the page and the probe cannot show different hours for one listing */
+  t('§3 item 0 (real source): the Peak page’s hourly panel and the evidence probe assemble a listing through ONE function, and the page’s own action is role-gated and flag-gated',
+    (() => {
+      const probe = src.slice(src.indexOf('  adsPeakPlanProbe: {'), src.indexOf('  adsVideoProbe: {'));
+      const route = src.slice(src.indexOf('  adtoolPeakProfile: {'), src.indexOf('  adtoolLiveSplit: {'));
+      return (src.match(/function adPeakListingProfile\(row, inp\) \{/g) || []).length === 1 &&
+        /const listings = chosen\.map\(row => adPeakListingProfile\(row, \{/.test(probe) &&
+        /adPeakListingProfile\(row, \{/.test(route) &&
+        /await adtGate\(ctx, 'adtool_page_peak'\);/.test(route) &&
+        /if \(!item\) throw new Error\('SAY: name the listing'\);/.test(route) &&
+        /that listing is not on the peak list/.test(route);
+    })(), null);
+  t('§3 item 0: the shared function gives the 24 hours with their real sums beside the weighted pattern, the dead hours, the tracking answer, the schedule worked out now, and the finished days asked for',
+    (() => {
+      const rows = [];
+      /* ten finished days, every hour with a reading; hour 3 spends and never sells */
+      for (let d = 1; d <= 10; d++) {
+        const day = F.adtAddDays('2026-10-10', d);
+        for (let h = 0; h < 24; h++) {
+          rows.push({ day: day, hour: h, spend: h === 3 ? 1.2 : 0.5, clicks: h === 3 ? 6 : 3, impressions: 10, orders: h === 3 ? 0 : (h >= 17 ? 2 : 1), units: h === 3 ? 0 : 1, revenue: h === 3 ? 0 : 12 });
+        }
+      }
+      const one = F.adPeakListingProfile({ item_id: '123456789012', account: 'A', hours: '00-24', auto: 1, hold: 'auto' }, {
+        rows: rows, drift_day: '', sched: {}, daily_by: { '123456789012|2026-10-20': { spend: 12, clicks: 72, orders: 25, units: 23, revenue: 276 } },
+        rules: F.adPeakPlanRules({}), uk: { date: '2026-10-21', hour: 9, minute: 0 }, today: '2026-10-21', tomorrow: '2026-10-22', day: '2026-10-20', days: 3,
+      });
+      return one.item_id === '123456789012' && one.profile.hours.length === 24 &&
+        one.profile.hours[3].spend_raw > 0 && one.profile.hours[3].orders_raw === 0 &&
+        one.profile.hours[0].days_observed === 10 && typeof one.profile.hours[0].days_with_sales === 'number' &&
+        one.profile.days_observed === 10 &&
+        one.dead_hours && Array.isArray(one.dead_hours.windows) &&
+        one.tracking && one.tracking.tracking !== undefined &&
+        one.schedule_worked_out_now.states.length === 24 && one.schedule_worked_out_now.day === '2026-10-20' &&
+        one.daily_totals.length === 3 && one.daily_totals[2].day === '2026-10-20' && one.daily_totals[2].daily_total !== null &&
+        one.daily_totals[0].daily_total === null;
+    })(), null);
+
+  /* ══ §4 and §3 item 0, BOTH SIDES: the engine really sends the field and the page really reads it.
+     The 28 October reconciliation is the reason these exist: two halves built on separate files each
+     reported green and still disagreed about the NAMES of eight figures, and a name the engine does
+     not send renders as an empty cell, which a reader takes for a nought. ══ */
+  const ovSrc = rdFile('frontend/view-adtool-overview.js');
+  const rtSrc = rdFile('frontend/view-adtool-runtoday.js');
+  const vidBlk = src.slice(src.indexOf('async function adtoolVideoBoardCompute(env, p, ctx) {'), src.indexOf('function adtPeriodParamsOf(w) {'));
+
+  t('§4 videos: the sub-page is registered in the Overview’s OWN file, as the key the shell keeps off the sidebar, and the Overview links to it',
+    /VIEWS\.adtoolVideos = \{/.test(ovSrc) && /label: 'Videos'/.test(ovSrc) && /roles: ROLES/.test(ovSrc) &&
+    /href="#adtoolVideos"/.test(ovSrc) && (ovSrc.match(/VIEWS\.adtoolVideos = \{/g) || []).length === 1, null);
+  t('§4 videos: the sub-page draws the Overview’s blocks through window.adtOverviewBlocks and never forks them',
+    (() => {
+      const i = ovSrc.indexOf('function vidDraw()'), b = ovSrc.slice(i, i + 1400);
+      return /var B = window\.adtOverviewBlocks;/.test(b) && /B\.hero\(O\.plan\)/.test(b) &&
+        /B\.today\(O\.command\) \+ B\.byAccount\(O\.command\) \+ B\.slots\(O\.command\) \+ B\.hourly\(O\.command\) \+ B\.foot\(O\.command\)/.test(b);
+    })(), null);
+  t('§4 videos: the page asks adtoolVideoBoard with the period bar’s own window and the account chip, and the engine answers on the same two',
+    /api\('adtoolVideoBoard', p\)/.test(ovSrc) && /adtPeriodParams\(VD\.period\)/.test(ovSrc) &&
+    /adtPeriodOr\(p, today, 'd30'\)/.test(vidBlk) && /const acct = String\(\(p && p\.account\) \|\| ''\)\.trim\(\);/.test(vidBlk), null);
+  t('§4 videos: the API-truth sentence and the cohort rule are PRINTED on both pages, out of the answer rather than typed into the view',
+    /esc\(String\(D\.api_truth \|\| ''\)\)/.test(ovSrc) && /esc\(String\(D\.cohort_rule\)\)/.test(ovSrc) &&
+    /esc\(String\(D\.api_truth \|\| ''\)\)/.test(rtSrc) &&
+    !/listing-level metrics for listings with video/.test(ovSrc) && !/listing-level metrics for listings with video/.test(rtSrc), null);
+  t('§4 videos: the cohort counts the page prints are the four the engine sends, and the two difference lists are the engine’s own',
+    /on_ebay: eIds\.length, recorded: rIds\.length, both: both\.length,/.test(src) &&
+    /cnt\(C\.on_ebay\)/.test(ovSrc) && /cnt\(C\.recorded\)/.test(ovSrc) && /cnt\(C\.both\)/.test(ovSrc) &&
+    /vidList\(C\.ebay_only,/.test(ovSrc) && /vidList\(C\.recorded_only,/.test(ovSrc), null);
+  t('§4 videos: the with-against-without table reads the per-listing figures and the lift the engine sends, by account and by case type',
+    /by_account: adVideoVsNoVideo\(/.test(vidBlk) && /by_case_type: adVideoVsNoVideo\(/.test(vidBlk) &&
+    /views_listing/.test(ovSrc) && /units_listing/.test(ovSrc) && /revenue_listing/.test(ovSrc) &&
+    /tbl\('Account', V\.by_account\)/.test(ovSrc) && /tbl\('Case type', V\.by_case_type\)/.test(ovSrc), null);
+  t('§4 videos: the Videos sub-page carries NO per-listing table and NO before-and-after of its own, because the owner put that record on the Decision page, and it links there',
+    !/before_after/.test(ovSrc) && !/per_listing/.test(ovSrc) && /href="#adtoolRunToday"/.test(ovSrc) && /Video revisions/.test(ovSrc), null);
+  t('§4 videos: the Decision page’s department reads the engine’s own windows, both sides, the change and the control, by the names the engine sends',
+    /windows: windows,/.test(vidBlk) && /before_after_windows: ADTOOL_VIDEO_WINDOWS,/.test(vidBlk) &&
+    /Array\.isArray\(D\.per_listing\) \? D\.per_listing : \[\]/.test(rtSrc) && /Array\.isArray\(D\.before_after\) \? D\.before_after : \[\]/.test(rtSrc) &&
+    /D\.before_after_windows \|\| \[14, 28\]/.test(rtSrc) &&
+    /w\.before/.test(rtSrc) && /w\.after/.test(rtSrc) && /w\.change/.test(rtSrc) && /w\.control/.test(rtSrc) &&
+    /units_day/.test(rtSrc) && /revenue_day/.test(rtSrc) && /spend_day/.test(rtSrc), null);
+  t('§4 videos: EVERY listing row on the department is an adtProductCell, so it keeps its History link',
+    (() => {
+      const i = rtSrc.indexOf('function vrRow(r)'), b = rtSrc.slice(i, i + 3000);
+      const rows = (b.match(/<tr>/g) || []).length;
+      return rows > 0 && (b.match(/adtProductCell\(r\)/g) || []).length === rows;
+    })(), null);
+  t('§4 videos: the department says what eBay could not give us rather than leaving a column blank, and names the control in the engine’s own words',
+    /traffic_note: 'No traffic reading from before the video\./.test(vidBlk) &&
+    /rows\[q\]\.traffic_note/.test(rtSrc) && /esc\(String\(D\.control_note \|\| ''\)\)/.test(rtSrc) &&
+    /no video date, so there is nothing to put either side of one/.test(rtSrc), null);
+  t('§4 videos: a change the engine sends as null reads as "no before" on the page and never as a nought per cent',
+    (() => { const i = rtSrc.indexOf('function vrChg(v)'), b = rtSrc.slice(i, i + 400); return /no before/.test(b) && /if \(n == null\)/.test(b); })(), null);
+  t('§3 item 0: the Peak page asks adtoolPeakProfile for the ONE listing whose panel is open, by the name the engine registers, and prints the hours it sends',
+    /api\('adtoolPeakProfile', \{ item_id: key, days: 3 \}\)/.test(pkSrc) &&
+    /if \(PK\.dataFor\) loadProfile\(PK\.dataFor\);/.test(pkSrc) &&
+    /P\.profile && P\.profile\.hours/.test(pkSrc) &&
+    /spend_raw/.test(pkSrc) && /clicks_raw/.test(pkSrc) && /orders_raw/.test(pkSrc) && /days_observed/.test(pkSrc) && /days_with_sales/.test(pkSrc) &&
+    /P\.dead_hours && Array\.isArray\(P\.dead_hours\.windows\)/.test(pkSrc) && /daily_totals/.test(pkSrc), null);
+  t('§3 item 0: the panel prints the twenty-four hours and the four parts of the day under them, and says the four are the same hours added up',
+    (() => {
+      const i = pkSrc.indexOf('function profSlotRow(hours)'), b = pkSrc.slice(i, i + 1400);
+      return /PROF_SLOTS = \[\['Night', 0, 6\], \['Morning', 6, 12\], \['Afternoon', 12, 17\], \['Evening', 17, 24\]\]/.test(pkSrc) &&
+        /The same hours added into the four parts of the day/.test(b) &&
+        /for \(var i = 0; i < 24; i\+\+\)/.test(pkSrc.slice(pkSrc.indexOf('function profRows('), pkSrc.indexOf('function profDays(')));
+    })(), null);
+  t('§3 item 0: the sentence that said the hourly figures are NOT in this answer is gone, because they are, and the page says where they come from instead',
+    !/The money, the clicks and the sales in each hour are not in this answer/.test(pkSrc) &&
+    /eBay publishes no ad figures by hour/.test(pkSrc) && /a day\\'s first reading belongs to no hour of trading/.test(pkSrc), null);
+  t('§4 videos: the department lists EVERY listing that carries a video, the before-and-after joined onto the ones whose date we have, so an undated listing is a row that says why rather than one that is dropped',
+    (() => {
+      const i = rtSrc.indexOf('function vrRows()'), b = rtSrc.slice(i, i + 1600);
+      return /per_listing/.test(b) && /byId\[String\(r\.item_id\)\] \|\| null/.test(b) &&
+        /windows: b \? b\.windows : null/.test(b) &&
+        /no video date, so there is nothing to put either side of one/.test(rtSrc);
+    })(), null);
+  t('§4 videos: the conversion rate takes BOTH its sides from eBay\u2019s own traffic reading, never this period\u2019s units over a thirty-day view count',
+    /transactions: t30 \? n0\(t30\.transactions\) : null,/.test(vidBlk) &&
+    /conversion: \(views != null && views > 0 && t30 && n0\(t30\.transactions\) != null\) \? round4\(n0\(t30\.transactions\) \/ views\) : null,/.test(vidBlk), null);
+
+  t('§4 videos: VIEWS are divided by the listings eBay published views for, because the traffic report covers the top three hundred of an account and a listing with no reading is not a listing with nought views',
+    (() => {
+      /* four listings a side; eBay published views for one of the four on each side */
+      const mk = (hv, n, trafficOn) => { const out = []; for (let i = 0; i < n; i++) out.push({ key: 'A', has_video: hv, listings: 1, listings_with_traffic: (i < trafficOn ? 1 : 0), views: (i < trafficOn ? 400 : 0), impressions: (i < trafficOn ? 4000 : 0), units: 2, revenue: 20, spend: 2, attr_revenue: 4, attr_units: 1, clicks: 10, orders: 2 }); return out; };
+      const out = F.adVideoVsNoVideo(mk(true, 4, 1).concat(mk(false, 4, 1)));
+      const a = out[0];
+      return a.with.listings === 4 && a.with.listings_with_traffic === 1 && a.with.views_listing === 400 &&
+        a.without.views_listing === 400 && a.lift.views === 0 &&
+        a.with.units_listing === 2 && a.with.revenue_listing === 20;
+    })(), null);
+  t('§4 videos: a side with no traffic reading at all has no views each, rather than nought views each',
+    (() => {
+      const out = F.adVideoVsNoVideo([
+        { key: 'B', has_video: true, listings: 3, listings_with_traffic: 0, views: 0, impressions: 0, units: 6, revenue: 60, spend: 3, attr_revenue: 6, attr_units: 3, clicks: 9, orders: 6 },
+        { key: 'B', has_video: false, listings: 3, listings_with_traffic: 3, views: 300, impressions: 3000, units: 3, revenue: 30, spend: 3, attr_revenue: 3, attr_units: 1, clicks: 9, orders: 3 },
+      ]);
+      return out[0].with.views_listing === null && out[0].without.views_listing === 100 && out[0].lift.views === null;
+    })(), null);
+  t('§4 videos: a whole-period rate is NOT worked out from a bounded slice of days; it comes back blank with the reason, and the equal windows are untouched',
+    (() => {
+      const rows = [];
+      for (let i = 0; i < 20; i++) rows.push({ day: F.adtAddDays('2026-09-20', i), units: 1, revenue: 10, spend: 1 });
+      const full = F.adVideoBeforeAfter(rows, '2026-09-30', '2026-10-09', { listed_day: '2026-06-01', data_start: '2026-05-16', cap: 10 });
+      const cut = F.adVideoBeforeAfter(rows, '2026-09-30', '2026-10-09', { listed_day: '2026-06-01', data_start: '2026-05-16', cap: 10, rows_from: '2026-09-20' });
+      return full.whole.pre_units === 10 && cut.whole.pre_units === null && cut.whole.before_side_limited === true &&
+        /after this listing/.test(cut.whole.note) &&
+        JSON.stringify(cut.before) === JSON.stringify(full.before) && JSON.stringify(cut.after) === JSON.stringify(full.after);
+    })(), null);
+
+  t('§4 videos: no setting is typed into copy \u2014 the sweep\u2019s ceilings and the two windows are written from the settings themselves, in the register and on the page',
+    (() => {
+      const reg = rgAll.filter(r => r.id === 'VIDEO_COHORT')[0], ba = rgAll.filter(r => r.id === 'VIDEO_BEFORE_AFTER')[0];
+      const board = src.slice(src.indexOf('async function adtoolVideoBoardCompute(env, p, ctx) {'), src.indexOf('function adtPeriodParamsOf(w) {'));
+      return reg && ba &&
+        /up to 120 listings an account/.test(reg.recompute) && /again every 7 days/.test(reg.formula) &&
+        /which is 14 days and then 28 days/.test(ba.formula) &&
+        /' \+ ADTOOL_VIDEO_SWEEP_PER_ACCOUNT \+ '/.test(src) && /' \+ ADTOOL_VIDEO_RECHECK_DAYS \+ '/.test(src) &&
+        /ADTOOL_VIDEO_WINDOWS\.join\(' days and then '\)/.test(src) &&
+        !/a hundred and twenty/.test(src) && !/asks again a week after/.test(src) &&
+        /ADTOOL_VIDEO_SWEEP_PER_ACCOUNT \+ ' listings an account each hour/.test(board);
     })(), null);
 
   const passed = results.filter(r => r.ok).length;

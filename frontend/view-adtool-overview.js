@@ -101,6 +101,10 @@
     icon: '<path d="M3 3v18h18"/><path d="m6 15 4-4 3 3 5-7"/>',
     render: function () {
       return '<div class="ov-wrap">' + adtHgroup('Overview', 'Where the ad money went, and how today is going') +
+        /* the sub-page is not a sidebar line (the owner fixed the ten pages on 28 Oct), so this is
+           the way in to it. Hidden views stay reachable by hash. */
+        '<div class="ov-win" style="margin:-4px 0 12px">These same figures over the listings that carry a product video: ' +
+        '<a class="vid-link" href="#adtoolVideos">Videos</a></div>' +
         '<div id="ovBar"></div><div id="ovAcct" class="ov-acct"></div>' +
         '<div id="ovHero"><div class="ov-empty">Loading…</div></div>' +
         '<div id="ovToday"><div class="ov-empty">Loading…</div></div></div>';
@@ -427,6 +431,204 @@
     var legend = '<div class="ov-legend"><span><i style="background:' + LOSS + '"></i>money spent' + (maxS > 0 ? ', busiest hour ' + esc(gbp0(maxS)) : '') + '</span>' +
       '<span><i style="background:' + ORDERS_C + '"></i>orders received' + (maxO > 0 ? ', busiest hour ' + esc(cnt(maxO)) : '') + '</span></div>';
     return '<div class="ov-panel">' + head + (notes.length ? '<div class="ov-carry">' + notes.join(' ') + '</div>' : '') + legend + s + '</div>';
+  }
+
+
+  /* ══ VIDEOS, the sub-page under this one (owner's brief, 31 Oct, §4) ════════════════════════
+     "All the videos we have on our listings, how they are performing, all the data, the way it
+     comes in the Overview." So: the Overview's OWN blocks above, drawn through the same functions
+     this page draws them with, from the same two actions asked for the video cohort.
+     THE PER-LISTING RECORD IS NOT HERE. The owner put it on the Decision page, as a department of
+     video revisions, and one figure has one home: this page carries the cohort, the blocks and the
+     with-video against without-video comparison, and links to that department for the rest.
+     It is registered here, in the Overview's own file, because it is the Overview over one cohort
+     and the two must never drift apart. The shell keeps it off the sidebar and reaches it by hash. */
+  var VD = { account: '', period: null, data: null, open: '' };
+
+  VIEW_CSS.push([
+    '.vid-truth{font-size:12px;color:var(--text-2);line-height:1.55;background:var(--panel-2);border:1px solid var(--gold-line);border-radius:12px;padding:10px 13px;margin:0 0 12px}',
+    '.vid-badge{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;margin-left:8px;color:var(--text-3)}',
+    '.vid-badge.amber{color:#e8b54b;border-color:#e8b54b}.vid-badge.red{color:#e0563f;border-color:#e0563f}',
+    '.vid-link{color:var(--gold-a);font-weight:800;text-decoration:none}',
+    '.vid-diff{font-size:12px;color:var(--text-2);margin-top:8px;line-height:1.6}',
+    '.vid-diff ul{margin:6px 0 0;padding-left:18px}',
+    '.vid-diff li{margin:2px 0}',
+    '.vid-more{background:none;border:0;color:var(--gold-a);font:inherit;font-size:12px;font-weight:800;cursor:pointer;padding:0}'
+  ].join(''));
+
+  VIEWS.adtoolVideos = {
+    label: 'Videos', hidden: false, order: 63, roles: ROLES,
+    icon: '<rect x="2" y="5" width="14" height="14" rx="2"/><path d="m22 8-6 4 6 4z"/>',
+    render: function () {
+      return '<div class="ov-wrap">' + adtHgroup('Videos', 'How the listings that carry a product video are performing') +
+        '<div class="vid-truth" id="vidTruth">Loading…</div>' +
+        '<div id="vidBar"></div><div id="vidAcct" class="ov-acct"></div>' +
+        '<div id="vidCohort"><div class="ov-empty">Loading…</div></div>' +
+        '<div id="vidHero"></div><div id="vidToday"></div><div id="vidVs"></div></div>';
+    },
+    init: function () {
+      VD.data = null; VD.open = '';
+      VD.period = adtPeriodBar('vidBar', { page: 'adtoolVideos', def: 'd30', onChange: function (v) { VD.period = v; loadVideos(false); } });
+      vidAcctChips();
+      loadVideos(false)['catch'](function () {});
+      /* the cohort moves with the hourly sweep and the blocks move with today, so a tab left open
+         is re-asked every five minutes. adtPoll waits on hidden tabs and stops for good on an
+         'auth' refusal (the session-expiry law). */
+      adtPoll('vidCohort', 300000, function () { return loadVideos(true); });
+    }
+  };
+
+  function vidAcctChips() {
+    var el = $('vidAcct'); if (!el) return;
+    el.innerHTML = '<button class="' + (VD.account ? '' : 'on') + '" data-a="">All accounts</button>' +
+      ((VD.data && VD.data.accounts) || OV.accounts || []).map(function (a) {
+        return '<button class="' + (VD.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>';
+      }).join('');
+    var bs = el.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { VD.account = this.getAttribute('data-a'); vidAcctChips(); loadVideos(false)['catch'](function () {}); };
+  }
+  function loadVideos(quiet) {
+    var p = adtPeriodParams(VD.period); if (VD.account) p.account = VD.account;
+    return api('adtoolVideoBoard', p).then(function (d) {
+      VD.data = d || {};
+      if (!$('vidCohort')) return;
+      vidAcctChips();
+      vidDraw();
+      adtPeriodEcho('vidBar', d && d.period);
+    })['catch'](function (e) {
+      if (!quiet && $('vidCohort')) $('vidCohort').innerHTML = '<div class="ov-panel"><h3>Not available</h3><div class="ov-sub">' + esc((e && e.message) || 'This page could not load.') + '</div></div>';
+      throw e;
+    });
+  }
+  /* the freshness badge. Both thresholds are read off the answer, so nothing here goes stale when
+     somebody changes them, and a stamp nobody could read says so rather than reading as fresh. */
+  function vidFresh(at, rules) {
+    if (!at) return '<span class="vid-badge">not read yet</span>';
+    var d = new Date(String(at).replace(' ', 'T') + (/[Zz]|[+-]\d\d:?\d\d$/.test(String(at)) ? '' : 'Z'));
+    if (isNaN(d.getTime())) return '<span class="vid-badge">reading time not understood</span>';
+    var mins = Math.round((Date.now() - d.getTime()) / 60000);
+    var amber = num(rules && rules.amber_min), red = num(rules && rules.red_min);
+    if (red != null && mins > red) return '<span class="vid-badge red">' + cnt(mins) + ' min old</span>';
+    if (amber != null && mins > amber) return '<span class="vid-badge amber">' + cnt(mins) + ' min old</span>';
+    return '';
+  }
+  function vidDraw() {
+    var D = VD.data || {};
+    if ($('vidTruth')) $('vidTruth').innerHTML = esc(String(D.api_truth || '')) + (D.cohort_rule ? '<br><br>' + esc(String(D.cohort_rule)) : '');
+    $('vidCohort').innerHTML = vidCohortPanel(D);
+    var B = window.adtOverviewBlocks;
+    var O = D.overview || {};
+    if ($('vidHero')) {
+      $('vidHero').innerHTML = (B && O.plan)
+        ? B.hero(O.plan)
+        : '<div class="ov-panel"><h3>The Overview\'s own figures over these listings</h3><div class="ov-sub">' +
+          esc(O.note || 'These blocks are not available for this answer.') + '</div></div>';
+    }
+    if ($('vidToday')) {
+      $('vidToday').innerHTML = (B && O.command)
+        ? (B.today(O.command) + B.byAccount(O.command) + B.slots(O.command) + B.hourly(O.command) + B.foot(O.command))
+        : '';
+    }
+    if ($('vidVs')) $('vidVs').innerHTML = vidVsPanel(D);
+    vidWire();
+  }
+  function vidWire() {
+    var bs = document.querySelectorAll('[data-vidopen]');
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].onclick = function () {
+        var k = this.getAttribute('data-vidopen');
+        VD.open = VD.open === k ? '' : k;
+        $('vidCohort').innerHTML = vidCohortPanel(VD.data || {});
+        vidWire();
+      };
+    }
+  }
+  function vidList(rows, label) {
+    var L = Array.isArray(rows) ? rows : [];
+    if (!L.length) return '<div class="vid-diff">' + esc(label) + ': none.</div>';
+    var shown = L.slice(0, 40);
+    return '<div class="vid-diff"><b>' + esc(label) + ':</b> ' + cnt(L.length) + '<ul>' +
+      shown.map(function (r) {
+        var id = String((r && r.item_id) || '');
+        return '<li>' + (/^\d{9,13}$/.test(id)
+          ? '<a class="vid-link" href="#adtoolProduct/' + esc(id) + '">' + esc(id) + '</a>'
+          : esc(id)) + (r && r.account ? ' · ' + esc(String(r.account)) : '') +
+          (r && r.video_added_on ? ' · video ' + esc(String(r.video_added_on)) : '') +
+          (r && r.recorded_at ? ' · recorded ' + esc(String(r.recorded_at).slice(0, 10)) : '') + '</li>';
+      }).join('') + '</ul>' + (L.length > shown.length ? '<div>and ' + cnt(L.length - shown.length) + ' more</div>' : '') + '</div>';
+  }
+  function vidCohortPanel(D) {
+    var C = D.cohort || {}, RU = D.freshness_rules || null;
+    var cov = C.coverage || {};
+    var h = '<div class="ov-panel"><h3>The videos on our listings' + src('which listings carry a video', 'how') + '</h3>' +
+      '<div class="ov-sub">' + esc(String(C.note || '')) + '</div>' +
+      '<div class="ov-kpis">' +
+      kpi('Carrying a video on eBay', cnt(C.on_ebay),
+        'eBay\'s own answer, listing by listing' + (cov.last_checked_at ? '<br>last asked ' + esc(ago(cov.last_checked_at)) + vidFresh(cov.last_checked_at, RU) : '<br>the sweep has not run yet')) +
+      kpi('Recorded by a lister', cnt(C.recorded), 'the portal\'s own record of the video stage') +
+      kpi('On both', cnt(C.both), 'eBay shows a video and a lister recorded one') +
+      kpi('Listings asked about', cnt(cov.listings_asked_about),
+        (cov.active_listings == null ? 'out of a number of active listings we do not have' : 'out of ' + cnt(cov.active_listings) + ' active') +
+        (num(cov.still_to_ask_about) > 0 ? '<br>' + cnt(cov.still_to_ask_about) + ' still to ask about' : '') +
+        (num(cov.without_a_date) > 0 ? '<br>' + cnt(cov.without_a_date) + ' with no date eBay would give us' : '') +
+        (num(cov.video_taken_off) > 0 ? '<br>' + cnt(cov.video_taken_off) + ' had a video and no longer do' : '')) +
+      '</div>';
+    h += '<div class="vid-diff">' + esc(String(cov.note || '')) + '</div>';
+    /* the two differences, each behind its own button: these are the lists somebody acts on, and
+       neither is reconciled away into a single number. */
+    h += '<div style="margin-top:8px">' +
+      '<button type="button" class="vid-more" data-vidopen="ebay">' + (VD.open === 'ebay' ? 'Hide' : 'Show') + ' the ' + cnt((C.ebay_only || []).length) + ' on eBay that no lister recorded</button>' +
+      (VD.open === 'ebay' ? vidList(C.ebay_only, 'On eBay, not recorded') : '') + '</div>';
+    h += '<div style="margin-top:6px">' +
+      '<button type="button" class="vid-more" data-vidopen="rec">' + (VD.open === 'rec' ? 'Hide' : 'Show') + ' the ' + cnt((C.recorded_only || []).length) + ' recorded with no video on eBay</button>' +
+      (VD.open === 'rec' ? vidList(C.recorded_only, 'Recorded, no video on eBay') : '') + '</div>';
+    if (Array.isArray(C.by_date_source) && C.by_date_source.length) {
+      h += '<div class="vid-diff"><b>Where each video date came from:</b> ' +
+        C.by_date_source.map(function (r) { return esc(String(r.date_source)) + ' ' + cnt(r.n); }).join(' · ') + '</div>';
+    }
+    var J = cov.last_sweep;
+    if (J) h += '<div class="vid-diff"><b>Last sweep:</b> ' + esc(ago(J.started_at)) + (J.status ? ' · ' + esc(String(J.status)) : '') + (J.note ? ' · ' + esc(String(J.note)) : '') + '</div>';
+    /* the per-listing record and the before-and-after have one home, and it is not this page */
+    h += '<div class="vid-diff">Every listing with a video, its video date and what its sales did either side of it are on the ' +
+      '<a class="vid-link" href="#adtoolRunToday">Decision page</a>, under <b>Video revisions</b>.</div>';
+    return h + '</div>';
+  }
+  function vidVsPanel(D) {
+    var V = D.video_vs_no_video || {};
+    var head = '<div class="ov-panel"><h3>With a video against without one' + src('with a video against without one', 'how') + '</h3>' +
+      '<div class="ov-sub">' + esc(String(V.basis || '')) + '</div>';
+    var tbl = function (label, rows) {
+      var L = Array.isArray(rows) ? rows.filter(function (r) { return r && r.with; }) : [];
+      if (!L.length) return '<div class="ov-empty">No ' + esc(label) + ' has a listing with a video in this period.</div>';
+      return '<div class="ov-sub" style="margin-top:10px"><b>' + esc(label) + '</b></div>' +
+        '<div class="ov-scroll"><table class="ov-tbl"><thead><tr><th>' + esc(label) + '</th>' +
+        '<th class="r">Listings with · without</th><th class="r">Views each</th><th class="r">Click-through</th>' +
+        '<th class="r">Conversion</th><th class="r">ROAS</th><th class="r">Units each</th><th class="r">Takings each</th></tr></thead><tbody>' +
+        L.map(function (r) {
+          var w = r.with, n = r.without;
+          var pair = function (a, b, f) { return f(a) + ' <span class="ov-src" style="border:0;padding:0;margin:0">vs</span> ' + (b ? f(b) : '—'); };
+          return '<tr><td>' + esc(String(r.key)) + (r.note ? '<div class="ov-sub" style="margin:0">' + esc(String(r.note)) + '</div>' : '') + '</td>' +
+            '<td class="r">' + cnt(w.listings) + ' · ' + (n ? cnt(n.listings) : '—') + '</td>' +
+            '<td class="r">' + pair(w.views_listing, n && n.views_listing, cnt) + vidLift(r.lift && r.lift.views) +
+            /* the denominator, because it is not the number of listings: eBay publishes views for the
+               top three hundred listings of an account, so a side's views are divided by the listings
+               that carry a reading and the reader is told how many those were. */
+            '<div class="ov-sub" style="margin:0">' + cnt(w.listings_with_traffic) + ' · ' + (n ? cnt(n.listings_with_traffic) : '—') + ' with a reading</div></td>' +
+            '<td class="r">' + pair(w.ctr, n && n.ctr, pct) + vidLift(r.lift && r.lift.ctr) + '</td>' +
+            '<td class="r">' + pair(w.conversion, n && n.conversion, pct) + vidLift(r.lift && r.lift.conversion) + '</td>' +
+            '<td class="r">' + pair(w.roas, n && n.roas, roas) + vidLift(r.lift && r.lift.roas) + '</td>' +
+            '<td class="r">' + pair(w.units_listing, n && n.units_listing, function (v) { var x = num(v); return x == null ? '—' : x.toFixed(1); }) + '</td>' +
+            '<td class="r">' + pair(w.revenue_listing, n && n.revenue_listing, gbp0) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    };
+    return head + tbl('Account', V.by_account) + tbl('Case type', V.by_case_type) + '</div>';
+  }
+  /* the difference between the two sides, as a share of the side without a video. Null stays blank:
+     a lift against nought is not a lift, and the engine sends null for exactly that reason. */
+  function vidLift(v) {
+    var n = num(v);
+    if (n == null) return '';
+    return '<div class="ov-sub" style="margin:0;color:' + (n < 0 ? LOSS : 'var(--ok)') + '">' + (n > 0 ? '+' : '') + Math.round(n * 100) + '%</div>';
   }
 
   /* block 5 — how up to date this is. The forecast chip is gone with the forecast. */

@@ -721,7 +721,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['priceRevisionBoard','priceItemDetail','priceDecide','adtoolPeakHold','adtoolVideoBoard','adtoolPeakCampaigns','adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
+var ENGINE_ACTIONS = ['priceRevisionBoard','priceItemDetail','priceDecide','adtoolPeakHold','adtoolPeakProfile','adtoolVideoBoard','adtoolPeakCampaigns','adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -866,7 +866,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261031-0238';
+var BUILD = '20261031-0323';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -6595,6 +6595,10 @@ VIEW_CSS.push(
     icon: '<path d="M3 3v18h18"/><path d="m6 15 4-4 3 3 5-7"/>',
     render: function () {
       return '<div class="ov-wrap">' + adtHgroup('Overview', 'Where the ad money went, and how today is going') +
+        /* the sub-page is not a sidebar line (the owner fixed the ten pages on 28 Oct), so this is
+           the way in to it. Hidden views stay reachable by hash. */
+        '<div class="ov-win" style="margin:-4px 0 12px">These same figures over the listings that carry a product video: ' +
+        '<a class="vid-link" href="#adtoolVideos">Videos</a></div>' +
         '<div id="ovBar"></div><div id="ovAcct" class="ov-acct"></div>' +
         '<div id="ovHero"><div class="ov-empty">Loading…</div></div>' +
         '<div id="ovToday"><div class="ov-empty">Loading…</div></div></div>';
@@ -6923,6 +6927,204 @@ VIEW_CSS.push(
     return '<div class="ov-panel">' + head + (notes.length ? '<div class="ov-carry">' + notes.join(' ') + '</div>' : '') + legend + s + '</div>';
   }
 
+
+  /* ══ VIDEOS, the sub-page under this one (owner's brief, 31 Oct, §4) ════════════════════════
+     "All the videos we have on our listings, how they are performing, all the data, the way it
+     comes in the Overview." So: the Overview's OWN blocks above, drawn through the same functions
+     this page draws them with, from the same two actions asked for the video cohort.
+     THE PER-LISTING RECORD IS NOT HERE. The owner put it on the Decision page, as a department of
+     video revisions, and one figure has one home: this page carries the cohort, the blocks and the
+     with-video against without-video comparison, and links to that department for the rest.
+     It is registered here, in the Overview's own file, because it is the Overview over one cohort
+     and the two must never drift apart. The shell keeps it off the sidebar and reaches it by hash. */
+  var VD = { account: '', period: null, data: null, open: '' };
+
+  VIEW_CSS.push([
+    '.vid-truth{font-size:12px;color:var(--text-2);line-height:1.55;background:var(--panel-2);border:1px solid var(--gold-line);border-radius:12px;padding:10px 13px;margin:0 0 12px}',
+    '.vid-badge{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;margin-left:8px;color:var(--text-3)}',
+    '.vid-badge.amber{color:#e8b54b;border-color:#e8b54b}.vid-badge.red{color:#e0563f;border-color:#e0563f}',
+    '.vid-link{color:var(--gold-a);font-weight:800;text-decoration:none}',
+    '.vid-diff{font-size:12px;color:var(--text-2);margin-top:8px;line-height:1.6}',
+    '.vid-diff ul{margin:6px 0 0;padding-left:18px}',
+    '.vid-diff li{margin:2px 0}',
+    '.vid-more{background:none;border:0;color:var(--gold-a);font:inherit;font-size:12px;font-weight:800;cursor:pointer;padding:0}'
+  ].join(''));
+
+  VIEWS.adtoolVideos = {
+    label: 'Videos', hidden: false, order: 63, roles: ROLES,
+    icon: '<rect x="2" y="5" width="14" height="14" rx="2"/><path d="m22 8-6 4 6 4z"/>',
+    render: function () {
+      return '<div class="ov-wrap">' + adtHgroup('Videos', 'How the listings that carry a product video are performing') +
+        '<div class="vid-truth" id="vidTruth">Loading…</div>' +
+        '<div id="vidBar"></div><div id="vidAcct" class="ov-acct"></div>' +
+        '<div id="vidCohort"><div class="ov-empty">Loading…</div></div>' +
+        '<div id="vidHero"></div><div id="vidToday"></div><div id="vidVs"></div></div>';
+    },
+    init: function () {
+      VD.data = null; VD.open = '';
+      VD.period = adtPeriodBar('vidBar', { page: 'adtoolVideos', def: 'd30', onChange: function (v) { VD.period = v; loadVideos(false); } });
+      vidAcctChips();
+      loadVideos(false)['catch'](function () {});
+      /* the cohort moves with the hourly sweep and the blocks move with today, so a tab left open
+         is re-asked every five minutes. adtPoll waits on hidden tabs and stops for good on an
+         'auth' refusal (the session-expiry law). */
+      adtPoll('vidCohort', 300000, function () { return loadVideos(true); });
+    }
+  };
+
+  function vidAcctChips() {
+    var el = $('vidAcct'); if (!el) return;
+    el.innerHTML = '<button class="' + (VD.account ? '' : 'on') + '" data-a="">All accounts</button>' +
+      ((VD.data && VD.data.accounts) || OV.accounts || []).map(function (a) {
+        return '<button class="' + (VD.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>';
+      }).join('');
+    var bs = el.querySelectorAll('button');
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { VD.account = this.getAttribute('data-a'); vidAcctChips(); loadVideos(false)['catch'](function () {}); };
+  }
+  function loadVideos(quiet) {
+    var p = adtPeriodParams(VD.period); if (VD.account) p.account = VD.account;
+    return api('adtoolVideoBoard', p).then(function (d) {
+      VD.data = d || {};
+      if (!$('vidCohort')) return;
+      vidAcctChips();
+      vidDraw();
+      adtPeriodEcho('vidBar', d && d.period);
+    })['catch'](function (e) {
+      if (!quiet && $('vidCohort')) $('vidCohort').innerHTML = '<div class="ov-panel"><h3>Not available</h3><div class="ov-sub">' + esc((e && e.message) || 'This page could not load.') + '</div></div>';
+      throw e;
+    });
+  }
+  /* the freshness badge. Both thresholds are read off the answer, so nothing here goes stale when
+     somebody changes them, and a stamp nobody could read says so rather than reading as fresh. */
+  function vidFresh(at, rules) {
+    if (!at) return '<span class="vid-badge">not read yet</span>';
+    var d = new Date(String(at).replace(' ', 'T') + (/[Zz]|[+-]\d\d:?\d\d$/.test(String(at)) ? '' : 'Z'));
+    if (isNaN(d.getTime())) return '<span class="vid-badge">reading time not understood</span>';
+    var mins = Math.round((Date.now() - d.getTime()) / 60000);
+    var amber = num(rules && rules.amber_min), red = num(rules && rules.red_min);
+    if (red != null && mins > red) return '<span class="vid-badge red">' + cnt(mins) + ' min old</span>';
+    if (amber != null && mins > amber) return '<span class="vid-badge amber">' + cnt(mins) + ' min old</span>';
+    return '';
+  }
+  function vidDraw() {
+    var D = VD.data || {};
+    if ($('vidTruth')) $('vidTruth').innerHTML = esc(String(D.api_truth || '')) + (D.cohort_rule ? '<br><br>' + esc(String(D.cohort_rule)) : '');
+    $('vidCohort').innerHTML = vidCohortPanel(D);
+    var B = window.adtOverviewBlocks;
+    var O = D.overview || {};
+    if ($('vidHero')) {
+      $('vidHero').innerHTML = (B && O.plan)
+        ? B.hero(O.plan)
+        : '<div class="ov-panel"><h3>The Overview\'s own figures over these listings</h3><div class="ov-sub">' +
+          esc(O.note || 'These blocks are not available for this answer.') + '</div></div>';
+    }
+    if ($('vidToday')) {
+      $('vidToday').innerHTML = (B && O.command)
+        ? (B.today(O.command) + B.byAccount(O.command) + B.slots(O.command) + B.hourly(O.command) + B.foot(O.command))
+        : '';
+    }
+    if ($('vidVs')) $('vidVs').innerHTML = vidVsPanel(D);
+    vidWire();
+  }
+  function vidWire() {
+    var bs = document.querySelectorAll('[data-vidopen]');
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].onclick = function () {
+        var k = this.getAttribute('data-vidopen');
+        VD.open = VD.open === k ? '' : k;
+        $('vidCohort').innerHTML = vidCohortPanel(VD.data || {});
+        vidWire();
+      };
+    }
+  }
+  function vidList(rows, label) {
+    var L = Array.isArray(rows) ? rows : [];
+    if (!L.length) return '<div class="vid-diff">' + esc(label) + ': none.</div>';
+    var shown = L.slice(0, 40);
+    return '<div class="vid-diff"><b>' + esc(label) + ':</b> ' + cnt(L.length) + '<ul>' +
+      shown.map(function (r) {
+        var id = String((r && r.item_id) || '');
+        return '<li>' + (/^\d{9,13}$/.test(id)
+          ? '<a class="vid-link" href="#adtoolProduct/' + esc(id) + '">' + esc(id) + '</a>'
+          : esc(id)) + (r && r.account ? ' · ' + esc(String(r.account)) : '') +
+          (r && r.video_added_on ? ' · video ' + esc(String(r.video_added_on)) : '') +
+          (r && r.recorded_at ? ' · recorded ' + esc(String(r.recorded_at).slice(0, 10)) : '') + '</li>';
+      }).join('') + '</ul>' + (L.length > shown.length ? '<div>and ' + cnt(L.length - shown.length) + ' more</div>' : '') + '</div>';
+  }
+  function vidCohortPanel(D) {
+    var C = D.cohort || {}, RU = D.freshness_rules || null;
+    var cov = C.coverage || {};
+    var h = '<div class="ov-panel"><h3>The videos on our listings' + src('which listings carry a video', 'how') + '</h3>' +
+      '<div class="ov-sub">' + esc(String(C.note || '')) + '</div>' +
+      '<div class="ov-kpis">' +
+      kpi('Carrying a video on eBay', cnt(C.on_ebay),
+        'eBay\'s own answer, listing by listing' + (cov.last_checked_at ? '<br>last asked ' + esc(ago(cov.last_checked_at)) + vidFresh(cov.last_checked_at, RU) : '<br>the sweep has not run yet')) +
+      kpi('Recorded by a lister', cnt(C.recorded), 'the portal\'s own record of the video stage') +
+      kpi('On both', cnt(C.both), 'eBay shows a video and a lister recorded one') +
+      kpi('Listings asked about', cnt(cov.listings_asked_about),
+        (cov.active_listings == null ? 'out of a number of active listings we do not have' : 'out of ' + cnt(cov.active_listings) + ' active') +
+        (num(cov.still_to_ask_about) > 0 ? '<br>' + cnt(cov.still_to_ask_about) + ' still to ask about' : '') +
+        (num(cov.without_a_date) > 0 ? '<br>' + cnt(cov.without_a_date) + ' with no date eBay would give us' : '') +
+        (num(cov.video_taken_off) > 0 ? '<br>' + cnt(cov.video_taken_off) + ' had a video and no longer do' : '')) +
+      '</div>';
+    h += '<div class="vid-diff">' + esc(String(cov.note || '')) + '</div>';
+    /* the two differences, each behind its own button: these are the lists somebody acts on, and
+       neither is reconciled away into a single number. */
+    h += '<div style="margin-top:8px">' +
+      '<button type="button" class="vid-more" data-vidopen="ebay">' + (VD.open === 'ebay' ? 'Hide' : 'Show') + ' the ' + cnt((C.ebay_only || []).length) + ' on eBay that no lister recorded</button>' +
+      (VD.open === 'ebay' ? vidList(C.ebay_only, 'On eBay, not recorded') : '') + '</div>';
+    h += '<div style="margin-top:6px">' +
+      '<button type="button" class="vid-more" data-vidopen="rec">' + (VD.open === 'rec' ? 'Hide' : 'Show') + ' the ' + cnt((C.recorded_only || []).length) + ' recorded with no video on eBay</button>' +
+      (VD.open === 'rec' ? vidList(C.recorded_only, 'Recorded, no video on eBay') : '') + '</div>';
+    if (Array.isArray(C.by_date_source) && C.by_date_source.length) {
+      h += '<div class="vid-diff"><b>Where each video date came from:</b> ' +
+        C.by_date_source.map(function (r) { return esc(String(r.date_source)) + ' ' + cnt(r.n); }).join(' · ') + '</div>';
+    }
+    var J = cov.last_sweep;
+    if (J) h += '<div class="vid-diff"><b>Last sweep:</b> ' + esc(ago(J.started_at)) + (J.status ? ' · ' + esc(String(J.status)) : '') + (J.note ? ' · ' + esc(String(J.note)) : '') + '</div>';
+    /* the per-listing record and the before-and-after have one home, and it is not this page */
+    h += '<div class="vid-diff">Every listing with a video, its video date and what its sales did either side of it are on the ' +
+      '<a class="vid-link" href="#adtoolRunToday">Decision page</a>, under <b>Video revisions</b>.</div>';
+    return h + '</div>';
+  }
+  function vidVsPanel(D) {
+    var V = D.video_vs_no_video || {};
+    var head = '<div class="ov-panel"><h3>With a video against without one' + src('with a video against without one', 'how') + '</h3>' +
+      '<div class="ov-sub">' + esc(String(V.basis || '')) + '</div>';
+    var tbl = function (label, rows) {
+      var L = Array.isArray(rows) ? rows.filter(function (r) { return r && r.with; }) : [];
+      if (!L.length) return '<div class="ov-empty">No ' + esc(label) + ' has a listing with a video in this period.</div>';
+      return '<div class="ov-sub" style="margin-top:10px"><b>' + esc(label) + '</b></div>' +
+        '<div class="ov-scroll"><table class="ov-tbl"><thead><tr><th>' + esc(label) + '</th>' +
+        '<th class="r">Listings with · without</th><th class="r">Views each</th><th class="r">Click-through</th>' +
+        '<th class="r">Conversion</th><th class="r">ROAS</th><th class="r">Units each</th><th class="r">Takings each</th></tr></thead><tbody>' +
+        L.map(function (r) {
+          var w = r.with, n = r.without;
+          var pair = function (a, b, f) { return f(a) + ' <span class="ov-src" style="border:0;padding:0;margin:0">vs</span> ' + (b ? f(b) : '—'); };
+          return '<tr><td>' + esc(String(r.key)) + (r.note ? '<div class="ov-sub" style="margin:0">' + esc(String(r.note)) + '</div>' : '') + '</td>' +
+            '<td class="r">' + cnt(w.listings) + ' · ' + (n ? cnt(n.listings) : '—') + '</td>' +
+            '<td class="r">' + pair(w.views_listing, n && n.views_listing, cnt) + vidLift(r.lift && r.lift.views) +
+            /* the denominator, because it is not the number of listings: eBay publishes views for the
+               top three hundred listings of an account, so a side's views are divided by the listings
+               that carry a reading and the reader is told how many those were. */
+            '<div class="ov-sub" style="margin:0">' + cnt(w.listings_with_traffic) + ' · ' + (n ? cnt(n.listings_with_traffic) : '—') + ' with a reading</div></td>' +
+            '<td class="r">' + pair(w.ctr, n && n.ctr, pct) + vidLift(r.lift && r.lift.ctr) + '</td>' +
+            '<td class="r">' + pair(w.conversion, n && n.conversion, pct) + vidLift(r.lift && r.lift.conversion) + '</td>' +
+            '<td class="r">' + pair(w.roas, n && n.roas, roas) + vidLift(r.lift && r.lift.roas) + '</td>' +
+            '<td class="r">' + pair(w.units_listing, n && n.units_listing, function (v) { var x = num(v); return x == null ? '—' : x.toFixed(1); }) + '</td>' +
+            '<td class="r">' + pair(w.revenue_listing, n && n.revenue_listing, gbp0) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    };
+    return head + tbl('Account', V.by_account) + tbl('Case type', V.by_case_type) + '</div>';
+  }
+  /* the difference between the two sides, as a share of the side without a video. Null stays blank:
+     a lift against nought is not a lift, and the engine sends null for exactly that reason. */
+  function vidLift(v) {
+    var n = num(v);
+    if (n == null) return '';
+    return '<div class="ov-sub" style="margin:0;color:' + (n < 0 ? LOSS : 'var(--ok)') + '">' + (n > 0 ? '+' : '') + Math.round(n * 100) + '%</div>';
+  }
+
   /* block 5 — how up to date this is. The forecast chip is gone with the forecast. */
   function freshBlock(D) {
     var f = D.freshness || {};
@@ -6995,7 +7197,13 @@ VIEW_CSS.push(
        tooltip nobody can read on a touch screen. `dataFor` is the listing whose data is expanded.
        `holdBy` remembers who set a hold FROM THE WRITE'S OWN ANSWER, because the list read does not
        carry it: a name is shown only where this page watched it being set. */
-    cell: '', dataFor: '', holdBy: {}, holdBusy: '' };
+    cell: '', dataFor: '', holdBy: {}, holdBusy: '',
+    /* THE REAL HOURS BEHIND THE DECISION (31 Oct, §3's last open item). The peak list's own answer
+       carries the planner's conclusion and not the readings behind it, so the panel asks for them
+       the moment it is opened: `prof` keeps one listing's answer by item number, `profBusy` is the
+       listing being read, and `profErr` is what to say when the read was refused. Kept by item
+       number so re-opening a listing does not ask again. */
+    prof: {}, profBusy: '', profErr: {} };
   var campTimer = null;
 
   VIEW_CSS.push([
@@ -7510,40 +7718,129 @@ VIEW_CSS.push(
       (Number(r.auto) ? '' : ' This listing is not set to switch itself, so a hold is written down and nothing switches it.') + '</div>' +
       holdByLine(id, hold);
   }
-  /* THE DATA BEHIND THE DECISION. What the planner wrote, hour by hour, for today and tomorrow, with
-     the figures it stands on. The money and the clicks in each hour are NOT in this answer: the
-     planner reads them and keeps its conclusion, so the honest thing is to print the conclusion and
-     name the gap rather than show an empty column where a figure should be. */
+  /* THE READINGS BEHIND THE DECISION, asked for one listing when the panel is opened (31 Oct, §3's
+     last open item). adtoolPeakProfile hands back what the evidence probe hands back for one
+     listing, out of the same assembling function, so this panel and that probe cannot show
+     different hours for one listing. It reads and it decides nothing. */
+  function loadProfile(id) {
+    var key = String(id || '');
+    if (!key || PK.prof[key] || PK.profBusy === key) return;
+    PK.profBusy = key;
+    var done = function () { if (PK.profBusy === key) PK.profBusy = ''; if (PK.dataFor === key) draw(); };
+    api('adtoolPeakProfile', { item_id: key, days: 3 }).then(function (D) {
+      PK.prof[key] = D || {}; delete PK.profErr[key]; done();
+    })['catch'](function (e) {
+      PK.profErr[key] = (e && e.message) || 'the hours behind this could not be read';
+      done();
+    });
+  }
+  /* the four parts of the day, the SAME 24 readings added up: it is the hours above grouped, and
+     the heading says so, rather than a second figure from a second source. */
+  var PROF_SLOTS = [['Night', 0, 6], ['Morning', 6, 12], ['Afternoon', 12, 17], ['Evening', 17, 24]];
+  function profSlotRow(hours) {
+    if (!Array.isArray(hours) || hours.length !== 24) return '';
+    var cells = PROF_SLOTS.map(function (s) {
+      var sp = 0, cl = 0, or_ = 0, un = 0, i;
+      for (i = s[1]; i < s[2]; i++) {
+        var h = hours[i] || {};
+        sp += num(h.spend_raw) || 0; cl += num(h.clicks_raw) || 0;
+        or_ += num(h.orders_raw) || 0; un += num(h.units_raw) || 0;
+      }
+      return '<td><b>' + esc(s[0]) + '</b> ' + esc(hh(s[1])) + '-' + esc(s[2] >= 24 ? '24' : hh(s[2])) +
+        '<div class="pkt-sm2">' + gbp(sp) + ' · ' + cnt(cl) + ' clicks · ' + cnt(or_) + ' orders, ' + cnt(un) + ' units</div></td>';
+    }).join('');
+    return '<table class="pkt-htbl" style="margin-top:8px"><thead><tr><th colspan="4">The same hours added into the four parts of the day</th></tr></thead>' +
+      '<tbody><tr>' + cells + '</tr></tbody></table>';
+  }
+  /* an hour of the profile, in the words the rest of this page uses. Every figure is the REAL sum
+     over the real days, not the weighted pattern: a threshold is a threshold on real money, and a
+     weighted figure has counted some days twice. */
+  function profRows(P, T, M, tr, mr, nowH) {
+    var hours = (P && P.profile && P.profile.hours) || null;
+    var dead = {};
+    if (P && P.dead_hours && Array.isArray(P.dead_hours.windows)) {
+      P.dead_hours.windows.forEach(function (w) {
+        if (!w || w.from == null || w.to == null) return;
+        for (var k = Number(w.from); k !== Number(w.to); k = (k + 1) % 24) dead[k] = 1;
+      });
+    }
+    var h = '';
+    for (var i = 0; i < 24; i++) {
+      var hr = hours ? (hours[i] || {}) : null;
+      var ts = T && T.states ? String(T.states[i]) : '', ms = M && M.states ? String(M.states[i]) : '';
+      h += '<tr' + (nowH === i ? ' class="nowrow"' : '') + '><td class="hr">' + esc(clock(i)) + (nowH === i ? ' · now' : '') + '</td>' +
+        (hours
+          ? '<td>' + gbp(hr.spend_raw) + '</td><td>' + cnt(hr.clicks_raw) + '</td>' +
+            '<td>' + cnt(hr.orders_raw) + (num(hr.units_raw) != null ? ' <span class="pkt-sm2">· ' + cnt(hr.units_raw) + ' units</span>' : '') + '</td>' +
+            '<td>' + cnt(hr.days_observed) + (num(hr.days_with_sales) != null ? ' <span class="pkt-sm2">· sold on ' + cnt(hr.days_with_sales) + '</span>' : '') + '</td>' +
+            '<td>' + (dead[i] ? '<b>dead</b>' : '<span class="pkt-sm2">no</span>') + '</td>'
+          : '<td colspan="5"><span class="pkt-sm2">not read yet</span></td>') +
+        '<td>' + (ts ? esc(CELL_WORDS[cellKind(ts, tr[i])]) : '<span class="pkt-sm2">no schedule</span>') + '</td>' +
+        '<td>' + (tr[i] ? esc(String(tr[i])) : '<span class="pkt-sm2">not recorded</span>') + '</td>' +
+        '<td>' + (ms ? esc(CELL_WORDS[cellKind(ms, mr[i])]) + (mr[i] ? ' <span class="pkt-sm2">· ' + esc(String(mr[i])) + '</span>' : '') : '<span class="pkt-sm2">no schedule yet</span>') + '</td></tr>';
+    }
+    return h;
+  }
+  /* the finished days the answer carries, each one's hours summed beside the day eBay published */
+  function profDays(P) {
+    var L = (P && Array.isArray(P.daily_totals)) ? P.daily_totals : null;
+    if (!L || !L.length) return '';
+    return '<div class="pkt-scroll" style="margin-top:8px"><table class="pkt-htbl"><thead><tr><th>Finished day</th>' +
+      '<th>Its hours added up</th><th>The day eBay published</th><th>Hours with a reading</th></tr></thead><tbody>' +
+      L.map(function (d) {
+        var s = d.hours_sum || {}, t = d.daily_total || null;
+        return '<tr><td class="hr">' + esc(String(d.day || '')) + '</td>' +
+          '<td>' + gbp(s.spend) + ' · ' + cnt(s.clicks) + ' clicks · ' + cnt(s.orders) + ' orders</td>' +
+          '<td>' + (t ? gbp(t.spend) + ' · ' + cnt(t.clicks) + ' clicks · ' + cnt(t.orders) + ' orders' : '<span class="pkt-sm2">eBay has published no day row for this listing</span>') + '</td>' +
+          '<td>' + cnt(d.hours_with_a_reading) + ' of 24' +
+          (d.spend_difference != null && Math.abs(num(d.spend_difference)) >= 0.01
+            ? '<div class="pkt-sm2">' + gbp(Math.abs(num(d.spend_difference))) + ' apart on spend</div>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  /* THE DATA BEHIND THE DECISION. What the planner wrote, hour by hour, for today and tomorrow, and
+     the readings it stands on. Until 31 Oct the readings were not here at all: the peak list's own
+     answer carries the planner's conclusion and nothing else, so the panel could only print the
+     conclusion and name the gap. It now asks adtoolPeakProfile for the one listing it is open on,
+     which hands back what the evidence probe hands back, out of the same assembling function. */
   function dataPanel(r, sugg) {
     var id = String(r.item_id || '');
     if (PK.dataFor !== id) return '';
     var T = r.schedule_today, M = r.schedule_tomorrow;
     var tr = Array.isArray(T && T.reasons) ? T.reasons : [], mr = Array.isArray(M && M.reasons) ? M.reasons : [];
     var nowH = T && String(T.day || '') === adtUkDay() ? ukHourNow() : null;
+    var P = PK.prof[id] || null, pErr = PK.profErr[id] || '';
     var h = '<div class="pkt-data"><h5>The data behind this' + reg('the 24-hour pattern', 'how') + '</h5>';
-    h += '<div class="pkt-sm2" style="margin-bottom:8px">The hours the planner wrote for this listing and what put each of them there. ' +
-      'The money, the clicks and the sales in each hour are not in this answer: the planner reads them and keeps its answer, ' +
-      'so what is shown here is what it decided and not the readings behind it.</div>';
-    if (!T && !M) {
-      h += '<div class="pkt-empty">The system has written no schedule for this listing, for today or for tomorrow.</div>';
-    } else {
-      h += '<div class="pkt-scroll"><table class="pkt-htbl"><thead><tr><th>Hour, UK</th><th>Today' +
-        (T && T.day ? ' · ' + esc(String(T.day)) : '') + '</th><th>Why today</th><th>Tomorrow' +
-        (M && M.day ? ' · ' + esc(String(M.day)) : '') + '</th></tr></thead><tbody>';
-      for (var i = 0; i < 24; i++) {
-        var ts = T && T.states ? String(T.states[i]) : '', ms = M && M.states ? String(M.states[i]) : '';
-        h += '<tr' + (nowH === i ? ' class="nowrow"' : '') + '><td class="hr">' + esc(clock(i)) + (nowH === i ? ' · now' : '') + '</td>' +
-          '<td>' + (ts ? esc(CELL_WORDS[cellKind(ts, tr[i])]) : '<span class="pkt-sm2">no schedule</span>') + '</td>' +
-          '<td>' + (tr[i] ? esc(String(tr[i])) : '<span class="pkt-sm2">not recorded</span>') + '</td>' +
-          '<td>' + (ms ? esc(CELL_WORDS[cellKind(ms, mr[i])]) + (mr[i] ? ' <span class="pkt-sm2">· ' + esc(String(mr[i])) + '</span>' : '') : '<span class="pkt-sm2">no schedule yet</span>') + '</td></tr>';
-      }
-      h += '</tbody></table></div>';
-    }
-    /* the figures the answer DOES carry about the pattern, each one printed from the answer */
+    h += '<div class="pkt-sm2" style="margin-bottom:8px">Every hour of the day for this listing: the money that went out in it, ' +
+      'the clicks, the orders and the units, on how many days we hold a reading for it and on how many of those it sold, ' +
+      'beside what the planner wrote for that hour and why. ' +
+      'eBay publishes no ad figures by hour: the hourly money is the portal\'s own reading of eBay\'s running total every few ' +
+      'minutes, each difference booked to the hour it arrived in, and a day\'s first reading belongs to no hour of trading ' +
+      'and is left out. Today is kept out of the pattern, because a part day reads as quiet in every hour the clock has not reached.</div>';
+    if (pErr) h += '<div class="pkt-sm2" style="margin-bottom:8px">The hours behind this could not be read: ' + esc(pErr) + '</div>';
+    else if (!P) h += '<div class="pkt-sm2" style="margin-bottom:8px">Reading the hours behind this…</div>';
+    h += '<div class="pkt-scroll"><table class="pkt-htbl"><thead><tr><th>Hour, UK</th>' +
+      '<th>Spend</th><th>Clicks</th><th>Sales</th><th>Days observed</th><th>Dead?</th>' +
+      '<th>Today' + (T && T.day ? ' · ' + esc(String(T.day)) : '') + '</th><th>Why today</th>' +
+      '<th>Tomorrow' + (M && M.day ? ' · ' + esc(String(M.day)) : '') + '</th></tr></thead><tbody>' +
+      profRows(P, T, M, tr, mr, nowH) + '</tbody></table></div>';
+    if (P && P.profile) h += profSlotRow(P.profile.hours);
+    if (!T && !M) h += '<div class="pkt-sm2" style="margin-top:6px">The system has written no schedule for this listing, for today or for tomorrow, so the last three columns are empty.</div>';
+    h += profDays(P);
+    /* ONE "days observed" on this panel. The list row carries it and so does the hourly answer, and
+       they are the same figure read twice, so the row's is printed and the answer's is only used to
+       say when they disagree, which would mean the planner and this read are not on the same rows. */
     var days = num(r.profile_days), ca = T && T.computed_at ? String(T.computed_at) : '';
+    var seen = P && P.profile ? num(P.profile.days_observed) : null;
     h += '<div class="pkt-sm" style="margin-top:8px"><b>Days of hours the pattern was read over:</b> ' +
-      (days == null ? 'not available yet' : cnt(days) + ' ' + plural(days, 'day', 'days')) +
-      (ca ? ' · <b>worked out</b> ' + esc(whenTxt(ca)) : '') + '</div>';
+      (days == null ? (seen == null ? 'not available yet' : cnt(seen) + ' ' + plural(seen, 'day', 'days')) : cnt(days) + ' ' + plural(days, 'day', 'days')) +
+      (P && P.rules && P.rules.lookback_days != null ? ' · looked back over ' + cnt(P.rules.lookback_days) + ' ' + plural(P.rules.lookback_days, 'day', 'days') : '') +
+      (ca ? ' · <b>worked out</b> ' + esc(whenTxt(ca)) : '') +
+      (days != null && seen != null && days !== seen ? ' · <b>the hours read now give ' + cnt(seen) + '</b>, so the schedule was written over a different set of days' : '') + '</div>';
+    if (P && P.profile && P.profile.note) h += '<div class="pkt-sm2">' + esc(String(P.profile.note)) + '</div>';
+    if (P && P.dead_hours && P.dead_hours.note) h += '<div class="pkt-sm2">' + esc(String(P.dead_hours.note)) + '</div>';
+    if (P && P.tracking && P.tracking.note) h += '<div class="pkt-sm2">' + esc(String(P.tracking.note)) + '</div>';
+    if (P && P.note) h += '<div class="pkt-sm2">' + esc(String(P.note)) + '</div>';
     h += windowsLine('Switched off today by the pattern', r.dead_windows, 'nothing today');
     h += windowsLine('Put forward and not acted on', r.dead_proposal, 'nothing put forward');
     /* the four parts of the day, where the suggestion list has judged this listing: that row carries
@@ -8297,6 +8594,7 @@ VIEW_CSS.push(
     for (i = 0; i < dts.length; i++) dts[i].onclick = function () {
       var id = this.getAttribute('data-pkdata') || '';
       PK.dataFor = PK.dataFor === id ? '' : id;
+      if (PK.dataFor) loadProfile(PK.dataFor);
       draw();
     };
     var dcs = box.querySelectorAll('[data-pkdataclose]');
@@ -8985,7 +9283,18 @@ VIEW_CSS.push(
     '.rt-pkr .w b{color:var(--text)}' +
     '.rt-pkb{background:transparent;border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:4px 11px;font:inherit;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;align-self:center}' +
     '.rt-pkb:hover{color:var(--gold-a);border-color:var(--gold-line-hi)}' +
-    '.rt-pkb[disabled]{opacity:.5;cursor:default}'
+    '.rt-pkb[disabled]{opacity:.5;cursor:default}' +
+    /* ── the video revisions department (owner, 31 Oct). This file's own prefix: nothing here
+       borrows a class from another spliced file, and nothing here is borrowed by one. ── */
+    '.rt-vrp{background:var(--panel);border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;margin:14px 0 0}' +
+    '.rt-vrp h4{margin:0 0 4px;font-size:13px;font-weight:800;color:var(--text)}' +
+    '.rt-vrp .s{font-size:12px;color:var(--text-2);margin:0 0 10px;line-height:1.55}' +
+    '.rt-vrw{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}' +
+    '.rt-vrb{background:var(--panel-2);border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:4px 11px;font:inherit;font-size:11px;font-weight:800;cursor:pointer}' +
+    '.rt-vrb.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b)}' +
+    '.rt-vrt th{vertical-align:bottom}' +
+    '.rt-vrsort{background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;letter-spacing:.07em;text-transform:uppercase}' +
+    '.rt-vrsort.on{color:var(--gold-a)}'
   );
 
   function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
@@ -9012,7 +9321,12 @@ VIEW_CSS.push(
       /* a closure outlives a visit: drop yesterday's score so a page re-opened the next morning
          does not paint the previous day's figure before asking for a new one */
       RT.data = null; RT.stop = null; RT.filter = ''; RT.peakOpen = false; RT.peakBusy = '';
+      /* the video department's own answer: asked once when the page opens and again only when the
+         account chip moves, never on the five-minute poll. Its figures are finished days and a
+         fortnight of them does not move between two ticks of today. */
+      VR.data = null; VR.asked = false; VR.error = ''; VR.sort = 'video'; VR.dir = 'desc'; VR.win = 0;
       acctChips();
+      vrLoad();
       load(false)['catch'](function () {});
       /* today moves every 5 minutes; adtPoll waits on hidden tabs and stops on an 'auth' refusal (session-expiry law) */
       adtPoll('rtBody', 300000, function () { return load(true); });
@@ -9027,7 +9341,7 @@ VIEW_CSS.push(
   function acctChips() {
     var el = $('rtAcct'); if (!el) return;
     el.innerHTML = '<button class="' + (RT.account ? '' : 'on') + '" data-a="">All accounts</button>' + accounts().map(function (a) { return '<button class="' + (RT.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('');
-    var bs = el.querySelectorAll('button'); for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { RT.account = this.getAttribute('data-a'); acctChips(); load(false); };
+    var bs = el.querySelectorAll('button'); for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { RT.account = this.getAttribute('data-a'); acctChips(); VR.data = null; VR.asked = false; VR.error = ''; vrLoad(); load(false); };
   }
   function load(quiet) {
     /* the rows, the weekday verdict and this morning's decision all come off adtoolRunToday, one
@@ -9083,6 +9397,9 @@ VIEW_CSS.push(
         shown.map(rowHtml).join('') + '</tbody></table></div>';
     }
     h += '<div class="rt-sm" style="margin-top:8px">' + esc(D.source || '') + '</div>';
+    /* the video revisions department, at the foot of the page: it is a record to read rather than a
+       call to act on today, so it sits after the day's own verdicts instead of above them. */
+    h += vrDept();
     $('rtBody').innerHTML = h;
     var fs = document.querySelectorAll('#rtBody [data-f]'); for (var i = 0; i < fs.length; i++) fs[i].onclick = function () { var f = this.getAttribute('data-f'); RT.filter = RT.filter === f && this.classList.contains('rt-c') ? '' : f; draw(); };
     /* the second line lives INSIDE the Stop today tile, which is itself a filter button, so its own
@@ -9095,12 +9412,199 @@ VIEW_CSS.push(
     };
     var pc = document.querySelectorAll('#rtBody [data-rtpeakclose]');
     for (var k = 0; k < pc.length; k++) pc[k].onclick = function () { RT.peakOpen = false; draw(); };
+    var vs = document.querySelectorAll('#rtBody [data-vrsort]');
+    for (var s = 0; s < vs.length; s++) vs[s].onclick = function () {
+      var k = this.getAttribute('data-vrsort');
+      if (VR.sort === k) VR.dir = VR.dir === 'desc' ? 'asc' : 'desc'; else { VR.sort = k; VR.dir = 'desc'; }
+      draw();
+    };
+    var vw = document.querySelectorAll('#rtBody [data-vrwin]');
+    for (var n = 0; n < vw.length; n++) vw[n].onclick = function () { VR.win = Number(this.getAttribute('data-vrwin')) || 0; draw(); };
     var hb = document.querySelectorAll('#rtBody [data-rthold]');
     for (var m = 0; m < hb.length; m++) hb[m].onclick = function () {
       var id = this.getAttribute('data-rthold');
       if (!id) { toast('That row has no item number.'); return; }
       holdOn(id, this);
     };
+  }
+
+
+  /* ══ VIDEO REVISIONS (owner, 31 Oct, after the brief) ═══════════════════════════════════════
+     "In the Decision page, make one department of video revisions, that keeps the record of the
+     items that have videos on them, and understand the behaviour of sales after uploading video,
+     like the sheet made earlier."
+     So this is that record, in the shape of the 18 October workbook: every listing that carries a
+     video on eBay, with the lister's own record beside it, the video date, the days since, and
+     equal windows each side of the upload day for orders, units, takings, ad spend and return.
+     The window is the days since the video capped at a fortnight, and four weeks once four weeks
+     exist either side. Beside each listing sits the rest of its account over the very same dates,
+     because a fortnight when the whole account fell is not the video's doing.
+     WHAT EBAY CANNOT GIVE US IS SAID RATHER THAN LEFT BLANK: there is no reading of a listing's
+     views from before the video, because eBay publishes views as a rolling window and the portal
+     keeps only the latest of each. Nothing on this department reaches eBay. ══ */
+  var VR = { data: null, sort: 'video', dir: 'desc', win: 0, asked: false, error: '' };
+
+  function vrLoad() {
+    if (VR.asked) return;
+    VR.asked = true;
+    api('adtoolVideoBoard', RT.account ? { account: RT.account } : {}).then(function (D) {
+      VR.data = D || {}; VR.error = '';
+      if ($('rtBody')) draw();
+    })['catch'](function (e) {
+      VR.error = (e && e.message) || 'this department could not load';
+      if ($('rtBody')) draw();
+    });
+  }
+  /* EVERY LISTING THAT CARRIES A VIDEO, which is what the owner asked the department to keep: the
+     per-listing record from the engine, with the before-and-after joined onto the ones whose video
+     date we could recover. A listing with no date is still a row, and its own cells say there is
+     nothing to put either side of a day nobody has, rather than being dropped off the list. */
+  function vrRows() {
+    var D = VR.data || {};
+    var P = Array.isArray(D.per_listing) ? D.per_listing : [];
+    var BA = Array.isArray(D.before_after) ? D.before_after : [];
+    var byId = {};
+    BA.forEach(function (b) { if (b && b.item_id) byId[String(b.item_id)] = b; });
+    /* the sentence about what eBay cannot give us belongs to the whole table, so a row with no
+       before-and-after of its own borrows the one the engine sent with the others. */
+    var tnote = (BA[0] && BA[0].traffic_note) || '';
+    return P.filter(function (r) { return r && typeof r === 'object'; }).map(function (r) {
+      var b = byId[String(r.item_id)] || null;
+      /* one object per listing, carrying both halves under the names each half already uses, so no
+         figure is copied from one into the other and nothing is worked out here. */
+      return {
+        item_id: String(r.item_id), account: r.account, title: r.title, image: r.image,
+        video_added_on: r.video_added_on, date_source: r.date_source,
+        days_since_video: r.days_since_video,
+        recorded_by_lister: r.recorded_by_lister, lister_recorded_at: r.lister_recorded_at,
+        windows: b ? b.windows : null, traffic_note: (b && b.traffic_note) || tnote,
+        listed_on: b ? b.listed_on : null,
+      };
+    });
+  }
+  function vrWin(r) {
+    var W = (r && r.windows) || [];
+    /* the reader picks a ceiling; a listing with too few days either side for it falls back to the
+       widest window it does have, and the cell says which. */
+    var want = VR.win, w = W[want] || null;
+    if (w && w.window_days) return w;
+    for (var i = W.length - 1; i >= 0; i--) if (W[i] && W[i].window_days) return W[i];
+    return W[0] || null;
+  }
+  function vrNum(r, path) {
+    var w = vrWin(r); if (!w) return null;
+    var side = path[0] === 'b' ? w.before : w.after;
+    if (!side) return null;
+    return num(side[path.slice(2)]);
+  }
+  function vrSortVal(r) {
+    var w = vrWin(r);
+    switch (VR.sort) {
+      case 'video': return String(r.video_added_on || '');
+      case 'days': return num(r.days_since_video) || 0;
+      case 'units': return (w && w.change) ? (num(w.change.units) == null ? -9 : num(w.change.units)) : -9;
+      case 'revenue': return (w && w.change) ? (num(w.change.revenue) == null ? -9 : num(w.change.revenue)) : -9;
+      case 'spend': return (w && w.change) ? (num(w.change.spend) == null ? -9 : num(w.change.spend)) : -9;
+      case 'after': return vrNum(r, 'a.units_day') || 0;
+      case 'account': return String(r.account || '');
+      default: return String(r.video_added_on || '');
+    }
+  }
+  function vrSorted() {
+    var rows = vrRows().slice();
+    rows.sort(function (a, b) {
+      var x = vrSortVal(a), y = vrSortVal(b);
+      if (x === y) return String(a.item_id).localeCompare(String(b.item_id));
+      var c = (typeof x === 'string') ? String(x).localeCompare(String(y)) : (x - y);
+      return VR.dir === 'desc' ? -c : c;
+    });
+    return rows;
+  }
+  function vrTh(key, label, hint) {
+    var on = VR.sort === key;
+    return '<th class="r"><button type="button" class="rt-vrsort' + (on ? ' on' : '') + '" data-vrsort="' + esc(key) + '"' +
+      (hint ? ' title="' + esc(hint) + '"' : '') + '>' + esc(label) + (on ? (VR.dir === 'desc' ? ' ↓' : ' ↑') : '') + '</button></th>';
+  }
+  /* a change as a share of the before side. Null stays blank: the engine sends null where the
+     before side was nought, because a share of nothing is not a figure. */
+  function vrChg(v) {
+    var n = num(v);
+    if (n == null) return '<span class="rt-dim">no before</span>';
+    return '<b style="color:' + (n < 0 ? LOSS : 'var(--ok)') + '">' + (n > 0 ? '+' : '') + Math.round(n * 100) + '%</b>';
+  }
+  function vrPair(before, after, f) {
+    return f(before) + ' <span class="rt-dim">→</span> ' + f(after);
+  }
+  function vrDept() {
+    var h = '<div class="rt-vrp"><h4>Video revisions' + src('sales before and after the video', 'how') + '</h4>';
+    if (VR.error) return h + '<div class="rt-empty">' + esc(VR.error) + '</div></div>';
+    if (!VR.data) return h + '<div class="rt-empty">Loading the listings that carry a video…</div></div>';
+    var D = VR.data, C = D.cohort || {}, rows = vrSorted();
+    h += '<div class="s">' + esc(String(D.api_truth || '')) + '</div>';
+    var cov = C.coverage || {};
+    h += '<div class="rt-sm" style="margin-bottom:8px">' +
+      '<b>' + cnt(C.on_ebay) + '</b> ' + (num(C.on_ebay) === 1 ? 'listing carries' : 'listings carry') + ' a video on eBay' +
+      ' · <b>' + cnt(C.recorded) + '</b> recorded by a lister · <b>' + cnt(C.both) + '</b> on both' +
+      (num(cov.without_a_date) > 0 ? ' · <b>' + cnt(cov.without_a_date) + '</b> with no date eBay would give us, so they have no before and after' : '') +
+      ' · the whole picture is on the <a href="#adtoolVideos" style="color:var(--gold-a);font-weight:800">Videos page</a></div>';
+    /* the window the reader is reading: a ceiling, not a promise. A listing with fewer days either
+       side than the ceiling is shown over the widest window it has, and its own cell says so. */
+    var wins = (D.before_after_windows || [14, 28]);
+    h += '<div class="rt-vrw">' + wins.map(function (n, i) {
+      return '<button type="button" class="rt-vrb' + (VR.win === i ? ' on' : '') + '" data-vrwin="' + i + '">' + n + ' days each side</button>';
+    }).join('') + '</div>';
+    if (!rows.length) {
+      h += '<div class="rt-empty">No listing carries a video yet, or the hourly sweep has not reached them.</div>';
+      return h + '</div>';
+    }
+    h += '<div class="an-scroll"><table class="rt-tbl rt-vrt"><thead><tr><th>Listing</th>' +
+      vrTh('account', 'Account') + vrTh('video', 'Video on', 'the day the video went on, decoded from the video thumbnail') +
+      vrTh('days', 'Days since') +
+      '<th class="r">Window</th>' +
+      vrTh('units', 'Units a day', 'before → after, and the change') +
+      vrTh('revenue', 'Takings a day') +
+      '<th class="r">Orders a day</th>' +
+      vrTh('spend', 'Ad spend a day') +
+      '<th class="r">ROAS</th><th class="r">Rest of the account</th><th>Lister record</th></tr></thead><tbody>' +
+      rows.map(vrRow).join('') + '</tbody></table></div>';
+    var tn = '';
+    for (var q = 0; q < rows.length; q++) { if (rows[q].traffic_note) { tn = rows[q].traffic_note; break; } }
+    h += '<div class="rt-sm" style="margin-top:8px">' + esc(String(D.control_note || '')) + ' ' + esc(String(tn)) + '</div>';
+    return h + '</div>';
+  }
+  function vrRow(r) {
+    var w = vrWin(r), b = w && w.before, a = w && w.after, ch = (w && w.change) || {};
+    var per = function (v) { var n = num(v); return n == null ? '—' : n.toFixed(2); };
+    var money = function (v) { var n = num(v); return n == null ? '—' : gbp(n); };
+    var note = (w && Array.isArray(w.notes) && w.notes.length) ? w.notes.join(' ') : '';
+    if (!w || !w.window_days) {
+      return '<tr><td>' + adtProductCell(r) + '</td><td class="r">' + esc(String(r.account || '')) + '</td>' +
+        '<td class="r">' + esc(String(r.video_added_on || '')) + '</td><td class="r">' + cnt(r.days_since_video) + '</td>' +
+        '<td class="r" colspan="7"><span class="rt-dim">' +
+          (r.video_added_on ? 'no equal window yet' : 'no video date, so there is nothing to put either side of one') + '</span>' +
+          (note ? '<div class="rt-sm">' + esc(note) + '</div>' : '') + '</td>' +
+        '<td>' + vrLister(r) + '</td></tr>';
+    }
+    var asked = (VR.data.before_after_windows || [14, 28])[VR.win];
+    return '<tr><td>' + adtProductCell(r) + '</td>' +
+      '<td class="r">' + esc(String(r.account || '')) + '</td>' +
+      '<td class="r">' + esc(String(r.video_added_on || '')) + '<div class="rt-dim">' + esc(String(r.date_source || '')) + '</div></td>' +
+      '<td class="r">' + cnt(r.days_since_video) + '</td>' +
+      '<td class="r">' + cnt(w.window_days) + ' d' + (asked != null && w.window_days < asked ? '<div class="rt-dim">fewer days than asked for</div>' : '') + '</td>' +
+      '<td class="r rt-num">' + vrPair(b.units_day, a.units_day, per) + '<div>' + vrChg(ch.units) + '</div>' +
+      '<div class="rt-dim">' + cnt(b.units) + ' → ' + cnt(a.units) + ' in all</div></td>' +
+      '<td class="r rt-num">' + vrPair(b.revenue_day, a.revenue_day, money) + '<div>' + vrChg(ch.revenue) + '</div></td>' +
+      '<td class="r rt-num">' + vrPair(b.orders_day, a.orders_day, per) + '</td>' +
+      '<td class="r rt-num">' + vrPair(b.spend_day, a.spend_day, money) + '<div>' + vrChg(ch.spend) + '</div></td>' +
+      '<td class="r rt-num">' + vrPair(b.roas, a.roas, roasTxt) + '</td>' +
+      '<td class="r rt-num">' + (w.control
+        ? vrChg(w.control.change) + '<div class="rt-dim">' + cnt(w.control.before_units) + ' → ' + cnt(w.control.after_units) + ' units</div>'
+        : '<span class="rt-dim">not in this answer</span>') + '</td>' +
+      '<td>' + vrLister(r) + (note ? '<div class="rt-sm">' + esc(note) + '</div>' : '') + '</td></tr>';
+  }
+  function vrLister(r) {
+    if (!r.recorded_by_lister) return '<span class="rt-dim">not recorded</span>';
+    return '<span class="rt-sm"><b>recorded</b>' + (r.lister_recorded_at ? ' ' + esc(String(r.lister_recorded_at).slice(0, 10)) : '') + '</span>';
   }
 
   /* ══ THE PATTERN ENGINE'S OWN STOPS FOR TODAY (owner's brief, 31 Oct, §3) ═══════════════════

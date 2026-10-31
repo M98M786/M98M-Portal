@@ -54,7 +54,13 @@
        tooltip nobody can read on a touch screen. `dataFor` is the listing whose data is expanded.
        `holdBy` remembers who set a hold FROM THE WRITE'S OWN ANSWER, because the list read does not
        carry it: a name is shown only where this page watched it being set. */
-    cell: '', dataFor: '', holdBy: {}, holdBusy: '' };
+    cell: '', dataFor: '', holdBy: {}, holdBusy: '',
+    /* THE REAL HOURS BEHIND THE DECISION (31 Oct, §3's last open item). The peak list's own answer
+       carries the planner's conclusion and not the readings behind it, so the panel asks for them
+       the moment it is opened: `prof` keeps one listing's answer by item number, `profBusy` is the
+       listing being read, and `profErr` is what to say when the read was refused. Kept by item
+       number so re-opening a listing does not ask again. */
+    prof: {}, profBusy: '', profErr: {} };
   var campTimer = null;
 
   VIEW_CSS.push([
@@ -569,40 +575,129 @@
       (Number(r.auto) ? '' : ' This listing is not set to switch itself, so a hold is written down and nothing switches it.') + '</div>' +
       holdByLine(id, hold);
   }
-  /* THE DATA BEHIND THE DECISION. What the planner wrote, hour by hour, for today and tomorrow, with
-     the figures it stands on. The money and the clicks in each hour are NOT in this answer: the
-     planner reads them and keeps its conclusion, so the honest thing is to print the conclusion and
-     name the gap rather than show an empty column where a figure should be. */
+  /* THE READINGS BEHIND THE DECISION, asked for one listing when the panel is opened (31 Oct, §3's
+     last open item). adtoolPeakProfile hands back what the evidence probe hands back for one
+     listing, out of the same assembling function, so this panel and that probe cannot show
+     different hours for one listing. It reads and it decides nothing. */
+  function loadProfile(id) {
+    var key = String(id || '');
+    if (!key || PK.prof[key] || PK.profBusy === key) return;
+    PK.profBusy = key;
+    var done = function () { if (PK.profBusy === key) PK.profBusy = ''; if (PK.dataFor === key) draw(); };
+    api('adtoolPeakProfile', { item_id: key, days: 3 }).then(function (D) {
+      PK.prof[key] = D || {}; delete PK.profErr[key]; done();
+    })['catch'](function (e) {
+      PK.profErr[key] = (e && e.message) || 'the hours behind this could not be read';
+      done();
+    });
+  }
+  /* the four parts of the day, the SAME 24 readings added up: it is the hours above grouped, and
+     the heading says so, rather than a second figure from a second source. */
+  var PROF_SLOTS = [['Night', 0, 6], ['Morning', 6, 12], ['Afternoon', 12, 17], ['Evening', 17, 24]];
+  function profSlotRow(hours) {
+    if (!Array.isArray(hours) || hours.length !== 24) return '';
+    var cells = PROF_SLOTS.map(function (s) {
+      var sp = 0, cl = 0, or_ = 0, un = 0, i;
+      for (i = s[1]; i < s[2]; i++) {
+        var h = hours[i] || {};
+        sp += num(h.spend_raw) || 0; cl += num(h.clicks_raw) || 0;
+        or_ += num(h.orders_raw) || 0; un += num(h.units_raw) || 0;
+      }
+      return '<td><b>' + esc(s[0]) + '</b> ' + esc(hh(s[1])) + '-' + esc(s[2] >= 24 ? '24' : hh(s[2])) +
+        '<div class="pkt-sm2">' + gbp(sp) + ' · ' + cnt(cl) + ' clicks · ' + cnt(or_) + ' orders, ' + cnt(un) + ' units</div></td>';
+    }).join('');
+    return '<table class="pkt-htbl" style="margin-top:8px"><thead><tr><th colspan="4">The same hours added into the four parts of the day</th></tr></thead>' +
+      '<tbody><tr>' + cells + '</tr></tbody></table>';
+  }
+  /* an hour of the profile, in the words the rest of this page uses. Every figure is the REAL sum
+     over the real days, not the weighted pattern: a threshold is a threshold on real money, and a
+     weighted figure has counted some days twice. */
+  function profRows(P, T, M, tr, mr, nowH) {
+    var hours = (P && P.profile && P.profile.hours) || null;
+    var dead = {};
+    if (P && P.dead_hours && Array.isArray(P.dead_hours.windows)) {
+      P.dead_hours.windows.forEach(function (w) {
+        if (!w || w.from == null || w.to == null) return;
+        for (var k = Number(w.from); k !== Number(w.to); k = (k + 1) % 24) dead[k] = 1;
+      });
+    }
+    var h = '';
+    for (var i = 0; i < 24; i++) {
+      var hr = hours ? (hours[i] || {}) : null;
+      var ts = T && T.states ? String(T.states[i]) : '', ms = M && M.states ? String(M.states[i]) : '';
+      h += '<tr' + (nowH === i ? ' class="nowrow"' : '') + '><td class="hr">' + esc(clock(i)) + (nowH === i ? ' · now' : '') + '</td>' +
+        (hours
+          ? '<td>' + gbp(hr.spend_raw) + '</td><td>' + cnt(hr.clicks_raw) + '</td>' +
+            '<td>' + cnt(hr.orders_raw) + (num(hr.units_raw) != null ? ' <span class="pkt-sm2">· ' + cnt(hr.units_raw) + ' units</span>' : '') + '</td>' +
+            '<td>' + cnt(hr.days_observed) + (num(hr.days_with_sales) != null ? ' <span class="pkt-sm2">· sold on ' + cnt(hr.days_with_sales) + '</span>' : '') + '</td>' +
+            '<td>' + (dead[i] ? '<b>dead</b>' : '<span class="pkt-sm2">no</span>') + '</td>'
+          : '<td colspan="5"><span class="pkt-sm2">not read yet</span></td>') +
+        '<td>' + (ts ? esc(CELL_WORDS[cellKind(ts, tr[i])]) : '<span class="pkt-sm2">no schedule</span>') + '</td>' +
+        '<td>' + (tr[i] ? esc(String(tr[i])) : '<span class="pkt-sm2">not recorded</span>') + '</td>' +
+        '<td>' + (ms ? esc(CELL_WORDS[cellKind(ms, mr[i])]) + (mr[i] ? ' <span class="pkt-sm2">· ' + esc(String(mr[i])) + '</span>' : '') : '<span class="pkt-sm2">no schedule yet</span>') + '</td></tr>';
+    }
+    return h;
+  }
+  /* the finished days the answer carries, each one's hours summed beside the day eBay published */
+  function profDays(P) {
+    var L = (P && Array.isArray(P.daily_totals)) ? P.daily_totals : null;
+    if (!L || !L.length) return '';
+    return '<div class="pkt-scroll" style="margin-top:8px"><table class="pkt-htbl"><thead><tr><th>Finished day</th>' +
+      '<th>Its hours added up</th><th>The day eBay published</th><th>Hours with a reading</th></tr></thead><tbody>' +
+      L.map(function (d) {
+        var s = d.hours_sum || {}, t = d.daily_total || null;
+        return '<tr><td class="hr">' + esc(String(d.day || '')) + '</td>' +
+          '<td>' + gbp(s.spend) + ' · ' + cnt(s.clicks) + ' clicks · ' + cnt(s.orders) + ' orders</td>' +
+          '<td>' + (t ? gbp(t.spend) + ' · ' + cnt(t.clicks) + ' clicks · ' + cnt(t.orders) + ' orders' : '<span class="pkt-sm2">eBay has published no day row for this listing</span>') + '</td>' +
+          '<td>' + cnt(d.hours_with_a_reading) + ' of 24' +
+          (d.spend_difference != null && Math.abs(num(d.spend_difference)) >= 0.01
+            ? '<div class="pkt-sm2">' + gbp(Math.abs(num(d.spend_difference))) + ' apart on spend</div>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  /* THE DATA BEHIND THE DECISION. What the planner wrote, hour by hour, for today and tomorrow, and
+     the readings it stands on. Until 31 Oct the readings were not here at all: the peak list's own
+     answer carries the planner's conclusion and nothing else, so the panel could only print the
+     conclusion and name the gap. It now asks adtoolPeakProfile for the one listing it is open on,
+     which hands back what the evidence probe hands back, out of the same assembling function. */
   function dataPanel(r, sugg) {
     var id = String(r.item_id || '');
     if (PK.dataFor !== id) return '';
     var T = r.schedule_today, M = r.schedule_tomorrow;
     var tr = Array.isArray(T && T.reasons) ? T.reasons : [], mr = Array.isArray(M && M.reasons) ? M.reasons : [];
     var nowH = T && String(T.day || '') === adtUkDay() ? ukHourNow() : null;
+    var P = PK.prof[id] || null, pErr = PK.profErr[id] || '';
     var h = '<div class="pkt-data"><h5>The data behind this' + reg('the 24-hour pattern', 'how') + '</h5>';
-    h += '<div class="pkt-sm2" style="margin-bottom:8px">The hours the planner wrote for this listing and what put each of them there. ' +
-      'The money, the clicks and the sales in each hour are not in this answer: the planner reads them and keeps its answer, ' +
-      'so what is shown here is what it decided and not the readings behind it.</div>';
-    if (!T && !M) {
-      h += '<div class="pkt-empty">The system has written no schedule for this listing, for today or for tomorrow.</div>';
-    } else {
-      h += '<div class="pkt-scroll"><table class="pkt-htbl"><thead><tr><th>Hour, UK</th><th>Today' +
-        (T && T.day ? ' · ' + esc(String(T.day)) : '') + '</th><th>Why today</th><th>Tomorrow' +
-        (M && M.day ? ' · ' + esc(String(M.day)) : '') + '</th></tr></thead><tbody>';
-      for (var i = 0; i < 24; i++) {
-        var ts = T && T.states ? String(T.states[i]) : '', ms = M && M.states ? String(M.states[i]) : '';
-        h += '<tr' + (nowH === i ? ' class="nowrow"' : '') + '><td class="hr">' + esc(clock(i)) + (nowH === i ? ' · now' : '') + '</td>' +
-          '<td>' + (ts ? esc(CELL_WORDS[cellKind(ts, tr[i])]) : '<span class="pkt-sm2">no schedule</span>') + '</td>' +
-          '<td>' + (tr[i] ? esc(String(tr[i])) : '<span class="pkt-sm2">not recorded</span>') + '</td>' +
-          '<td>' + (ms ? esc(CELL_WORDS[cellKind(ms, mr[i])]) + (mr[i] ? ' <span class="pkt-sm2">· ' + esc(String(mr[i])) + '</span>' : '') : '<span class="pkt-sm2">no schedule yet</span>') + '</td></tr>';
-      }
-      h += '</tbody></table></div>';
-    }
-    /* the figures the answer DOES carry about the pattern, each one printed from the answer */
+    h += '<div class="pkt-sm2" style="margin-bottom:8px">Every hour of the day for this listing: the money that went out in it, ' +
+      'the clicks, the orders and the units, on how many days we hold a reading for it and on how many of those it sold, ' +
+      'beside what the planner wrote for that hour and why. ' +
+      'eBay publishes no ad figures by hour: the hourly money is the portal\'s own reading of eBay\'s running total every few ' +
+      'minutes, each difference booked to the hour it arrived in, and a day\'s first reading belongs to no hour of trading ' +
+      'and is left out. Today is kept out of the pattern, because a part day reads as quiet in every hour the clock has not reached.</div>';
+    if (pErr) h += '<div class="pkt-sm2" style="margin-bottom:8px">The hours behind this could not be read: ' + esc(pErr) + '</div>';
+    else if (!P) h += '<div class="pkt-sm2" style="margin-bottom:8px">Reading the hours behind this…</div>';
+    h += '<div class="pkt-scroll"><table class="pkt-htbl"><thead><tr><th>Hour, UK</th>' +
+      '<th>Spend</th><th>Clicks</th><th>Sales</th><th>Days observed</th><th>Dead?</th>' +
+      '<th>Today' + (T && T.day ? ' · ' + esc(String(T.day)) : '') + '</th><th>Why today</th>' +
+      '<th>Tomorrow' + (M && M.day ? ' · ' + esc(String(M.day)) : '') + '</th></tr></thead><tbody>' +
+      profRows(P, T, M, tr, mr, nowH) + '</tbody></table></div>';
+    if (P && P.profile) h += profSlotRow(P.profile.hours);
+    if (!T && !M) h += '<div class="pkt-sm2" style="margin-top:6px">The system has written no schedule for this listing, for today or for tomorrow, so the last three columns are empty.</div>';
+    h += profDays(P);
+    /* ONE "days observed" on this panel. The list row carries it and so does the hourly answer, and
+       they are the same figure read twice, so the row's is printed and the answer's is only used to
+       say when they disagree, which would mean the planner and this read are not on the same rows. */
     var days = num(r.profile_days), ca = T && T.computed_at ? String(T.computed_at) : '';
+    var seen = P && P.profile ? num(P.profile.days_observed) : null;
     h += '<div class="pkt-sm" style="margin-top:8px"><b>Days of hours the pattern was read over:</b> ' +
-      (days == null ? 'not available yet' : cnt(days) + ' ' + plural(days, 'day', 'days')) +
-      (ca ? ' · <b>worked out</b> ' + esc(whenTxt(ca)) : '') + '</div>';
+      (days == null ? (seen == null ? 'not available yet' : cnt(seen) + ' ' + plural(seen, 'day', 'days')) : cnt(days) + ' ' + plural(days, 'day', 'days')) +
+      (P && P.rules && P.rules.lookback_days != null ? ' · looked back over ' + cnt(P.rules.lookback_days) + ' ' + plural(P.rules.lookback_days, 'day', 'days') : '') +
+      (ca ? ' · <b>worked out</b> ' + esc(whenTxt(ca)) : '') +
+      (days != null && seen != null && days !== seen ? ' · <b>the hours read now give ' + cnt(seen) + '</b>, so the schedule was written over a different set of days' : '') + '</div>';
+    if (P && P.profile && P.profile.note) h += '<div class="pkt-sm2">' + esc(String(P.profile.note)) + '</div>';
+    if (P && P.dead_hours && P.dead_hours.note) h += '<div class="pkt-sm2">' + esc(String(P.dead_hours.note)) + '</div>';
+    if (P && P.tracking && P.tracking.note) h += '<div class="pkt-sm2">' + esc(String(P.tracking.note)) + '</div>';
+    if (P && P.note) h += '<div class="pkt-sm2">' + esc(String(P.note)) + '</div>';
     h += windowsLine('Switched off today by the pattern', r.dead_windows, 'nothing today');
     h += windowsLine('Put forward and not acted on', r.dead_proposal, 'nothing put forward');
     /* the four parts of the day, where the suggestion list has judged this listing: that row carries
@@ -1356,6 +1451,7 @@
     for (i = 0; i < dts.length; i++) dts[i].onclick = function () {
       var id = this.getAttribute('data-pkdata') || '';
       PK.dataFor = PK.dataFor === id ? '' : id;
+      if (PK.dataFor) loadProfile(PK.dataFor);
       draw();
     };
     var dcs = box.querySelectorAll('[data-pkdataclose]');

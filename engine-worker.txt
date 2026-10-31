@@ -136,7 +136,13 @@ function cronMap() {
        profiles / forecast / report / decisions / analyst as their phases land. Every job is
        flag-gated in portal_config (adtool_*); flags off = the invocation returns at once. */
     '20 * * * *': [adtoolRollups],
-    '25 * * * *': [adtoolAlerts],
+    /* adtoolVideoSweep rides LAST here (31 Oct, §4). This slot already carries one light D1-only job,
+       and this file's own law is that the cheap reads go ahead of anything that fetches: the sweep is
+       the only job in the slot that calls eBay, so last is where it cannot eat the budget of the job
+       in front of it. It carries its own per-account ceiling, its own fleet-wide fetch cap and its own
+       clock, so a slot it shares can never be exhausted by it either. No new cron slot was needed, so
+       crons.json is untouched. */
+    '25 * * * *': [adtoolAlerts, adtoolVideoSweep],
     '20 5 * * *': [adtoolTruth, adtoolProfiles, adtoolForecast, adtoolReport, adtoolRoas],
     /* the morning chain's second half: score yesterday, decide today, carry-forward on Mondays, narratives,
        then the apply job (which sends nothing unless an account's own switch is on) */
@@ -5515,7 +5521,12 @@ const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunTo
      and the finished day figures behind it, which move once an hour. Potential CPC reads orders and
      finished days. Two minutes keeps a page flag switched off honoured inside the ceiling the gate
      states, and still spares the owner the whole compute on every click between tabs. */
-  adtoolLiveSplit: 120000, adtoolPotentialCpc: 120000 };
+  adtoolLiveSplit: 120000, adtoolPotentialCpc: 120000,
+  /* 31 Oct, §4: Videos reads the video table the hourly sweep writes, the finished days behind the
+     cohort and eBay's traffic windows, and it runs the Overview's own two actions for the cohort on
+     top of that. None of those move inside two minutes, and the ceiling is what keeps a page flag
+     switched off honoured inside the time the gate states. */
+  adtoolVideoBoard: 120000 };
 const ADTOOL_ACTIONS = {
   adtoolFlags: {
     auth: 'any', fn: async (p, ctx) => {
@@ -7398,16 +7409,17 @@ const ADTOOL_ACTIONS_P5 = {
       const today = ukDate(''), yday = adtAddDays(today, -1);
       const acct = String((p && p.account) || '').trim();
       const aw = acct ? ' AND account = ?' : '';
-      /* THE PEAK-TIME OVERVIEW'S COHORT (owner's brief, 31 Oct, section 2). `cohort: 'peak'` asks this
-         same action, for the same window, over the listings on the by-hand peak list alone. There is no
-         second computation: every query below is the query the Overview already runs with ONE item
-         filter joined onto it, so the cohort answer cannot drift from the answer it is a part of.
+      /* THE COHORTS (owner's brief, 31 Oct, sections 2 and 4). `cohort: 'peak'` asks this same action,
+         for the same window, over the listings on the by-hand peak list alone, and `cohort: 'video'`
+         asks it over the listings that carry a video. There is no second computation either way: every
+         query below is the query the Overview already runs with ONE item filter joined onto it, so a
+         cohort answer cannot drift from the answer it is a part of.
          `cohort` is part of the cache key (adtKvCanon keeps it), so a cohort answer is never served to
          a reader who asked for the whole fleet. An unknown cohort is refused rather than silently
          answered for everything, which is the one failure nobody would see. */
       const cohort = String((p && p.cohort) || '').trim().toLowerCase();
-      if (cohort && cohort !== 'peak') throw new Error('SAY: the only cohort this answer knows is the peak list');
-      const CO = cohort === 'peak' ? await adPeakCohortRead(env, acct) : null;
+      if (cohort && ADTOOL_COHORTS.indexOf(cohort) < 0) throw new Error('SAY: the cohorts this answer knows are ' + ADTOOL_COHORT_WORDS);
+      const CO = cohort === 'peak' ? await adPeakCohortRead(env, acct) : cohort === 'video' ? await adVideoCohortRead(env, acct) : null;
       const coJoin = (itemCol, dayCol) => CO ? adPeakCohortJoin(CO.sql, itemCol, dayCol) : '';
       /* the today grain and the order read have no day column to judge: they ARE today, and today's
          part-day figures hold the listings on the list now. An empty list gives an IN list that can
@@ -7518,7 +7530,13 @@ const ADTOOL_ACTIONS_P5 = {
          page never has to add anything up for itself. Nothing below reaches eBay. */
       let peakExtras = null, reconcile = null;
       if (CO) {
-        peakExtras = await adPeakOverviewExtras(env, { account: acct, cohort: CO, today: today, fresh: fresh });
+        /* THE FOUR FIGURES BELONG TO THE PEAK LIST ALONE, and from 31 Oct §4 this is not the only
+           cohort. Hours on and off, money not spent outside the hours and orders inside against
+           outside are all answers about typed hours and a switch; a video cohort has neither, so
+           asking for them would print four figures that mean nothing under a heading that implies
+           they do. The check below it IS about any cohort (a tile against the sum of its own
+           listings) and is worked out for all of them. */
+        if (cohort === 'peak') peakExtras = await adPeakOverviewExtras(env, { account: acct, cohort: CO, today: today, fresh: fresh });
         /* the period half of the check: the SAME per-listing day rows the 30-day tile is summed from,
            read back one listing at a time and added up here. Both sides sum the raw column and round
            once at the end, so a penny of rounding cannot be mistaken for a cohort filter that was
@@ -8957,14 +8975,14 @@ const ADTOOL_ACTIONS_P9 = {
       const today = ukDate(''), yday = adtAddDays(today, -1), todayUtc = utcDate();
       const w = adtPeriodOr(p, today, 'd30'), from = w.from, to = w.to, src = adtDaySrc(w, today, todayUtc);
       const acct = String((p && p.account) || '').trim();
-      /* THE PEAK-TIME OVERVIEW'S COHORT (owner's brief, 31 Oct, section 2). The same six tiles over the
-         listings on the by-hand peak list alone: every aggregate below is the one this page already runs
-         with ONE item filter joined onto it, so there is one computation and the two answers can never
-         drift apart. The cohort is part of the cache key (adtKvCanon keeps it). An unknown cohort is
-         refused rather than quietly answered for the whole fleet. */
+      /* THE COHORTS (owner's brief, 31 Oct, sections 2 and 4). The same six tiles over the listings on
+         the by-hand peak list alone, or over the listings that carry a video: every aggregate below is
+         the one this page already runs with ONE item filter joined onto it, so there is one computation
+         and the two answers can never drift apart. The cohort is part of the cache key (adtKvCanon keeps
+         it). An unknown cohort is refused rather than quietly answered for the whole fleet. */
       const cohort = String((p && p.cohort) || '').trim().toLowerCase();
-      if (cohort && cohort !== 'peak') throw new Error('SAY: the only cohort this answer knows is the peak list');
-      const CO = cohort === 'peak' ? await adPeakCohortRead(env, acct) : null;
+      if (cohort && ADTOOL_COHORTS.indexOf(cohort) < 0) throw new Error('SAY: the cohorts this answer knows are ' + ADTOOL_COHORT_WORDS);
+      const CO = cohort === 'peak' ? await adPeakCohortRead(env, acct) : cohort === 'video' ? await adVideoCohortRead(env, acct) : null;
       const coJoin = (itemCol, dayCol) => CO ? adPeakCohortJoin(CO.sql, itemCol, dayCol) : '';
       const coSet = CO ? (function () { const m = {}; for (const id of adPeakCohortIds(CO.entries, today)) m[String(id)] = 1; return m; })() : null;
       /* the last 7 full days to yesterday ride the same aggregate as the window (a listing losing over the window
@@ -13479,6 +13497,389 @@ function adChangeBy(attribution, changeAt, withinMin) {
         : sender + ' sent the matching change ' + Math.abs(gap) + ' minutes ' + (gap < 0 ? 'after' : 'before') + ' eBay reported this one, which is the same day rather than the same moment',
   };
 }
+
+/* a hold nobody can read is 'auto', which is what the list did before holds existed. Pure, and in
+   this block rather than beside the list read it came from, because adPeakListingProfile below is
+   pure and under unit test and must be able to call it. */
+function adtPeakHoldOf(row) { const h = String((row && row.hold) == null ? 'auto' : row.hold); return ADTOOL_PEAK_HOLDS.indexOf(h) >= 0 ? h : 'auto'; }
+/* ONE LISTING'S HOURS, ASSEMBLED ONCE (31 Oct, §3's last open item). The evidence probe and the Peak
+   page's own "data behind this" panel both need this, and before this function existed only the probe
+   had it, so the page could print the planner's conclusion and never the readings behind it.
+   Pure: every figure comes out of the four pure functions the planner itself calls, and the caller
+   does the reading. `inp` carries what was read — { rows, drift_day, sched, daily_by, rules, uk,
+   today, tomorrow, day, days } — so the probe can read a handful of listings in one batch and the
+   page can read one, and the answer for a listing is identical either way. */
+function adPeakListingProfile(row, inp) {
+  const c = inp || {};
+  const rules = c.rules || adPeakPlanRules({});
+  const uk = c.uk || {};
+  const sched = c.sched || {}, dailyBy = c.daily_by || {};
+  const today = String(c.today || ''), tomorrow = String(c.tomorrow || ''), day = String(c.day || today);
+  const days = Math.max(1, Math.round(Number(c.days) || 3));
+  const id = String((row && row.item_id) || '');
+  const rows = c.rows || [];
+  const hours = adPeakHoursParse(row && row.hours);
+  const profile = adPeakProfile(rows, { today: today, for_day: day, lookback_days: rules.lookback_days, recent_days: rules.recent_days });
+  const dead = adPeakDeadHours(profile, Object.assign({}, rules, { typed_ranges: hours.ranges || [] }));
+  const track = adPeakTracking(profile.today, profile.hours, { drift_detected_day: c.drift_day || '' });
+  const hold = adtPeakHoldOf(row);
+  const plan = adPeakSchedule({ typed_ranges: hours.ranges || [], dead_windows: dead.windows, hold: hold, min_days_ok: profile.days_observed >= rules.min_days, tracking: track.tracking });
+  /* the day's own hours, summed, beside the day eBay finally published for it */
+  const perDay = [];
+  for (let k = days - 1; k >= 0; k--) {
+    const d = adtAddDays(day, -k);
+    const own = { spend: 0, clicks: 0, orders: 0, units: 0, revenue: 0, hours_with_a_reading: 0 };
+    for (const r of rows) {
+      if (String(r.day) !== d) continue;
+      own.hours_with_a_reading++;
+      own.spend += Number(r.spend) || 0; own.clicks += Number(r.clicks) || 0;
+      own.orders += Number(r.orders) || 0; own.units += Number(r.units) || 0; own.revenue += Number(r.revenue) || 0;
+    }
+    const tot = dailyBy[id + '|' + d] || null;
+    const n = v => (v == null || v === '' || isNaN(Number(v))) ? null : round2(Number(v));
+    perDay.push({
+      day: d, hours_with_a_reading: own.hours_with_a_reading,
+      hours_sum: { spend: round2(own.spend), clicks: own.clicks, orders: own.orders, units: own.units, revenue: round2(own.revenue) },
+      daily_total: tot ? { spend: n(tot.spend), clicks: Number(tot.clicks) || 0, orders: Number(tot.orders) || 0, units: Number(tot.units) || 0, revenue: n(tot.revenue) } : null,
+      /* orders and units are counted into the hour the order arrived in, from the same roll-up the
+         day row is counted from, so those two must agree exactly. Spend cannot, and the note says
+         why rather than the probe calling a known difference a fault. */
+      orders_equal: tot ? (own.orders === (Number(tot.orders) || 0)) : null,
+      units_equal: tot ? (own.units === (Number(tot.units) || 0)) : null,
+      spend_difference: tot && n(tot.spend) != null ? round2(round2(own.spend) - n(tot.spend)) : null,
+    });
+  }
+  const schT = sched[id + '|' + today] || null, schM = sched[id + '|' + tomorrow] || null, schAsked = sched[id + '|' + day] || null;
+  const want = adPeakWantFor({ hold: hold, schedule: schT, hour: uk.hour });
+  return {
+    item_id: id, account: String((row && row.account) || ''), hours: String((row && row.hours) || ''),
+    hours_parsed: hours.ranges, hours_problem: hours.reason || '', auto: Number((row && row.auto) || 0) ? 1 : 0, hold: hold,
+    /* §6.3 */
+    profile: { hours: profile.hours, today: profile.today, days_observed: profile.days_observed, days: profile.days,
+      lookback: profile.lookback, for_day: profile.for_day, for_weekday: profile.for_weekday,
+      weekday_weighting_used: profile.weekday_weighting_used, weekday_days_doubled: profile.weekday_days_doubled,
+      recent_days_doubled: profile.recent_days_doubled, note: profile.note },
+    daily_totals: perDay,
+    /* §6.4 */
+    dead_hours: dead, tracking: track,
+    schedule_worked_out_now: { day: day, states: plan.states, source: plan.source, reasons: plan.reasons, off_windows: plan.off_windows, proposal: plan.proposal, why: plan.why },
+    schedule_stored: { today: schT, tomorrow: schM, asked_for: schAsked },
+    /* a stored schedule that disagrees with what the same pure functions work out from the same
+       rows right now is the one thing worth seeing on this route: either the figures moved since
+       the planner ran, which is normal and dated by computed_at, or the planner and the page are
+       not reading the same rule, which is not. */
+    stored_matches_now: schAsked && schAsked.readable ? JSON.stringify(schAsked.states) === JSON.stringify(plan.states) : null,
+    /* §6.5: the override the switch is handed for this very hour, from the same pure function the
+       job calls, so a hold or a schedule being respected is readable rather than inferred. */
+    switch_override_now: { uk_hour: uk.hour, want: want.want_override || null, source: want.want_source || null, from: want.from, schedule_source: want.schedule_source },
+    next_switch: adPeakNextSwitch({
+      today: schT && schT.readable ? Object.assign({ day: today }, schT) : null,
+      tomorrow: schM && schM.readable ? Object.assign({ day: tomorrow }, schM) : null, uk: uk,
+    }),
+  };
+}
+/* ══ VIDEOS (owner's brief, 31 Oct, §4) ══════════════════════════════════════════════════════
+   "All the videos we have on our listings, how they are performing, all the data, the way it comes
+   in the Overview." A PORT of the 18 Oct study (M98M-Video-Listings), not a second method: the same
+   equal-window rule, the same exclusions, the same control, so the engine's answer and that
+   workbook's answer are the same answer.
+
+   WHAT EBAY GIVES US, and the limit this whole section is written around. Trading GetItem carries
+   VideoDetails, which is a list of video IDS and nothing else: no play count, no watch time, no
+   upload date. The traffic report and the ad reports are PER LISTING, never per video play, and the
+   per-listing traffic figures arrive as a 7-day and a 30-day window rather than as days. So nothing
+   here invents a figure for a video: every number is the LISTING's, and the before-and-after is run
+   on the grains that really are daily — orders, units, revenue, ad spend and the listing's own
+   profit. Views and the click-through rate are shown as they stand, and a before-and-after on them
+   is shown only where a reading from before the video date exists. */
+/* THE COHORTS adtoolPlan and adtoolCommand will answer for. Named in one place, so a third one
+   cannot be added to one of those two actions and forgotten in the other, and so the refusal
+   sentence a reader sees is written once. */
+const ADTOOL_COHORTS = ['peak', 'video'];
+const ADTOOL_COHORT_WORDS = 'the peak list and the listings that carry a video';
+const ADTOOL_VIDEO_WINDOW_CAP = 30;         /* the 18 Oct study's own ceiling on an equal window */
+const ADTOOL_VIDEO_WINDOWS = [14, 28];      /* the two the Decision page's department asks for */
+const ADTOOL_VIDEO_DATA_START = '2026-05-16';  /* the day the engine's order history begins */
+const ADTOOL_VIDEO_API_TRUTH = 'These are listing-level metrics for listings with video. eBay gives us the video IDs on a listing and nothing more: no play count and no watch time, and its traffic and ad reports are per listing, never per video play. Orders, units, revenue, ad spend and profit are daily, so the before and after on those is exact. Views and the click-through rate arrive only as a 7-day and a 30-day window, so a before-and-after on them is shown only where the portal holds a reading from before the video date.';
+const ADTOOL_VIDEO_DATE_SOURCES = ['media thumbnail', 'item page thumbnail', 'lister record', 'unknown date'];
+/* THE SWEEP'S OWN CEILINGS, here rather than beside the job, so the register's prose and the page's
+   own sentence are written FROM them: a number repeated in words goes wrong the day somebody changes
+   the number. */
+const ADTOOL_VIDEO_SWEEP_PER_ACCOUNT = 120;   /* the brief's own ceiling */
+const ADTOOL_VIDEO_SWEEP_FETCH_CAP = 700;     /* fleet-wide, inside one invocation's subrequest budget */
+const ADTOOL_VIDEO_SWEEP_DATES = 12;          /* date lookups a run: a page read is ~1 MB, so few */
+const ADTOOL_VIDEO_RECHECK_DAYS = 7;
+const ADTOOL_VIDEO_SWEEP_MS = 40000;
+
+/* THE VIDEO IDS ON A LISTING, out of a Trading GetItem reply. Regex and not a parser: this worker has
+   no XML parser and every other eBay read in this file is read the same way. A reply with the element
+   and no ids inside it is a listing with no video, which is not the same thing as a reply we could not
+   read, so the two are returned apart. */
+function adVideoIdsFromXml(xml) {
+  const s = String(xml || '');
+  if (!s) return { ids: [], readable: false, note: 'nothing came back' };
+  const fail = s.indexOf('<Ack>Failure</Ack>') >= 0;
+  const ids = [];
+  const re = /<VideoID[^>]*>([^<]+)<\/VideoID>/g;
+  let m;
+  while ((m = re.exec(s))) { const v = String(m[1]).trim(); if (v && ids.indexOf(v) < 0) ids.push(v); }
+  if (fail && !ids.length) return { ids: [], readable: false, note: 'eBay refused this item' };
+  return { ids: ids, readable: true, note: '' };
+}
+
+/* THE VIDEO'S OWN UPLOAD DATE, out of its thumbnail's picture id (18 Oct, verified on 1,246 listing
+   photos and on all 102 video thumbnails). The id is 16 base64url characters with eBay's own two
+   substitutions (- for + and ~ for /); it decodes to 12 bytes whose bytes 8 to 12, big-endian, are
+   the Unix second the file was uploaded.
+   THE PAGE'S OWN uploadDate IS NOT THIS. eBay's item page carries a JSON-LD VideoObject whose
+   uploadDate matched the LISTING's start time on all 102 of the listings checked, to the minute, so
+   it is the listing date wearing a video's name and is never read here.
+   A figure that cannot be decoded comes back null, with the reason, and never as a date. */
+function adVideoThumbDate(urlOrId, nowMs) {
+  const raw = String(urlOrId || '').trim();
+  if (!raw) return { ts: null, iso: null, day: null, picture_id: '', note: 'no thumbnail to read' };
+  /* .../z/<id>/$_26.PNG and .../images/g/<id>/s-l140.jpg both carry it; a bare id is accepted too */
+  let id = raw;
+  const m = raw.match(/\/(?:z|g)\/([A-Za-z0-9_~-]{16})(?:[/?]|$)/);
+  if (m) id = m[1];
+  else if (!/^[A-Za-z0-9_~-]{16}$/.test(raw)) return { ts: null, iso: null, day: null, picture_id: '', note: 'no 16-character picture id in that address' };
+  const b64 = id.replace(/-/g, '+').replace(/~/g, '/');
+  let bin = '';
+  try { bin = atob(b64); } catch (e) { return { ts: null, iso: null, day: null, picture_id: id, note: 'the picture id is not readable as base64' }; }
+  if (bin.length < 12) return { ts: null, iso: null, day: null, picture_id: id, note: 'the picture id decodes to ' + bin.length + ' bytes, not 12' };
+  let ts = 0;
+  for (let i = 8; i < 12; i++) ts = (ts * 256) + (bin.charCodeAt(i) & 255);
+  /* a plausibility floor and ceiling, so a byte pattern that happens to decode is not printed as a
+     date in 1973 or in 2097. eBay's own picture store starts well after 2010. */
+  const now = Number(nowMs) || Date.now();
+  if (ts < 1262304000 || ts * 1000 > now + 7 * 86400000) return { ts: ts, iso: null, day: null, picture_id: id, note: 'the decoded time is not a believable upload time' };
+  const iso = new Date(ts * 1000).toISOString().replace('T', ' ').slice(0, 19);
+  return { ts: ts, iso: iso, day: iso.slice(0, 10), picture_id: id, note: '' };
+}
+
+/* THE EQUAL WINDOWS EACH SIDE OF THE UPLOAD DAY — the 18 Oct analysis, rule for rule.
+   rows: the listing's own finished days, { day, units, revenue, orders, spend } — spend is the click
+   fee the portal already books against a listing-day, and the caller chooses that column once.
+   video_day: the UK day the video went on. today: the last FINISHED day; nothing reaches into today,
+   because eBay publishes a day's ad report the day after and a part day would read as a cheap one.
+   opts: { listed_day, data_start, cap, control_rows }.
+
+   THE UPLOAD DAY ITSELF IS IN NEITHER WINDOW. The video went on at some hour of it, so part of that
+   day is before and part after, and counting it either way would credit or blame the video for hours
+   it was not there. It is returned on its own instead.
+   THE WINDOW IS THE SHORTER OF THREE: the days since the video, the days of history before it, and
+   the cap. Equal sides or nothing: a 14-day after against a 3-day before would read as a collapse.
+   A LISTING WITH NO HISTORY EITHER SIDE gets window_days 0 and null figures, never noughts. */
+function adVideoBeforeAfter(rows, video_day, today, opts) {
+  const o = opts || {};
+  const D = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : '';
+  const vday = D(video_day), last = D(today);
+  const cap = Math.max(1, Math.round(Number(o.cap) || ADTOOL_VIDEO_WINDOW_CAP));
+  const dataStart = D(o.data_start) || ADTOOL_VIDEO_DATA_START;
+  const listed = D(o.listed_day);
+  const out = {
+    video_day: vday || null, last_finished_day: last || null, cap: cap,
+    window_days: 0, days_since_video: null, days_before_available: null,
+    before: null, after: null, change: null, upload_day: null, control: null, whole: null, notes: [],
+  };
+  if (!vday || !last) { out.notes.push('No video date, so there is nothing to compare either side of it.'); return out; }
+  const dayDiff = (a, b) => Math.round((Date.parse(a + 'T12:00:00Z') - Date.parse(b + 'T12:00:00Z')) / 86400000);
+  const floor = listed && listed > dataStart ? listed : dataStart;
+  const nAfter = Math.max(0, dayDiff(last, vday));
+  const beforeAvail = Math.max(0, dayDiff(vday, floor));
+  const N = Math.max(0, Math.min(nAfter, beforeAvail, cap));
+  out.days_since_video = nAfter; out.days_before_available = beforeAvail; out.window_days = N;
+  const add = (ymd, n) => { const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const sum = (list, from, to) => {
+    const s = { days: 0, orders: 0, units: 0, revenue: 0, spend: 0 };
+    for (const r of (list || [])) {
+      const d = D(r && r.day); if (!d || d < from || d > to) continue;
+      s.days++;
+      s.orders += Number((r && r.orders) || 0) || 0;
+      s.units += Number((r && r.units) || 0) || 0;
+      s.revenue += Number((r && r.revenue) || 0) || 0;
+      s.spend += Number((r && r.spend) || 0) || 0;
+    }
+    return s;
+  };
+  const side = (from, to) => {
+    const s = sum(rows, from, to);
+    return {
+      from: from, to: to, days: N,
+      orders: s.orders, units: s.units, revenue: round2(s.revenue), spend: round2(s.spend),
+      units_day: round4(s.units / N), revenue_day: round2(s.revenue / N), spend_day: round2(s.spend / N),
+      orders_day: round4(s.orders / N),
+      roas: s.spend > 0 ? round2(s.revenue / s.spend) : null,
+      days_with_a_row: s.days,
+    };
+  };
+  const u0 = sum(rows, vday, vday);
+  out.upload_day = { day: vday, orders: u0.orders, units: u0.units, revenue: round2(u0.revenue), spend: round2(u0.spend), note: 'the upload day itself, in neither window' };
+  /* the whole period either side, for context: the rates the 18 Oct sheet printed beside the windows */
+  const preDays = beforeAvail, postDays = nAfter;
+  /* THE WHOLE PERIOD EITHER SIDE is only a whole-period figure when the rows reach back to the floor.
+     A caller that read a bounded slice of days (a page reading a fortnight either side for a hundred
+     listings does exactly that) must not be handed a sum over part of the history under a heading
+     that says the whole of it: `rows_from` says how far back the rows go, and where that is later
+     than the floor the before side comes back null with the reason instead of understated. */
+  const rowsFrom = D(o.rows_from);
+  const preTruncated = !!(rowsFrom && rowsFrom > floor);
+  const pre = (preDays > 0 && !preTruncated) ? sum(rows, floor, add(vday, -1)) : null;
+  const post = postDays > 0 ? sum(rows, add(vday, 1), last) : null;
+  out.whole = {
+    history_from: floor, pre_days: preDays, post_days: postDays,
+    rows_from: rowsFrom || null, before_side_limited: preTruncated,
+    pre_units: pre ? pre.units : null, post_units: post ? post.units : null,
+    pre_units_day: pre && preDays > 0 ? round4(pre.units / preDays) : null,
+    post_units_day: post && postDays > 0 ? round4(post.units / postDays) : null,
+    note: preTruncated ? 'The days handed in start ' + rowsFrom + ', which is after this listing\'s history begins, so the whole period before the video is not counted here. The equal windows either side are unaffected.' : '',
+  };
+  if (!N) {
+    out.notes.push(nAfter <= 0
+      ? 'The video went on today or later, so no finished day has passed with it on.'
+      : 'There is no history before the video to compare the days since it against.');
+    if (listed && Math.abs(dayDiff(vday, listed)) <= 1) out.notes.push('The video was on from the listing day, so there is no before-period.');
+    if (listed && listed < dataStart) out.notes.push('The engine\'s order history starts ' + dataStart + '.');
+    return out;
+  }
+  out.before = side(add(vday, -N), add(vday, -1));
+  out.after = side(add(vday, 1), add(vday, N));
+  const chg = (a, b) => (b && b > 0) ? round4((a - b) / b) : null;
+  out.change = {
+    units: chg(out.after.units, out.before.units), revenue: chg(out.after.revenue, out.before.revenue),
+    orders: chg(out.after.orders, out.before.orders), spend: chg(out.after.spend, out.before.spend),
+    units_abs: out.after.units - out.before.units, revenue_abs: round2(out.after.revenue - out.before.revenue),
+    spend_abs: round2(out.after.spend - out.before.spend),
+    roas: (out.before.roas != null && out.after.roas != null) ? round4(out.after.roas - out.before.roas) : null,
+  };
+  /* THE REST OF THE ACCOUNT over the very same dates: every listing of the account that carries no
+     video. A fleet that fell 20% in the fortnight after a batch of videos went on did not fall
+     because of the videos, and without this column nobody could tell the two apart. */
+  if (o.control_rows) {
+    const cb = sum(o.control_rows, out.before.from, out.before.to), ca = sum(o.control_rows, out.after.from, out.after.to);
+    out.control = {
+      before_units: cb.units, after_units: ca.units, change: chg(ca.units, cb.units),
+      before_revenue: round2(cb.revenue), after_revenue: round2(ca.revenue), revenue_change: chg(round2(ca.revenue), round2(cb.revenue)),
+      note: 'every listing of this account that carries no video, over the same dates',
+    };
+  }
+  if (listed && Math.abs(dayDiff(vday, listed)) <= 1) out.notes.push('The video was on from the listing day, so there is no before-period.');
+  else if (listed && dayDiff(vday, listed) < -1) out.notes.push('The video was uploaded ' + dayDiff(listed, vday) + ' days before the listing went live.');
+  if (nAfter <= 2) out.notes.push('Only ' + nAfter + ' day' + (nAfter === 1 ? '' : 's') + ' of sales since the video, which is too early to judge.');
+  else if (nAfter < 7) out.notes.push(nAfter + ' days since the video, so this is an early read.');
+  if (listed && listed < dataStart) out.notes.push('The engine\'s order history starts ' + dataStart + '.');
+  if (!out.before.units && !out.after.units) out.notes.push('No sales either side of the video.');
+  if (out.before.spend > 0 && out.after.spend > 0) {
+    const r = out.after.spend / out.before.spend;
+    if (r > 1.5) out.notes.push('Ad spend rose ' + Math.round((r - 1) * 100) + '% after the video, so the sales either side are not being compared on equal money.');
+    else if (r < 0.67) out.notes.push('Ad spend fell ' + Math.round((1 - r) * 100) + '% after the video, so the sales either side are not being compared on equal money.');
+  }
+  if (N < cap) out.notes.push('The window is ' + N + ' day' + (N === 1 ? '' : 's') + ' each side, which is the shorter of the days since the video, the history before it and the ' + cap + '-day ceiling.');
+  return out;
+}
+
+/* THE COHORT, AS THE PEAK LIST'S OWN SQL UNDERSTANDS IT. One membership shape for the whole portal:
+   adPeakCohortSql / adPeakCohortJoin take (item, from, to) and the day-level rule decides day by day
+   which of a listing's days count, so the video cohort is written in their words and the SQL builder
+   is not duplicated.
+   THE DAY A LISTING JOINS IS THE DAY WE CAN PROVE IT CARRIED THE VIDEO: the decoded upload day where
+   there is one, and otherwise the first day the sweep saw the video on eBay. A listing whose date we
+   could not decode is therefore counted from a day we actually observed rather than from the
+   beginning of its life, which would claim video-days nobody can stand behind. */
+function adVideoCohortEntry(row) {
+  const r = row || {};
+  const id = String(r.item_id || '').replace(/\D/g, '');
+  if (!id) return null;
+  const D = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : '';
+  const added = D(r.video_added_on) || D(String(r.first_seen || '').slice(0, 10));
+  if (!added) return null;
+  return {
+    item_id: id, account: String(r.account || ''), added_day: added, removed_day: '',
+    from_source: D(r.video_added_on) ? 'the video\'s own upload day' : 'the first day the sweep saw the video',
+    video_count: Number(r.video_count) || 0,
+  };
+}
+function adVideoCohortEntries(rows) {
+  const out = [];
+  for (const r of (rows || [])) { const e = adVideoCohortEntry(r); if (e) out.push(e); }
+  return out;
+}
+
+/* ON EBAY, AND IN THE LISTERS' OWN RECORD — the two counts and the two differences.
+   The portal's own record is the listing ladder, where a lister marks the video stage done and pastes
+   the link. The sweep reads eBay. The point of showing both is that neither is the whole truth: a
+   video on eBay that nobody recorded is work nobody got credit for, and a record with no video on
+   eBay is a listing somebody believes is done and is not. */
+function adVideoCohortCounts(ebayRows, ladderRows) {
+  const onE = {}, rec = {};
+  for (const r of (ebayRows || [])) {
+    const id = String((r && r.item_id) || '').replace(/\D/g, '');
+    if (id && Number((r && r.video_count) || 0) > 0) onE[id] = { item_id: id, account: String((r && r.account) || ''), video_count: Number(r.video_count) || 0, video_added_on: r.video_added_on || null };
+  }
+  for (const r of (ladderRows || [])) {
+    const id = String((r && r.item_id) || '').replace(/\D/g, '');
+    if (id && String((r && r.video_status) || '').toUpperCase() === 'DONE') rec[id] = { item_id: id, account: String((r && r.account) || ''), recorded_at: (r && r.updated_at) || null, video_link: String((r && r.video_link) || '') };
+  }
+  const eIds = Object.keys(onE), rIds = Object.keys(rec);
+  const both = eIds.filter(id => rec[id]);
+  return {
+    on_ebay: eIds.length, recorded: rIds.length, both: both.length,
+    ebay_only: eIds.filter(id => !rec[id]).map(id => onE[id]),
+    recorded_only: rIds.filter(id => !onE[id]).map(id => rec[id]),
+    note: 'eBay\'s own answer is the one the cohort is built from. The lister record beside it is the portal\'s, and the two differences are listed rather than reconciled away.',
+  };
+}
+
+/* WITH A VIDEO AGAINST WITHOUT ONE, per account and per case type. Both sides are the same aggregate
+   over the same dates, so the only difference between them is the video. A side with nothing in it is
+   null and says so: a lift against nought is not a lift. */
+function adVideoVsNoVideo(rows) {
+  const g = {};
+  for (const r of (rows || [])) {
+    const key = String((r && r.key) || '');
+    if (!key) continue;
+    const side = (r && r.has_video) ? 'with' : 'without';
+    const b = g[key] = g[key] || { key: key, with: null, without: null };
+    const t = b[side] = b[side] || { listings: 0, listings_with_traffic: 0, views: 0, impressions: 0, orders: 0, units: 0, revenue: 0, spend: 0, attr_revenue: 0, attr_units: 0, clicks: 0 };
+    t.listings += Number((r && r.listings) || 1) || 0;
+    for (const k of ['listings_with_traffic', 'views', 'impressions', 'orders', 'units', 'revenue', 'spend', 'attr_revenue', 'attr_units', 'clicks']) t[k] += Number((r && r[k]) || 0) || 0;
+  }
+  const close = t => {
+    if (!t) return null;
+    /* VIEWS ARE DIVIDED BY THE LISTINGS EBAY PUBLISHED VIEWS FOR, and the rest by all of them.
+       The traffic report is the top three hundred listings of an account by impressions, so most
+       listings have no reading at all, and a listing with no reading is not a listing with nought
+       views: dividing by every listing would quietly understate whichever side has fewer readings.
+       Each side therefore says how many of its listings carry a reading. */
+    const o = {
+      listings: t.listings, listings_with_traffic: t.listings_with_traffic,
+      views: t.views, impressions: t.impressions, orders: t.orders, units: t.units,
+      revenue: round2(t.revenue), spend: round2(t.spend), attr_revenue: round2(t.attr_revenue), attr_units: t.attr_units, clicks: t.clicks,
+      ctr: t.impressions > 0 ? round4(t.views / t.impressions) : null,
+      conversion: t.views > 0 ? round4(t.units / t.views) : null,
+      roas: t.spend > 0 ? round2(t.attr_revenue / t.spend) : null,
+      views_listing: t.listings_with_traffic > 0 ? round2(t.views / t.listings_with_traffic) : null,
+      units_listing: t.listings > 0 ? round4(t.units / t.listings) : null,
+      revenue_listing: t.listings > 0 ? round2(t.revenue / t.listings) : null,
+    };
+    return o;
+  };
+  const lift = (a, b) => (a == null || b == null || !(b > 0)) ? null : round4((a - b) / b);
+  const out = [];
+  for (const key of Object.keys(g).sort()) {
+    const w = close(g[key].with), n = close(g[key].without);
+    out.push({
+      key: key, with: w, without: n,
+      lift: (w && n) ? {
+        views: lift(w.views_listing, n.views_listing), ctr: lift(w.ctr, n.ctr),
+        conversion: lift(w.conversion, n.conversion), roas: lift(w.roas, n.roas),
+        units: lift(w.units_listing, n.units_listing), revenue: lift(w.revenue_listing, n.revenue_listing),
+      } : null,
+      note: (w && n) ? '' : (w ? 'no listing without a video in this group, so there is nothing to compare against' : 'no listing with a video in this group'),
+    });
+  }
+  return out;
+}
 /* ADTOOL-P16-PURE-END */
 
 /* ---- schema: the peak list's own switch, and the campaign columns the sync now fills ---- */
@@ -13578,6 +13979,11 @@ const ADTOOL_REGISTER_P16 = [
   ['PEAK_HOLD', 'Holding a listing on or off by hand', 'A listing on the peak list can be held on for the whole day or off for the whole day, and a hold overrules both its typed hours and its pattern, with a reason printed against every hour. Only Management, an Ops Head or an Advertising Manager may set one, and who set it and when is written to the audit trail. Every row is born on the schedule, which is what the list did before holds existed. A hold decides a wanted state and nothing more: it reaches eBay only through the quarter-hourly switch, for an account whose live switch is on, under the same ceiling and refusal rule as every other change.', 'adtool_peak_items, audit, adtool_apply_log', 'As soon as somebody sets one, and every quarter hour for the switching', 'Unit tests on a hold on and a hold off beating the schedule, and the audit row read back against the actor'],
   ['PEAK_TRACKING', 'Whether a listing is still playing on its pattern', 'The owner’s own condition for keeping a listing on its 24-hour pattern, answered by the drift rule the portal already has rather than a second one beside it: today’s hours are compared with the pattern’s by the same measure, against the same threshold, with the same floor of orders either side below which that rule declines to call a drift. Where the pattern check has already written a change of shape for the listing, that record is the answer and the day it was written is named. Too few orders either side is still tracking. A listing no longer tracking falls back to its typed hours, and the schedule says so.', 'adtool_regimes, adtool_listing_hour, adtool_profiles', 'With the schedule', 'Unit tests on a drift record deciding it, on the order floor, and on the two shapes agreeing'],
   ['SPEND_BACK_WINDOWS', 'What a listing spent over the last three, seven and fourteen days', 'The listing’s own ad spend over the last three, seven and fourteen FINISHED days, beside what it has spent today. Every window ends yesterday, because eBay publishes a day’s ad report the day after and a window reaching into today would read every listing as having had a cheap day. The spend already carries the fee charged on clicks, so nothing is added on top of it. A day with no row simply does not count.', 'adtool_listing_day', 'Worked out when you open the page, and held for a minute', 'Unit tests on the three windows never being out of order, and the figures read back against the listing’s own page'],
+  /* the 31 Oct brief, §4: the videos on our listings, and what happened to sales after each one */
+  ['VIDEO_COHORT', 'Which listings carry a video', 'eBay’s own answer, asked listing by listing: GetItem carries the video IDs on a listing, and a listing with at least one is in. The sweep works through the fleet active listings first and longest-unchecked first, so every live listing is asked about within a day and again every ' + ADTOOL_VIDEO_RECHECK_DAYS + ' days. Beside eBay’s answer sits the portal’s own record, where a lister marks the video stage done, and the two differences are listed rather than reconciled away: a video nobody recorded, and a record with no video. A listing counts from the day we can prove it carried the video, which is its upload day where that decoded and otherwise the first day the sweep saw it.', 'items_api, adtool_listing_video, listing_ladder', 'Every hour, up to ' + ADTOOL_VIDEO_SWEEP_PER_ACCOUNT + ' listings an account, and each live listing again ' + ADTOOL_VIDEO_RECHECK_DAYS + ' days after it was last asked about', 'The sweep’s own count read back against the 102 listings the 18 October study found, and unit tests on the two difference lists'],
+  ['VIDEO_ADDED_ON', 'The day a video went on a listing', 'eBay publishes no upload date for a video, so it is recovered from the video thumbnail’s picture address: sixteen characters that decode to twelve bytes whose ninth to twelfth, read as one number, are the second the file was uploaded. Verified on 1,246 listing photos and on all 102 video thumbnails of the 18 October study. The item page’s own uploadDate is NOT this: it matched the listing’s start time on all 102, to the minute, so it is the listing date and is never read. Where the thumbnail cannot be reached the lister’s own record date is used and marked as such, and where there is neither the day is blank, never a guess.', 'adtool_listing_video, listing_ladder', 'With the sweep, and only for a listing whose day is not known yet', 'The decoded day read back against the 102 dates the 18 October study recovered, and unit tests on the decode itself'],
+  ['VIDEO_BEFORE_AFTER', 'Sales before and after the video', 'Equal windows each side of the upload day, with that day itself in neither of them because the video went on part way through it. The window is the shorter of three: the days since the video, the history before it, and the ceiling asked for, which is ' + ADTOOL_VIDEO_WINDOWS.join(' days and then ') + ' days once that many exist either side. Units and takings come from the order book, cancelled and lost orders left out, on London dates; the ad spend is the click fee already booked against the listing’s day. Beside each listing sits the rest of its account over the same dates, so a fortnight when the whole account fell is not read as the video’s doing.', 'adtool_listing_day, orders, adtool_listing_video, adtool_listings', 'Worked out when the page is opened, over finished days only', 'The same arithmetic as the 18 October workbook, unit tested against three of its own listings'],
+  ['VIDEO_VS_NO_VIDEO', 'With a video against without one', 'The same aggregate twice over the same dates, once over the listings that carry a video and once over the listings of the same account that do not, per account and per case type. Views and the click-through rate come from eBay’s traffic report, which is per listing over a 7-day and a 30-day window and never per video play; everything else is daily. Each side is divided by its own number of listings, because an account with four videos and four hundred other listings would otherwise read as a collapse. A group with nothing on one side is blank and says so, because a comparison against nought is not a comparison.', 'traffic_listing, adtool_listing_day, adtool_listings, adtool_listing_video', 'Worked out when the page is opened', 'Unit tests on the per-listing division, on a group with one side empty, and the figures read back against the Overview for the same window'],
 ];
 let ADTOOL_P16_REG_OK = false;
 async function ensureAdtoolPhase16Register(env) {
@@ -13587,7 +13993,10 @@ async function ensureAdtoolPhase16Register(env) {
   /* both pages are born ON. Neither writes anything and neither reaches eBay: one counts the live
      listings three ways and the other reads orders. A manager can switch either off in Flags, and a
      switch somebody has already set is left exactly as it stands. */
-  for (const key of ['adtool_page_livesplit', 'adtool_page_potential']) {
+  /* Videos joins them (31 Oct, §4). It reads eBay's own answer about which listings carry a video and
+     the finished days behind them, writes nothing a reader can act on, and reaches eBay only through
+     the sweep's own GetItem read under its own job flag. */
+  for (const key of ['adtool_page_livesplit', 'adtool_page_potential', 'adtool_page_videos']) {
     stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, 'on', datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key));
   }
   /* the planner's stop flag and the seven figures, through the one seed every job and route shares.
@@ -14023,7 +14432,6 @@ async function adtPeakListRows(env, acct) {
     }
   }
 }
-function adtPeakHoldOf(row) { const h = String((row && row.hold) == null ? 'auto' : row.hold); return ADTOOL_PEAK_HOLDS.indexOf(h) >= 0 ? h : 'auto'; }
 async function adtPeakPlanOne(env, row, ctxIn) {
   /* ONE LISTING, ONE DAY: profile, dead hours, tracking, schedule. Pure functions do all four; this
      only hands them what they need and gives back the row to store. */
@@ -14372,6 +14780,73 @@ async function adtoolPeakSwitch(env) {
 }
 
 const ADTOOL_ACTIONS_P16 = {
+  /* VIDEOS (31 Oct, §4). Memoised exactly as Entire Live Listings is, and for the same reason: the
+     gate runs BEFORE the cache, because the cache key carries the caller's profit class and not the
+     caller's role, so a stored answer can never be the thing that decides who may read the page.
+     The seed runs between the two halves of the gate, because the seed is what puts the page flag
+     there in the first place. */
+  adtoolVideoBoard: {
+    auth: 'any',
+    fn: async (p, ctx) => {
+      await adtGate(ctx, null);
+      await ensureAdtoolPhase16Register(ctx.env);
+      await ensureAdtoolVideoSchema(ctx.env);
+      await adtGate(ctx, 'adtool_page_videos');
+      const acct = String((p && p.account) || '').trim();
+      const per = adtPeriodOr(p, ukDate(''), 'd30');
+      return adtKvMemo(ctx.env, 'adtoolVideoBoard', adtProfitClass(ctx.user), { account: acct, period: per.key, from: per.from, to: per.to }, ADTOOL_KV_TTL_MS.adtoolVideoBoard,
+        () => adtoolVideoBoardCompute(ctx.env, p || {}, ctx),
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+    },
+  },
+  /* THE REAL HOURS BEHIND ONE PEAK LISTING (31 Oct, §3's last open item). The Peak page's "data
+     behind this" panel could only ever print the planner's conclusion, because the peak list's own
+     answer carries no hourly figures. This hands back what the evidence probe hands back for ONE
+     listing, from the SAME assembling function the probe calls, so the page and the probe cannot
+     come to show different hours for one listing. It reads and decides nothing. */
+  adtoolPeakProfile: {
+    auth: 'any',
+    fn: async (p, ctx) => {
+      await adtGate(ctx, null);
+      await ensureAdtoolPhase16Register(ctx.env);
+      await adtGate(ctx, 'adtool_page_peak');
+      const env = ctx.env;
+      const item = String((p && p.item_id) || '').replace(/\D/g, '').slice(0, 24);
+      if (!item) throw new Error('SAY: name the listing');
+      const days = Math.min(Math.max(Math.round(Number((p && p.days)) || 3), 1), 14);
+      await ensureAdtoolPhase16Schema(env);
+      await ensureAdtoolPeakPlanConfig(env);
+      const rules = await adtPeakPlanRulesFor(env);
+      const uk = adtUkParts(Date.now());
+      const today = uk.date, tomorrow = adtAddDays(today, 1);
+      const list = await adtPeakListRows(env, '');
+      const row = list.filter(r => String(r.item_id) === item)[0];
+      if (!row) throw new Error('SAY: that listing is not on the peak list');
+      const hourRead = await adtPeakHourRows(env, [item], today, rules.lookback_days);
+      const drift = await adtPeakDriftDays(env, [item], today).catch(() => ({}));
+      const sched = await adtPeakSchedulesRead(env, [item], [adtAddDays(today, -1), today, tomorrow]).catch(() => ({}));
+      /* the last FINISHED days, which is what the panel asks for: today is a part day and the hourly
+         profile keeps it apart from the pattern for that very reason. */
+      const lastDay = adtAddDays(today, -1);
+      const dailyRows = (await env.DB.prepare('SELECT item_id, day, ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND item_id = ?3 GROUP BY item_id, day')
+        .bind(adtAddDays(lastDay, -(days - 1)), lastDay, item).all().catch(() => ({ results: [] }))).results || [];
+      const dailyBy = {};
+      for (const r of dailyRows) dailyBy[String(r.item_id) + '|' + String(r.day)] = r;
+      const one = adPeakListingProfile(row, {
+        rows: (hourRead.by_item || {})[item] || [], drift_day: drift[item] || '', sched: sched,
+        daily_by: dailyBy, rules: rules, uk: uk, today: today, tomorrow: tomorrow, day: lastDay, days: days,
+      });
+      return Object.assign({}, one, {
+        asked: { item_id: item, days: days, day: lastDay },
+        uk_now: { date: uk.date, hour: uk.hour, minute: uk.minute, weekday: ADTOOL_DOW[uk.weekday] },
+        hours_read_for: hourRead.read || [], hours_not_read_for: hourRead.skipped || [],
+        rules: rules, freshness_rules: ADTOOL_PEAK_FRESHNESS_RULES,
+        source: 'adtool_listing_hour (our own readings of eBay\'s running total, the reconciled column where the day has been settled) and adtool_listing_day for the day eBay published',
+        note: 'eBay publishes no ad figures by hour. Every hourly figure here is the portal\'s own reading of eBay\'s running total every few minutes, each difference booked to the hour it arrived in. A day\'s first reading belongs to no hour of trading and is left out.',
+        computed_at: new Date().toISOString(),
+      });
+    },
+  },
   adtoolLiveSplit: {
     auth: 'any',
     /* The hourly warm calls raw (route.raw || route.fn), so its hour-long put is the only put for this key.
@@ -14410,6 +14885,452 @@ const ADTOOL_ACTIONS_P16 = {
     },
   },
 };
+/* ---- VIDEOS: the schema, the sweep, the cohort and the board (owner's brief, 31 Oct, §4) ----
+   Nothing in this section writes to eBay. The sweep's GetItem, the media read and the item-page read
+   are all reads, and the three of them are the only fetches it makes. */
+let ADTOOL_VIDEO_SCHEMA_OK = false;
+async function ensureAdtoolVideoSchema(env) {
+  if (ADTOOL_VIDEO_SCHEMA_OK) return;
+  /* ONE ROW PER LISTING, whether or not it carries a video: a listing asked about and found to have
+     none is a fact worth keeping, because it is what stops the sweep asking about it again an hour
+     later and is what `checked_at` orders the whole rotation by. video_count 0 is therefore a real
+     answer and the cohort is built on video_count > 0 rather than on a row existing.
+     `first_seen` is the first day we saw a video on it, which is the floor the cohort counts from
+     when the upload day itself could not be decoded. */
+  await adtBatch(env, [
+    'CREATE TABLE IF NOT EXISTS adtool_listing_video (account TEXT NOT NULL, item_id TEXT NOT NULL, video_ids_json TEXT, video_count INTEGER DEFAULT 0, video_added_on TEXT, video_gone_on TEXT, date_source TEXT, source TEXT, thumb_url TEXT, first_seen TEXT, checked_at TEXT, date_checked_at TEXT, note TEXT, PRIMARY KEY (account, item_id))',
+    'CREATE INDEX IF NOT EXISTS idx_adtlv_checked ON adtool_listing_video(checked_at)',
+    'CREATE INDEX IF NOT EXISTS idx_adtlv_item ON adtool_listing_video(item_id)',
+  ].map(s => env.DB.prepare(s)));
+  const one = (key, value) => env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key, value);
+  /* the sweep's own stop flag and the page's, seeded before either is read, for the reason the
+     pattern engine's seed states: a key nobody has written reads as blank, blank is not 'on', and a
+     job that read its own flag first would have returned having swept nothing, in silence. */
+  try { await adtBatch(env, [one('adtool_job_videosweep', 'on'), one('adtool_page_videos', 'on')]); } catch (e) { /* a default; never let it stop a job */ }
+  ADTOOL_VIDEO_SCHEMA_OK = true;
+}
+
+/* THE VIDEO'S THUMBNAIL, in the order the brief sets out, and the step that answered is recorded.
+   1. the Sell Media API's own record of the video, read with the account's token;
+   2. the public item page, where the thumbnail address sits in the HTML;
+   and the caller falls back to the lister's own record date when neither answers.
+   BOTH ARE READS. The media call is a GET and the item page is a GET, and a refusal is recorded as a
+   refusal rather than retried in a loop. */
+async function adVideoThumbFetch(env, acct, videoId, itemId) {
+  const tried = [];
+  const vid = String(videoId || '').replace(/[^0-9a-zA-Z_-]/g, '').slice(0, 64);
+  if (vid) {
+    try {
+      const tok = await ebayAccessToken(env, acct);
+      /* the Media API lives on apim.ebay.com, not api.ebay.com, which is why it is named apart from
+         every other REST read in this file. v1_beta is the only version eBay publishes for it. */
+      const r = await fetch('https://apim.ebay.com/commerce/media/v1_beta/video/' + vid, {
+        headers: { authorization: 'Bearer ' + tok, accept: 'application/json', 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB' },
+      });
+      const body = await r.text();
+      if (r.ok) {
+        const m = body.match(/https?:\/\/[^"'\s]*i\.ebayimg\.com[^"'\s]*\/(?:z|g)\/[A-Za-z0-9_~-]{16}\/[^"'\s]*/);
+        if (m) return { thumb: m[0], source: 'media thumbnail', tried: tried.concat(['media read: a thumbnail address came back']) };
+        tried.push('media read: eBay answered and the reply carries no thumbnail address');
+      } else tried.push('media read: eBay answered ' + r.status);
+    } catch (e) { tried.push('media read: ' + String((e && e.message) || e).slice(0, 120)); }
+  }
+  const iid = String(itemId || '').replace(/\D/g, '');
+  if (iid) {
+    try {
+      const r = await fetch('https://www.ebay.co.uk/itm/' + iid, { headers: { 'accept-language': 'en-GB', 'user-agent': 'Mozilla/5.0 (compatible; M98M-portal/1.0)' } });
+      if (r.ok) {
+        const html = await r.text();
+        /* the video's own thumbnail is a .PNG under /z/ with the $_26 suffix the video player uses;
+           a listing PHOTO under /g/ decodes the same way but is the photo's date and not the
+           video's, so only the video thumbnail is accepted here. */
+        const m = html.match(/https?:\/\/i\.ebayimg\.com\/[^"'\s]*\/z\/[A-Za-z0-9_~-]{16}\/\$_2[0-9]\.(?:PNG|png|jpg|JPG)[^"'\s]*/);
+        if (m) return { thumb: m[0], source: 'item page thumbnail', tried: tried.concat(['item page: a video thumbnail address came back']) };
+        tried.push('item page: the page came back and carries no video thumbnail address');
+      } else tried.push('item page: eBay answered ' + r.status + ' to this worker');
+    } catch (e) { tried.push('item page: ' + String((e && e.message) || e).slice(0, 120)); }
+  }
+  return { thumb: '', source: '', tried: tried };
+}
+
+/* THE SWEEP. eBay's own answer to "does this listing carry a video", asked listing by listing on the
+   hourly slot, active listings first and longest-unchecked first, so the whole live fleet is asked
+   about within a day and asked again a week after it was last asked.
+   IT RIDES LAST IN ITS SLOT and carries its own ceiling and its own clock. Every job in a slot shares
+   one invocation's subrequest budget, and this is the only job in that slot that fetches anything, so
+   the cap and the deadline are what keep it from eating the budget of the job ahead of it. In the
+   steady state it asks about roughly the fleet divided by seven days of hours, which is a handful an
+   hour; the cap only bites on the first day, when nothing has ever been checked. */
+async function adtoolVideoSweep(env) {
+  await ensureAdtoolVideoSchema(env);
+  if ((await adtFlag(env, 'adtool_job_videosweep')) !== 'on') return;
+  const t = await adtJobStart(env, 'adtoolVideoSweep');
+  let asked = 0, withVideo = 0, lost = 0, dated = 0, fetches = 0, written = 0, refused = 0;
+  const deadline = Date.now() + ADTOOL_VIDEO_SWEEP_MS;
+  const notes = [];
+  try {
+    const today = ukDate('');
+    const stale = adtAddDays(today, -ADTOOL_VIDEO_RECHECK_DAYS);
+    await perAccount(env, 'adtoolVideoSweep', async (acct) => {
+      if (Date.now() > deadline || fetches >= ADTOOL_VIDEO_SWEEP_FETCH_CAP) return;
+      /* NEVER CHECKED first, then longest ago, and an ACTIVE listing ahead of an ended one inside
+         both: an ended listing's video cannot change and its days are already on the record. */
+      const rows = (await env.DB.prepare(
+        'SELECT i.item_id, i.status FROM items_api i LEFT JOIN adtool_listing_video v ON v.account = i.account AND v.item_id = i.item_id ' +
+        /* ASKED ABOUT ONCE if it has ended, and again every week while it is live: an ended listing's
+           video cannot change, so re-asking about one would spend the run's ceiling on a listing
+           whose answer is already final. */
+        "WHERE i.account = ?1 AND (COALESCE(v.checked_at, '') = '' OR (i.status = 'ACTIVE' AND substr(v.checked_at, 1, 10) < ?2)) " +
+        "ORDER BY (i.status = 'ACTIVE') DESC, COALESCE(v.checked_at, '') ASC LIMIT " + ADTOOL_VIDEO_SWEEP_PER_ACCOUNT
+      ).bind(acct, stale).all()).results || [];
+      if (!rows.length) return;
+      const tok = await ebayAccessToken(env, acct);
+      const stmts = [];
+      for (const r of rows) {
+        if (Date.now() > deadline || fetches >= ADTOOL_VIDEO_SWEEP_FETCH_CAP) break;
+        const iid = String(r.item_id);
+        const body = '<?xml version="1.0" encoding="utf-8"?><GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ItemID>' + iid + '</ItemID><OutputSelector>Item.VideoDetails</OutputSelector></GetItemRequest>';
+        let xml = '';
+        try {
+          fetches++;
+          const res = await fetch('https://api.ebay.com/ws/api.dll', { method: 'POST', headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'GetItem', 'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' }, body: body });
+          if (!res.ok) continue;                                    /* transport or 5xx: asked again next run */
+          xml = await res.text();
+        } catch (e) { continue; }
+        const got = adVideoIdsFromXml(xml);
+        if (!got.readable) { refused++; continue; }                  /* eBay refused this item: left unchecked */
+        asked++;
+        const n = got.ids.length;
+        if (n > 0) withVideo++;
+        /* first_seen is set ONCE, on the first run that found a video, and never moved afterwards:
+           it is the floor the cohort counts from when the upload day cannot be decoded, so a later
+           run must not quietly walk it forward.
+           A VIDEO THAT HAS GONE is written down as the day we first found it gone, and the row keeps
+           its first_seen and its date. The cohort is the listings that carry a video NOW, which is
+           what the owner asked for, so such a listing leaves it; the row is what stops the fact
+           disappearing with it, and the page counts them. A video that comes back clears the day. */
+        stmts.push(env.DB.prepare(
+          "INSERT INTO adtool_listing_video (account, item_id, video_ids_json, video_count, source, first_seen, checked_at) VALUES (?1, ?2, ?3, ?4, 'ebay GetItem', ?5, datetime('now')) " +
+          "ON CONFLICT(account, item_id) DO UPDATE SET video_ids_json = ?3, video_count = ?4, source = 'ebay GetItem'," +
+          " first_seen = CASE WHEN ?4 > 0 AND COALESCE(first_seen, '') = '' THEN ?5 ELSE first_seen END," +
+          " video_gone_on = CASE WHEN ?4 > 0 THEN '' WHEN COALESCE(video_count, 0) > 0 AND COALESCE(video_gone_on, '') = '' THEN ?6 ELSE video_gone_on END," +
+          " checked_at = datetime('now')"
+        ).bind(acct, iid, JSON.stringify(got.ids), n, n > 0 ? today : '', today));
+      }
+      written += await adtBatch(env, stmts);
+    });
+    /* THE DATE PASS, a few listings a run. A date costs a media read and often a megabyte of item
+       page, so it is kept well apart from the cheap GetItem rotation above and only ever runs for a
+       listing whose day is not known yet. The lister's own record is the last resort before blank. */
+    if (Date.now() < deadline && fetches < ADTOOL_VIDEO_SWEEP_FETCH_CAP) {
+      /* NEVER LOOKED UP first, then one given up on a week ago. A give-up is not for ever: eBay
+         refusing the media read this morning is not eBay refusing it next week, and a row whose date
+         could not be recovered is asked again on the same clock the video check itself runs on. */
+      const need = (await env.DB.prepare(
+        "SELECT account, item_id, video_ids_json FROM adtool_listing_video WHERE video_count > 0 AND COALESCE(video_added_on, '') = ''" +
+        " AND (COALESCE(date_checked_at, '') = '' OR date_checked_at < datetime('now', '-" + ADTOOL_VIDEO_RECHECK_DAYS + " day'))" +
+        " ORDER BY COALESCE(date_checked_at, '') ASC LIMIT " + ADTOOL_VIDEO_SWEEP_DATES
+      ).all()).results || [];
+      const stmts = [];
+      for (const r of need) {
+        if (Date.now() > deadline || fetches >= ADTOOL_VIDEO_SWEEP_FETCH_CAP) break;
+        let ids = [];
+        try { ids = JSON.parse(String(r.video_ids_json || '[]')) || []; } catch (e) { ids = []; }
+        fetches += 2;
+        const got = await adVideoThumbFetch(env, String(r.account), ids[0] || '', String(r.item_id));
+        let day = null, source = '', thumb = String(got.thumb || ''), note = (got.tried || []).join('; ').slice(0, 300);
+        if (thumb) { const dec = adVideoThumbDate(thumb); if (dec.day) { day = dec.day; source = got.source; } else note = (note + '; decode: ' + dec.note).slice(0, 300); }
+        if (!day) {
+          /* THE LISTER'S OWN RECORD, marked as such: it is the day the stage was ticked and not the
+             day eBay stored the file, so it is used only when eBay gave us nothing. */
+          const lad = await env.DB.prepare("SELECT updated_at FROM listing_ladder WHERE item_id = ?1 AND UPPER(COALESCE(video_status, '')) = 'DONE'").bind(String(r.item_id)).first().catch(() => null);
+          const u = String((lad && lad.updated_at) || '').slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(u)) { day = u; source = 'lister record'; }
+        }
+        if (day) dated++; else { source = 'unknown date'; lost++; }
+        stmts.push(env.DB.prepare("UPDATE adtool_listing_video SET video_added_on = ?3, date_source = ?4, thumb_url = ?5, note = ?6, date_checked_at = datetime('now') WHERE account = ?1 AND item_id = ?2")
+          .bind(String(r.account), String(r.item_id), day, source, thumb, note));
+      }
+      written += await adtBatch(env, stmts);
+    }
+    const covered = await env.DB.prepare('SELECT COUNT(*) AS n, SUM(CASE WHEN video_count > 0 THEN 1 ELSE 0 END) AS v FROM adtool_listing_video').first().catch(() => null);
+    notes.push(asked + ' asked about, ' + withVideo + ' carry a video, ' + dated + ' dated, ' + lost + ' with no date eBay would give us');
+    if (refused) notes.push(refused + ' refused by eBay');
+    if (covered) notes.push('on record: ' + (Number(covered.n) || 0) + ' listings, ' + (Number(covered.v) || 0) + ' with a video');
+    await adtJobEnd(env, 'adtoolVideoSweep', t, written, 'ok', notes.join('; '));
+  } catch (e) { await adtJobEnd(env, 'adtoolVideoSweep', t, written, 'error', String((e && e.message) || e)); throw e; }
+}
+
+/* THE VIDEO COHORT, read once per answer and handed to every query that narrows itself by it. The
+   same shape the peak list's cohort uses, and the SAME SQL builder, so there is one membership rule
+   in this file and not two. */
+async function adVideoCohortRead(env, acct) {
+  await ensureAdtoolVideoSchema(env);
+  const ab = acct ? [acct] : [];
+  const rows = (await env.DB.prepare(
+    'SELECT account, item_id, video_count, video_added_on, date_source, first_seen, checked_at FROM adtool_listing_video' +
+    ' WHERE video_count > 0' + (acct ? ' AND account = ?1' : '') +
+    " ORDER BY COALESCE(video_added_on, first_seen, '') DESC LIMIT " + ADTOOL_PEAK_COHORT_CAP
+  ).bind(...ab).all()).results || [];
+  const entries = adVideoCohortEntries(rows);
+  return {
+    entries: entries, sql: adPeakCohortSql(entries), rows_read: rows.length, cap: ADTOOL_PEAK_COHORT_CAP,
+    held_back: Math.max(0, rows.length - entries.length), account: acct || '', as_of: new Date().toISOString(),
+    rows: rows,
+  };
+}
+
+/* THE VIDEOS BOARD. One answer for the Videos sub-page and for the Decision page's "Video revisions"
+   department, so the two cannot disagree about a listing.
+   THREE RULES, EACH STATED ON THE PAGE:
+   (a) the Overview blocks and the per-listing table count only the days the portal can prove a
+       listing carried its video, which is the cohort's own day rule;
+   (b) the before-and-after runs equal windows each side of the upload day, so it reaches back into
+       days before the video on purpose, and it is the only thing on the page that does;
+   (c) the with-video against without-video comparison uses the SAME dates on both sides and divides
+       each side by its own number of listings, because that is the only way the two are comparable.
+   Nothing here sends anything to eBay. */
+function adVideoIdList(ids) {
+  /* literals and not binds, for the reason adPeakCohortSql gives: the list runs to hundreds, which is
+     past what one statement may bind. Digits only, so nothing anybody typed can reach the query, and
+     an empty list gives a list that matches nothing rather than no filter at all. */
+  const safe = (ids || []).map(x => String(x).replace(/[^0-9]/g, '')).filter(Boolean);
+  return '(' + (safe.length ? safe.map(x => "'" + x + "'").join(',') : "''") + ')';
+}
+async function adtoolVideoBoardCompute(env, p, ctx) {
+  await ensureAdtoolVideoSchema(env);
+  await ensureAdtoolPhase1Schema(env);
+  const today = ukDate(''), yday = adtAddDays(today, -1), todayUtc = utcDate();
+  const w = adtPeriodOr(p, today, 'd30'), from = w.from, to = w.to, src = adtDaySrc(w, today, todayUtc);
+  const acct = String((p && p.account) || '').trim();
+  const CO = await adVideoCohortRead(env, acct);
+  const ids = CO.entries.map(e => String(e.item_id));
+  const inIds = adVideoIdList(ids);
+  const coJoin = adPeakCohortJoin(CO.sql, 'd.item_id', 'd.day');
+
+  /* ── the two counts and the two differences ─────────────────────────────────────────────── */
+  const ladder = (await env.DB.prepare(
+    "SELECT item_id, account, video_status, video_link, updated_at FROM listing_ladder WHERE UPPER(COALESCE(video_status, '')) = 'DONE'" +
+    (acct ? ' AND account = ?1' : '') + ' LIMIT 4000'
+  ).bind(...(acct ? [acct] : [])).all().catch(() => ({ results: [] }))).results || [];
+  const cohort = adVideoCohortCounts(CO.rows, ladder);
+  /* how far the sweep has got, so a thin cohort is read as a sweep still working through the fleet
+     rather than as a fleet with few videos */
+  const cover = await env.DB.prepare(
+    'SELECT COUNT(*) AS on_record, SUM(CASE WHEN video_count > 0 THEN 1 ELSE 0 END) AS with_video, ' +
+    "SUM(CASE WHEN video_count > 0 AND COALESCE(video_added_on, '') = '' THEN 1 ELSE 0 END) AS undated, " +
+    "SUM(CASE WHEN COALESCE(video_count, 0) = 0 AND COALESCE(video_gone_on, '') <> '' THEN 1 ELSE 0 END) AS gone, MAX(checked_at) AS last_checked " +
+    'FROM adtool_listing_video' + (acct ? ' WHERE account = ?1' : '')
+  ).bind(...(acct ? [acct] : [])).first().catch(() => null);
+  const live = await env.DB.prepare("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE'" + (acct ? ' AND account = ?1' : '')).bind(...(acct ? [acct] : [])).first().catch(() => null);
+  const sweepJob = await env.DB.prepare("SELECT started_at, finished_at, rows_written, status, note FROM adtool_jobs WHERE job = 'adtoolVideoSweep' ORDER BY started_at DESC LIMIT 1").first().catch(() => null);
+  const onRecord = cover ? Number(cover.on_record) || 0 : null, liveN = live ? Number(live.n) || 0 : null;
+  cohort.coverage = {
+    listings_asked_about: onRecord, active_listings: liveN,
+    still_to_ask_about: (onRecord != null && liveN != null) ? Math.max(0, liveN - onRecord) : null,
+    without_a_date: cover ? Number(cover.undated) || 0 : null,
+    /* a listing that carried a video and no longer does. It is out of the cohort, because the cohort
+       is the listings that carry one now, and it is counted here so the fact does not vanish with it. */
+    video_taken_off: cover ? Number(cover.gone) || 0 : null,
+    last_checked_at: cover ? (cover.last_checked || null) : null,
+    last_sweep: sweepJob ? { started_at: sweepJob.started_at, finished_at: sweepJob.finished_at || null, status: sweepJob.status || '', note: sweepJob.note || '' } : null,
+    note: 'The sweep asks eBay about up to ' + ADTOOL_VIDEO_SWEEP_PER_ACCOUNT + ' listings an account each hour, active listings first and longest-unchecked first, and asks again ' + ADTOOL_VIDEO_RECHECK_DAYS + ' days after a live listing was last asked about. A listing that has ended is asked about once, because its video cannot change.',
+  };
+  cohort.by_date_source = (await env.DB.prepare(
+    "SELECT COALESCE(NULLIF(date_source, ''), 'not looked up yet') AS date_source, COUNT(*) AS n FROM adtool_listing_video WHERE video_count > 0" +
+    (acct ? ' AND account = ?1' : '') + ' GROUP BY 1 ORDER BY n DESC'
+  ).bind(...(acct ? [acct] : [])).all().catch(() => ({ results: [] }))).results || [];
+  cohort.as_of = CO.as_of;
+
+  /* ── the Overview's own blocks, over this cohort ────────────────────────────────────────────
+     Through the Overview's OWN two actions, asked for cohort 'video'. Not a copy of their
+     arithmetic: the very same functions, so a tile cannot read one way on the Overview and another
+     way here. A page flag switched off on either of them leaves this panel saying so rather than
+     taking the whole board down with it. */
+  let overview = { plan: null, command: null, note: '' };
+  if (ctx && ctx.user) {
+    const planPay = Object.assign({ cohort: 'video' }, adtPeriodParamsOf(w), acct ? { account: acct } : {});
+    const cmdPay = Object.assign({ cohort: 'video' }, acct ? { account: acct } : {});
+    const call = async (name, pay) => {
+      const route = ROUTES[name]; if (!route) return null;
+      return (route.raw || route.fn)(pay, ctx);
+    };
+    try { overview.plan = await call('adtoolPlan', planPay); } catch (e) { overview.note = String((e && e.message) || e).slice(0, 200); }
+    try { overview.command = await call('adtoolCommand', cmdPay); } catch (e) { overview.note = (overview.note ? overview.note + ' ' : '') + String((e && e.message) || e).slice(0, 200); }
+  } else {
+    overview.note = 'The Overview blocks are only worked out for a signed-in reader, because they run the Overview\'s own two actions under that reader\'s own gates.';
+  }
+
+  /* ── the per-listing record ─────────────────────────────────────────────────────────────── */
+  /* NOT d.impressions in this read: a window that includes today comes from adtDaySrc's UNION with
+     the today grain, which exposes no impressions column, so asking for it would break the page on
+     every window reaching into today. The impressions on this page are eBay's LISTING impressions
+     from the traffic report, which is the right source for a click-through rate in any case. */
+  const B = await env.DB.batch([
+    env.DB.prepare('SELECT d.item_id, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.cpc_spend), 2) AS cpc_spend, SUM(d.clicks) AS clicks, ' +
+      'SUM(d.orders) AS orders, SUM(d.units) AS units, ROUND(SUM(d.revenue), 2) AS revenue, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, SUM(d.attr_units) AS attr_units, ' +
+      'ROUND(SUM(d.actual_profit), 2) AS actual_profit, SUM(d.pending_cost_orders) AS pending_cost_orders, SUM(COALESCE(d.pending_fee_orders, 0)) AS pending_fee_orders, ' +
+      'COUNT(DISTINCT d.day) AS days, MAX(d.day) AS last_day FROM ' + src + ' d' + coJoin +
+      ' WHERE d.day >= ?1 AND d.day <= ?2 AND d.item_id IN ' + inIds + ' GROUP BY d.item_id').bind(from, to),
+    env.DB.prepare('SELECT l.item_id, l.account, l.title, l.case_type, l.status, l.start_time, i.image AS image FROM adtool_listings l LEFT JOIN items_api i ON i.item_id = l.item_id WHERE l.item_id IN ' + inIds),
+    env.DB.prepare('SELECT item_id, range_days, impressions, views, transactions, updated_at FROM traffic_listing WHERE item_id IN ' + inIds),
+    env.DB.prepare("SELECT DISTINCT account FROM adtool_listings WHERE account <> '' ORDER BY account"),
+  ]);
+  const money = {}, meta = {}, traffic = {};
+  for (const r of (B[0].results || [])) money[String(r.item_id)] = r;
+  for (const r of (B[1].results || [])) meta[String(r.item_id)] = r;
+  for (const r of (B[2].results || [])) { const k = String(r.item_id); (traffic[k] = traffic[k] || {})[String(r.range_days)] = r; }
+  const accounts = (B[3].results || []).map(r => String(r.account));
+  const byId = {}; for (const e of CO.entries) byId[String(e.item_id)] = e;
+  const vrow = {}; for (const r of (CO.rows || [])) vrow[String(r.item_id)] = r;
+  const n0 = v => (v == null || v === '' || isNaN(Number(v))) ? null : Number(v);
+  const per_listing = ids.map(id => {
+    const m = money[id] || {}, me = meta[id] || {}, e = byId[id] || {}, v = vrow[id] || {};
+    const t30 = (traffic[id] || {})['30'] || null, t7 = (traffic[id] || {})['7'] || null;
+    const views = t30 ? n0(t30.views) : null, imps = t30 ? n0(t30.impressions) : null;
+    const spend = n0(m.spend), attrRev = n0(m.attr_revenue), units = n0(m.units);
+    return {
+      item_id: id, account: String(e.account || me.account || ''), title: String(me.title || ''), image: me.image ? String(me.image) : null,
+      status: String(me.status || ''), case_type: String(me.case_type || ''),
+      video_count: Number(v.video_count) || 0,
+      video_added_on: v.video_added_on || null, date_source: String(v.date_source || '') || null,
+      counts_from: String(e.added_day || '') || null, counts_from_source: String(e.from_source || '') || null,
+      days_since_video: /^\d{4}-\d{2}-\d{2}$/.test(String(v.video_added_on || '')) ? Math.max(0, Math.round((Date.parse(yday + 'T12:00:00Z') - Date.parse(String(v.video_added_on) + 'T12:00:00Z')) / 86400000)) : null,
+      impressions: imps, views: views,
+      ctr: (imps != null && imps > 0 && views != null) ? round4(views / imps) : null,
+      /* BOTH SIDES OF THIS RATE COME OFF THE SAME READING. eBay's traffic report carries the views and
+         the transactions of one window together, so the conversion is its own figure over its own
+         window and not this period's units divided by a 30-day view count, which would be two
+         different windows in one fraction. */
+      transactions: t30 ? n0(t30.transactions) : null,
+      conversion: (views != null && views > 0 && t30 && n0(t30.transactions) != null) ? round4(n0(t30.transactions) / views) : null,
+      views_7d: t7 ? n0(t7.views) : null, impressions_7d: t7 ? n0(t7.impressions) : null,
+      orders: n0(m.orders), units: units, revenue: n0(m.revenue), spend: spend, cpc_spend: n0(m.cpc_spend),
+      clicks: n0(m.clicks), attr_revenue: attrRev, attr_units: n0(m.attr_units),
+      roas: (spend != null && spend > 0 && attrRev != null) ? round2(attrRev / spend) : null,
+      actual_profit: n0(m.actual_profit), pending_cost_orders: Number(m.pending_cost_orders) || 0, pending_fee_orders: Number(m.pending_fee_orders) || 0,
+      days_counted: Number(m.days) || 0,
+      as_of: {
+        money: m.last_day ? String(m.last_day) : null,
+        traffic: t30 ? (t30.updated_at || null) : null,
+        traffic_window_days: t30 ? Number(t30.range_days) || null : null,
+        video: v.checked_at || null,
+      },
+    };
+  });
+  /* which of them the listers recorded, read off the one answer that already holds both sides */
+  const recordedIds = {}; for (const r of ladder) recordedIds[String(r.item_id).replace(/\D/g, '')] = r;
+  for (const r of per_listing) {
+    const rec = recordedIds[r.item_id];
+    r.recorded_by_lister = !!rec;
+    r.lister_recorded_at = rec ? (rec.updated_at || null) : null;
+    r.lister_video_link = rec ? String(rec.video_link || '') : '';
+  }
+
+  /* ── before and after the video, the 18 Oct method ──────────────────────────────────────── */
+  const dated = CO.rows.filter(r => /^\d{4}-\d{2}-\d{2}$/.test(String(r.video_added_on || '')));
+  let before_after = [];
+  let control_note = '';
+  if (dated.length) {
+    const earliest = dated.map(r => String(r.video_added_on)).sort()[0];
+    const histFrom = adtAddDays(earliest, -(ADTOOL_VIDEO_WINDOWS[ADTOOL_VIDEO_WINDOWS.length - 1] + 1));
+    const dayRows = (await env.DB.prepare(
+      'SELECT item_id, account, day, orders, units, revenue, cpc_spend, spend FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND item_id IN ' + adVideoIdList(dated.map(r => r.item_id))
+    ).bind(histFrom, yday).all().catch(() => ({ results: [] }))).results || [];
+    const perItem = {};
+    for (const r of dayRows) (perItem[String(r.item_id)] = perItem[String(r.item_id)] || []).push({ day: String(r.day), orders: Number(r.orders) || 0, units: Number(r.units) || 0, revenue: Number(r.revenue) || 0, spend: Number(r.cpc_spend) || 0 });
+    /* THE REST OF THE ACCOUNT: every listing of the account that carries no video at all, over the
+       same dates. A SUBQUERY and not a literal list. Every listing that carries a video is excluded, not only the
+       ones inside the cohort cap, so a listing the cap left out is still never counted as a control;
+       and the exclusion is written as one term rather than as several thousand item numbers, which is
+       a statement the database would have to parse before it could answer. */
+    const ctrlRows = (await env.DB.prepare(
+      'SELECT account, day, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue FROM adtool_listing_day' +
+      ' WHERE day >= ?1 AND day <= ?2 AND item_id NOT IN (SELECT item_id FROM adtool_listing_video WHERE video_count > 0)' +
+      ' GROUP BY account, day'
+    ).bind(histFrom, yday).all().catch(() => ({ results: [] }))).results || [];
+    const ctrlBy = {};
+    for (const r of ctrlRows) (ctrlBy[String(r.account)] = ctrlBy[String(r.account)] || []).push({ day: String(r.day), units: Number(r.units) || 0, revenue: Number(r.revenue) || 0 });
+    control_note = 'Every listing of the same account that carries no video, over the same dates.';
+    for (const r of dated) {
+      const id = String(r.item_id), me = meta[id] || {};
+      const rows = perItem[id] || [], ctrl = ctrlBy[String(r.account)] || [];
+      const opts = { listed_day: String(me.start_time || '').slice(0, 10), data_start: ADTOOL_VIDEO_DATA_START, control_rows: ctrl, rows_from: histFrom };
+      const windows = ADTOOL_VIDEO_WINDOWS.map(cap => adVideoBeforeAfter(rows, String(r.video_added_on), yday, Object.assign({}, opts, { cap: cap })));
+      before_after.push({
+        item_id: id, account: String(r.account || ''), title: String(me.title || ''), image: me.image ? String(me.image) : null,
+        video_added_on: String(r.video_added_on), date_source: String(r.date_source || '') || null,
+        listed_on: String(me.start_time || '').slice(0, 10) || null,
+        days_since_video: windows[0] ? windows[0].days_since_video : null,
+        windows: windows,
+        /* eBay keeps no history of a listing's views: the traffic report is a 7-day and a 30-day
+           window that is replaced on every read, so there is no reading from before the video date to
+           compare against, for any listing. Said here rather than left as an empty column. */
+        traffic_available: false,
+        traffic_note: 'No traffic reading from before the video. eBay publishes a listing\'s views as a rolling 7-day and 30-day window and the portal keeps the latest of each, so there is no earlier reading to compare with.',
+      });
+    }
+    before_after.sort((a, b) => String(b.video_added_on).localeCompare(String(a.video_added_on)));
+  }
+
+  /* ── with a video against without one, same dates both sides ────────────────────────────── */
+  /* GROUPED BY THE DATABASE, two statements, one per grouping. Both sides of the comparison are the
+     same aggregate over the same dates, and the only difference between them is whether the listing
+     carries a video, so the two sides are read by one query with a CASE on that and never by two
+     queries that could drift. Every join carries the account as well as the item number, because
+     each of these tables is keyed on the pair. */
+  const vsSql = (groupCol) => 'SELECT ' + groupCol + ' AS key, CASE WHEN COALESCE(v.video_count, 0) > 0 THEN 1 ELSE 0 END AS has_video, ' +
+    'COUNT(*) AS listings, SUM(CASE WHEN t.item_id IS NULL THEN 0 ELSE 1 END) AS listings_with_traffic, ' +
+    'SUM(COALESCE(t.views, 0)) AS views, SUM(COALESCE(t.impressions, 0)) AS impressions, ' +
+    'SUM(COALESCE(d.orders, 0)) AS orders, SUM(COALESCE(d.units, 0)) AS units, SUM(COALESCE(d.revenue, 0)) AS revenue, ' +
+    'SUM(COALESCE(d.spend, 0)) AS spend, SUM(COALESCE(d.attr_revenue, 0)) AS attr_revenue, SUM(COALESCE(d.attr_units, 0)) AS attr_units, SUM(COALESCE(d.clicks, 0)) AS clicks ' +
+    'FROM adtool_listings l ' +
+    'LEFT JOIN adtool_listing_video v ON v.account = l.account AND v.item_id = l.item_id ' +
+    'LEFT JOIN traffic_listing t ON t.account = l.account AND t.item_id = l.item_id AND t.range_days = 30 ' +
+    'LEFT JOIN (SELECT account, item_id, SUM(orders) AS orders, SUM(units) AS units, SUM(revenue) AS revenue, SUM(spend) AS spend, SUM(attr_revenue) AS attr_revenue, SUM(attr_units) AS attr_units, SUM(clicks) AS clicks FROM ' +
+    src + ' WHERE day >= ?1 AND day <= ?2 GROUP BY account, item_id) d ON d.account = l.account AND d.item_id = l.item_id ' +
+    "WHERE l.status = 'ACTIVE'" + (acct ? ' AND l.account = ?3' : '') + ' AND ' + groupCol + " <> '' GROUP BY key, has_video";
+  const vsBind = acct ? [from, to, acct] : [from, to];
+  const vsRows = async (groupCol) => {
+    const rs = (await env.DB.prepare(vsSql(groupCol)).bind(...vsBind).all().catch(() => ({ results: [] }))).results || [];
+    return rs.map(r => ({
+      key: String(r.key), has_video: Number(r.has_video) === 1, listings: Number(r.listings) || 0,
+      listings_with_traffic: Number(r.listings_with_traffic) || 0,
+      views: Number(r.views) || 0, impressions: Number(r.impressions) || 0,
+      orders: Number(r.orders) || 0, units: Number(r.units) || 0, revenue: Number(r.revenue) || 0,
+      spend: Number(r.spend) || 0, attr_revenue: Number(r.attr_revenue) || 0, attr_units: Number(r.attr_units) || 0, clicks: Number(r.clicks) || 0,
+    }));
+  };
+  const video_vs_no_video = {
+    by_account: adVideoVsNoVideo(await vsRows('l.account')),
+    by_case_type: adVideoVsNoVideo(await vsRows('l.case_type')),
+    basis: 'Every listing eBay still shows as active, over the same dates on both sides, each side divided by its own number of listings. Views and the click-through rate come from eBay\'s own 30-day listing window rather than from the period, because that is the only shape it publishes them in, and it covers the top three hundred listings of an account: views are therefore divided by the listings that carry a reading, and each side says how many of its listings those are.',
+    period: { from: from, to: to },
+  };
+
+  return {
+    account: acct || 'all', accounts: accounts, period: w,
+    api_truth: ADTOOL_VIDEO_API_TRUTH,
+    cohort_rule: 'A listing counts from the day the portal can prove it carried its video, which is the video\'s own upload day where that could be decoded and otherwise the first day the sweep saw it. The figures in the blocks and in the per-listing table are therefore the days the video was on, inside the period chosen.',
+    cohort: cohort, overview: overview, per_listing: per_listing,
+    before_after: before_after, before_after_windows: ADTOOL_VIDEO_WINDOWS, control_note: control_note,
+    video_vs_no_video: video_vs_no_video,
+    cohort_meta: { listings: CO.entries.length, rows_read: CO.rows_read, cap: CO.cap, held_back: CO.held_back, as_of: CO.as_of },
+    freshness_rules: ADTOOL_PEAK_FRESHNESS_RULES,
+    where_the_per_listing_record_lives: 'adtoolRunToday',
+    computed_at: new Date().toISOString(),
+    source: 'eBay Trading GetItem for the videos, the ads report and the order book for the money, eBay\'s traffic report for views',
+  };
+}
+/* the period a caller already resolved, written back as the parameters adtoolPlan reads, so the
+   cohort blocks stand on the very same window as the rest of this answer */
+function adtPeriodParamsOf(w) {
+  const o = w || {};
+  if (o.key && String(o.key) !== 'custom') return { period: String(o.key) };
+  if (o.from && o.to) return { period: 'custom', from: String(o.from), to: String(o.to) };
+  return {};
+}
+
 /* ADTOOL-P16-END ================================================================================== */
 
 
@@ -22909,7 +23830,7 @@ const ROUTES = {
         trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan,
         selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch,
         trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep, policyScan, trackingInboxRetry,
-        adtoolRollups, adtoolTruth };
+        adtoolRollups, adtoolTruth, adtoolVideoSweep };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
@@ -23499,70 +24420,12 @@ const ROUTES = {
       const dailyRows = ids.length ? await q('daily totals', 'SELECT item_id, day, ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND item_id IN ' + adtInList(ids, 2) + ' GROUP BY item_id, day', [dayFrom, day].concat(ids)) : [];
       const dailyBy = {};
       for (const r of (dailyRows || [])) dailyBy[String(r.item_id) + '|' + String(r.day)] = r;
-      const listings = [];
-      for (const row of chosen) {
-        const id = String(row.item_id);
-        const rows = hourRows[id] || [];
-        const hours = adPeakHoursParse(row.hours);
-        const profile = adPeakProfile(rows, { today: today, for_day: day, lookback_days: rules.lookback_days, recent_days: rules.recent_days });
-        const dead = adPeakDeadHours(profile, Object.assign({}, rules, { typed_ranges: hours.ranges || [] }));
-        const track = adPeakTracking(profile.today, profile.hours, { drift_detected_day: drift[id] || '' });
-        const hold = adtPeakHoldOf(row);
-        const plan = adPeakSchedule({ typed_ranges: hours.ranges || [], dead_windows: dead.windows, hold: hold, min_days_ok: profile.days_observed >= rules.min_days, tracking: track.tracking });
-        /* the day's own hours, summed, beside the day eBay finally published for it */
-        const perDay = [];
-        for (let k = days - 1; k >= 0; k--) {
-          const d = adtAddDays(day, -k);
-          const own = { spend: 0, clicks: 0, orders: 0, units: 0, revenue: 0, hours_with_a_reading: 0 };
-          for (const r of rows) {
-            if (String(r.day) !== d) continue;
-            own.hours_with_a_reading++;
-            own.spend += Number(r.spend) || 0; own.clicks += Number(r.clicks) || 0;
-            own.orders += Number(r.orders) || 0; own.units += Number(r.units) || 0; own.revenue += Number(r.revenue) || 0;
-          }
-          const tot = dailyBy[id + '|' + d] || null;
-          const n = v => (v == null || v === '' || isNaN(Number(v))) ? null : round2(Number(v));
-          perDay.push({
-            day: d, hours_with_a_reading: own.hours_with_a_reading,
-            hours_sum: { spend: round2(own.spend), clicks: own.clicks, orders: own.orders, units: own.units, revenue: round2(own.revenue) },
-            daily_total: tot ? { spend: n(tot.spend), clicks: Number(tot.clicks) || 0, orders: Number(tot.orders) || 0, units: Number(tot.units) || 0, revenue: n(tot.revenue) } : null,
-            /* orders and units are counted into the hour the order arrived in, from the same roll-up the
-               day row is counted from, so those two must agree exactly. Spend cannot, and the note says
-               why rather than the probe calling a known difference a fault. */
-            orders_equal: tot ? (own.orders === (Number(tot.orders) || 0)) : null,
-            units_equal: tot ? (own.units === (Number(tot.units) || 0)) : null,
-            spend_difference: tot && n(tot.spend) != null ? round2(round2(own.spend) - n(tot.spend)) : null,
-          });
-        }
-        const schT = sched[id + '|' + today] || null, schM = sched[id + '|' + tomorrow] || null, schAsked = sched[id + '|' + day] || null;
-        const want = adPeakWantFor({ hold: hold, schedule: schT, hour: uk.hour });
-        listings.push({
-          item_id: id, account: String(row.account || ''), hours: String(row.hours || ''),
-          hours_parsed: hours.ranges, hours_problem: hours.reason || '', auto: Number(row.auto || 0) ? 1 : 0, hold: hold,
-          /* §6.3 */
-          profile: { hours: profile.hours, today: profile.today, days_observed: profile.days_observed, days: profile.days,
-            lookback: profile.lookback, for_day: profile.for_day, for_weekday: profile.for_weekday,
-            weekday_weighting_used: profile.weekday_weighting_used, weekday_days_doubled: profile.weekday_days_doubled,
-            recent_days_doubled: profile.recent_days_doubled, note: profile.note },
-          daily_totals: perDay,
-          /* §6.4 */
-          dead_hours: dead, tracking: track,
-          schedule_worked_out_now: { day: day, states: plan.states, source: plan.source, reasons: plan.reasons, off_windows: plan.off_windows, proposal: plan.proposal, why: plan.why },
-          schedule_stored: { today: schT, tomorrow: schM, asked_for: schAsked },
-          /* a stored schedule that disagrees with what the same pure functions work out from the same
-             rows right now is the one thing worth seeing on this route: either the figures moved since
-             the planner ran, which is normal and dated by computed_at, or the planner and the page are
-             not reading the same rule, which is not. */
-          stored_matches_now: schAsked && schAsked.readable ? JSON.stringify(schAsked.states) === JSON.stringify(plan.states) : null,
-          /* §6.5: the override the switch is handed for this very hour, from the same pure function the
-             job calls, so a hold or a schedule being respected is readable rather than inferred. */
-          switch_override_now: { uk_hour: uk.hour, want: want.want_override || null, source: want.want_source || null, from: want.from, schedule_source: want.schedule_source },
-          next_switch: adPeakNextSwitch({
-            today: schT && schT.readable ? Object.assign({ day: today }, schT) : null,
-            tomorrow: schM && schM.readable ? Object.assign({ day: tomorrow }, schM) : null, uk: uk,
-          }),
-        });
-      }
+      /* ONE assembling function, for a handful of listings here and for one listing on the Peak page's
+         own panel (adtoolPeakProfile): the two must not be able to show different hours for one listing. */
+      const listings = chosen.map(row => adPeakListingProfile(row, {
+        rows: hourRows[String(row.item_id)] || [], drift_day: drift[String(row.item_id)] || '', sched: sched,
+        daily_by: dailyBy, rules: rules, uk: uk, today: today, tomorrow: tomorrow, day: day, days: days,
+      }));
       /* the switch's own rows for these listings over the window, so §6.5 can be read end to end: what
          the override wanted, and what the job then wrote down or sent. */
       const applyRows = ids.length ? await q('apply log', "SELECT day, account, item_id, campaign_id, mode, http_status, payload_json, at FROM adtool_apply_log WHERE decision_id = 'peak' AND day >= ?1 AND day <= ?2 AND item_id IN " + adtInList(ids, 2) + ' ORDER BY id DESC LIMIT 400', [dayFrom, day].concat(ids)) : [];
@@ -23594,6 +24457,108 @@ const ROUTES = {
         envelope_note: 'The hours somebody typed are the envelope: a schedule can only switch a listing off inside them and can never switch one on outside them, so the worst a wrong pattern can do is leave an ad paused in an hour that has never sold.',
         sent_to_ebay: false,
         read_errors: readErrors,
+      };
+    },
+  },
+
+  /* THE VIDEO EVIDENCE ROUTE (31 Oct, §4, acceptance). Read-only and key-gated, so the acceptance
+     checks can be run without a portal session and without a browser. It sends nothing to eBay of
+     its own: the only fetch it ever makes is the thumbnail read for ONE listing a caller names, and
+     that is the same read the sweep makes, so the route can prove the date recipe rather than
+     describe it.
+     `expect` is how the 18 October study stays the test: hand it { item_id: 'YYYY-MM-DD' } and it
+     says how many of the stored dates agree with it, which ones do not, and which it has not got
+     yet. Nothing in that comparison is written. */
+  adsVideoProbe: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const env = ctx.env;
+      const item = String((p && p.item_id) || '').replace(/\D/g, '').slice(0, 24);
+      const readErrors = [];
+      const q = async (what, sql, binds) => {
+        try {
+          const st = env.DB.prepare(sql);
+          const rs = await ((binds && binds.length) ? st.bind(...binds) : st).all();
+          return (rs && rs.results) || [];
+        } catch (e) { readErrors.push(what + ': ' + String((e && e.message) || e).slice(0, 160)); return null; }
+      };
+      try { await ensureAdtoolVideoSchema(env); } catch (e) { readErrors.push('schema: ' + String((e && e.message) || e).slice(0, 160)); }
+      const uk = adtUkParts(Date.now()), today = uk.date, yday = adtAddDays(today, -1);
+      const rows = await q('video table', "SELECT account, item_id, video_count, video_added_on, date_source, source, thumb_url, first_seen, checked_at, note FROM adtool_listing_video WHERE video_count > 0 ORDER BY COALESCE(video_added_on, first_seen, '') DESC LIMIT 1000");
+      const ladder = await q('lister record', "SELECT item_id, account, video_status, video_link, updated_at FROM listing_ladder WHERE UPPER(COALESCE(video_status, '')) = 'DONE' LIMIT 4000");
+      const counts = adVideoCohortCounts(rows || [], ladder || []);
+      const cover = (await q('coverage', 'SELECT COUNT(*) AS on_record, SUM(CASE WHEN video_count > 0 THEN 1 ELSE 0 END) AS with_video, MAX(checked_at) AS last_checked FROM adtool_listing_video') || [])[0] || null;
+      const active = (await q('active listings', "SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE'") || [])[0] || null;
+      const bySource = await q('date sources', "SELECT COALESCE(NULLIF(date_source, ''), 'not looked up yet') AS date_source, COUNT(*) AS n FROM adtool_listing_video WHERE video_count > 0 GROUP BY 1 ORDER BY n DESC");
+      const jobs = await q('sweep runs', "SELECT started_at, finished_at, rows_written, status, note FROM adtool_jobs WHERE job = 'adtoolVideoSweep' ORDER BY started_at DESC LIMIT 10");
+      const cfg = await q('flags', "SELECT key, value, updated_at FROM portal_config WHERE key IN ('adtool_job_videosweep', 'adtool_page_videos') ORDER BY key");
+      /* the cron map itself, not a copy: a sweep that quietly left the build is the one fault that
+         would make every list here read as healthy while nothing was ever swept. */
+      const map = cronMap();
+      const slots = Object.keys(map).filter(k => (map[k] || []).indexOf(adtoolVideoSweep) >= 0);
+      /* ONE listing, end to end: what eBay says, what the thumbnail decodes to, and the windows */
+      let one = null;
+      if (item) {
+        const r = ((await q('this listing', 'SELECT account, item_id, video_count, video_ids_json, video_added_on, date_source, thumb_url, first_seen, checked_at, note FROM adtool_listing_video WHERE item_id = ?1', [item])) || [])[0] || null;
+        const meta = ((await q('listing meta', 'SELECT l.account, l.title, l.status, l.start_time FROM adtool_listings l WHERE l.item_id = ?1', [item])) || [])[0] || null;
+        let ids = [];
+        try { ids = JSON.parse(String((r && r.video_ids_json) || '[]')) || []; } catch (e) { ids = []; }
+        let fetched = null;
+        if (p && p.fetch_thumb) {
+          const got = await adVideoThumbFetch(env, String((r && r.account) || (meta && meta.account) || ''), ids[0] || '', item);
+          fetched = { thumb: got.thumb || '', source: got.source || '', tried: got.tried || [], decoded: got.thumb ? adVideoThumbDate(got.thumb) : null };
+        }
+        const dayRows = (r && r.video_added_on) ? await q('days', 'SELECT day, orders, units, revenue, cpc_spend FROM adtool_listing_day WHERE item_id = ?1 AND day <= ?2 ORDER BY day', [item, yday]) : null;
+        const ctrlRows = (r && r.video_added_on && r.account) ? await q('control days', 'SELECT day, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue FROM adtool_listing_day WHERE account = ?1 AND day <= ?2 AND item_id NOT IN (SELECT item_id FROM adtool_listing_video WHERE video_count > 0) GROUP BY day', [String(r.account), yday]) : null;
+        const opts = { listed_day: String((meta && meta.start_time) || '').slice(0, 10), data_start: ADTOOL_VIDEO_DATA_START, control_rows: ctrlRows || [] };
+        one = {
+          row: r, meta: meta, video_ids: ids,
+          stored_thumb_decoded: (r && r.thumb_url) ? adVideoThumbDate(r.thumb_url) : null,
+          fetched: fetched,
+          windows: (r && r.video_added_on && dayRows)
+            ? ADTOOL_VIDEO_WINDOWS.concat([ADTOOL_VIDEO_WINDOW_CAP]).map(cap => adVideoBeforeAfter(dayRows.map(x => ({ day: String(x.day), orders: Number(x.orders) || 0, units: Number(x.units) || 0, revenue: Number(x.revenue) || 0, spend: Number(x.cpc_spend) || 0 })), String(r.video_added_on), yday, Object.assign({}, opts, { cap: cap })))
+            : null,
+          note: r ? '' : 'the sweep has not reached this listing yet',
+        };
+      }
+      /* the stored dates against a set handed in: how many agree, and every one that does not */
+      let agreement = null;
+      const exp = (p && p.expect && typeof p.expect === 'object') ? p.expect : null;
+      if (exp) {
+        const have = {}; for (const r of (rows || [])) have[String(r.item_id)] = r;
+        const keys = Object.keys(exp).slice(0, 2000);
+        const agree = [], differ = [], missing = [], undatedList = [];
+        for (const k of keys) {
+          const id = String(k).replace(/\D/g, ''), want = String(exp[k] || '').slice(0, 10);
+          const got = have[id];
+          if (!got) { missing.push(id); continue; }
+          if (!got.video_added_on) { undatedList.push({ item_id: id, date_source: got.date_source || null, note: got.note || '' }); continue; }
+          if (String(got.video_added_on) === want) agree.push(id);
+          else differ.push({ item_id: id, expected: want, stored: String(got.video_added_on), date_source: got.date_source || null });
+        }
+        agreement = { asked: keys.length, agree: agree.length, differ: differ.length, not_on_record: missing.length, on_record_without_a_date: undatedList.length, differences: differ.slice(0, 60), undated: undatedList.slice(0, 60), not_on_record_ids: missing.slice(0, 60) };
+      }
+      return {
+        asked: { item_id: item || null, fetch_thumb: !!(p && p.fetch_thumb), expect_given: !!exp },
+        uk_now: { date: uk.date, hour: uk.hour, minute: uk.minute },
+        api_truth: ADTOOL_VIDEO_API_TRUTH,
+        cohort: counts,
+        coverage: {
+          listings_on_record: cover ? Number(cover.on_record) || 0 : null,
+          with_a_video: cover ? Number(cover.with_video) || 0 : null,
+          active_listings: active ? Number(active.n) || 0 : null,
+          last_checked_at: cover ? (cover.last_checked || null) : null,
+          by_date_source: bySource,
+        },
+        cohort_sql: adPeakCohortSql(adVideoCohortEntries(rows || [])).slice(0, 2000),
+        cohort_listings: adVideoCohortEntries(rows || []).length,
+        windows_asked_for: ADTOOL_VIDEO_WINDOWS, window_cap: ADTOOL_VIDEO_WINDOW_CAP, history_starts: ADTOOL_VIDEO_DATA_START,
+        date_recipe: ['the Sell Media API video read', 'the public item page', 'the lister\'s own record date', 'blank, marked unknown'],
+        one: one, agreement: agreement,
+        sweep: { slots: slots, per_account_cap: ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, fetch_cap: ADTOOL_VIDEO_SWEEP_FETCH_CAP, dates_per_run: ADTOOL_VIDEO_SWEEP_DATES, recheck_days: ADTOOL_VIDEO_RECHECK_DAYS, deadline_ms: ADTOOL_VIDEO_SWEEP_MS, runs: jobs },
+        flags: cfg,
+        sent_to_ebay: false,
+        read_errors: readErrors,
+        computed_at: new Date().toISOString(),
       };
     },
   },
@@ -24348,11 +25313,18 @@ const ROUTES = {
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/get_ads_by_listing_id(\?|$)/,
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_create_ads_by_listing_id$/,
         /^\/sell\/marketing\/v1\/ad_campaign\/find_campaign_by_ad_reference(\?|$)/,
+        /* 31 Oct (owner, §4): ONE video read, so the upload day behind a product video can be looked
+           up by hand the same way the sweep looks it up. READ ONLY and GET only, enforced below.
+           It is the only path on this list that does not live on api.ebay.com: the Media API is served
+           from apim.ebay.com, so the host is chosen from the path rather than fixed. */
+        /^\/commerce\/media\/v1_beta\/video\/[0-9a-zA-Z_-]{1,64}$/,
       ];
       if (!ok.some((r) => r.test(path))) throw new Error('SAY: path not allowed');
       if (['GET', 'POST'].indexOf(method) < 0) throw new Error('SAY: GET or POST only');
+      const media = /^\/commerce\/media\//.test(path);
+      if (media && method !== 'GET') throw new Error('SAY: the video read is GET only');
       const tok = await ebayAccessToken(ctx.env, String(p.account || ''));
-      const r = await fetch('https://api.ebay.com' + path, {
+      const r = await fetch((media ? 'https://apim.ebay.com' : 'https://api.ebay.com') + path, {
         method,
         headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json', accept: 'application/json',
           'content-language': 'en-GB', 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB' },

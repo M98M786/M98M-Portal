@@ -62,7 +62,18 @@
     '.rt-pkr .w b{color:var(--text)}' +
     '.rt-pkb{background:transparent;border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:4px 11px;font:inherit;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;align-self:center}' +
     '.rt-pkb:hover{color:var(--gold-a);border-color:var(--gold-line-hi)}' +
-    '.rt-pkb[disabled]{opacity:.5;cursor:default}'
+    '.rt-pkb[disabled]{opacity:.5;cursor:default}' +
+    /* ── the video revisions department (owner, 31 Oct). This file's own prefix: nothing here
+       borrows a class from another spliced file, and nothing here is borrowed by one. ── */
+    '.rt-vrp{background:var(--panel);border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;margin:14px 0 0}' +
+    '.rt-vrp h4{margin:0 0 4px;font-size:13px;font-weight:800;color:var(--text)}' +
+    '.rt-vrp .s{font-size:12px;color:var(--text-2);margin:0 0 10px;line-height:1.55}' +
+    '.rt-vrw{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}' +
+    '.rt-vrb{background:var(--panel-2);border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:4px 11px;font:inherit;font-size:11px;font-weight:800;cursor:pointer}' +
+    '.rt-vrb.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b)}' +
+    '.rt-vrt th{vertical-align:bottom}' +
+    '.rt-vrsort{background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;letter-spacing:.07em;text-transform:uppercase}' +
+    '.rt-vrsort.on{color:var(--gold-a)}'
   );
 
   function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
@@ -89,7 +100,12 @@
       /* a closure outlives a visit: drop yesterday's score so a page re-opened the next morning
          does not paint the previous day's figure before asking for a new one */
       RT.data = null; RT.stop = null; RT.filter = ''; RT.peakOpen = false; RT.peakBusy = '';
+      /* the video department's own answer: asked once when the page opens and again only when the
+         account chip moves, never on the five-minute poll. Its figures are finished days and a
+         fortnight of them does not move between two ticks of today. */
+      VR.data = null; VR.asked = false; VR.error = ''; VR.sort = 'video'; VR.dir = 'desc'; VR.win = 0;
       acctChips();
+      vrLoad();
       load(false)['catch'](function () {});
       /* today moves every 5 minutes; adtPoll waits on hidden tabs and stops on an 'auth' refusal (session-expiry law) */
       adtPoll('rtBody', 300000, function () { return load(true); });
@@ -104,7 +120,7 @@
   function acctChips() {
     var el = $('rtAcct'); if (!el) return;
     el.innerHTML = '<button class="' + (RT.account ? '' : 'on') + '" data-a="">All accounts</button>' + accounts().map(function (a) { return '<button class="' + (RT.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('');
-    var bs = el.querySelectorAll('button'); for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { RT.account = this.getAttribute('data-a'); acctChips(); load(false); };
+    var bs = el.querySelectorAll('button'); for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { RT.account = this.getAttribute('data-a'); acctChips(); VR.data = null; VR.asked = false; VR.error = ''; vrLoad(); load(false); };
   }
   function load(quiet) {
     /* the rows, the weekday verdict and this morning's decision all come off adtoolRunToday, one
@@ -160,6 +176,9 @@
         shown.map(rowHtml).join('') + '</tbody></table></div>';
     }
     h += '<div class="rt-sm" style="margin-top:8px">' + esc(D.source || '') + '</div>';
+    /* the video revisions department, at the foot of the page: it is a record to read rather than a
+       call to act on today, so it sits after the day's own verdicts instead of above them. */
+    h += vrDept();
     $('rtBody').innerHTML = h;
     var fs = document.querySelectorAll('#rtBody [data-f]'); for (var i = 0; i < fs.length; i++) fs[i].onclick = function () { var f = this.getAttribute('data-f'); RT.filter = RT.filter === f && this.classList.contains('rt-c') ? '' : f; draw(); };
     /* the second line lives INSIDE the Stop today tile, which is itself a filter button, so its own
@@ -172,12 +191,199 @@
     };
     var pc = document.querySelectorAll('#rtBody [data-rtpeakclose]');
     for (var k = 0; k < pc.length; k++) pc[k].onclick = function () { RT.peakOpen = false; draw(); };
+    var vs = document.querySelectorAll('#rtBody [data-vrsort]');
+    for (var s = 0; s < vs.length; s++) vs[s].onclick = function () {
+      var k = this.getAttribute('data-vrsort');
+      if (VR.sort === k) VR.dir = VR.dir === 'desc' ? 'asc' : 'desc'; else { VR.sort = k; VR.dir = 'desc'; }
+      draw();
+    };
+    var vw = document.querySelectorAll('#rtBody [data-vrwin]');
+    for (var n = 0; n < vw.length; n++) vw[n].onclick = function () { VR.win = Number(this.getAttribute('data-vrwin')) || 0; draw(); };
     var hb = document.querySelectorAll('#rtBody [data-rthold]');
     for (var m = 0; m < hb.length; m++) hb[m].onclick = function () {
       var id = this.getAttribute('data-rthold');
       if (!id) { toast('That row has no item number.'); return; }
       holdOn(id, this);
     };
+  }
+
+
+  /* ══ VIDEO REVISIONS (owner, 31 Oct, after the brief) ═══════════════════════════════════════
+     "In the Decision page, make one department of video revisions, that keeps the record of the
+     items that have videos on them, and understand the behaviour of sales after uploading video,
+     like the sheet made earlier."
+     So this is that record, in the shape of the 18 October workbook: every listing that carries a
+     video on eBay, with the lister's own record beside it, the video date, the days since, and
+     equal windows each side of the upload day for orders, units, takings, ad spend and return.
+     The window is the days since the video capped at a fortnight, and four weeks once four weeks
+     exist either side. Beside each listing sits the rest of its account over the very same dates,
+     because a fortnight when the whole account fell is not the video's doing.
+     WHAT EBAY CANNOT GIVE US IS SAID RATHER THAN LEFT BLANK: there is no reading of a listing's
+     views from before the video, because eBay publishes views as a rolling window and the portal
+     keeps only the latest of each. Nothing on this department reaches eBay. ══ */
+  var VR = { data: null, sort: 'video', dir: 'desc', win: 0, asked: false, error: '' };
+
+  function vrLoad() {
+    if (VR.asked) return;
+    VR.asked = true;
+    api('adtoolVideoBoard', RT.account ? { account: RT.account } : {}).then(function (D) {
+      VR.data = D || {}; VR.error = '';
+      if ($('rtBody')) draw();
+    })['catch'](function (e) {
+      VR.error = (e && e.message) || 'this department could not load';
+      if ($('rtBody')) draw();
+    });
+  }
+  /* EVERY LISTING THAT CARRIES A VIDEO, which is what the owner asked the department to keep: the
+     per-listing record from the engine, with the before-and-after joined onto the ones whose video
+     date we could recover. A listing with no date is still a row, and its own cells say there is
+     nothing to put either side of a day nobody has, rather than being dropped off the list. */
+  function vrRows() {
+    var D = VR.data || {};
+    var P = Array.isArray(D.per_listing) ? D.per_listing : [];
+    var BA = Array.isArray(D.before_after) ? D.before_after : [];
+    var byId = {};
+    BA.forEach(function (b) { if (b && b.item_id) byId[String(b.item_id)] = b; });
+    /* the sentence about what eBay cannot give us belongs to the whole table, so a row with no
+       before-and-after of its own borrows the one the engine sent with the others. */
+    var tnote = (BA[0] && BA[0].traffic_note) || '';
+    return P.filter(function (r) { return r && typeof r === 'object'; }).map(function (r) {
+      var b = byId[String(r.item_id)] || null;
+      /* one object per listing, carrying both halves under the names each half already uses, so no
+         figure is copied from one into the other and nothing is worked out here. */
+      return {
+        item_id: String(r.item_id), account: r.account, title: r.title, image: r.image,
+        video_added_on: r.video_added_on, date_source: r.date_source,
+        days_since_video: r.days_since_video,
+        recorded_by_lister: r.recorded_by_lister, lister_recorded_at: r.lister_recorded_at,
+        windows: b ? b.windows : null, traffic_note: (b && b.traffic_note) || tnote,
+        listed_on: b ? b.listed_on : null,
+      };
+    });
+  }
+  function vrWin(r) {
+    var W = (r && r.windows) || [];
+    /* the reader picks a ceiling; a listing with too few days either side for it falls back to the
+       widest window it does have, and the cell says which. */
+    var want = VR.win, w = W[want] || null;
+    if (w && w.window_days) return w;
+    for (var i = W.length - 1; i >= 0; i--) if (W[i] && W[i].window_days) return W[i];
+    return W[0] || null;
+  }
+  function vrNum(r, path) {
+    var w = vrWin(r); if (!w) return null;
+    var side = path[0] === 'b' ? w.before : w.after;
+    if (!side) return null;
+    return num(side[path.slice(2)]);
+  }
+  function vrSortVal(r) {
+    var w = vrWin(r);
+    switch (VR.sort) {
+      case 'video': return String(r.video_added_on || '');
+      case 'days': return num(r.days_since_video) || 0;
+      case 'units': return (w && w.change) ? (num(w.change.units) == null ? -9 : num(w.change.units)) : -9;
+      case 'revenue': return (w && w.change) ? (num(w.change.revenue) == null ? -9 : num(w.change.revenue)) : -9;
+      case 'spend': return (w && w.change) ? (num(w.change.spend) == null ? -9 : num(w.change.spend)) : -9;
+      case 'after': return vrNum(r, 'a.units_day') || 0;
+      case 'account': return String(r.account || '');
+      default: return String(r.video_added_on || '');
+    }
+  }
+  function vrSorted() {
+    var rows = vrRows().slice();
+    rows.sort(function (a, b) {
+      var x = vrSortVal(a), y = vrSortVal(b);
+      if (x === y) return String(a.item_id).localeCompare(String(b.item_id));
+      var c = (typeof x === 'string') ? String(x).localeCompare(String(y)) : (x - y);
+      return VR.dir === 'desc' ? -c : c;
+    });
+    return rows;
+  }
+  function vrTh(key, label, hint) {
+    var on = VR.sort === key;
+    return '<th class="r"><button type="button" class="rt-vrsort' + (on ? ' on' : '') + '" data-vrsort="' + esc(key) + '"' +
+      (hint ? ' title="' + esc(hint) + '"' : '') + '>' + esc(label) + (on ? (VR.dir === 'desc' ? ' ↓' : ' ↑') : '') + '</button></th>';
+  }
+  /* a change as a share of the before side. Null stays blank: the engine sends null where the
+     before side was nought, because a share of nothing is not a figure. */
+  function vrChg(v) {
+    var n = num(v);
+    if (n == null) return '<span class="rt-dim">no before</span>';
+    return '<b style="color:' + (n < 0 ? LOSS : 'var(--ok)') + '">' + (n > 0 ? '+' : '') + Math.round(n * 100) + '%</b>';
+  }
+  function vrPair(before, after, f) {
+    return f(before) + ' <span class="rt-dim">→</span> ' + f(after);
+  }
+  function vrDept() {
+    var h = '<div class="rt-vrp"><h4>Video revisions' + src('sales before and after the video', 'how') + '</h4>';
+    if (VR.error) return h + '<div class="rt-empty">' + esc(VR.error) + '</div></div>';
+    if (!VR.data) return h + '<div class="rt-empty">Loading the listings that carry a video…</div></div>';
+    var D = VR.data, C = D.cohort || {}, rows = vrSorted();
+    h += '<div class="s">' + esc(String(D.api_truth || '')) + '</div>';
+    var cov = C.coverage || {};
+    h += '<div class="rt-sm" style="margin-bottom:8px">' +
+      '<b>' + cnt(C.on_ebay) + '</b> ' + (num(C.on_ebay) === 1 ? 'listing carries' : 'listings carry') + ' a video on eBay' +
+      ' · <b>' + cnt(C.recorded) + '</b> recorded by a lister · <b>' + cnt(C.both) + '</b> on both' +
+      (num(cov.without_a_date) > 0 ? ' · <b>' + cnt(cov.without_a_date) + '</b> with no date eBay would give us, so they have no before and after' : '') +
+      ' · the whole picture is on the <a href="#adtoolVideos" style="color:var(--gold-a);font-weight:800">Videos page</a></div>';
+    /* the window the reader is reading: a ceiling, not a promise. A listing with fewer days either
+       side than the ceiling is shown over the widest window it has, and its own cell says so. */
+    var wins = (D.before_after_windows || [14, 28]);
+    h += '<div class="rt-vrw">' + wins.map(function (n, i) {
+      return '<button type="button" class="rt-vrb' + (VR.win === i ? ' on' : '') + '" data-vrwin="' + i + '">' + n + ' days each side</button>';
+    }).join('') + '</div>';
+    if (!rows.length) {
+      h += '<div class="rt-empty">No listing carries a video yet, or the hourly sweep has not reached them.</div>';
+      return h + '</div>';
+    }
+    h += '<div class="an-scroll"><table class="rt-tbl rt-vrt"><thead><tr><th>Listing</th>' +
+      vrTh('account', 'Account') + vrTh('video', 'Video on', 'the day the video went on, decoded from the video thumbnail') +
+      vrTh('days', 'Days since') +
+      '<th class="r">Window</th>' +
+      vrTh('units', 'Units a day', 'before → after, and the change') +
+      vrTh('revenue', 'Takings a day') +
+      '<th class="r">Orders a day</th>' +
+      vrTh('spend', 'Ad spend a day') +
+      '<th class="r">ROAS</th><th class="r">Rest of the account</th><th>Lister record</th></tr></thead><tbody>' +
+      rows.map(vrRow).join('') + '</tbody></table></div>';
+    var tn = '';
+    for (var q = 0; q < rows.length; q++) { if (rows[q].traffic_note) { tn = rows[q].traffic_note; break; } }
+    h += '<div class="rt-sm" style="margin-top:8px">' + esc(String(D.control_note || '')) + ' ' + esc(String(tn)) + '</div>';
+    return h + '</div>';
+  }
+  function vrRow(r) {
+    var w = vrWin(r), b = w && w.before, a = w && w.after, ch = (w && w.change) || {};
+    var per = function (v) { var n = num(v); return n == null ? '—' : n.toFixed(2); };
+    var money = function (v) { var n = num(v); return n == null ? '—' : gbp(n); };
+    var note = (w && Array.isArray(w.notes) && w.notes.length) ? w.notes.join(' ') : '';
+    if (!w || !w.window_days) {
+      return '<tr><td>' + adtProductCell(r) + '</td><td class="r">' + esc(String(r.account || '')) + '</td>' +
+        '<td class="r">' + esc(String(r.video_added_on || '')) + '</td><td class="r">' + cnt(r.days_since_video) + '</td>' +
+        '<td class="r" colspan="7"><span class="rt-dim">' +
+          (r.video_added_on ? 'no equal window yet' : 'no video date, so there is nothing to put either side of one') + '</span>' +
+          (note ? '<div class="rt-sm">' + esc(note) + '</div>' : '') + '</td>' +
+        '<td>' + vrLister(r) + '</td></tr>';
+    }
+    var asked = (VR.data.before_after_windows || [14, 28])[VR.win];
+    return '<tr><td>' + adtProductCell(r) + '</td>' +
+      '<td class="r">' + esc(String(r.account || '')) + '</td>' +
+      '<td class="r">' + esc(String(r.video_added_on || '')) + '<div class="rt-dim">' + esc(String(r.date_source || '')) + '</div></td>' +
+      '<td class="r">' + cnt(r.days_since_video) + '</td>' +
+      '<td class="r">' + cnt(w.window_days) + ' d' + (asked != null && w.window_days < asked ? '<div class="rt-dim">fewer days than asked for</div>' : '') + '</td>' +
+      '<td class="r rt-num">' + vrPair(b.units_day, a.units_day, per) + '<div>' + vrChg(ch.units) + '</div>' +
+      '<div class="rt-dim">' + cnt(b.units) + ' → ' + cnt(a.units) + ' in all</div></td>' +
+      '<td class="r rt-num">' + vrPair(b.revenue_day, a.revenue_day, money) + '<div>' + vrChg(ch.revenue) + '</div></td>' +
+      '<td class="r rt-num">' + vrPair(b.orders_day, a.orders_day, per) + '</td>' +
+      '<td class="r rt-num">' + vrPair(b.spend_day, a.spend_day, money) + '<div>' + vrChg(ch.spend) + '</div></td>' +
+      '<td class="r rt-num">' + vrPair(b.roas, a.roas, roasTxt) + '</td>' +
+      '<td class="r rt-num">' + (w.control
+        ? vrChg(w.control.change) + '<div class="rt-dim">' + cnt(w.control.before_units) + ' → ' + cnt(w.control.after_units) + ' units</div>'
+        : '<span class="rt-dim">not in this answer</span>') + '</td>' +
+      '<td>' + vrLister(r) + (note ? '<div class="rt-sm">' + esc(note) + '</div>' : '') + '</td></tr>';
+  }
+  function vrLister(r) {
+    if (!r.recorded_by_lister) return '<span class="rt-dim">not recorded</span>';
+    return '<span class="rt-sm"><b>recorded</b>' + (r.lister_recorded_at ? ' ' + esc(String(r.lister_recorded_at).slice(0, 10)) : '') + '</span>';
   }
 
   /* ══ THE PATTERN ENGINE'S OWN STOPS FOR TODAY (owner's brief, 31 Oct, §3) ═══════════════════
