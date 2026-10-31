@@ -37,7 +37,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_PEAK_FRESHNESS_RULES };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -1378,7 +1378,10 @@ function run(argv) {
   t('campaign sync: the column is added once, guarded, and a failure to add it never stops a change being recorded', /try \{ await ensureCampaignEventsCampaignId\(env\); \} catch \(e\)/.test(src) && /try \{ await env\.DB\.prepare\("ALTER TABLE campaign_events ADD COLUMN campaign_id TEXT DEFAULT ''"\)\.run\(\); \} catch \(e\)/.test(src), null);
   t('campaign sync: every other writer of a campaign change names its columns and leaves the new one to its default', (src.match(/INSERT INTO campaign_events \(/g) || []).length === 8 && (src.match(/INSERT INTO campaign_events \(account, campaign, item_id,/g) || []).length === 7 && !/INSERT INTO campaign_events VALUES/.test(src), (src.match(/INSERT INTO campaign_events \(/g) || []).length);
 
-  t('fields: nothing on the three pages is ever sent to eBay, and no collective profit figure is printed anywhere on them', !/ebay\.com\/sh\/ads\/dashboard\/campaign\/[^']*'\s*\+/.test(viewSrc) && !/adtProfitCell/.test(viewSrc) && (viewSrc.match(/api\('[A-Za-z]+'/g) || []).every(c => /adtoolChangeDay|adtoolPeak/.test(c)), (viewSrc.match(/api\('[A-Za-z]+'/g) || []));
+  t('fields: nothing on the three pages is ever sent to eBay, and no collective profit figure is printed anywhere on them', !/ebay\.com\/sh\/ads\/dashboard\/campaign\/[^']*'\s*\+/.test(viewSrc) && !/adtProfitCell/.test(viewSrc) && (viewSrc.match(/api\('[A-Za-z]+'/g) || []).every(c => /adtoolChangeDay|adtoolPeak|adtoolPlan|adtoolCommand/.test(c)), (viewSrc.match(/api\('[A-Za-z]+'/g) || []));
+  /* 31 Oct section 2: the Peak-time overview at the top of the Peak page reads the Overview's own
+     two actions with cohort:'peak'. Both are reads: neither writes a row and neither reaches eBay,
+     and the cohort answer says so itself (sent_to_ebay false on the probe that prints it). */
 
   /* ================= "live on eBay, ARCHIVED in the portal" (owner, 24 Oct) =================
      One listing can hold more than one ad record in the SAME campaign, and the membership loop used
@@ -2053,7 +2056,7 @@ function run(argv) {
   /* ten rows from 28 Oct: the nine the batch was specified with, plus SUGGESTIONS_WAITING, which the
      Overview prints as a tile of its own and which had stood at a hard nought since the Command
      centre was written. */
-  t('register: the new entries name the rule, the sources, when they recompute and how they are rechecked', (() => { const p16 = rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16'); return p16.length === 11 && p16.some(r => r.id === 'DECISIONS_TODAY') && p16.some(r => r.id === 'PEAK_CAMPAIGN') && !p16.some(r => r.id === 'SUGGESTIONS_WAITING') && p16.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck); })(), rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16').map(r => r.id));
+  t('register: the new entries name the rule, the sources, when they recompute and how they are rechecked', (() => { const p16 = rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16'); return p16.length === 15 && p16.some(r => r.id === 'DECISIONS_TODAY') && p16.some(r => r.id === 'PEAK_CAMPAIGN') && !p16.some(r => r.id === 'SUGGESTIONS_WAITING') && ['PEAK_COHORT_LISTINGS', 'PEAK_HOURS_ON_OFF', 'PEAK_SPEND_AVOIDED', 'PEAK_SALES_IN_OUT'].every(k => p16.some(r => r.id === k)) && p16.every(r => r.id && r.name && r.formula && r.sources && r.recompute && r.recheck); })(), rgAll.filter(r => r.array === 'ADTOOL_REGISTER_P16').map(r => r.id));
   t('register: there is an entry for every new number the two pages, the switch and the Overview now show', ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'PEAK_CAMPAIGN', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].every(id => rgAll.filter(r => r.id === id).length === 1), ['LIVE_SPLIT', 'AD_RATE_DYNAMIC', 'POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN', 'PEAK_HOURS_FORMAT', 'PEAK_SWITCH', 'PEAK_CAMPAIGN', 'TODAY_HOURS', 'SPEND_BACK_WINDOWS'].filter(id => rgAll.filter(r => r.id === id).length !== 1));
   t('register: the switch entry says outright that it is sent only for an account whose own switch is on', (() => { const r = rgAll.filter(x => x.id === 'PEAK_SWITCH')[0]; return r && /own live switch is on/.test(r.formula) && /nothing leaves the portal/.test(r.formula); })(), null);
   t('report: yesterday’s report still answers for any day it is asked for, and offers the days it has', /SELECT day, generated_at FROM adtool_reports ORDER BY day DESC LIMIT 60/.test(src) && /const day = String\(\(p && p\.day\) \|\| \(days\[0\] && days\[0\]\.day\) \|\| ''\);/.test(src) && /yesterday_missing: !days\.some\(d => d\.day === ukYesterday\)/.test(src), null);
@@ -2321,9 +2324,12 @@ function run(argv) {
     /* the tile and the page it points at must read the same rows or one of them is lying. The page's
        own list is day + anything but KEEP, with no account and no applied/undone filter, so the tile
        is the same predicate and nothing else. `decisions_waiting` is gone with its old narrower read. */
-    const tile = /SELECT COUNT\(\*\) AS n FROM adtool_decisions WHERE day = \?1 AND decision <> 'KEEP'"\)\.bind\(today\)/.test(src);
+    /* 31 Oct section 2: the predicate is the same one, and the Peak-time Overview's own answer adds
+       the cohort's item filter to it and nothing else. */
+    const tile = /SELECT COUNT\(\*\) AS n FROM adtool_decisions WHERE day = \?1 AND decision <> 'KEEP'" \+ coIn\('item_id'\)\)\.bind\(today\)/.test(src);
     const page = /FROM adtool_decisions d LEFT JOIN adtool_listings l ON l\.item_id = d\.item_id WHERE d\.day = \?1 AND d\.decision <> 'KEEP'/.test(src);
-    return tile && page && /decisions_today: decisionsToday, decisions_scope: 'all accounts'/.test(src) && !/decisions_waiting/.test(src.replace(/\/\*[\s\S]*?\*\//g, ''));
+    const scope = /decisions_today: decisionsToday, decisions_scope: CO \? 'the listings on the peak list' : 'all accounts'/.test(src);
+    return tile && page && scope && !/decisions_waiting/.test(src.replace(/\/\*[\s\S]*?\*\//g, ''));
   })(), null);
   t('overview: and a database without the decisions table still draws the landing page, with the tile saying so', (() => { const i = src.indexOf('const alertSql = () =>'); const b = src.slice(i, i + 1600); return /catch \(e\) \{ alerts = null; decisionsToday = null; \}/.test(b) && /if \(!alerts\) alerts = await alertSql\(\)\.first\(\);/.test(b); })(), null);
 
@@ -2535,6 +2541,249 @@ function run(argv) {
        added answers nothing to the full query, and the second attempt leaves those two unknown. */
     return /const readErrors = \[\]/.test(r) && /readErrors\.push\(what \+ ': '/.test(r)
       && /read_errors: readErrors,/.test(r) && /q\('list \(without the two columns the 28 Oct batch added\)'/.test(r);
+  })(), null);
+
+  /* ================= THE PEAK-TIME OVERVIEW (owner's brief, 31 Oct, section 2) =================
+     "Our Overview already exists. We need a replica of it on a smaller level, where the only focus
+     is the listings that are playing on peak time." The section is the Overview's own blocks over
+     one cohort, so what is tested here is the cohort rule itself, the four figures that are the
+     cohort's own, and the two claims the whole thing rests on: one cache key per cohort, and one
+     set of block functions both screens render through. */
+
+  /* (a) the membership rule, which is the whole cohort */
+  const PKE = (id, added, removed) => ({ item_id: id, added_day: added, removed_day: removed || '' });
+  t('peak cohort: a listing counts FROM the day it joined and not the day before',
+    F.adPeakInCohort(PKE('1', '2026-10-10'), '2026-10-10') === true && F.adPeakInCohort(PKE('1', '2026-10-10'), '2026-10-09') === false, null);
+  t('peak cohort: it LEAVES on the day it was taken off, and the days before that stay in',
+    F.adPeakInCohort(PKE('1', '2026-10-10', '2026-10-20'), '2026-10-19') === true &&
+    F.adPeakInCohort(PKE('1', '2026-10-10', '2026-10-20'), '2026-10-20') === false &&
+    F.adPeakInCohort(PKE('1', '2026-10-10', '2026-10-20'), '2026-10-21') === false, null);
+  t('peak cohort: a row still on the list has no end, and a row with no join day is in no day at all',
+    F.adPeakInCohort(PKE('1', '2026-10-10'), '2026-12-31') === true && F.adPeakInCohort(PKE('1', ''), '2026-10-10') === false, null);
+  /* the one-hour-a-day trap: datetime('now') is UTC and the list is kept on a British clock */
+  t('peak cohort: the join day is the UK day of the stamp, not its first ten characters',
+    F.adPeakUkDayOf('2026-09-17 23:30:00') === '2026-09-18' && F.adPeakUkDayOf('2026-11-17 23:30:00') === '2026-11-17' &&
+    F.adPeakUkDayOf('') === '' && F.adPeakUkDayOf('not a date') === '',
+    [F.adPeakUkDayOf('2026-09-17 23:30:00'), F.adPeakUkDayOf('2026-11-17 23:30:00')]);
+  t('peak cohort: an as-of stamp is the UK clock, and one nobody can read is null rather than midnight',
+    F.adPeakUkClock('2026-09-17 23:30:00') === '00:30' && F.adPeakUkClock('2026-11-17 09:05:00') === '09:05' && F.adPeakUkClock('') === null,
+    [F.adPeakUkClock('2026-09-17 23:30:00'), F.adPeakUkClock('')]);
+  t('peak cohort: one entry per listing with the newest kept, a row with no join day left out, and unreadable hours saying why', (() => {
+    const es = F.adPeakCohortEntries([
+      { item_id: '111', account: 'A', hours: '17-23', auto: 1, added_at: '2026-10-10 09:00:00', removed_at: '' },
+      { item_id: '111', account: 'A', hours: '09-12', auto: 1, added_at: '2026-09-01 09:00:00', removed_at: '' },
+      { item_id: '222', account: 'B', hours: 'evenings please', auto: 1, added_at: '2026-10-01 09:00:00', removed_at: '2026-10-05 09:00:00' },
+      { item_id: '333', account: 'B', hours: '10-11', auto: 0, added_at: '', removed_at: '' },
+    ]);
+    return es.length === 2 && es[0].item_id === '111' && es[0].added_day === '2026-10-10' && es[0].open === true &&
+      es[0].ranges.length === 1 && es[0].ranges[0][0] === 17 &&
+      es[1].item_id === '222' && es[1].removed_day === '2026-10-05' && es[1].open === false &&
+      es[1].ranges.length === 0 && /not an hour range/.test(es[1].hours_problem);
+  })(), F.adPeakCohortEntries([{ item_id: '111', hours: '17-23', auto: 1, added_at: '2026-10-10 09:00:00', removed_at: '' }]));
+  t('peak cohort: the day filter is built from literals that can only ever hold digits and dates', (() => {
+    const sql = F.adPeakCohortSql([
+      { item_id: '123', added_day: '2026-10-01', removed_day: '' },
+      { item_id: "oops'; DROP TABLE adtool_listing_day; --", added_day: '2026-10-01', removed_day: '' },
+      { item_id: '456', added_day: 'yesterday', removed_day: '' },
+      { item_id: '789', added_day: '2026-10-01', removed_day: 'whenever' },
+    ]);
+    return /pk_item/.test(sql) && sql.indexOf('123') >= 0 && sql.indexOf('DROP') < 0 &&
+      sql.indexOf('456') < 0 && sql.indexOf('yesterday') < 0 && sql.indexOf('789') < 0;
+  })(), F.adPeakCohortSql([{ item_id: '123', added_day: '2026-10-01', removed_day: '' }]));
+  t('peak cohort: an EMPTY list gives a table with no rows, never a filter that quietly vanished', (() => {
+    const sql = F.adPeakCohortSql([]);
+    const j = F.adPeakCohortJoin(sql, 'item_id', 'day');
+    return /WHERE 1 = 0/.test(sql) && / JOIN /.test(j) && /pkc\.pk_item = item_id/.test(j) &&
+      /day >= pkc\.pk_from/.test(j) && /day < pkc\.pk_to/.test(j);
+  })(), F.adPeakCohortJoin(F.adPeakCohortSql([]), 'item_id', 'day'));
+  t('peak cohort: the before window is each listing’s own 28 days up to the day it joined', (() => {
+    const j = F.adPeakCohortBeforeJoin(F.adPeakCohortSql([{ item_id: '1', added_day: '2026-10-01', removed_day: '' }]), 'item_id', 'day', 28);
+    /* the ON clause names only the join day and the day it joined: a row already taken off still
+       had the days before it joined, so the removal day has no part in the before window. */
+    const on = j.slice(j.indexOf(' pkc ON '));
+    return /date\(pkc\.pk_from, '-28 day'\)/.test(j) && /day < pkc\.pk_from/.test(j) && on.indexOf('pk_to') < 0;
+  })(), null);
+
+  /* (b) the hours on and off today, in listing-hours */
+  const PKH = (id, hours, auto) => F.adPeakCohortEntry({ item_id: id, hours: hours, auto: auto, added_at: '2026-10-01 09:00:00', removed_at: '' });
+  t('peak hours: at 12:30 none of a 17-23 listing’s six hours has run and all six are still to come', (() => {
+    const H = F.adPeakHoursToday([PKH('1', '17-23', 1)], { hour: 12, minute: 30 });
+    return H.on_elapsed === 0 && H.off_elapsed === 12.5 && H.on_planned === 6 && H.off_planned === 5.5 && H.listings === 1;
+  })(), F.adPeakHoursToday([PKH('1', '17-23', 1)], { hour: 12, minute: 30 }));
+  t('peak hours: at 20:00 three of the six have run and three are still to come', (() => {
+    const H = F.adPeakHoursToday([PKH('1', '17-23', 1)], { hour: 20, minute: 0 });
+    return H.on_elapsed === 3 && H.on_planned === 3 && H.off_elapsed === 17 && H.off_planned === 1;
+  })(), F.adPeakHoursToday([PKH('1', '17-23', 1)], { hour: 20, minute: 0 }));
+  t('peak hours: on and off add back up to the whole of today for every listing counted, a stretch across midnight included', (() => {
+    const H = F.adPeakHoursToday([PKH('1', '17-23', 1), PKH('2', '22-02', 1)], { hour: 9, minute: 15 });
+    return H.listings === 2 && Math.abs(H.on_elapsed + H.off_elapsed - 2 * 9.25) < 0.001 &&
+      Math.abs(H.on_planned + H.off_planned - 2 * (24 - 9.25)) < 0.001 && H.on_elapsed === 2;
+  })(), F.adPeakHoursToday([PKH('1', '17-23', 1), PKH('2', '22-02', 1)], { hour: 9, minute: 15 }));
+  t('peak hours: a row left to a person and a row with hours we cannot read are both left out, and counted apart', (() => {
+    const H = F.adPeakHoursToday([PKH('1', '17-23', 0), PKH('2', 'evenings', 1), PKH('3', '17-23', 1)], { hour: 6, minute: 0 });
+    return H.listings === 1 && H.listings_left_to_a_person === 1 && H.listings_without_readable_hours === 1;
+  })(), F.adPeakHoursToday([PKH('1', '17-23', 0), PKH('2', 'evenings', 1), PKH('3', '17-23', 1)], { hour: 6, minute: 0 }));
+
+  /* (c) orders inside and outside a listing’s own hours */
+  t('peak sales: inside counts in, outside counts out, and the hour a stretch STOPS on is outside it', (() => {
+    const es = [F.adPeakCohortEntry({ item_id: '1', hours: '17-23', auto: 1, added_at: '2026-10-10 09:00:00', removed_at: '' })];
+    const r = F.adPeakSalesSplit({ rows: [
+      { item_id: '1', day: '2026-10-20', hour: 17, orders: 1, units: 1 },
+      { item_id: '1', day: '2026-10-20', hour: 23, orders: 1, units: 2 },
+      { item_id: '1', day: '2026-10-20', hour: 16, orders: 1, units: 1 },
+    ], entries: es, windows: [{ key: 'w', from: '2026-10-20', to: '2026-10-20' }] });
+    const w = r.windows.w;
+    return w.in_orders === 1 && w.in_units === 1 && w.out_orders === 2 && w.out_units === 3 && r.listings_counted === 1;
+  })(), null);
+  t('peak sales: a day before the listing joined, and the day it was taken off, do not count at all', (() => {
+    const es = [F.adPeakCohortEntry({ item_id: '1', hours: '17-23', auto: 1, added_at: '2026-10-10 09:00:00', removed_at: '2026-10-15 09:00:00' })];
+    const r = F.adPeakSalesSplit({ rows: [
+      { item_id: '1', day: '2026-10-09', hour: 18, orders: 1, units: 1 },
+      { item_id: '1', day: '2026-10-10', hour: 18, orders: 1, units: 1 },
+      { item_id: '1', day: '2026-10-15', hour: 18, orders: 1, units: 1 },
+    ], entries: es, windows: [{ key: 'w', from: '2026-10-01', to: '2026-10-31' }] });
+    return r.windows.w.in_orders === 1 && r.rows_outside_the_cohort === 2;
+  })(), null);
+  t('peak sales: a listing whose hours cannot be read is left out, never counted as selling outside hours it never had', (() => {
+    const es = [F.adPeakCohortEntry({ item_id: '1', hours: 'evenings', auto: 1, added_at: '2026-10-01 09:00:00', removed_at: '' })];
+    const r = F.adPeakSalesSplit({ rows: [{ item_id: '1', day: '2026-10-20', hour: 18, orders: 1, units: 1 }], entries: es, windows: [{ key: 'w', from: '2026-10-01', to: '2026-10-31' }] });
+    return r.windows.w.in_orders === 0 && r.windows.w.out_orders === 0 && r.listings_counted === 0 && r.listings_without_readable_hours === 1;
+  })(), null);
+
+  /* (d) the money no longer spent outside the hours */
+  t('peak avoided: each listing is its own money per day, and before minus now is the figure', (() => {
+    const r = F.adPeakAvoided({ listings: [
+      { item_id: '1', off_spend_now: 7, days_now: 7, off_spend_before: 56, days_before: 28 },
+      { item_id: '2', off_spend_now: 4, days_now: 4, off_spend_before: 28, days_before: 14 },
+    ] });
+    return r.now_per_day === 2 && r.before_per_day === 4 && r.avoided_per_day === 2 &&
+      r.listings_with_before_data === 2 && r.days_observed_before === 28;
+  })(), F.adPeakAvoided({ listings: [{ item_id: '1', off_spend_now: 7, days_now: 7, off_spend_before: 56, days_before: 28 }] }));
+  t('peak avoided: a listing with nothing from before is out of the comparison, and the whole list’s own figure still stands', (() => {
+    const r = F.adPeakAvoided({ listings: [
+      { item_id: '1', off_spend_now: 7, days_now: 7, off_spend_before: 56, days_before: 28 },
+      { item_id: '2', off_spend_now: 10, days_now: 5, off_spend_before: null, days_before: 0 },
+    ] });
+    return r.now_per_day === 3 && r.now_per_day_compared === 1 && r.before_per_day === 2 &&
+      r.avoided_per_day === 1 && r.listings_with_before_data === 1 && r.listings === 2;
+  })(), null);
+  t('peak avoided: no before-data at all is null and never a nought', (() => {
+    const r = F.adPeakAvoided({ listings: [{ item_id: '1', off_spend_now: 7, days_now: 7, off_spend_before: null, days_before: 0 }] });
+    return r.before_per_day === null && r.avoided_per_day === null && r.days_observed_before === null &&
+      r.now_per_day === 1 && /nothing to compare/.test(r.note);
+  })(), F.adPeakAvoided({ listings: [{ item_id: '1', off_spend_now: 7, days_now: 7, off_spend_before: null, days_before: 0 }] }));
+
+  /* (e) the check the page prints */
+  t('peak reconcile: equal to the penny passes, a penny out fails, and either side unknown is neither', (() => {
+    const ok = F.adPeakReconcile({ today_spend_cohort: 12.34, today_spend_sum_of_listings: 12.34, period_spend_cohort: 500, period_spend_sum: 500 });
+    const bad = F.adPeakReconcile({ today_spend_cohort: 12.34, today_spend_sum_of_listings: 12.35, period_spend_cohort: 500, period_spend_sum: 500 });
+    const un = F.adPeakReconcile({ today_spend_cohort: 12.34, today_spend_sum_of_listings: null, period_spend_cohort: 500, period_spend_sum: 500 });
+    return ok.equal === true && ok.equal2 === true && ok.difference === 0 &&
+      bad.equal === false && bad.difference === -0.01 &&
+      un.equal === null && un.difference === null && un.equal2 === true;
+  })(), null);
+
+  /* (f) ONE CACHE KEY PER COHORT. A cohort answer served to a reader who asked for the whole fleet
+     is the one fault here that would look exactly like a correct page. */
+  t('peak cohort: the cohort is part of the cache key for both actions, and is never folded away', (() => {
+    const a1 = F.adtKvKey('adtoolPlan', 'p', { period: 'd30' });
+    const b1 = F.adtKvKey('adtoolPlan', 'p', { period: 'd30', cohort: 'peak' });
+    const a2 = F.adtKvKey('adtoolCommand', 'p', {});
+    const b2 = F.adtKvKey('adtoolCommand', 'p', { cohort: 'peak' });
+    const a3 = F.adtKvKey('adtoolPlan', 'p', { period: 'd30', account: 'X', cohort: 'peak' });
+    const canon = F.adtKvCanon('adtoolPlan', { period: 'd30', cohort: 'peak' });
+    return a1 !== b1 && a2 !== b2 && b1 !== a3 && canon.cohort === 'peak' && Object.keys(canon).length === 1;
+  })(), [F.adtKvKey('adtoolPlan', 'p', { period: 'd30' }), F.adtKvKey('adtoolPlan', 'p', { period: 'd30', cohort: 'peak' })]);
+  t('peak cohort: both actions take cohort ‘peak’, refuse any other, and narrow by ONE join (regex over the real source)', (() => {
+    const refuse = (src.match(/if \(cohort && cohort !== 'peak'\) throw new Error\('SAY: the only cohort this answer knows is the peak list'\);/g) || []).length === 2;
+    const read = (src.match(/const CO = cohort === 'peak' \? await adPeakCohortRead\(env, acct\) : null;/g) || []).length === 2;
+    const join = (src.match(/const coJoin = \(itemCol, dayCol\) => CO \? adPeakCohortJoin\(CO\.sql, itemCol, dayCol\) : '';/g) || []).length === 2;
+    /* and the today grain gets the item list rather than a day rule it has no day column for */
+    const today = /await adtoolTodayCompute\(env, \{ account: acct, cohort_items: coToday \}\)/.test(src);
+    const extras = /peak_extras: peakExtras, reconcile: reconcile,/.test(src);
+    return refuse && read && join && today && extras;
+  })(), null);
+  t('peak cohort: the tiles, the per-listing rows, the day rows and today’s orders are ALL narrowed, so none of them can answer for the fleet (regex over the real source)', (() => {
+    const tiles = /FROM adtool_listing_day' \+ coJoin\('item_id', 'day'\) \+ ' WHERE day >= \?1 AND day <= \?2'/.test(src);
+    const back = /FROM adtool_listing_day' \+ coJoin\('item_id', 'day'\) \+ ' WHERE day >= \?1 AND day <= \?2 AND item_id IN \(/.test(src);
+    const days = /FROM adtool_listing_day' \+ coJoin\('item_id', 'day'\) \+ ' WHERE day >= \?1 AND day <= \?2' \+ \(acct \? ' AND account = \?3' : ''\) \+ ' GROUP BY day ORDER BY day'/.test(src);
+    const orders = /FROM orders WHERE created_at >= \?1 AND status <> 'CANCELLED'" \+ aw\.replace\('\?', '\?2'\) \+ coIn\('item_id'\)/.test(src);
+    const planRows = (src.match(/coJoin\('d\.item_id', 'd\.day'\)/g) || []).length === 4;
+    const caps = /coJoin\('c\.item_id', 'c\.day'\)/.test(src) && /adtool_cap_days' \+ coJoin\('item_id', 'day'\)/.test(src);
+    return tiles && back && days && orders && planRows && caps;
+  })(), null);
+
+  /* (g) ONE SET OF BLOCKS. The section is the Overview or it is a fork, and this is the difference. */
+  t('overview: the page renders THROUGH adtOverviewBlocks, so the Peak-time overview draws the same blocks (regex over the real file)', (() => {
+    const ov = readFile('frontend/view-adtool-overview.js');
+    const exported = /window\.adtOverviewBlocks = \{\n\s*hero: heroBlock, today: todayBlock, hourly: hourBlock,\n\s*byAccount: accountBlock, slots: slotBlock, foot: footBlock,\n\s*\};/.test(ov);
+    const heroThrough = /\$\('ovHero'\)\.innerHTML = window\.adtOverviewBlocks\.hero\(OV\.plan\);/.test(ov);
+    const todayThrough = /var B = window\.adtOverviewBlocks;\n\s*\$\('ovToday'\)\.innerHTML = B\.today\(D\) \+ B\.byAccount\(D\) \+ B\.slots\(D\) \+ B\.hourly\(D\) \+ B\.foot\(D\);/.test(ov);
+    /* and the old straight-line render is gone, so there is no way past the blocks */
+    const noBypass = !/statusBlock\(D\) \+ tilesBlock\(D\) \+ accountBlock\(D\)/.test(ov);
+    return exported && heroThrough && todayThrough && noBypass;
+  })(), null);
+  t('peak: the Peak-time overview draws those same blocks from the cohort answers and keeps its own class prefix (regex over the real file)', (() => {
+    const pk = readFile('frontend/view-adtool-peak.js');
+    const code = pk.replace(/\/\*[\s\S]*?\*\//g, '');
+    const blocks = /B\.today\(PK\.pkoCmd\) \+ B\.byAccount\(PK\.pkoCmd\) \+ B\.slots\(PK\.pkoCmd\) \+ B\.hourly\(PK\.pkoCmd\) \+ B\.foot\(PK\.pkoCmd\)/.test(pk);
+    const hero = /B\.hero\(PK\.pkoPlan\)/.test(pk);
+    const asks = /api\('adtoolCommand', PK\.account \? \{ account: PK\.account, cohort: 'peak' \} : \{ cohort: 'peak' \}\)/.test(pk) && /q\.cohort = 'peak';/.test(pk);
+    const shared = /window\.adtOverviewBlocks/.test(pk);
+    /* it may RENDER the other file's blocks, but it must not write that file's classes itself */
+    const ownPrefix = code.indexOf('.ov-') < 0 && /'\.pkt-kpis\{/.test(code);
+    return blocks && hero && asks && shared && ownPrefix;
+  })(), null);
+  t('peak: every new tile carries an explainer label the shell has a pattern for, and that pattern reaches its own register row', (() => {
+    if (!regMap) return false;
+    const pk = readFile('frontend/view-adtool-peak.js');
+    const want = { 'listings on peak': 'PEAK_COHORT_LISTINGS', 'hours on and off': 'PEAK_HOURS_ON_OFF', 'spend avoided': 'PEAK_SPEND_AVOIDED', 'sales in and out of the peak': 'PEAK_SALES_IN_OUT' };
+    /* the four labels travel into reg() through pkoTile, so what has to be true is that each label
+       is written in this file and that the shell's FIRST matching pattern reaches its own row. */
+    const viaReg = /reg\(regLabel, 'how'\)/.test(pk);
+    return viaReg && Object.keys(want).every(l => {
+      if (pk.indexOf("'" + l + "'") < 0) return false;
+      const row = regMap.filter(r => r[0].test(l))[0];
+      return !!row && row[1].indexOf(want[l]) >= 0;
+    });
+  })(), regMapFail);
+  t('peak: the freshness badge reads both thresholds off the answer, and neither is typed into the page', (() => {
+    const pk = readFile('frontend/view-adtool-peak.js');
+    const reads = /var amber = num\(rules && rules\.amber_min\), red = num\(rules && rules\.red_min\);/.test(pk);
+    const fromPayload = /X\.freshness_rules \|\| D\.freshness_rules \|\| null/.test(pk);
+    const engineHasThem = /const ADTOOL_PEAK_FRESHNESS_RULES = \{ amber_min: 15, red_min: 60 \};/.test(src) &&
+      F.ADTOOL_PEAK_FRESHNESS_RULES.amber_min === 15 && F.ADTOOL_PEAK_FRESHNESS_RULES.red_min === 60;
+    const notTyped = !/amber_min: *\d/.test(pk) && !/red_min: *\d/.test(pk);
+    return reads && fromPayload && engineHasThem && notTyped;
+  })(), null);
+  t('peak: a tile opens the listings behind it through the portal’s one listing cell, so every row keeps its History link', (() => {
+    const pk = readFile('frontend/view-adtool-peak.js');
+    return /data-pkolist=/.test(pk) && /adtProductCell\(r\)/.test(pk) && /PKO_LISTS/.test(pk) &&
+      /all: \[/.test(pk) && /switching: \[/.test(pk) && /avoided: \[/.test(pk) && /sales: \[/.test(pk);
+  })(), null);
+  t('peak: the page says in words what eBay does not give us, and the words come from the engine (regex over both)', (() => {
+    const pk = readFile('frontend/view-adtool-peak.js');
+    const page = /not_from_ebay/.test(pk) && /What eBay does not give us/.test(pk);
+    const engine = /not_from_ebay: \[/.test(src) && /eBay publishes no ad spend by hour at all/.test(src) &&
+      /eBay does not say which hour a click or an ad-attributed sale happened in/.test(src);
+    return page && engine;
+  })(), null);
+
+  /* (h) the key-authed probe, so the acceptance check can be printed without a browser */
+  t('probe: adsPeakOverviewProbe is key-authed exactly as backupDump is, is not adtool-prefixed, and prints the acceptance check (regex over the real source)', (() => {
+    const i = src.indexOf('  adsPeakOverviewProbe: {');
+    const r = i < 0 ? '' : src.slice(i, src.indexOf('\n  },\n', i));
+    const sameGate = /^  adsPeakOverviewProbe: \{\n    auth: 'sync',/m.test(src) && /^  backupDump: \{\n    auth: 'sync',/m.test(src);
+    /* the router role-gates every action whose name starts with adtool before it has a user to judge,
+       and a key-authed call has none, so this one deliberately does not carry that prefix */
+    const notPrefixed = r.length > 1500 && 'adsPeakOverviewProbe'.indexOf('adtool') !== 0;
+    const windows = /line\('today'/.test(r) && /line\('d7'/.test(r) && /line\('d28'/.test(r);
+    const answers = /acceptance: acceptance,/.test(r) && /reconcile: cmdCohort \? cmdCohort\.reconcile : null,/.test(r) &&
+      /peak_extras: cmdCohort \? cmdCohort\.peak_extras : null,/.test(r) && /sent_to_ebay: false,/.test(r);
+    const sameCode = /ROUTES\[action\]/.test(r) && /\(r\.raw \|\| r\.fn\)\(payload, sub\)/.test(r) && /cohort: 'peak'/.test(r);
+    const stripped = /adtStripCollectiveProfit\(JSON\.parse\(JSON\.stringify\(d\)\), \{ keepCollective: false \}\)/.test(r);
+    const errors = /const readErrors = \[\]/.test(r) && /read_errors: readErrors,/.test(r);
+    return sameGate && notPrefixed && windows && answers && sameCode && stripped && errors;
   })(), null);
 
   /* THE CRON PIN. A slot written in the worker and never registered on Cloudflare never fires, and

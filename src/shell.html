@@ -721,7 +721,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['priceRevisionBoard','priceItemDetail','priceDecide','adtoolPeakCampaigns','adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
+var ENGINE_ACTIONS = ['priceRevisionBoard','priceItemDetail','priceDecide','adtoolPeakHold','adtoolVideoBoard','adtoolPeakCampaigns','adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -1350,7 +1350,19 @@ var ADT_REG_MAP = [
   [/orders in each hour|today hour by hour/i, ['TODAY_HOURS', 'adtool_ads_intraday', 'adtool_listing_today']],
   [/how this list fills itself|put forward by the figures/i, ['POTENTIAL_CPC', 'POTENTIAL_CPC_ORDERS', 'POTENTIAL_CPC_LAST_RUN']],
   [/decisions today/i, ['DECISIONS_TODAY', 'adtool_decisions']],
-  [/which campaign/i, ['PEAK_CAMPAIGN', 'PEAK_MANUAL']]
+  [/which campaign/i, ['PEAK_CAMPAIGN', 'PEAK_MANUAL']],
+  /* 31 Oct brief §2: the Peak-time overview's own row of tiles */
+  [/listings on peak/i, ['PEAK_COHORT_LISTINGS', 'PEAK_MANUAL']],
+  [/hours on and off/i, ['PEAK_HOURS_ON_OFF']],
+  [/spend avoided/i, ['PEAK_SPEND_AVOIDED', 'adtool_ads_intraday']],
+  [/sales in and out of the peak/i, ['PEAK_SALES_IN_OUT', 'adtool_orders']],
+  /* 31 Oct brief §3 and §4 */
+  [/the 24-hour pattern/i, ['PEAK_PROFILE', 'PEAK_SCHEDULE', 'PEAK_TRACKING']],
+  [/dead hours/i, ['PEAK_DEAD_HOURS', 'PEAK_SCHEDULE']],
+  [/held on or off/i, ['PEAK_HOLD']],
+  [/listings with video|video cohort/i, ['VIDEO_COHORT', 'VIDEO_ADDED_ON']],
+  [/before and after the video/i, ['VIDEO_BEFORE_AFTER']],
+  [/video against no video/i, ['VIDEO_VS_NO_VIDEO']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label, shown){
@@ -1654,6 +1666,9 @@ function enterApp(user){
     ['advertising', 'adtoolAccounts', 'adtoolStop', 'adtoolHealth'].forEach(function (k) {
       if (VIEWS[k]) { VIEWS[k].roles = ['Management', 'Ops Head']; }
     });
+    /* 31 Oct brief §4: Videos is a sub-page under the Overview (linked from it), not a sidebar line: the
+       ten-page order the owner fixed on 28 Oct stays as it is. Hidden views stay routable by hash. */
+    if (VIEWS.adtoolVideos) { VIEWS.adtoolVideos.hidden = true; }
     /* The owner chose this portal's landing page. Advertising tasks is now the first entry of the
        first group, which satisfies "the first page in the menu of that department" without moving
        anybody off the screen they asked to land on.

@@ -5321,6 +5321,17 @@ async function adtoolTodayCompute(env, opts) {
      subtracted; buckets are UTC hours, turned into UK hours by adtHourCurve. */
   await ensureAdtoolPhase1Schema(env);
   const acct = String((opts && opts.account) || '').trim();
+  /* 31 Oct section 2: the Peak-time Overview asks for THIS payload over the listings on the by-hand
+     peak list alone. The caller hands the item numbers in and nothing else changes, so the cohort
+     answer is this same computation and this same shape. A list that is present but empty narrows
+     to nothing, which is the honest answer for an empty peak list; no list at all is the whole
+     fleet, exactly as before. Each number is reduced to its digits before it reaches the SQL. */
+  const coItems = Array.isArray(opts && opts.cohort_items) ? (opts.cohort_items || []).map(x => String(x).replace(/[^0-9]/g, '')).filter(Boolean) : null;
+  /* the quote characters around each item number are written as escaped single quotes. A lone
+     single quote inside a double-quoted string is fine for JavaScript and confusing for every
+     tool that reads the SQL in this file by pairing up its quote characters, the column checker
+     in scripts included. */
+  const coIn = col => coItems ? ' AND ' + col + ' IN (' + (coItems.length ? coItems.map(x => '\'' + x + '\'').join(',') : '\'\'') + ')' : '';
   const today = ukDate(''), todayUtc = utcDate();
   const period = adtPeriod({ period: 'today' }, today);
   const fresh = await adtFresh(env, 'today');
@@ -5328,7 +5339,7 @@ async function adtoolTodayCompute(env, opts) {
   if (acct) { bind.push(acct); where = ' AND t.account = ?1'; }
   const items = (await env.DB.prepare(
     'SELECT t.account, t.item_id, i.title, i.image, i.price, t.spend, t.cpc_spend, t.clicks, t.impressions, t.attr_units, t.attr_revenue, t.orders, t.units, t.revenue, t.raw_priced_sum, t.refunds, t.actual_profit, t.pending_cost_orders, t.pending_fee_orders, t.unpriced_orders, t.sampled_at, t.report_day, t.uk_day ' +
-    'FROM adtool_listing_today t LEFT JOIN items_api i ON i.item_id = t.item_id WHERE t.uk_day = ?' + (bind.length + 1) + where + ' ORDER BY t.spend DESC, t.orders DESC'
+    'FROM adtool_listing_today t LEFT JOIN items_api i ON i.item_id = t.item_id WHERE t.uk_day = ?' + (bind.length + 1) + where + coIn('t.item_id') + ' ORDER BY t.spend DESC, t.orders DESC'
   ).bind(...bind.concat([today])).all()).results || [];
   const totals = {};
   for (const r of items) {
@@ -5345,12 +5356,13 @@ async function adtoolTodayCompute(env, opts) {
   const all = ratio(byAccount.reduce((t, a) => { t.listings += a.listings; t.sampled_listings += a.sampled_listings; t.spend += a.spend; t.attr_revenue += a.attr_revenue; t.clicks += a.clicks; t.attr_units += a.attr_units; t.orders += a.orders; t.units += a.units; t.revenue += a.revenue; t.pending_cost_orders += a.pending_cost_orders; t.pending_fee_orders += a.pending_fee_orders; t.unpriced_orders += a.unpriced_orders; t.ads_sampled = t.ads_sampled || a.ads_sampled; return t; }, { account: 'all', listings: 0, sampled_listings: 0, spend: 0, attr_revenue: 0, clicks: 0, attr_units: 0, orders: 0, units: 0, revenue: 0, pending_cost_orders: 0, pending_fee_orders: 0, unpriced_orders: 0, ads_sampled: false }));
   const hb = []; if (acct) hb.push(acct); hb.push(todayUtc);
   const buckets = (await env.DB.prepare(
-    'WITH s AS (SELECT sampled_at, cum_spend, cum_units, cum_spend - LAG(cum_spend) OVER (PARTITION BY account, item_id, family ORDER BY sampled_at) AS d_spend, cum_units - LAG(cum_units) OVER (PARTITION BY account, item_id, family ORDER BY sampled_at) AS d_units FROM adtool_ads_intraday WHERE ' + (acct ? 'account = ?1 AND ' : '') + 'report_day = ?' + hb.length + ') ' +
+    'WITH s AS (SELECT sampled_at, cum_spend, cum_units, cum_spend - LAG(cum_spend) OVER (PARTITION BY account, item_id, family ORDER BY sampled_at) AS d_spend, cum_units - LAG(cum_units) OVER (PARTITION BY account, item_id, family ORDER BY sampled_at) AS d_units FROM adtool_ads_intraday WHERE ' + (acct ? 'account = ?1 AND ' : '') + 'report_day = ?' + hb.length + coIn('item_id') + ') ' +
     'SELECT substr(sampled_at, 1, 13) AS hour_utc, ROUND(SUM(CASE WHEN d_spend > 0 THEN d_spend ELSE 0 END), 2) AS spend, SUM(CASE WHEN d_units > 0 THEN d_units ELSE 0 END) AS attr_units, ROUND(SUM(CASE WHEN d_spend IS NULL THEN cum_spend ELSE 0 END), 2) AS carry_spend, SUM(CASE WHEN d_spend IS NULL THEN cum_units ELSE 0 END) AS carry_units, COUNT(*) AS samples FROM s GROUP BY 1 ORDER BY 1'
   ).bind(...hb).all()).results || [];
   const curve = adtHourCurve(buckets);
   return {
     period, fresh, account: acct || 'all', report_day_utc: todayUtc, ads_sampled: all.ads_sampled,
+    cohort: coItems ? 'peak' : null, cohort_listings: coItems ? coItems.length : null,
     totals: all, totals_by_account: byAccount, items, items_total: items.length,
     hour_curve: curve.hour_curve, carry_spend: curve.carry_spend, carry_units: curve.carry_units, carry_hour_uk: curve.carry_hour_uk,
     profit_label: 'Profit (Sales Analysis law) — priced orders only, cpc spend sampled',
@@ -5403,6 +5415,12 @@ function adtKvCanon(action, payload) {
     if (v === undefined || v === null || v === '') continue;
     if (k === 'period' && ADTOOL_KV_DEFAULT_PERIOD[action] && String(v) === ADTOOL_KV_DEFAULT_PERIOD[action]) continue;
     if (k === 'mode' && action === 'adtoolCpcListings' && String(v) === 'active') continue;
+    /* 31 Oct section 2: `cohort` is NEVER dropped. The Peak-time Overview asks these same two
+       actions for the same window over the by-hand peak list alone, so the cohort answer and the
+       whole-fleet answer are two different answers and must never be served for one another. An
+       unknown key is kept by the loop above in any case; it is named here so that a default added
+       later can never quietly fold the two keys into one. */
+    if (k === 'cohort') { out[k] = String(v); continue; }
     out[k] = v;
   }
   return out;
@@ -7337,15 +7355,33 @@ const ADTOOL_ACTIONS_P5 = {
       const today = ukDate(''), yday = adtAddDays(today, -1);
       const acct = String((p && p.account) || '').trim();
       const aw = acct ? ' AND account = ?' : '';
+      /* THE PEAK-TIME OVERVIEW'S COHORT (owner's brief, 31 Oct, section 2). `cohort: 'peak'` asks this
+         same action, for the same window, over the listings on the by-hand peak list alone. There is no
+         second computation: every query below is the query the Overview already runs with ONE item
+         filter joined onto it, so the cohort answer cannot drift from the answer it is a part of.
+         `cohort` is part of the cache key (adtKvCanon keeps it), so a cohort answer is never served to
+         a reader who asked for the whole fleet. An unknown cohort is refused rather than silently
+         answered for everything, which is the one failure nobody would see. */
+      const cohort = String((p && p.cohort) || '').trim().toLowerCase();
+      if (cohort && cohort !== 'peak') throw new Error('SAY: the only cohort this answer knows is the peak list');
+      const CO = cohort === 'peak' ? await adPeakCohortRead(env, acct) : null;
+      const coJoin = (itemCol, dayCol) => CO ? adPeakCohortJoin(CO.sql, itemCol, dayCol) : '';
+      /* the today grain and the order read have no day column to judge: they ARE today, and today's
+         part-day figures hold the listings on the list now. An empty list gives an IN list that can
+         match nothing, never a missing filter. */
+      const coToday = CO ? adPeakCohortIds(CO.entries, today) : null;
+      const coIn = col => coToday ? ' AND ' + col + ' IN (' + (coToday.length ? coToday.map(x => '\'' + String(x).replace(/[^0-9]/g, '') + '\'').join(',') : '\'\'') + ')' : '';
       /* fleet and day-of-fleet rows: spend / return terms only (PROFIT_ITEM_ONLY); the "Accounts, last 30 days"
          table the brief removed is gone — `accounts` stays an empty list so an older page does not break */
       /* Phase 1B tiles: today from the today grain (sampled, provisional), yesterday / 7 d / 30 d from listing_day in
          one pass; yesterday carries report_status (landing until both T+1 families are INGESTED for every account) */
-      const tileSql = (from, to) => env.DB.prepare('SELECT ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue, SUM(pending_cost_orders) AS pending, COUNT(DISTINCT day) AS days FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2' + (acct ? ' AND account = ?3' : '')).bind(...(acct ? [from, to, acct] : [from, to])).first();
+      const tileSql = (from, to) => env.DB.prepare('SELECT ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue, SUM(pending_cost_orders) AS pending, COUNT(DISTINCT day) AS days FROM adtool_listing_day' + coJoin('item_id', 'day') + ' WHERE day >= ?1 AND day <= ?2' + (acct ? ' AND account = ?3' : '')).bind(...(acct ? [from, to, acct] : [from, to])).first();
       const tile = (r, extra) => { const x = Object.assign({ spend: 0, clicks: 0, attr_units: 0, attr_revenue: 0, orders: 0, units: 0, revenue: 0, pending: 0 }, r || {}); for (const k of ['spend', 'clicks', 'attr_units', 'attr_revenue', 'orders', 'units', 'revenue', 'pending']) x[k] = Number(x[k]) || 0; x.roas = x.spend > 0 ? round2(x.attr_revenue / x.spend) : null; x.cpc = x.clicks > 0 ? round2(x.spend / x.clicks) : null; x.cvr = x.clicks > 0 ? round2(x.attr_units / x.clicks) : null; return Object.assign(x, extra || {}); };
       const y = await tileSql(yday, yday);
       const d7 = await tileSql(adtAddDays(today, -7), yday), d30 = await tileSql(adtAddDays(today, -30), yday);
-      const todayPay = (!acct && ctx.todayPay) ? ctx.todayPay : await adtoolTodayCompute(env, { account: acct });   // the pre-warm hands its Today payload in
+      /* the pre-warm hands its Today payload in. Never for a cohort answer: that payload is the whole
+         fleet's, and reading it here would print fleet money under a peak-list heading. */
+      const todayPay = (!acct && !CO && ctx.todayPay) ? ctx.todayPay : await adtoolTodayCompute(env, { account: acct, cohort_items: coToday });
       const rs = await adtReportStatus(env, yday);
       const rsVals = Object.keys(rs).filter(a => !acct || a === acct).map(a => rs[a]);
       const reportStatus = rsVals.length && rsVals.every(v => v === 'final') ? 'final' : 'landing';
@@ -7373,7 +7409,7 @@ const ADTOOL_ACTIONS_P5 = {
           /* each window is counted as well as summed, because a conditional SUM over no rows is 0 in
              SQL and 0 is a figure: "spent nothing" and "we hold no day for it" are different answers
              and a reader acts on them differently. No day in the window, no number. */
-          for (const r of ((await env.DB.prepare('SELECT item_id, ROUND(SUM(spend), 2) AS spend, SUM(CASE WHEN spend > 0 THEN 1 ELSE 0 END) AS active_days, ROUND(SUM(CASE WHEN day >= ?3 THEN spend ELSE 0 END), 2) AS spend_3d, SUM(CASE WHEN day >= ?3 THEN 1 ELSE 0 END) AS days_3d, ROUND(SUM(CASE WHEN day >= ?4 THEN spend ELSE 0 END), 2) AS spend_7d, SUM(CASE WHEN day >= ?4 THEN 1 ELSE 0 END) AS days_7d, ROUND(SUM(CASE WHEN day >= ?5 THEN spend ELSE 0 END), 2) AS spend_14d, SUM(CASE WHEN day >= ?5 THEN 1 ELSE 0 END) AS days_14d FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND item_id IN (' + chunk.map((_, j) => '?' + (j + 6)).join(',') + ') GROUP BY item_id').bind(...[adtAddDays(today, -28), yday, adtAddDays(today, -3), adtAddDays(today, -7), adtAddDays(today, -14)].concat(chunk)).all()).results || [])) {
+          for (const r of ((await env.DB.prepare('SELECT item_id, ROUND(SUM(spend), 2) AS spend, SUM(CASE WHEN spend > 0 THEN 1 ELSE 0 END) AS active_days, ROUND(SUM(CASE WHEN day >= ?3 THEN spend ELSE 0 END), 2) AS spend_3d, SUM(CASE WHEN day >= ?3 THEN 1 ELSE 0 END) AS days_3d, ROUND(SUM(CASE WHEN day >= ?4 THEN spend ELSE 0 END), 2) AS spend_7d, SUM(CASE WHEN day >= ?4 THEN 1 ELSE 0 END) AS days_7d, ROUND(SUM(CASE WHEN day >= ?5 THEN spend ELSE 0 END), 2) AS spend_14d, SUM(CASE WHEN day >= ?5 THEN 1 ELSE 0 END) AS days_14d FROM adtool_listing_day' + coJoin('item_id', 'day') + ' WHERE day >= ?1 AND day <= ?2 AND item_id IN (' + chunk.map((_, j) => '?' + (j + 6)).join(',') + ') GROUP BY item_id').bind(...[adtAddDays(today, -28), yday, adtAddDays(today, -3), adtAddDays(today, -7), adtAddDays(today, -14)].concat(chunk)).all()).results || [])) {
             avg[String(r.item_id)] = Number(r.active_days) > 0 ? round2(Number(r.spend) / Number(r.active_days)) : null;
             back[String(r.item_id)] = {
               spend_3d: Number(r.days_3d) > 0 ? round2(Number(r.spend_3d) || 0) : null,
@@ -7395,7 +7431,10 @@ const ADTOOL_ACTIONS_P5 = {
          somebody has already applied or undone. The review caught the first attempt counting a
          narrower set than the page it points at, which is the one way a tile and a page can
          disagree. Scope is sent beside it so the tile can say which it is. */
-      const alertSql = () => env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high FROM adtool_alerts WHERE cleared_at = '' AND (snoozed_until = '' OR snoozed_until < ?1)").bind(new Date().toISOString());
+      /* both of these are keyed by listing, so a cohort answer counts the cohort's own and says so
+         in `alerts_scope` / `decisions_scope` rather than printing a fleet figure under a peak-list
+         heading. Without a cohort neither line changes. */
+      const alertSql = () => env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high FROM adtool_alerts WHERE cleared_at = '' AND (snoozed_until = '' OR snoozed_until < ?1)" + coIn('item_id')).bind(new Date().toISOString());
       let alerts = null, decisionsToday = null;
       /* the decisions table belongs to a later phase than this action ensures, so the pair is tried
          together and the alerts read stands on its own if the decisions table is not there yet. The
@@ -7403,7 +7442,7 @@ const ADTOOL_ACTIONS_P5 = {
          a figure this page added must never be able to be the thing that takes it down. */
       try {
         const OA = await env.DB.batch([alertSql(),
-          env.DB.prepare("SELECT COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 AND decision <> 'KEEP'").bind(today),
+          env.DB.prepare("SELECT COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 AND decision <> 'KEEP'" + coIn('item_id')).bind(today),
         ]);
         alerts = ((OA[0] || {}).results || [])[0] || null;
         decisionsToday = Number((((OA[1] || {}).results || [])[0] || {}).n) || 0;
@@ -7417,12 +7456,12 @@ const ADTOOL_ACTIONS_P5 = {
          lists always add up to the same day. Hours with nothing in them are left out, the way
          hour_curve leaves them out, and the chart fills the gaps itself. */
       const todayOrders = []; const slotAgg = {}; const hourAgg = {};
-      for (const o of ((await env.DB.prepare("SELECT created_at, qty FROM orders WHERE created_at >= ?1 AND status <> 'CANCELLED'" + aw.replace('?', '?2')).bind(...(acct ? [ukDayStartIso(), acct] : [ukDayStartIso()])).all()).results || [])) { const ms = Date.parse(String(o.created_at)); if (isNaN(ms)) continue; const uk = adtUkParts(ms); const qty = Math.max(1, Number(o.qty) || 1); const s = (slotAgg[uk.slot] = slotAgg[uk.slot] || { slot: uk.slot, units: 0, orders: 0 }); s.orders++; s.units += qty; const h = (hourAgg[uk.hour] = hourAgg[uk.hour] || { hour_uk: uk.hour, orders: 0, units: 0 }); h.orders++; h.units += qty; }
+      for (const o of ((await env.DB.prepare("SELECT created_at, qty FROM orders WHERE created_at >= ?1 AND status <> 'CANCELLED'" + aw.replace('?', '?2') + coIn('item_id')).bind(...(acct ? [ukDayStartIso(), acct] : [ukDayStartIso()])).all()).results || [])) { const ms = Date.parse(String(o.created_at)); if (isNaN(ms)) continue; const uk = adtUkParts(ms); const qty = Math.max(1, Number(o.qty) || 1); const s = (slotAgg[uk.slot] = slotAgg[uk.slot] || { slot: uk.slot, units: 0, orders: 0 }); s.orders++; s.units += qty; const h = (hourAgg[uk.hour] = hourAgg[uk.hour] || { hour_uk: uk.hour, orders: 0, units: 0 }); h.orders++; h.units += qty; }
       for (const k of Object.keys(slotAgg).sort()) todayOrders.push(slotAgg[k]);
       const todayHours = Object.keys(hourAgg).map(k => hourAgg[k]).sort((a, b) => a.hour_uk - b.hour_uk);
       const slotProf = await adtLatestProfiles(env, 'fleet', 'slot');
       const accounts = [];
-      const byDate = (await env.DB.prepare('SELECT day, weekday, ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue, SUM(orders) AS orders, SUM(units) AS units FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2' + (acct ? ' AND account = ?3' : '') + ' GROUP BY day ORDER BY day').bind(...(acct ? [adtAddDays(yday, -29), yday, acct] : [adtAddDays(yday, -29), yday])).all()).results || [];
+      const byDate = (await env.DB.prepare('SELECT day, weekday, ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue, SUM(orders) AS orders, SUM(units) AS units FROM adtool_listing_day' + coJoin('item_id', 'day') + ' WHERE day >= ?1 AND day <= ?2' + (acct ? ' AND account = ?3' : '') + ' GROUP BY day ORDER BY day').bind(...(acct ? [adtAddDays(yday, -29), yday, acct] : [adtAddDays(yday, -29), yday])).all()).results || [];
       for (const d of byDate) { d.roas = Number(d.spend) > 0 ? round2(Number(d.attr_revenue) / Number(d.spend)) : null; d.cpc = Number(d.clicks) > 0 ? round2(Number(d.spend) / Number(d.clicks)) : null; d.cvr = Number(d.clicks) > 0 ? round2(Number(d.attr_units) / Number(d.clicks)) : null; }
       const fresh = {
         orders: await env.DB.prepare("SELECT MAX(last_ok) AS t FROM sync_state WHERE job = 'orderSync'").first(),
@@ -7431,6 +7470,33 @@ const ADTOOL_ACTIONS_P5 = {
         rollup: await env.DB.prepare("SELECT MAX(finished_at) AS t FROM adtool_jobs WHERE job = 'adtoolRollups' AND status = 'ok'").first(),
         profiles: await adtFlag(env, 'adtool_profiles_cursor'), forecast: await adtFlag(env, 'adtool_forecast_cursor'),
       };
+      /* THE COHORT'S OWN FOUR FIGURES, and the check the page prints under them. Both are worked out
+         here, on the answer that already holds the tiles and the per-listing rows they stand on, so the
+         page never has to add anything up for itself. Nothing below reaches eBay. */
+      let peakExtras = null, reconcile = null;
+      if (CO) {
+        peakExtras = await adPeakOverviewExtras(env, { account: acct, cohort: CO, today: today, fresh: fresh });
+        /* the period half of the check: the SAME per-listing day rows the 30-day tile is summed from,
+           read back one listing at a time and added up here. Both sides sum the raw column and round
+           once at the end, so a penny of rounding cannot be mistaken for a cohort filter that was
+           missed on one of the two reads. */
+        let periodSum = null, periodListings = null;
+        try {
+          const pr = (await env.DB.prepare('SELECT item_id, SUM(spend) AS spend FROM adtool_listing_day' + coJoin('item_id', 'day') +
+            ' WHERE day >= ?1 AND day <= ?2' + (acct ? ' AND account = ?3' : '') + ' GROUP BY item_id')
+            .bind(...(acct ? [adtAddDays(today, -30), yday, acct] : [adtAddDays(today, -30), yday])).all()).results || [];
+          periodSum = round2(pr.reduce((t, r) => t + (Number(r.spend) || 0), 0));
+          periodListings = pr.length;
+        } catch (e) { periodSum = null; periodListings = null; }
+        reconcile = adPeakReconcile({
+          today_spend_cohort: tiles.today.spend,
+          today_spend_sum_of_listings: round2(items.reduce((t, r) => t + (Number(r.spend) || 0), 0)),
+          period: { from: adtAddDays(today, -30), to: yday, days: 30, label: 'Last 30 days' },
+          period_spend_cohort: d30 && d30.spend != null ? d30.spend : null,
+          period_spend_sum: periodSum,
+          listings_today: items.length, listings_period: periodListings,
+        });
+      }
       return {
         period: todayPay.period, account: acct || 'all', fresh: todayPay.fresh, fresh_day: await adtFresh(env, 'day'),
         tiles, items_today: itemsToday.slice(0, 150), items_today_total: itemsToday.length, spend_today: round2(spendToday), hour_curve: todayPay.hour_curve, carry_spend: todayPay.carry_spend, carry_hour_uk: todayPay.carry_hour_uk, ads_sampled: todayPay.ads_sampled, today_note: todayPay.note,
@@ -7441,12 +7507,17 @@ const ADTOOL_ACTIONS_P5 = {
         totals_by_account: todayPay.totals_by_account,
         profit_label: 'Profit (Sales Analysis law)',
         yesterday: Object.assign({ day: yday, roas: y && y.spend > 0 ? round2(y.attr_revenue / y.spend) : null, cpc: y && y.clicks > 0 ? round2(y.spend / y.clicks) : null, cvr: y && y.clicks > 0 ? round2(y.attr_units / y.clicks) : null, report_status: reportStatus }, y),
-        alerts, decisions_today: decisionsToday, decisions_scope: 'all accounts', report_hours: report ? report.hours : null, today_slots: todayOrders, slot_profile: slotProf.rows.all || null, accounts, by_date: byDate, freshness: fresh, computed_at: new Date().toISOString(),
+        alerts, alerts_scope: CO ? 'the listings on the peak list' : 'all accounts',
+        decisions_today: decisionsToday, decisions_scope: CO ? 'the listings on the peak list' : 'all accounts', report_hours: report ? report.hours : null, today_slots: todayOrders, slot_profile: slotProf.rows.all || null, accounts, by_date: byDate, freshness: fresh, computed_at: new Date().toISOString(),
         /* the orders half of the one hourly chart: per UK hour of today, counted from the same read as
            today_slots. The money half is hour_curve above, on the same hour_uk key, so the two bars of
            an hour line up without the page having to reconcile anything. */
         today_hours: todayHours,
-        source: 'adtool_listing_today (sampled, provisional) + adtool_listing_day, orders, adtool_ads_intraday (hour curve), adtool_reports, adtool_alerts, sync_state',
+        /* the cohort answer and nothing else carries these three. On the whole-fleet answer they are
+           null, so one shape serves both and an older page cannot be confused by them. */
+        cohort: cohort || null, peak_extras: peakExtras, reconcile: reconcile,
+        freshness_rules: ADTOOL_PEAK_FRESHNESS_RULES,
+        source: 'adtool_listing_today (sampled, provisional) + adtool_listing_day, orders, adtool_ads_intraday (hour curve), adtool_reports, adtool_alerts, sync_state' + (CO ? ', narrowed to adtool_peak_items' : ''),
       };
     },
   },
@@ -8831,6 +8902,16 @@ const ADTOOL_ACTIONS_P9 = {
       const today = ukDate(''), yday = adtAddDays(today, -1), todayUtc = utcDate();
       const w = adtPeriodOr(p, today, 'd30'), from = w.from, to = w.to, src = adtDaySrc(w, today, todayUtc);
       const acct = String((p && p.account) || '').trim();
+      /* THE PEAK-TIME OVERVIEW'S COHORT (owner's brief, 31 Oct, section 2). The same six tiles over the
+         listings on the by-hand peak list alone: every aggregate below is the one this page already runs
+         with ONE item filter joined onto it, so there is one computation and the two answers can never
+         drift apart. The cohort is part of the cache key (adtKvCanon keeps it). An unknown cohort is
+         refused rather than quietly answered for the whole fleet. */
+      const cohort = String((p && p.cohort) || '').trim().toLowerCase();
+      if (cohort && cohort !== 'peak') throw new Error('SAY: the only cohort this answer knows is the peak list');
+      const CO = cohort === 'peak' ? await adPeakCohortRead(env, acct) : null;
+      const coJoin = (itemCol, dayCol) => CO ? adPeakCohortJoin(CO.sql, itemCol, dayCol) : '';
+      const coSet = CO ? (function () { const m = {}; for (const id of adPeakCohortIds(CO.entries, today)) m[String(id)] = 1; return m; })() : null;
       /* the last 7 full days to yesterday ride the same aggregate as the window (a listing losing over the window
          but earning over them is improving, not a cut) */
       const d7from = adtAddDays(today, -7), lo = from < d7from ? from : d7from, hi = to > yday ? to : yday;
@@ -8843,17 +8924,17 @@ const ADTOOL_ACTIONS_P9 = {
           sumW('d.spend', 1) + ' AS spend, ' + sumW('d.clicks') + ' AS clicks, ' + sumW('d.attr_revenue', 1) + ' AS attr_revenue, ' + sumW('d.attr_units') + ' AS attr_units, ' + sumW('d.orders') + ' AS orders, ' + sumW('d.units') + ' AS units, ' +
           sumW('d.actual_profit', 1) + ' AS actual_profit, ' + sumW('d.pending_cost_orders') + ' AS pending_cost_orders, ' + sumW('COALESCE(d.pending_fee_orders, 0)') + ' AS pending_fee_orders, ' +
           sum7('d.spend', 1) + ' AS spend_d7, ' + sum7('d.attr_revenue', 1) + ' AS attr_revenue_d7, ' + sum7('d.actual_profit', 1) + ' AS actual_profit_d7, ' + sum7('d.pending_cost_orders') + ' AS pending_cost_orders_d7, ' + sum7('COALESCE(d.pending_fee_orders, 0)') + ' AS pending_fee_orders_d7 ' +
-          'FROM ' + src + ' d JOIN adtool_listings l ON l.item_id = d.item_id LEFT JOIN items_api i ON i.item_id = d.item_id ' +
+          'FROM ' + src + ' d JOIN adtool_listings l ON l.item_id = d.item_id LEFT JOIN items_api i ON i.item_id = d.item_id' + coJoin('d.item_id', 'd.day') + ' ' +
           'WHERE d.day >= ?5 AND d.day <= ?6' + (acct ? ' AND l.account = ?7' : '') + ' GROUP BY d.item_id HAVING ' + sumW('d.spend') + ' > 0'
         ).bind(...[from, to, d7from, yday, lo, hi].concat(acct ? [acct] : [])),
-        env.DB.prepare('SELECT l.account, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, SUM(d.clicks) AS clicks, SUM(d.attr_units) AS attr_units, SUM(d.orders) AS orders, SUM(d.units) AS units, COUNT(DISTINCT d.day) AS days FROM ' + src + ' d JOIN adtool_listings l ON l.item_id = d.item_id WHERE ' + inW + awW + ' GROUP BY l.account ORDER BY SUM(d.spend) DESC').bind(...bindW),
-        env.DB.prepare('SELECT d.day, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, SUM(d.attr_units) AS attr_units, SUM(d.orders) AS orders, SUM(d.clicks) AS clicks FROM ' + src + ' d' + joinL + ' WHERE ' + inW + awW + ' GROUP BY d.day ORDER BY d.day').bind(...bindW),
-        env.DB.prepare('SELECT d.weekday, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, SUM(d.orders) AS orders, SUM(d.attr_units) AS attr_units, SUM(d.clicks) AS clicks, COUNT(DISTINCT d.day) AS days FROM ' + src + ' d' + joinL + ' WHERE ' + inW + awW + ' GROUP BY d.weekday ORDER BY d.weekday').bind(...bindW),
+        env.DB.prepare('SELECT l.account, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, SUM(d.clicks) AS clicks, SUM(d.attr_units) AS attr_units, SUM(d.orders) AS orders, SUM(d.units) AS units, COUNT(DISTINCT d.day) AS days FROM ' + src + ' d JOIN adtool_listings l ON l.item_id = d.item_id' + coJoin('d.item_id', 'd.day') + ' WHERE ' + inW + awW + ' GROUP BY l.account ORDER BY SUM(d.spend) DESC').bind(...bindW),
+        env.DB.prepare('SELECT d.day, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, SUM(d.attr_units) AS attr_units, SUM(d.orders) AS orders, SUM(d.clicks) AS clicks FROM ' + src + ' d' + joinL + coJoin('d.item_id', 'd.day') + ' WHERE ' + inW + awW + ' GROUP BY d.day ORDER BY d.day').bind(...bindW),
+        env.DB.prepare('SELECT d.weekday, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, SUM(d.orders) AS orders, SUM(d.attr_units) AS attr_units, SUM(d.clicks) AS clicks, COUNT(DISTINCT d.day) AS days FROM ' + src + ' d' + joinL + coJoin('d.item_id', 'd.day') + ' WHERE ' + inW + awW + ' GROUP BY d.weekday ORDER BY d.weekday').bind(...bindW),
         env.DB.prepare("SELECT DISTINCT account FROM adtool_listings WHERE account <> '' ORDER BY account"),
         /* Budget: which listings ran out of money in the window, and whether the one that did deserved more — on this
            fleet most capped listings are losing, so the cap is doing the owner a favour */
-        env.DB.prepare('SELECT c.item_id, l.account, l.title, i.image AS image, l.margin_source, ROUND(l.breakeven_roas, 2) AS breakeven_roas, COUNT(*) AS capped_days, MIN(c.cap_hour) AS earliest_hour, ROUND(AVG(c.budget), 2) AS budget_capped, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, ROUND(SUM(d.actual_profit), 2) AS actual_profit, SUM(d.pending_cost_orders) AS pending_cost_orders, SUM(COALESCE(d.pending_fee_orders, 0)) AS pending_fee_orders FROM adtool_cap_days c JOIN adtool_listing_day d ON d.item_id = c.item_id AND d.day = c.day LEFT JOIN adtool_listings l ON l.item_id = c.item_id LEFT JOIN items_api i ON i.item_id = c.item_id WHERE c.day >= ?1 AND c.day <= ?2' + awW + ' GROUP BY c.item_id ORDER BY SUM(d.actual_profit) DESC').bind(...bindW),
-        env.DB.prepare('SELECT COUNT(DISTINCT day) AS d FROM adtool_cap_days WHERE day >= ?1 AND day <= ?2').bind(from, to),
+        env.DB.prepare('SELECT c.item_id, l.account, l.title, i.image AS image, l.margin_source, ROUND(l.breakeven_roas, 2) AS breakeven_roas, COUNT(*) AS capped_days, MIN(c.cap_hour) AS earliest_hour, ROUND(AVG(c.budget), 2) AS budget_capped, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.attr_revenue), 2) AS attr_revenue, ROUND(SUM(d.actual_profit), 2) AS actual_profit, SUM(d.pending_cost_orders) AS pending_cost_orders, SUM(COALESCE(d.pending_fee_orders, 0)) AS pending_fee_orders FROM adtool_cap_days c JOIN adtool_listing_day d ON d.item_id = c.item_id AND d.day = c.day LEFT JOIN adtool_listings l ON l.item_id = c.item_id LEFT JOIN items_api i ON i.item_id = c.item_id' + coJoin('c.item_id', 'c.day') + ' WHERE c.day >= ?1 AND c.day <= ?2' + awW + ' GROUP BY c.item_id ORDER BY SUM(d.actual_profit) DESC').bind(...bindW),
+        env.DB.prepare('SELECT COUNT(DISTINCT day) AS d FROM adtool_cap_days' + coJoin('item_id', 'day') + ' WHERE day >= ?1 AND day <= ?2').bind(from, to),
       ]);
       const rows = B[0].results || [], byAcctRaw = B[1].results || [], byDayRaw = B[2].results || [], wdRaw = B[3].results || [];
       const accounts = (B[4].results || []).map(r => String(r.account));
@@ -8893,12 +8974,25 @@ const ADTOOL_ACTIONS_P9 = {
       const verdict = adtPlanVerdict2({ cut_n: cut.length, improving_n: improving.length, spend_freed_day: cut.reduce((t, r) => t + (Number(r.spend) || 0), 0) / days, withheld_unpriced: pool.withheld, from, to, label: w.label, days, listings: rows.length });
       /* the run / stop lists are the same code the Running today page runs, first 8 rows each */
       let runToday = { enabled: false, run_today_top: [], stop_today_top: [], counts: null };
-      if ((await adtFlag(env, 'adtool_page_runtoday')) === 'on') { const rt = await adtKvMemo(env, 'adtoolRunToday', 'p', { account: acct }, ADTOOL_KV_TTL_MS.adtoolRunToday, () => adtoolRunTodayCompute(env, acct), (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null); runToday = { enabled: true, run_today_top: rt.rows.filter(r => r.verdict === 'run').slice(0, 8), stop_today_top: rt.rows.filter(r => r.verdict === 'stop').slice(0, 8), counts: rt.counts, day: rt.day, weekday: rt.weekday, rules: rt.rules }; }
+      if ((await adtFlag(env, 'adtool_page_runtoday')) === 'on') {
+        const rt = await adtKvMemo(env, 'adtoolRunToday', 'p', { account: acct }, ADTOOL_KV_TTL_MS.adtoolRunToday, () => adtoolRunTodayCompute(env, acct), (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        /* the cohort narrows the SAME rows this list was already handed, and never runs the
+           computation a second time: one row is one listing, so a listing filter is exact here.
+           The counts are recounted off the narrowed rows, because a count of the fleet printed
+           beside the peak list's own rows would be the one number on the section that lied. */
+        const rtRows = coSet ? (rt.rows || []).filter(r => coSet[String(r && r.item_id)]) : (rt.rows || []);
+        const rtCounts = coSet ? rtRows.reduce((t, r) => { t[r.verdict] = (t[r.verdict] || 0) + 1; return t; }, { run: 0, stop: 0, watch: 0 }) : rt.counts;
+        runToday = { enabled: true, run_today_top: rtRows.filter(r => r.verdict === 'run').slice(0, 8), stop_today_top: rtRows.filter(r => r.verdict === 'stop').slice(0, 8), counts: rtCounts, listings: rtRows.length, day: rt.day, weekday: rt.weekday, rules: rt.rules };
+      }
       return Object.assign({
         window: { from, to, days, key: w.key, label: w.label, includes_today: w.includes_today },
         period: w,
         fresh: await adtFresh(env, w.includes_today ? 'today' : 'day'),
         account: acct || 'all', accounts,
+        /* the cohort answer and nothing else carries these. Null on the whole-fleet answer, so one
+           shape serves both. */
+        cohort: cohort || null, cohort_listings: CO ? CO.entries.length : null,
+        freshness_rules: ADTOOL_PEAK_FRESHNESS_RULES,
         hero, by_account, by_day, weekday,
         frontier: Object.assign(frontier, { note: w.includes_today ? 'today\'s rows are sampled and provisional; an order placed today is unpriced until its fees and cost land' : null }),
         verdict,
@@ -8907,7 +9001,7 @@ const ADTOOL_ACTIONS_P9 = {
         run_today: runToday, run_today_top: runToday.run_today_top, stop_today_top: runToday.stop_today_top,
         profit_label: 'Profit (Sales Analysis law)',
         computed_at: new Date().toISOString(),
-        source: (w.includes_today ? 'adtool_listing_day + adtool_listing_today (today sampled, provisional) over ' : 'adtool_listing_day over ') + w.label.toLowerCase() + ' · eBay ads report, orders, Sales Analysis law; frontier ranked by own ROAS; run / stop lists from adtoolRunToday'
+        source: (w.includes_today ? 'adtool_listing_day + adtool_listing_today (today sampled, provisional) over ' : 'adtool_listing_day over ') + w.label.toLowerCase() + ' · eBay ads report, orders, Sales Analysis law; frontier ranked by own ROAS; run / stop lists from adtoolRunToday' + (CO ? '; narrowed to the listings on adtool_peak_items, each from the day it joined' : '')
       }, await adtPeriodExtras(env, w));
     },
   },
@@ -11204,6 +11298,198 @@ async function adtoolChangeDayCompute(env, pay) {
 
 /* ---- Peak times only: the list the figures suggest, and the list people keep by hand ---- */
 const ADTOOL_PEAK_SUGGEST_CAP = 200;
+/* ---- the Peak-time Overview: the cohort, and the four figures that are its own ----
+   Section 2 of the owner's 31 Oct brief. The Overview's own figures, computed by the Overview's own
+   code over one cohort, plus four figures that only mean anything for that cohort. Nothing here
+   sends anything to eBay and nothing here writes. */
+async function adPeakCohortRead(env, acct) {
+  /* THE COHORT, read once per answer and handed to every query that narrows itself by it. The whole
+     list and not only the open rows: a listing taken off last week still owns the days it was on,
+     and the membership rule decides day by day which of its days count.
+     Read with the two added columns, then without them, in the way every added column in this file
+     is read, so a database that has not taken an ALTER answers with that column unknown rather than
+     refusing the page. An `auto` nobody could read is null and never 0. */
+  await ensureAdtoolPhase16Schema(env);
+  const ab = acct ? [acct] : [];
+  const sql = cols => "SELECT p.account, p.item_id, p.hours, p.added_by, p.added_at, COALESCE(p.removed_at, '') AS removed_at" + cols +
+    ' FROM adtool_peak_items p' + (acct ? ' WHERE p.account = ?1' : '') +
+    " ORDER BY CASE WHEN COALESCE(p.removed_at, '') = '' THEN 0 ELSE 1 END, p.added_at DESC LIMIT " + ADTOOL_PEAK_COHORT_CAP;
+  let rows = [];
+  try { rows = (await env.DB.prepare(sql(", COALESCE(p.auto, 0) AS auto, COALESCE(p.campaign_id, '') AS campaign_id")).bind(...ab).all()).results || []; }
+  catch (e) {
+    try { rows = ((await env.DB.prepare(sql(', COALESCE(p.auto, 0) AS auto')).bind(...ab).all()).results || []).map(r => Object.assign({ campaign_id: '' }, r)); }
+    catch (e2) { rows = ((await env.DB.prepare(sql('')).bind(...ab).all()).results || []).map(r => Object.assign({ auto: null, campaign_id: '' }, r)); }
+  }
+  const entries = adPeakCohortEntries(rows);
+  return {
+    entries: entries, sql: adPeakCohortSql(entries), rows_read: rows.length, cap: ADTOOL_PEAK_COHORT_CAP,
+    held_back: Math.max(0, rows.length - entries.length), account: acct || '', as_of: new Date().toISOString(),
+  };
+}
+async function adPeakOverviewExtras(env, opts) {
+  /* The four figures the owner asked for beside the Overview's own: how many listings are on peak
+     and whose, the hours on and off today, the money no longer spent outside those hours, and the
+     orders that land inside the hours against the ones that land outside.
+     Every one of them is read from the portal's own sync of eBay's figures, every one carries the
+     stamp of the read it stands on, and where eBay gives us nothing the answer is null with a line
+     saying why rather than a nought. */
+  const o = opts || {};
+  const env2 = env, CO = o.cohort || { entries: [], sql: adPeakCohortSql([]) };
+  const acct = String(o.account || '').trim();
+  const today = String(o.today || ukDate(''));
+  const yday = adtAddDays(today, -1);
+  const fresh = o.fresh || {};
+  const nowIso = new Date().toISOString();
+  const ukNow = adtUkParts(Date.now());
+  const entries = CO.entries || [];
+  const open = entries.filter(e => e && e.open);
+
+  /* 1. the listings on the list now, and whose they are */
+  const byAcct = {};
+  for (const e of open) { const a = String(e.account || ''); byAcct[a] = (byAcct[a] || 0) + 1; }
+  const listings = {
+    total: open.length,
+    by_account: Object.keys(byAcct).sort().map(a => ({ account: a, n: byAcct[a] })),
+    switching: open.filter(e => Number(e.auto) === 1 && (e.ranges || []).length).length,
+    left_to_a_person: open.filter(e => e.auto != null && Number(e.auto) !== 1).length,
+    without_readable_hours: open.filter(e => !(e.ranges || []).length).length,
+    taken_off_and_kept: entries.length - open.length,
+    as_of: adPeakUkClock(nowIso), as_of_at: nowIso,
+    source: 'adtool_peak_items, the list people keep by hand',
+  };
+
+  /* 2. the hours on and off today, in listing-hours, off the UK clock */
+  const hoursToday = Object.assign(adPeakHoursToday(open, ukNow), {
+    as_of: adPeakUkClock(nowIso), as_of_at: nowIso,
+    source: 'adtool_peak_items hours, read against the UK clock',
+  });
+
+  /* 3. the money NOT spent outside the hours. The hour figures are the ones every other advertising
+     page reads: eBay publishes no hourly ad figures at all, so its running total is read every few
+     minutes and the difference booked to the hour it arrived in. The first reading of a day is a
+     total since midnight and belongs to no hour of trading, so it is dropped the same way here. */
+  const d7from = adtAddDays(today, -7);
+  /* `tp` is where today's own figure's placeholder lands: the two windows bind a different number
+     of dates, and a statement handed a parameter it never names is a statement that fails. */
+  const hourSel = tp => 'SELECT item_id, hour, ROUND(SUM(COALESCE(spend_r, spend_s)), 2) AS spend, ' +
+    'ROUND(SUM(CASE WHEN day = ?' + tp + ' THEN COALESCE(spend_r, spend_s) ELSE 0 END), 2) AS spend_today FROM adtool_listing_hour';
+  const daySel = 'SELECT item_id, COUNT(DISTINCT day) AS days FROM adtool_listing_hour';
+  /* TODAY'S OWN DAY COUNT, asked for separately. Without it, a listing with readings over the week
+     but none yet for today would have its today figure printed as nothing spent, and a nought
+     standing in for a reading we have not taken is the one thing this section must never print. */
+  const daySelNow = 'SELECT item_id, COUNT(DISTINCT day) AS days, COUNT(DISTINCT CASE WHEN day = ?4 THEN day END) AS days_today FROM adtool_listing_hour';
+  const guard = ' WHERE samples > 0 AND NOT (day < ?1 AND hour = 8)';
+  const nowJoin = adPeakCohortJoin(CO.sql, 'item_id', 'day');
+  const befJoin = adPeakCohortBeforeJoin(CO.sql, 'item_id', 'day', 28);
+  let H = [[], [], [], []];
+  try {
+    const B = await env2.DB.batch([
+      env2.DB.prepare(hourSel(4) + nowJoin + guard + ' AND day >= ?2 AND day <= ?3 GROUP BY item_id, hour').bind(ADTOOL_CARRY_FIX_DAY, d7from, today, today),
+      env2.DB.prepare(daySelNow + nowJoin + guard + ' AND day >= ?2 AND day <= ?3 GROUP BY item_id').bind(ADTOOL_CARRY_FIX_DAY, d7from, today, today),
+      env2.DB.prepare(hourSel(2) + befJoin + guard + ' GROUP BY item_id, hour').bind(ADTOOL_CARRY_FIX_DAY, today),
+      env2.DB.prepare(daySel + befJoin + guard + ' GROUP BY item_id').bind(ADTOOL_CARRY_FIX_DAY),
+    ]);
+    H = B.map(x => (x && x.results) || []);
+  } catch (e) { H = [[], [], [], []]; }
+  const rangeOf = {};
+  for (const e of entries) rangeOf[String(e.item_id)] = (e.ranges || []);
+  const offNow = {}, offToday = {}, onToday = {}, offBefore = {}, daysNow = {}, daysToday = {}, daysBefore = {};
+  for (const r of H[0]) {
+    const id = String(r.item_id), h = Number(r.hour);
+    const rs = rangeOf[id]; if (!rs || !rs.length) continue;
+    const inside = adInPeakRanges(h, rs);
+    if (!inside) { offNow[id] = (offNow[id] || 0) + (Number(r.spend) || 0); offToday[id] = (offToday[id] || 0) + (Number(r.spend_today) || 0); }
+    else { onToday[id] = (onToday[id] || 0) + (Number(r.spend_today) || 0); }
+  }
+  for (const r of H[1]) { daysNow[String(r.item_id)] = Number(r.days) || 0; daysToday[String(r.item_id)] = Number(r.days_today) || 0; }
+  for (const r of H[2]) {
+    const id = String(r.item_id), h = Number(r.hour);
+    const rs = rangeOf[id]; if (!rs || !rs.length) continue;
+    if (!adInPeakRanges(h, rs)) offBefore[id] = (offBefore[id] || 0) + (Number(r.spend) || 0);
+  }
+  for (const r of H[3]) daysBefore[String(r.item_id)] = Number(r.days) || 0;
+  const perListing = [];
+  for (const e of entries) {
+    const id = String(e.item_id);
+    if (!(e.ranges || []).length) continue;
+    if (daysNow[id] == null && daysBefore[id] == null) continue;
+    perListing.push({
+      item_id: id,
+      off_spend_now: daysNow[id] ? round2(offNow[id] || 0) : null, days_now: daysNow[id] || 0,
+      off_spend_before: daysBefore[id] ? round2(offBefore[id] || 0) : null, days_before: daysBefore[id] || 0,
+    });
+  }
+  let offTodayTotal = 0, onTodayTotal = 0, seenToday = 0;
+  for (const e of entries) { const id = String(e.item_id); if (daysToday[id] > 0) { seenToday++; offTodayTotal += offToday[id] || 0; onTodayTotal += onToday[id] || 0; } }
+  const rollAt = (fresh.rollup && fresh.rollup.t) ? String(fresh.rollup.t) : '';
+  const avoided = Object.assign(adPeakAvoided({ listings: perListing }), {
+    today: {
+      off_spend: seenToday ? round2(offTodayTotal) : null, on_spend: seenToday ? round2(onTodayTotal) : null,
+      listings_with_an_hour_read_today: seenToday, day: today,
+    },
+    window: { from: d7from, to: today, days: 8 },
+    before_window: { days: 28, ends: 'the day before each listing joined the list' },
+    as_of: adPeakUkClock(rollAt), as_of_at: rollAt || null,
+    source: 'adtool_listing_hour, built from the adtool_ads_intraday readings of eBay’s running total; the first reading of a day is left out',
+  });
+
+  /* 4. orders inside a listing's own hours against the ones outside them. Counted from the order
+     records the five minute sync writes, placed on the UK clock, which is the path the Overview's
+     own hour chart counts its orders by. */
+  const ids = entries.map(e => String(e.item_id));
+  const from28 = adtAddDays(today, -28);
+  const ordRows = [];
+  let ordTruncated = false, ordRead = true;
+  try {
+    for (const ch of adtChunks(ids)) {
+      const st = env2.DB.prepare("SELECT created_at, item_id, qty FROM orders WHERE created_at >= ?1 AND status <> 'CANCELLED'" +
+        (acct ? ' AND account = ?2' : '') + ' AND item_id IN ' + adtInList(ch, acct ? 2 : 1) + ' LIMIT 20000');
+      const rs = await st.bind(...[ukDayStartIsoFor(from28)].concat(acct ? [acct] : []).concat(ch)).all();
+      const got = (rs && rs.results) || [];
+      if (got.length >= 20000) ordTruncated = true;
+      for (const r of got) {
+        const ms = Date.parse(String(r.created_at));
+        if (isNaN(ms)) continue;
+        const uk = adtUkParts(ms);
+        ordRows.push({ item_id: String(r.item_id || ''), day: uk.date, hour: uk.hour, orders: 1, units: Math.max(1, Number(r.qty) || 1) });
+      }
+    }
+  } catch (e) { ordRead = false; }
+  const salesWindows = [
+    { key: 'today', from: today, to: today },
+    { key: 'd7', from: adtAddDays(today, -7), to: yday },
+    { key: 'd28', from: from28, to: yday },
+  ];
+  const split = adPeakSalesSplit({ rows: ordRows, entries: entries, windows: salesWindows });
+  const ordAt = (fresh.orders && fresh.orders.t) ? String(fresh.orders.t) : '';
+  const sales = Object.assign(split, {
+    read: ordRead, truncated: ordTruncated,
+    as_of: adPeakUkClock(ordAt), as_of_at: ordAt || null,
+    source: 'orders, placed on the UK clock, the same read the Overview counts its own hours from',
+    note: ordRead
+      ? 'eBay does not say which hour an ad was clicked in, so this is the hour the ORDER arrived in. A listing whose hours cannot be read is left out rather than counted as selling outside them.'
+      : 'The orders could not be read, so this split is not available.',
+  });
+
+  return {
+    cohort: {
+      rule: 'every listing on the by-hand peak list, counting from the UK day it joined and stopping on the UK day it was taken off',
+      listings_on_the_list_now: open.length, listings_ever: entries.length,
+      cap: CO.cap == null ? ADTOOL_PEAK_COHORT_CAP : CO.cap, held_back: CO.held_back == null ? 0 : CO.held_back,
+      account: acct || 'all', day: today,
+    },
+    listings: listings, hours_today: hoursToday,
+    spend_avoided_off_hours: avoided, sales_in_vs_out: sales,
+    freshness_rules: ADTOOL_PEAK_FRESHNESS_RULES,
+    not_from_ebay: [
+      'eBay publishes no ad spend by hour at all: the hourly figures here are the portal’s own readings of eBay’s running total, taken every few minutes, with the difference booked to the hour it arrived in.',
+      'eBay does not say which hour a click or an ad-attributed sale happened in, so orders inside and outside the hours are counted by the hour the order arrived in, not the hour of the click.',
+      'eBay charges a click fee a day in arrears, so today’s money is a reading and not a bill.',
+    ],
+    sent_to_ebay: false,
+    computed_at: nowIso,
+  };
+}
 async function adtoolPeakCompute(env, acct) {
   await ensureAdtoolPhase16Schema(env);   // P15's tables plus the by-hand list's own switch column
   const cfg = {};
@@ -12086,6 +12372,243 @@ function adPeakReadingDisagree(input) {
   out.sort((a, b) => (a.item_id + a.campaign_id) < (b.item_id + b.campaign_id) ? -1 : 1);
   return out.slice(0, 200);
 }
+/* ---- pure: the Peak-time Overview's cohort (owner's brief, 31 Oct, section 2) ----
+   "Our Overview already exists. We need a replica of it on a smaller level, where the only focus is
+   the listings that are playing on peak time."
+   The cohort is every listing on the by-hand peak list. A listing counts FROM the UK day it joined
+   and LEAVES on the UK day it was taken off, and everything it did before that stays on the record:
+   a day-level figure holds a listing's day only where added_day <= day < removed_day. Today's
+   part-day figures hold the listings on the list now.
+   That rule is written ONCE, here. The queries narrow themselves by the join this block builds and
+   the tests assert the same functions, so the cohort cannot come to mean two different things on
+   two screens. */
+const ADTOOL_PEAK_COHORT_CAP = 500;
+/* how old an "as of" stamp may be before a tile says so, in minutes. The page reads these off the
+   answer rather than carrying them, so one change here moves every badge at once. */
+const ADTOOL_PEAK_FRESHNESS_RULES = { amber_min: 15, red_min: 60 };
+function adPeakUkDayOf(stamp) {
+  /* the UK day a stored stamp fell in. adtool_peak_items stamps with datetime('now'), which is UTC
+     with no zone on it, and through a British summer 23:30 UTC is already half past midnight the
+     next day: taking the first ten characters would date a listing onto the list a day late for one
+     hour in every twenty four. Unreadable is '' and never a guess. */
+  const ms = adPeakStampMs(stamp);
+  return isFinite(ms) ? adtUkParts(ms).date : '';
+}
+function adPeakUkClock(stamp) {
+  /* the same stamp as an "as of HH:MM" on the UK clock, or null where there is no stamp to show.
+     Null is not midnight: a tile with no reading behind it says so instead. */
+  const ms = adPeakStampMs(stamp);
+  if (!isFinite(ms)) return null;
+  const p = adtUkParts(ms);
+  return String(p.hour).padStart(2, '0') + ':' + String(p.minute).padStart(2, '0');
+}
+function adPeakCohortEntry(row) {
+  /* one row of adtool_peak_items as the cohort reads it: the two UK days that bound its membership,
+     and the hours parsed by the same parser the switching itself uses. */
+  const r = row || {};
+  const parsed = adPeakHoursParse(r.hours);
+  return {
+    item_id: String(r.item_id == null ? '' : r.item_id).trim(),
+    account: String(r.account == null ? '' : r.account),
+    hours: String(r.hours == null ? '' : r.hours),
+    ranges: parsed.ranges || [], hours_problem: parsed.ranges ? '' : String(parsed.reason || ''),
+    auto: r.auto == null ? null : (Number(r.auto) ? 1 : 0),
+    campaign_id: r.campaign_id == null ? null : String(r.campaign_id),
+    added_by: String(r.added_by == null ? '' : r.added_by),
+    added_at: String(r.added_at == null ? '' : r.added_at),
+    removed_at: String(r.removed_at == null ? '' : r.removed_at),
+    added_day: adPeakUkDayOf(r.added_at), removed_day: adPeakUkDayOf(r.removed_at),
+    open: !String(r.removed_at == null ? '' : r.removed_at).trim(),
+  };
+}
+function adPeakCohortEntries(rows) {
+  /* the cohort, newest first and one entry per listing. A row with no readable join day is left out
+     altogether: it cannot be dated into any day's figure, and dropping it is the only answer that
+     does not quietly widen a window. */
+  const out = [], seen = {};
+  for (const r of (rows || [])) {
+    const e = adPeakCohortEntry(r);
+    if (!e.item_id || !e.added_day) continue;
+    if (seen[e.item_id]) continue;
+    seen[e.item_id] = 1; out.push(e);
+    if (out.length >= ADTOOL_PEAK_COHORT_CAP) break;
+  }
+  return out;
+}
+function adPeakInCohort(entry, day) {
+  /* THE MEMBERSHIP RULE: added_day <= day < removed_day. The day of removal is already out, because
+     the row stopped being switched that day; the days before it stay in, because they happened. */
+  const e = entry || {};
+  const d = String(day == null ? '' : day), a = String(e.added_day || ''), r = String(e.removed_day || '');
+  if (!d || !a) return false;
+  if (d < a) return false;
+  if (r && d >= r) return false;
+  return true;
+}
+function adPeakCohortOn(entries, day) { return (entries || []).filter(e => adPeakInCohort(e, day)); }
+function adPeakCohortIds(entries, day) { return adPeakCohortOn(entries, day).map(e => String(e.item_id)); }
+function adPeakCohortSql(entries) {
+  /* the cohort as a joinable table of (pk_item, pk_from, pk_to), written as literals.
+     LITERALS and not binds for two reasons: a day-level rule needs two dates per listing and the
+     list runs to hundreds, which is past what one statement may bind; and this file already writes
+     its day windows into its SQL the same way (adtDaySrc). Nothing anybody typed can reach the
+     query: every value is matched against a pattern first and a row that fails any of them is
+     dropped, so an item number is digits and a day is a date.
+     The three columns are named pk_* deliberately, so joining this onto a day table never makes
+     that table's own item_id or day ambiguous and no call site has to re-qualify a column.
+     AN EMPTY COHORT RETURNS A TABLE WITH NO ROWS, never an empty string: a join that vanished would
+     answer for the whole fleet while the page said it was answering for the peak list, which is the
+     one way this could go wrong without anybody seeing it. */
+  const parts = [];
+  for (const e of (entries || [])) {
+    const id = String((e && e.item_id) || ''), from = String((e && e.added_day) || ''), to = String((e && e.removed_day) || '');
+    if (!/^[0-9]{1,19}$/.test(id)) continue;
+    if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(from)) continue;
+    if (to && !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(to)) continue;
+    parts.push('SELECT \'' + id + '\' AS pk_item, \'' + from + '\' AS pk_from, \'' + (to || '') + '\' AS pk_to');
+  }
+  if (!parts.length) return '(SELECT \'\' AS pk_item, \'\' AS pk_from, \'\' AS pk_to WHERE 1 = 0)';
+  return '(' + parts.join(' UNION ALL ') + ')';
+}
+function adPeakCohortJoin(sql, itemCol, dayCol) {
+  /* THE ONE ITEM FILTER. Every cohort query is the query the Overview already runs with this join
+     appended, so there is one computation and not two. A JOIN and not an EXISTS, so the database
+     drives from the short cohort list instead of walking a day table row by row. */
+  if (!sql) return '';
+  return ' JOIN ' + sql + ' pkc ON pkc.pk_item = ' + itemCol + ' AND ' + dayCol + ' >= pkc.pk_from' +
+    ' AND (pkc.pk_to = \'\' OR ' + dayCol + ' < pkc.pk_to)';
+}
+function adPeakCohortBeforeJoin(sql, itemCol, dayCol, days) {
+  /* the same cohort, over the window BEFORE each listing joined: the days it was advertised without
+     its hours being switched. Each listing's own window, because they joined on different days. */
+  if (!sql) return '';
+  const n = Math.max(1, Math.round(Number(days) || 28));
+  return ' JOIN ' + sql + ' pkc ON pkc.pk_item = ' + itemCol +
+    ' AND ' + dayCol + ' >= date(pkc.pk_from, \'-' + n + ' day\') AND ' + dayCol + ' < pkc.pk_from';
+}
+function adPeakHoursToday(entries, uk) {
+  /* HOURS ON AND OFF TODAY, in listing-hours. For every row set to switch itself whose hours can be
+     read: the part of today already gone is counted against its hours (on_elapsed / off_elapsed) and
+     the part still to come is counted the same way (on_planned / off_planned). The hour the clock is
+     in is split at the minute, so nothing is claimed for a minute that has not happened.
+     A row left to a person, and a row whose hours cannot be read, switch nothing, so neither is
+     counted: both are reported apart instead. */
+  const u = uk || {};
+  const hour = Math.max(0, Math.min(23, Math.round(Number(u.hour) || 0)));
+  const minute = Math.max(0, Math.min(59, Math.round(Number(u.minute) || 0)));
+  const elapsed = hour + minute / 60;
+  let on_elapsed = 0, off_elapsed = 0, on_planned = 0, off_planned = 0, n = 0, left = 0, noHours = 0;
+  for (const e of (entries || [])) {
+    const ranges = (e && e.ranges) || [];
+    if (!e || Number(e.auto) !== 1) { left++; continue; }
+    if (!ranges.length) { noHours++; continue; }
+    n++;
+    for (let h = 0; h < 24; h++) {
+      const gone = h < hour ? 1 : (h === hour ? minute / 60 : 0);
+      const rest = 1 - gone;
+      if (adInPeakRanges(h, ranges)) { on_elapsed += gone; on_planned += rest; }
+      else { off_elapsed += gone; off_planned += rest; }
+    }
+  }
+  return {
+    on_elapsed: round2(on_elapsed), off_elapsed: round2(off_elapsed),
+    on_planned: round2(on_planned), off_planned: round2(off_planned),
+    listings: n, listings_left_to_a_person: left, listings_without_readable_hours: noHours,
+    elapsed_hours: round2(elapsed), uk_hour: hour, uk_minute: minute,
+  };
+}
+function adPeakSalesSplit(input) {
+  /* ORDERS INSIDE AND OUTSIDE A LISTING'S OWN HOURS. One pass over the orders, each one placed in
+     the UK hour it arrived in and judged against the hours of the listing it was for, and counted
+     into every window it falls in. A listing's order only counts for a day the listing was on the
+     list, by the one membership rule above.
+     A listing whose hours cannot be read is left out rather than having every order read as outside
+     its hours, and how many were left out is said. */
+  const i = input || {};
+  const by = {};
+  let counted = 0, noHours = 0;
+  for (const e of (i.entries || [])) {
+    const id = String((e && e.item_id) || ''); if (!id) continue;
+    if (!((e && e.ranges) || []).length) { noHours++; continue; }
+    by[id] = e; counted++;
+  }
+  const windows = {};
+  for (const w of (i.windows || [])) {
+    windows[String(w && w.key)] = { key: String(w && w.key), from: String((w && w.from) || ''), to: String((w && w.to) || ''), in_orders: 0, in_units: 0, out_orders: 0, out_units: 0 };
+  }
+  let skipped = 0;
+  for (const r of (i.rows || [])) {
+    const e = by[String((r && r.item_id) || '')];
+    if (!e) { skipped++; continue; }
+    const day = String((r && r.day) || ''), h = Number(r && r.hour);
+    if (!day || !isFinite(h)) { skipped++; continue; }
+    if (!adPeakInCohort(e, day)) { skipped++; continue; }
+    const inside = adInPeakRanges(h, e.ranges);
+    const orders = Number((r && r.orders) == null ? 1 : r.orders) || 0;
+    const units = Number((r && r.units) == null ? 0 : r.units) || 0;
+    for (const w of (i.windows || [])) {
+      if (day < String(w.from) || day > String(w.to)) continue;
+      const b = windows[String(w.key)]; if (!b) continue;
+      b[inside ? 'in_orders' : 'out_orders'] += orders;
+      b[inside ? 'in_units' : 'out_units'] += units;
+    }
+  }
+  return { windows: windows, listings_counted: counted, listings_without_readable_hours: noHours, rows_outside_the_cohort: skipped };
+}
+function adPeakAvoided(input) {
+  /* SPEND AVOIDED IN OFF HOURS. Per listing: what it spends per day in the hours outside its own
+     stretches now, against what it spent per day in those same hours over the days BEFORE it joined
+     the list. Each listing is counted as its own money per day, so a listing with three days of
+     readings does not weigh the same as one with twenty eight.
+     Before and after are compared over the listings we hold BOTH for, because a difference between
+     two different sets of listings is not a difference. The whole cohort's own figure is returned
+     beside it so the page can show what is happening now either way, and null means no before-data
+     rather than nothing avoided. */
+  const rows = (input && input.listings) || [];
+  let nowAll = 0, nowAllN = 0, nowCmp = 0, beforeCmp = 0, nCmp = 0, daysBefore = 0;
+  const num = v => (v == null || v === '' || isNaN(Number(v))) ? null : Number(v);
+  for (const r of rows) {
+    const dn = Number((r && r.days_now) || 0) || 0, db = Number((r && r.days_before) || 0) || 0;
+    const sn = num(r && r.off_spend_now), sb = num(r && r.off_spend_before);
+    if (dn > 0 && sn != null) { nowAll += sn / dn; nowAllN++; }
+    if (dn > 0 && sn != null && db > 0 && sb != null) { nowCmp += sn / dn; beforeCmp += sb / db; nCmp++; if (db > daysBefore) daysBefore = db; }
+  }
+  const note = !rows.length
+    ? 'No listing on the peak list has an hour we can see yet, so there is nothing to compare.'
+    : !nCmp
+      ? 'None of these listings has a sampled hour from before it joined the list, so there is nothing to compare today against. The figure for now stands on its own.'
+      : 'Worked out over the ' + nCmp + ' listing' + (nCmp === 1 ? '' : 's') + ' we hold sampled hours for both before and after they joined, each counted as its own money per day.';
+  return {
+    now_per_day: nowAllN ? round2(nowAll) : null,
+    now_per_day_compared: nCmp ? round2(nowCmp) : null,
+    before_per_day: nCmp ? round2(beforeCmp) : null,
+    avoided_per_day: nCmp ? round2(beforeCmp - nowCmp) : null,
+    days_observed_before: nCmp ? daysBefore : null,
+    listings: rows.length, listings_with_before_data: nCmp,
+    note: note,
+  };
+}
+function adPeakReconcile(input) {
+  /* THE CHECK THE PAGE PRINTS. The cohort's own tile and the cohort's own listing rows are two reads
+     of the same days, so they must come to the same money. A difference means one of the two was not
+     narrowed to the peak list, which is the only way this section could be wrong without looking
+     wrong. Either side unknown is null and never a nought, and `equal` is then null as well: an
+     answer nobody could work out must not read as a pass. */
+  const i = input || {};
+  const n = v => (v == null || v === '' || isNaN(Number(v))) ? null : round2(Number(v));
+  const a = n(i.today_spend_cohort), b = n(i.today_spend_sum_of_listings);
+  const c = n(i.period_spend_cohort), d = n(i.period_spend_sum);
+  const diff = (x, y) => (x == null || y == null) ? null : round2(x - y);
+  const same = (x, y) => (x == null || y == null) ? null : Math.abs(round2(x - y)) < 0.005;
+  return {
+    today_spend_cohort: a, today_spend_sum_of_listings: b, equal: same(a, b), difference: diff(a, b),
+    period: i.period || null,
+    period_spend_cohort: c, period_spend_sum: d, equal2: same(c, d), difference_period: diff(c, d),
+    listings_today: i.listings_today == null ? null : Number(i.listings_today),
+    listings_period: i.listings_period == null ? null : Number(i.listings_period),
+    note: 'The tile and the listings under it are two reads of the same days, so they must come to the same money to the penny.',
+  };
+}
 /* ADTOOL-P16-PURE-END */
 
 /* ---- schema: the peak list's own switch, and the campaign columns the sync now fills ---- */
@@ -12124,6 +12647,10 @@ const ADTOOL_REGISTER_P16 = [
   ['PEAK_SWITCH', 'The system switching a peak listing on and off', 'Every quarter hour, each listing on the by-hand peak list that is set to switch itself and has a pay-per-click ad is compared with its own hours: inside them the ad should be running, outside them it should be paused. Only a change is ever sent, so one boundary costs one instruction, and a quarter hour that never fired is put right on the next one. Sent only for an account whose own live switch is on, at most twenty times a day for an account, and written down either way with what was sent, what came back, and how to undo it. For every other account the row says what it would have sent and nothing leaves the portal.', 'adtool_peak_items, campaign_ads, campaigns, items_api, portal_config, adtool_apply_log', 'Every quarter hour', 'Unit tests on the hour either side of both boundaries, and on nothing being sent for an account whose switch is off'],
   ['TODAY_HOURS', 'Orders received in each hour today', 'Orders and units for every hour of today so far, on a London clock, counted from the order records the five minute sync writes and not from the hourly mirror. It is the same read the day’s four parts are counted from, so the two always agree, and it sits beside the money spent in each hour on one chart. Cancelled orders are left out. An hour nothing arrived in is left out and the chart fills the gap.', 'orders', 'Every time the page is opened, within a minute of the last order sync', 'The hours add up to the same day the four parts of the day add up to'],
   ['DECISIONS_TODAY', 'Decisions on today’s list', 'How many calls today’s run made that are something other than leave it alone. It is a count of exactly the rows the Decision page lists, by the same rule and over every account whichever account the reader is looking at, so the tile and that page can never disagree. It counts the whole list and not a backlog: a decision somebody has already acted on is still one of today’s calls and is still counted, because the Decision page still shows it. Until 28 Oct this figure was written as nought wherever it was printed, which read as nothing to look at.', 'adtool_decisions', 'Every time the page is opened', 'Counted against the rows the Decision page shows, for the same day'],
+  ['PEAK_COHORT_LISTINGS', 'The listings on peak time', 'How many listings are on the by-hand peak list right now, and whose they are. A listing counts from the day somebody put it on the list and stops counting on the day it was taken off, and the days in between stay on the record, so the figures under this heading are always about the listings that were actually on peak time on the day being shown. The count beside it says how many of those are set to switch themselves and have hours the system can read, because a row left to a person switches nothing.', 'adtool_peak_items', 'Read live every time the section is opened', 'Counted against the rows the Management list on this same page shows'],
+  ['PEAK_HOURS_ON_OFF', 'Hours on and off peak today', 'For every listing set to switch itself whose hours can be read, the part of today already gone is counted against its own hours and the part still to come is counted the same way, and the four figures are listing-hours: one listing for one hour is one. The hour the clock is in is split at the minute, so nothing is claimed for a minute that has not happened yet. A listing left to a person and a listing whose hours cannot be read are both left out and counted apart, because neither of them is being switched.', 'adtool_peak_items', 'Read against the London clock every time the section is opened', 'The hours on and the hours off add back up to the whole of today across the listings counted'],
+  ['PEAK_SPEND_AVOIDED', 'Money no longer spent outside the peak hours', 'What a listing spends in a day in the hours outside its own stretches now, against what it spent in a day in those same hours over the twenty eight days before it joined. eBay publishes no ad spend by hour, so the hourly figures are our own readings of its running total every few minutes, each difference booked to the hour it arrived in; a day’s first reading belongs to no hour of trading and is left out. Before and after are compared only over the listings we hold readings for on both sides, each counted as its own money per day. With nothing from before, the answer is blank and says so.', 'adtool_peak_items, adtool_listing_hour, adtool_ads_intraday', 'Worked out when the section is opened, from the hourly roll-up', 'Unit tests on the per-day arithmetic, on a listing with no before-data being left out of the comparison, and the hours read back against the listing’s own page'],
+  ['PEAK_SALES_IN_OUT', 'Orders inside and outside the peak hours', 'Every order for a listing on the list is placed in the London hour it arrived in and judged against that listing’s own hours: inside them or outside them, for today, the last seven days and the last twenty eight. An order only counts for a day the listing was actually on the list. eBay does not say which hour a click or a sale it credits to an ad happened in, so this is the hour the ORDER arrived and not the hour of the click, and the page says so. A listing whose hours cannot be read is left out rather than having all of its orders read as landing outside hours it never had.', 'adtool_peak_items, orders', 'Worked out when the section is opened, within a minute of the last order sync', 'Unit tests on an order either side of both boundaries and on a listing’s day before it joined the list not counting'],
   ['SPEND_BACK_WINDOWS', 'What a listing spent over the last three, seven and fourteen days', 'The listing’s own ad spend over the last three, seven and fourteen FINISHED days, beside what it has spent today. Every window ends yesterday, because eBay publishes a day’s ad report the day after and a window reaching into today would read every listing as having had a cheap day. The spend already carries the fee charged on clicks, so nothing is added on top of it. A day with no row simply does not count.', 'adtool_listing_day', 'Worked out when you open the page, and held for a minute', 'Unit tests on the three windows never being out of order, and the figures read back against the listing’s own page'],
 ];
 let ADTOOL_P16_REG_OK = false;
@@ -21553,6 +22080,114 @@ const ROUTES = {
         build: { crons: Object.keys(map), has_peak_job: !!peakSlot, peak_slot: peakSlot },
         window: { days, from_uk_day: fromDay, to_uk_day: today, item_id: item },
         switches, list, log, jobs, readings,
+        read_errors: readErrors,
+        sent_to_ebay: false,
+      };
+    },
+  },
+  /* THE PEAK-TIME OVERVIEW, READABLE WITH THE SYNC KEY ALONE (31 Oct, section 2 of the owner's brief).
+     The section's whole claim is that it is the Overview's own figures over one cohort, so the claim
+     has to be checkable from outside a signed-in browser: this answers with both cohort answers, the
+     reconciliation the page prints, and the acceptance check itself, worked out for today, the last
+     seven days and the last twenty eight.
+     Authenticated exactly as backupDump is: auth 'sync', so the SYNC_KEY and nothing else. It is
+     deliberately NOT named adtool*, because the router role-gates that prefix before it has a user to
+     judge and a key-authed call has none. Every collective profit figure is stripped on the way out,
+     the way the strictest session would see it.
+     IT WRITES NOTHING of its own and sends nothing to eBay. */
+  adsPeakOverviewProbe: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const env = ctx.env;
+      const period = String((p && p.period) || 'd30').trim().slice(0, 20);
+      const account = String((p && p.account) || '').trim().slice(0, 40);
+      const full = !!(p && p.full);
+      const today = ukDate(''), yday = adtAddDays(today, -1);
+      const readErrors = [];
+      /* a read that FAILS says so rather than answering with an empty list: on a check route the
+         difference between "they agree" and "I could not look" is the whole point. */
+      const q = async (what, sql, binds) => {
+        try {
+          const st = env.DB.prepare(sql);
+          const rs = await ((binds && binds.length) ? st.bind(...binds) : st).all();
+          return (rs && rs.results) || [];
+        } catch (e) { readErrors.push(what + ': ' + String((e && e.message) || e).slice(0, 160)); return null; }
+      };
+      const strip = d => adtStripCollectiveProfit(JSON.parse(JSON.stringify(d)), { keepCollective: false });
+      const sub = { env, user: { role: 'Management', email: 'probe@engine' }, waitUntil: null, todayPay: null };
+      const call = async (action, payload) => {
+        const r = ROUTES[action];
+        if (!r) { readErrors.push(action + ': not in the build'); return null; }
+        try { return strip(await (r.raw || r.fn)(payload, sub)); }
+        catch (e) { readErrors.push(action + ': ' + String((e && e.message) || e).slice(0, 200)); return null; }
+      };
+      const planPay = Object.assign({ period: period, cohort: 'peak' }, account ? { account: account } : {});
+      const cmdPay = Object.assign({ cohort: 'peak' }, account ? { account: account } : {});
+      const planCohort = await call('adtoolPlan', planPay);
+      const cmdCohort = await call('adtoolCommand', cmdPay);
+
+      /* THE ACCEPTANCE CHECK, section 6.2: the cohort's total against the sum of the same listings'
+         own rows, over the same days, for each of the three windows. Both sides add the raw column
+         and round once at the end, so a penny of rounding can never be read as a filter that was
+         missed on one of the two reads. Today is the today grain, because eBay publishes a day's ad
+         report the day after and the finished-day table holds nothing for today at all. */
+      const CO = await adPeakCohortRead(env, account);
+      const join = adPeakCohortJoin(CO.sql, 'item_id', 'day');
+      const ids = adPeakCohortIds(CO.entries, today).map(x => String(x).replace(/[^0-9]/g, '')).filter(Boolean);
+      const inToday = ' AND item_id IN (' + (ids.length ? ids.map(x => '\'' + x + '\'').join(',') : '\'\'') + ')';
+      const sum2 = (rows, k) => rows == null ? null : round2(rows.reduce((t, r) => t + (Number(r[k]) || 0), 0));
+      const line = async (key, label, aggSql, perSql, binds) => {
+        const agg = await q('acceptance ' + key + ' total', aggSql, binds);
+        const per = await q('acceptance ' + key + ' per listing', perSql, binds);
+        const a2 = agg == null ? null : sum2(agg, 'spend');
+        const b2 = sum2(per, 'spend');
+        return {
+          window: key, label: label,
+          cohort_total_spend: a2, sum_of_listings_spend: b2,
+          equal: (a2 == null || b2 == null) ? null : Math.abs(round2(a2 - b2)) < 0.005,
+          difference: (a2 == null || b2 == null) ? null : round2(a2 - b2),
+          cohort_total_orders: agg == null ? null : Number(sum2(agg, 'orders')),
+          sum_of_listings_orders: per == null ? null : Number(sum2(per, 'orders')),
+          cohort_total_units: agg == null ? null : Number(sum2(agg, 'units')),
+          sum_of_listings_units: per == null ? null : Number(sum2(per, 'units')),
+          listings: per == null ? null : per.length,
+        };
+      };
+      const dayAgg = () => 'SELECT SUM(spend) AS spend, SUM(orders) AS orders, SUM(units) AS units FROM adtool_listing_day' + join +
+        ' WHERE day >= ?1 AND day <= ?2' + (account ? ' AND account = ?3' : '');
+      const dayPer = () => 'SELECT item_id, SUM(spend) AS spend, SUM(orders) AS orders, SUM(units) AS units FROM adtool_listing_day' + join +
+        ' WHERE day >= ?1 AND day <= ?2' + (account ? ' AND account = ?3' : '') + ' GROUP BY item_id';
+      const dayBinds = (from, to) => account ? [from, to, account] : [from, to];
+      const acceptance = [
+        await line('today', 'today, from the sampled today grain',
+          'SELECT SUM(spend) AS spend, SUM(orders) AS orders, SUM(units) AS units FROM adtool_listing_today WHERE uk_day = ?1' + (account ? ' AND account = ?2' : '') + inToday,
+          'SELECT item_id, SUM(spend) AS spend, SUM(orders) AS orders, SUM(units) AS units FROM adtool_listing_today WHERE uk_day = ?1' + (account ? ' AND account = ?2' : '') + inToday + ' GROUP BY item_id',
+          account ? [today, account] : [today]),
+        await line('d7', 'the last 7 days to yesterday', dayAgg(), dayPer(), dayBinds(adtAddDays(today, -7), yday)),
+        await line('d28', 'the last 28 days to yesterday', dayAgg(), dayPer(), dayBinds(adtAddDays(today, -28), yday)),
+      ];
+
+      /* the two answers whole are long: the cut list, the per-listing rows and the day rows are all on
+         them. By default the lists are counted rather than copied, and `full: 1` asks for them as the
+         page itself receives them. Nothing is left out silently: what was counted is named. */
+      const trim = (d, lists) => {
+        if (!d || full) return d;
+        const out = JSON.parse(JSON.stringify(d));
+        for (const k of lists) if (Array.isArray(out[k])) out[k] = { rows_not_copied: out[k].length };
+        return out;
+      };
+      return {
+        now: new Date().toISOString(), uk_day: today, account: account || 'all', period: period,
+        cohort: {
+          rule: 'every listing on the by-hand peak list, counting from the UK day it joined and stopping on the UK day it was taken off',
+          listings_ever: CO.entries.length, listings_on_the_list_now: CO.entries.filter(e => e.open).length,
+          cap: CO.cap, held_back: CO.held_back,
+        },
+        acceptance: acceptance,
+        reconcile: cmdCohort ? cmdCohort.reconcile : null,
+        peak_extras: cmdCohort ? cmdCohort.peak_extras : null,
+        plan_cohort: trim(planCohort, ['cut', 'improving', 'push', 'budget', 'by_day', 'weekday', 'run_today_top', 'stop_today_top']),
+        command_cohort: trim(cmdCohort, ['items_today', 'by_date', 'today_hours', 'hour_curve', 'today_slots']),
+        lists_counted_not_copied: !full,
         read_errors: readErrors,
         sent_to_ebay: false,
       };

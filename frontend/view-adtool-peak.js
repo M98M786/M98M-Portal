@@ -21,8 +21,21 @@
  * can never offer one the save would turn down, and left alone it means every pay-per-click
  * campaign the listing is in, which is what this list has always done.
  *
- * Engine actions: adtoolPeak, adtoolPeakAdd, adtoolPeakRemove, adtoolPeakCampaigns.
- * Own class prefix: .pkt-
+ * 31 Oct, section 2 of the owner's brief: a PEAK-TIME OVERVIEW sits at the top of this page.
+ * "Our Overview already exists. We need a replica of it on a smaller level, where the only focus
+ * is the listings that are playing on peak time." It is not a second Overview: it draws the
+ * Overview's own blocks (window.adtOverviewBlocks, from view-adtool-overview.js, which both builds
+ * splice before this file) from the same two engine actions asked for one cohort, so there is one
+ * code path, one set of tiles and one set of graphs. Under them sits one row of tiles that belong
+ * to this list and to nothing else, each with the stamp of the read it stands on.
+ * The account chips at the top of the page drive BOTH halves. Two account controls on one page is
+ * the exact fault the Overview's own notes record: a reader picks an account, one half follows and
+ * the other goes on answering for the whole fleet with nothing saying so.
+ *
+ * Engine actions: adtoolPeak, adtoolPeakAdd, adtoolPeakRemove, adtoolPeakCampaigns, and
+ * adtoolPlan / adtoolCommand with cohort:'peak' for the section at the top.
+ * Own class prefix: .pkt-  (the blocks above carry .ov-, which is their own file's and travels
+ * with them; nothing here borrows a class from a file either build does not splice.)
  */
 (function () {
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
@@ -32,7 +45,10 @@
      DOM loses the item number somebody typed a moment ago. `camps` is the campaign list for
      `campFor`, and nothing else: a list read for one listing is never shown against another. */
   var PK = { tab: 'suggested', account: '', data: null, busy: false, edit: null, ranges: [],
-    item: '', note: '', pick: '', pickName: '', camps: null, campFor: '', campNote: '', campErr: '', campBusy: false };
+    item: '', note: '', pick: '', pickName: '', camps: null, campFor: '', campNote: '', campErr: '', campBusy: false,
+    /* the Peak-time overview's own state: the window its period bar is on, the two cohort answers,
+       and which tile the reader has opened the listings behind. */
+    pkoPeriod: null, pkoPlan: null, pkoCmd: null, pkoList: '' };
   var campTimer = null;
 
   VIEW_CSS.push([
@@ -91,7 +107,24 @@
     '.pkt-out code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--gold-a);background:rgba(242,176,53,.1);border-radius:6px;padding:1px 6px}',
     '.pkt-bad{color:' + LOSS + ';font-weight:700}',
     '.pkt-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
-    '.pkt-reg{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;margin-left:6px;white-space:nowrap}'
+    '.pkt-reg{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:800;border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;margin-left:6px;white-space:nowrap}',
+    /* the Peak-time overview's own row of tiles. This file's prefix, this file's rules: the blocks
+       above it bring their own .ov- styling with them from the file they live in. */
+    '.pkt-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:10px;margin:12px 0 8px}',
+    '.pkt-kpi{background:var(--panel-2);border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px}',
+    '.pkt-kpi.click{cursor:pointer}',
+    '.pkt-kpi.click:hover{border-color:var(--gold-line-hi)}',
+    '.pkt-kpi .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}',
+    '.pkt-kpi .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px;color:var(--text)}',
+    '.pkt-kpi .v.gold{color:var(--gold-a)}',
+    '.pkt-kpi .d{font-size:11.5px;color:var(--text-2);margin-top:3px;line-height:1.5}',
+    '.pkt-asof{margin-top:7px;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);font-weight:800}',
+    '.pkt-badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:800;border:1px solid var(--gold-line);color:var(--text-3)}',
+    '.pkt-badge.amber{color:var(--gold-a);border-color:rgba(242,176,53,.5)}',
+    '.pkt-badge.red{color:' + LOSS + ';border-color:rgba(224,86,63,.55)}',
+    '.pkt-recon{font-size:12px;color:var(--text-2);margin:2px 0 10px;line-height:1.55}',
+    '.pkt-recon.bad{color:' + LOSS + ';font-weight:700}',
+    '.pkt-row{padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05)}'
   ].join(''));
 
   /* adtSlot in the engine: 0 night 00-06, 1 morning 06-12, 2 afternoon 12-17, 3 evening 17-24, UK hours */
@@ -209,9 +242,15 @@
     hidden: false, order: 93, roles: ROLES,
     icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/><path d="M4 4l2 2M20 4l-2 2"/>',
     render: function () {
+      /* the account chips come first and drive BOTH halves of the page. Then the Peak-time overview,
+         then the page as it was. */
       return '<div class="pkt-wrap">' +
         adtHgroup('Peak time listings', 'The hours each listing should advertise in, and who switches it', 'pktFresh') +
         '<div id="pktAcct" class="pkt-chips"></div>' +
+        pkoHead() +
+        '<div id="pkoHero"><div class="pkt-empty">Loading…</div></div>' +
+        '<div id="pkoToday"><div class="pkt-empty">Loading…</div></div>' +
+        '<div id="pkoExtra"></div>' +
         '<div id="pktBody"><div class="pkt-empty">Loading…</div></div></div>';
     },
     init: function () {
@@ -224,6 +263,15 @@
       if (q === 'manual' || q === 'suggested') PK.tab = q;
       acctChips();
       load(false).catch(function () {});
+      /* the Peak-time overview. Its own remembered window, under its own page key, so changing it
+         here does not move the Overview's and the other way round. */
+      PK.pkoPlan = null; PK.pkoCmd = null; PK.pkoList = '';
+      PK.pkoPeriod = adtPeriodBar('pkoBar', { page: 'adtoolPeakOverview', def: 'd30', onChange: function (v) { PK.pkoPeriod = v; loadPkoPlan(false).catch(function () {}); } });
+      loadPkoPlan(false).catch(function () {});
+      loadPkoCmd(false).catch(function () {});
+      /* today moves every 5 minutes. adtPoll skips hidden tabs and stops for good on an 'auth'
+         refusal, which is the session-expiry law every live page in this portal follows. */
+      adtPoll('pkoToday', 300000, function () { return loadPkoCmd(true); });
     }
   };
 
@@ -265,8 +313,13 @@
     for (var i = 0; i < bs.length; i++) bs[i].onclick = function () {
       PK.account = this.getAttribute('data-pka') || '';
       PK.edit = null;
+      PK.pkoList = '';
       acctChips();
       load(false).catch(function () {});
+      /* ONE chip for the whole page: both halves are re-asked, so the section and the lists under it
+         can never be answering for different accounts. */
+      loadPkoPlan(false).catch(function () {});
+      loadPkoCmd(false).catch(function () {});
     };
   }
 
@@ -711,6 +764,194 @@
           '<td class="r">' + gbp(r.spend_7d) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
     return h + '</div>';
+  }
+
+  /* ══ THE PEAK-TIME OVERVIEW ════════════════════════════════════════════════════════════════
+     The Overview's own blocks, drawn from the Overview's own two actions asked for one cohort:
+     every listing on the by-hand peak list, each counting from the day it joined and stopping on
+     the day it was taken off. The engine does the narrowing, with one item filter on the queries it
+     already runs, so nothing here adds anything up for itself. ══ */
+
+  /* window.adtOverviewBlocks is view-adtool-overview.js's one set of blocks. Both builds splice that
+     file, and both splice it before this one, so it is there; a page that says so when it is not is
+     better than a page that throws. */
+  function OVB() { return (window.adtOverviewBlocks && typeof window.adtOverviewBlocks.hero === 'function') ? window.adtOverviewBlocks : null; }
+  function pkoHead() {
+    return '<div class="pkt-panel"><h3>Peak-time overview' + reg('listings on peak', 'how') + '</h3>' +
+      '<div class="pkt-sub">The same figures as the Overview, over the listings on the peak list and nothing else. ' +
+      'A listing counts from the day somebody put it on the list and stops counting on the day it was taken off, ' +
+      'so its history before that stays. The account chips above choose the account for this section and for the ' +
+      'lists further down.</div>' +
+      '<div id="pkoBar"></div></div>';
+  }
+  /* listing-hours, to one decimal: one listing switched on for one hour is one. */
+  function hrs(v) { var n = num(v); return n == null ? '—' : n.toFixed(1) + ' h'; }
+  /* the freshness badge. Both thresholds are read off the answer, so nothing here goes stale when
+     somebody changes them, and a stamp nobody could read says so rather than reading as fresh. */
+  function pkoFreshBadge(at, rules) {
+    if (!at) return '<span class="pkt-badge">not read yet</span>';
+    var d = new Date(String(at).replace(' ', 'T') + (/[Zz]|[+-]\d\d:?\d\d$/.test(String(at)) ? '' : 'Z'));
+    if (isNaN(d.getTime())) return '<span class="pkt-badge">reading time not understood</span>';
+    var mins = Math.round((Date.now() - d.getTime()) / 60000);
+    var amber = num(rules && rules.amber_min), red = num(rules && rules.red_min);
+    if (red != null && mins > red) return '<span class="pkt-badge red">' + cnt(mins) + ' min old</span>';
+    if (amber != null && mins > amber) return '<span class="pkt-badge amber">' + cnt(mins) + ' min old</span>';
+    return '';
+  }
+  /* `label` is what the reader sees; `regLabel` is the LOOKUP the explainer box matches on and must
+     stay as it is when the wording changes. `listKey` opens the listings behind the figure. */
+  function pkoTile(label, value, detail, regLabel, asOf, asOfAt, rules, listKey) {
+    return '<div class="pkt-kpi' + (listKey ? ' click' : '') + '"' +
+      (listKey ? ' data-pkolist="' + esc(listKey) + '" title="show the listings behind this figure"' : '') + '>' +
+      '<div class="k">' + esc(label) + reg(regLabel, 'how') + '</div>' +
+      '<div class="v">' + value + '</div>' +
+      '<div class="d">' + detail + '</div>' +
+      '<div class="pkt-asof">' + (asOf ? 'as of ' + esc(String(asOf)) + ' UK' : 'no reading yet') +
+      pkoFreshBadge(asOfAt, rules) + '</div></div>';
+  }
+
+  function pkoParams() {
+    var q = adtPeriodParams(PK.pkoPeriod);
+    q.cohort = 'peak';
+    if (PK.account) q.account = PK.account;
+    return q;
+  }
+  function loadPkoPlan(quiet) {
+    return api('adtoolPlan', pkoParams()).then(function (D) {
+      PK.pkoPlan = D || {};
+      var B = OVB();
+      if (!$('pkoHero')) return;
+      $('pkoHero').innerHTML = B ? B.hero(PK.pkoPlan) : '<div class="pkt-empty">The Overview blocks are not loaded, so this section cannot draw them.</div>';
+      adtPeriodEcho('pkoBar', D && D.period);
+    }).catch(function (e) {
+      if (!quiet && $('pkoHero')) $('pkoHero').innerHTML = '<div class="pkt-panel"><h3>Not available</h3><div class="pkt-sub">' + esc((e && e.message) || 'This block could not load.') + '</div></div>';
+      throw e;
+    });
+  }
+  function loadPkoCmd(quiet) {
+    return api('adtoolCommand', PK.account ? { account: PK.account, cohort: 'peak' } : { cohort: 'peak' }).then(function (D) {
+      PK.pkoCmd = D || {};
+      var B = OVB();
+      if ($('pkoToday')) {
+        $('pkoToday').innerHTML = B
+          ? (B.today(PK.pkoCmd) + B.byAccount(PK.pkoCmd) + B.slots(PK.pkoCmd) + B.hourly(PK.pkoCmd) + B.foot(PK.pkoCmd))
+          : '<div class="pkt-empty">The Overview blocks are not loaded, so this section cannot draw them.</div>';
+      }
+      pkoPaintExtras();
+    }).catch(function (e) {
+      if (!quiet && $('pkoToday')) $('pkoToday').innerHTML = '<div class="pkt-panel"><h3>Not available</h3><div class="pkt-sub">' + esc((e && e.message) || 'Today could not load.') + '</div></div>';
+      throw e;
+    });
+  }
+  function pkoPaintExtras() {
+    var el = $('pkoExtra'); if (!el) return;
+    el.innerHTML = pkoExtras(PK.pkoCmd || {});
+    pkoWire();
+  }
+
+  /* ONE extra row of tiles: the four figures that mean something for this list and for nothing else. */
+  function pkoExtras(D) {
+    var X = D && D.peak_extras;
+    if (!X) return '<div class="pkt-panel"><h3>The peak list in figures</h3><div class="pkt-empty">This answer carries no figures of its own for the list, so none is shown.</div></div>';
+    var RU = X.freshness_rules || D.freshness_rules || null;
+    var L = X.listings || {}, H = X.hours_today || {}, A = X.spend_avoided_off_hours || {}, S = X.sales_in_vs_out || {};
+    var W = S.windows || {};
+    var byAcct = (L.by_account || []).map(function (a) { return esc(String(a && a.account)) + ' ' + cnt(a && a.n); }).join(' · ');
+    var inOut = function (k) { var w = W[k]; return w ? cnt(w.in_orders) + ' in / ' + cnt(w.out_orders) + ' out' : '—'; };
+    var inOutUnits = function (k) { var w = W[k]; return w ? cnt(w.in_units) + ' units in / ' + cnt(w.out_units) + ' out' : ''; };
+    return '<div class="pkt-panel"><h3>The peak list in figures</h3>' +
+      '<div class="pkt-sub">Four figures that belong to this list alone. Each says when it was last read, and a tile ' +
+      'opens the listings behind it.</div>' +
+      '<div class="pkt-kpis">' +
+      pkoTile('Listings on peak', cnt(L.total),
+        (byAcct || 'no account on the rows') +
+        (L.switching == null ? '' : '<br>' + cnt(L.switching) + ' set to switch ' + plural(L.switching, 'itself', 'themselves') + ' with hours we can read') +
+        (n0(L.without_readable_hours) > 0 ? '<br>' + cnt(L.without_readable_hours) + ' with hours we cannot read' : '') +
+        (n0(L.taken_off_and_kept) > 0 ? '<br>' + cnt(L.taken_off_and_kept) + ' taken off and kept as a record' : ''),
+        'listings on peak', L.as_of, L.as_of_at, RU, 'all') +
+      pkoTile('Hours on and off today', hrs(H.on_elapsed) + ' on',
+        hrs(H.off_elapsed) + ' off so far, across ' + cnt(H.listings) + ' ' + plural(H.listings, 'listing', 'listings') +
+        '<br>' + hrs(H.on_planned) + ' on and ' + hrs(H.off_planned) + ' off still to come' +
+        (n0(H.listings_left_to_a_person) > 0 ? '<br>' + cnt(H.listings_left_to_a_person) + ' left to a person, so not counted' : ''),
+        'hours on and off', H.as_of, H.as_of_at, RU, 'switching') +
+      pkoTile('Spend avoided in off hours', A.avoided_per_day == null ? '—' : gbp(A.avoided_per_day) + ' a day',
+        pkoAvoidedDetail(A), 'spend avoided', A.as_of, A.as_of_at, RU, 'avoided') +
+      pkoTile('Sales in and out of the peak', inOut('today'),
+        (inOutUnits('today') ? inOutUnits('today') + ' today<br>' : '') +
+        '7 days ' + inOut('d7') + '<br>28 days ' + inOut('d28') +
+        (n0(S.listings_without_readable_hours) > 0 ? '<br>' + cnt(S.listings_without_readable_hours) + ' left out: hours we cannot read' : ''),
+        'sales in and out of the peak', S.as_of, S.as_of_at, RU, 'sales') +
+      '</div>' +
+      pkoRecon(D.reconcile) + pkoNotFromEbay(X) + pkoListPanel() + '</div>';
+  }
+  function pkoAvoidedDetail(A) {
+    var bits = [];
+    if (A.before_per_day != null && A.now_per_day_compared != null) {
+      bits.push(gbp(A.before_per_day) + ' a day before they joined against ' + gbp(A.now_per_day_compared) + ' a day now');
+    }
+    if (A.now_per_day != null) bits.push(gbp(A.now_per_day) + ' a day outside their hours across the whole list');
+    if (A.today && A.today.off_spend != null) bits.push(gbp(A.today.off_spend) + ' outside their hours today');
+    if (A.listings_with_before_data != null && A.listings != null) {
+      bits.push(cnt(A.listings_with_before_data) + ' of the ' + cnt(A.listings) + ' we can see hours for have figures from before they joined' +
+        (n0(A.days_observed_before) > 0 ? ', up to ' + cnt(A.days_observed_before) + ' ' + plural(A.days_observed_before, 'day', 'days') + ' of them' : ''));
+    }
+    if (A.note) bits.push('<span class="pkt-sm2">' + esc(String(A.note)) + '</span>');
+    return bits.length ? bits.join('<br>') : '<span class="pkt-sm2">Nothing has been read for these listings yet.</span>';
+  }
+  /* THE CHECK, in one line. The section's claim is that it is the Overview over fewer listings, so
+     the same listings' own rows have to come to the same money. The engine works it out; this
+     prints it, and prints the difference when there is one rather than only saying no. */
+  function pkoRecon(R) {
+    if (!R || typeof R !== 'object') return '';
+    if (R.equal == null || R.equal2 == null) {
+      return '<div class="pkt-recon">These totals could not be checked against the same listings’ figures on the Overview: one of the two reads is not available.</div>';
+    }
+    var ok = R.equal === true && R.equal2 === true;
+    var diff = R.equal === true ? R.difference_period : R.difference;
+    return '<div class="pkt-recon' + (ok ? '' : ' bad') + '">These totals equal the same listings’ figures on the Overview: <b>' +
+      (ok ? 'yes (to the penny)' : 'no (difference ' + esc(gbp(Math.abs(n0(diff)))) + ')') + '</b>' +
+      (R.period && R.period.from ? ' <span class="pkt-sm2">today, and ' + esc(String(R.period.label || 'the window')).toLowerCase() + ' ' + esc(String(R.period.from)) + ' to ' + esc(String(R.period.to)) + '</span>' : '') +
+      '</div>';
+  }
+  /* WHERE eBay GIVES US NOTHING, the page says so rather than letting a figure stand for something
+     it is not. The lines come from the engine, so they cannot drift from what it actually did. */
+  function pkoNotFromEbay(X) {
+    var L = X && X.not_from_ebay;
+    if (!Array.isArray(L) || !L.length) return '';
+    return '<div class="pkt-rules"><b>What eBay does not give us.</b> ' +
+      L.map(function (t) { return esc(String(t)); }).join(' ') + '</div>';
+  }
+  /* THE LISTINGS BEHIND A FIGURE. The rows are the page's own peak-list rows, narrowed by the same
+     condition the engine counted on, and each one is the portal's standard listing cell, so the
+     hand-off to a listing is the one route handler every listing row in this tool uses and every
+     row keeps its History link. */
+  var PKO_LISTS = {
+    all: ['Every listing on the list now', function () { return true; }],
+    switching: ['The listings set to switch themselves, with hours we can read', function (r) { var p = parsedRanges(r); return !!Number(r.auto) && !!(p && p.length); }],
+    avoided: ['The listings whose off-hour money we can see, which needs hours we can read', function (r) { var p = parsedRanges(r); return !!(p && p.length); }],
+    sales: ['The listings whose orders we can place inside or outside their hours', function (r) { var p = parsedRanges(r); return !!(p && p.length); }]
+  };
+  function pkoListPanel() {
+    var key = String(PK.pkoList || '');
+    var spec = PKO_LISTS[key];
+    if (!spec) return '';
+    var rows = manual().filter(spec[1]);
+    return '<div class="pkt-form"><h4>' + esc(spec[0]) + '</h4>' +
+      (rows.length
+        ? rows.map(function (r) { return '<div class="pkt-row">' + adtProductCell(r) + '</div>'; }).join('')
+        : '<div class="pkt-empty">No listing on the list meets that just now.</div>') +
+      '<div style="margin-top:10px"><button type="button" class="pkt-btn ghost" data-pkoclose="1">Close</button></div></div>';
+  }
+  function pkoWire() {
+    var box = $('pkoExtra'); if (!box) return;
+    var i, ts = box.querySelectorAll('[data-pkolist]');
+    for (i = 0; i < ts.length; i++) ts[i].onclick = function () {
+      var k = this.getAttribute('data-pkolist') || '';
+      PK.pkoList = (PK.pkoList === k) ? '' : k;
+      pkoPaintExtras();
+    };
+    var cs = box.querySelectorAll('[data-pkoclose]');
+    for (i = 0; i < cs.length; i++) cs[i].onclick = function () { PK.pkoList = ''; pkoPaintExtras(); };
   }
 
   /* ── draw and wire ────────────────────────────────────────────────────────────────────────── */

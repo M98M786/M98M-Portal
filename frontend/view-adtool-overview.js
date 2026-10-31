@@ -12,7 +12,16 @@
  * Fleet ad spend by date, the two old hour charts and Every check are all off this page; the
  * listings table now has its own page. No profit figure appears here at all: profit is a listing's
  * own and lives on the pages that show listings. Galaxy tokens; gold the accent, #e0563f the spend
- * bar and the only loss colour, var(--ok) the orders bar. Nothing here is sent to eBay. */
+ * bar and the only loss colour, var(--ok) the orders bar. Nothing here is sent to eBay.
+ *
+ * 31 Oct (owner's brief, section 2): every block above is a function on window.adtOverviewBlocks,
+ * and THIS PAGE RENDERS THROUGH THOSE SAME FUNCTIONS. The Peak-time overview at the top of the Peak
+ * time listings page draws the same blocks from the same engine answers asked for one cohort, so
+ * there is one code path, one set of tiles and one set of graphs. A tile cannot read one way here
+ * and another way there, because there is only one of it.
+ * The .ov- rules below are this file's own and travel with it: both builds splice every
+ * view-adtool-*.js file, and in both of them this file is spliced before view-adtool-peak.js
+ * (sorted order), so the blocks and their styling land together on either front door. */
 (function () {
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
   var LOSS = '#e0563f';
@@ -126,7 +135,7 @@
       var names = (d && d.accounts) || [];
       if (names.length) { OV.accounts = names.map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean); acctChips(); }
       if (!$('ovHero')) return;
-      $('ovHero').innerHTML = heroBlock(OV.plan);
+      $('ovHero').innerHTML = window.adtOverviewBlocks.hero(OV.plan);
       adtPeriodEcho('ovBar', d && d.period);
       /* a window that reaches into today moves every 5 minutes; a finished window does not */
       if (adtIncludesToday(d && d.period, OV.period)) { adtPoll('ovHero', 300000, function () { return loadPlan(true); }); } else { adtPollStop('ovHero'); }
@@ -193,15 +202,34 @@
 
   function drawToday() {
     var D = OV.cmd || {};
-    var h = statusBlock(D) + tilesBlock(D) + accountBlock(D) + slotBlock(D) + hourBlock(D) + freshBlock(D);
-    /* an answer with no `source` used to print a bare " · " in front of the rest of the footer */
+    /* THROUGH THE SHARED BLOCKS, not past them. The Peak-time overview draws the same five in the
+       same order from a cohort answer, so neither screen can quietly grow a tile the other has not. */
+    var B = window.adtOverviewBlocks;
+    $('ovToday').innerHTML = B.today(D) + B.byAccount(D) + B.slots(D) + B.hourly(D) + B.foot(D);
+  }
+
+  /* block 2 — the status line and the tiles, as one block: they answer the same question and a
+     reader has never wanted one without the other. */
+  function todayBlock(D) { return statusBlock(D) + tilesBlock(D); }
+
+  /* block 5 — how up to date this is, and the line that says where the figures came from.
+     An answer with no `source` used to print a bare " · " in front of the rest of the footer. */
+  function footBlock(D) {
     var foot = [];
     if (D.source) foot.push(esc(String(D.source)));
     if (D.computed_at) foot.push('computed ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC');
     foot.push('refreshes every 5 min while this tab is open');
-    h += '<div class="ov-foot">' + foot.join(' · ') + '</div>';
-    $('ovToday').innerHTML = h;
+    return freshBlock(D) + '<div class="ov-foot">' + foot.join(' · ') + '</div>';
   }
+
+  /* THE ONE SET OF BLOCKS. Each takes an engine answer and returns HTML: the Overview hands it the
+     whole fleet's, the Peak-time overview hands it the same answer asked for the peak-list cohort.
+     Named on window because the two pages are two separate spliced files and this is how every
+     shared piece in this portal travels. */
+  window.adtOverviewBlocks = {
+    hero: heroBlock, today: todayBlock, hourly: hourBlock,
+    byAccount: accountBlock, slots: slotBlock, foot: footBlock,
+  };
 
   /* block 2a — the status line: when today was last read, how often, and what is still missing */
   function statusBlock(D) {
