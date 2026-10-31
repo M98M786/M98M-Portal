@@ -5,6 +5,7 @@ is missing is reported loudly, never recreated, because its value is not known h
 Token comes from the CF_API_TOKEN environment variable and is never printed."""
 import json, os, sys, time, urllib.request, uuid
 ACCT = '22159c26d5386e3ac543be2bbed95e6d'; NAME = 'm98m-engine'
+CPU_MS = 300000   # the hourly roll-up needs minutes of CPU over a day's samples; the default allowance killed it every hour (31 Oct)
 BASE = 'https://api.cloudflare.com/client/v4/accounts/%s/workers/scripts/%s' % (ACCT, NAME)
 TOK = os.environ.get('CF_API_TOKEN', '').strip()
 if not TOK: print('no CF_API_TOKEN'); sys.exit(2)
@@ -22,7 +23,7 @@ script_ok = want in live
 print('live script == main engine/worker.js:', script_ok, '(%d bytes on main)' % len(want))
 if not script_ok:
     b = uuid.uuid4().hex
-    meta = json.dumps({'main_module': 'worker.js', 'compatibility_date': '2024-09-23',
+    meta = json.dumps({'main_module': 'worker.js', 'compatibility_date': '2024-09-23', 'limits': {'cpu_ms': CPU_MS},
                        'keep_bindings': ['plain_text', 'secret_text', 'json', 'd1', 'kv_namespace', 'r2_bucket', 'queue', 'service', 'durable_object_namespace', 'analytics_engine']}).encode()
     body = (b'--' + b.encode() + b'\r\nContent-Disposition: form-data; name="metadata"; filename="metadata.json"\r\nContent-Type: application/json\r\n\r\n' + meta +
             b'\r\n--' + b.encode() + b'\r\nContent-Disposition: form-data; name="worker.js"; filename="worker.js"\r\nContent-Type: application/javascript+module\r\n\r\n' + want +
@@ -40,6 +41,14 @@ if not crons_ok:
     res = json.loads(req(BASE + '/schedules', 'PUT', json.dumps([{'cron': c} for c in crons]).encode(), {'Content-Type': 'application/json'}))
     if not res.get('success'): print('SCHEDULE PUT FAILED', json.dumps(res.get('errors'))[:600]); sys.exit(1)
     print('RE-REGISTERED the %d slots from engine/crons.json' % len(crons))
+# 3a. the CPU allowance must be in force (a deploy whose metadata lacks it falls back to the default)
+st0 = json.loads(req(BASE + '/settings')); lim = ((st0.get('result') or {}).get('limits') or {}).get('cpu_ms')
+print('cpu allowance:', lim)
+if lim != CPU_MS:
+    b2 = uuid.uuid4().hex; body2 = (b'--' + b2.encode() + b'\r\nContent-Disposition: form-data; name="settings"\r\nContent-Type: application/json\r\n\r\n' + json.dumps({'limits': {'cpu_ms': CPU_MS}}).encode() + b'\r\n--' + b2.encode() + b'--\r\n')
+    res2 = json.loads(req(BASE + '/settings', 'PATCH', body2, {'Content-Type': 'multipart/form-data; boundary=' + b2}))
+    if not res2.get('success'): print('CPU ALLOWANCE PATCH FAILED', json.dumps(res2.get('errors'))[:300]); sys.exit(1)
+    print('RE-APPLIED the CPU allowance of %d ms' % CPU_MS)
 # 3. the bindings must have survived (reported, never recreated)
 st = json.loads(req(BASE + '/settings')); b = (st.get('result') or {}).get('bindings') or []
 names = {x['name']: x for x in b}
