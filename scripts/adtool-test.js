@@ -37,7 +37,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -3746,7 +3746,7 @@ function run(argv) {
     })(), null);
   t('§4 videos (real source): the register carries the four figures and the probe is a sync-key read that sends nothing',
     (() => {
-      const probe = src.slice(src.indexOf('  adsVideoProbe: {'), src.indexOf('  backupStamp: {'));
+      const probe = src.slice(src.indexOf('  adsVideoProbe: {'), src.indexOf('  adsFreshnessProbe: {'));
       return /\['VIDEO_COHORT',/.test(src) && /\['VIDEO_ADDED_ON',/.test(src) && /\['VIDEO_BEFORE_AFTER',/.test(src) && /\['VIDEO_VS_NO_VIDEO',/.test(src) &&
         /auth: 'sync'/.test(probe) && /sent_to_ebay: false,/.test(probe) && /agreement: agreement,/.test(probe) &&
         !/method: 'POST'/.test(probe);
@@ -3762,6 +3762,72 @@ function run(argv) {
         /video_gone_on = CASE WHEN \?4 > 0 THEN '' WHEN COALESCE\(video_count, 0\) > 0 AND COALESCE\(video_gone_on, ''\) = '' THEN \?6 ELSE video_gone_on END/.test(job) &&
         /* an ended listing is asked about once, ever; a live one again every week */
         /i\.status = 'ACTIVE' AND substr\(v\.checked_at, 1, 10\) < \?2/.test(job);
+    })(), null);
+
+  /* 4.9 THE SWEEP'S SPEED (31 Oct follow-up): the reads go out in slices, and the slicing is a pure
+     function so "eight at a time, in the order they were chosen" is a test and not a hope. Asked one
+     after another the run managed about thirty-nine listings before its clock, so the first pass over
+     the fleet took more than a day and the weekly re-check never caught up with itself. */
+  t('\u00a74 sweep speed: the slicer cuts eight to a slice and cuts nothing out \u2014 same members, same order, remainder last',
+    (() => {
+      const list = [];
+      for (let i = 1; i <= 20; i++) list.push({ item_id: String(i) });
+      const sl = F.adtFetchSlices(list, F.ADTOOL_VIDEO_SWEEP_PARALLEL);
+      const flat = [].concat.apply([], sl).map(x => x.item_id).join(',');
+      const want = list.map(x => x.item_id).join(',');
+      return sl.length === 3 && sl[0].length === 8 && sl[1].length === 8 && sl[2].length === 4 &&
+        flat === want && sl[0][0] === list[0] && sl[2][3] === list[19];
+    })(), null);
+  t('\u00a74 sweep speed: an exact multiple leaves no empty slice, a short list is one slice, an empty list is no slices, and a repeat is kept because the rotation\u2019s order is the whole point',
+    (() => {
+      const mk = n => { const a = []; for (let i = 0; i < n; i++) a.push({ item_id: 'x' + i }); return a; };
+      const eight = F.adtFetchSlices(mk(16), 8), few = F.adtFetchSlices(mk(3), 8);
+      const dupes = F.adtFetchSlices([{ item_id: '1' }, { item_id: '1' }, { item_id: '2' }], 8);
+      return eight.length === 2 && eight[1].length === 8 && few.length === 1 && few[0].length === 3 &&
+        F.adtFetchSlices([], 8).length === 0 && F.adtFetchSlices(null, 8).length === 0 &&
+        dupes.length === 1 && dupes[0].length === 3 &&
+        /* a size nobody set, or one somebody set to nonsense, still cuts one at a time rather than throwing */
+        F.adtFetchSlices(mk(3)).length === 3 && F.adtFetchSlices(mk(3), 0).length === 3 && F.adtFetchSlices(mk(3), -4).length === 3;
+    })(), null);
+  t('\u00a74 sweep speed (real source): BOTH passes await a Promise.all over slices \u2014 eight for the GetItem rotation, four for the date pass \u2014 and neither fetches inside a plain for-await loop over its rows',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolVideoSweep(env) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
+      return /const ADTOOL_VIDEO_SWEEP_PARALLEL = 8;/.test(src) && /const ADTOOL_VIDEO_SWEEP_DATE_PARALLEL = 4;/.test(src) &&
+        /for \(const slice of adtFetchSlices\(rows, ADTOOL_VIDEO_SWEEP_PARALLEL\)\)/.test(job) &&
+        /for \(const slice of adtFetchSlices\(need, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL\)\)/.test(job) &&
+        (job.match(/await Promise\.all\(batch\.map\(async \(r\) => \{/g) || []).length === 2 &&
+        /* the old one-at-a-time loops are gone, and no eBay read is reached outside a slice's map */
+        !/for \(const r of rows\)/.test(job) && !/for \(const r of need\)/.test(job) &&
+        (job.match(/await fetch\(/g) || []).length === 1 && (job.match(/await adVideoThumbFetch\(/g) || []).length === 1 &&
+        job.indexOf('await fetch(') > job.indexOf('await Promise.all(batch.map(async (r) => {') &&
+        job.lastIndexOf('await adVideoThumbFetch(') > job.lastIndexOf('await Promise.all(batch.map(async (r) => {');
+    })(), null);
+  t('\u00a74 sweep speed (real source): the cap is spent BEFORE the reads go out, counted in pairs on the date pass, and the clock and the cap are judged between slices \u2014 so eight replies landing together cannot carry the run past its ceiling',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolVideoSweep(env) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
+      return /const room = ADTOOL_VIDEO_SWEEP_FETCH_CAP - fetches;/.test(job) &&
+        /const room = Math\.floor\(\(ADTOOL_VIDEO_SWEEP_FETCH_CAP - fetches\) \/ 2\);/.test(job) &&
+        (job.match(/const batch = room < slice\.length \? slice\.slice\(0, room\) : slice;/g) || []).length === 2 &&
+        /fetches \+= batch\.length;/.test(job) && /fetches \+= batch\.length \* 2;/.test(job) &&
+        (job.match(/if \(Date\.now\(\) > deadline\) \{ stopped = 'deadline'; break; \}/g) || []).length === 2 &&
+        (job.match(/if \(batch\.length < slice\.length\) \{ stopped = 'cap'; break; \}/g) || []).length === 2 &&
+        /* and whatever a cut-short pass did read is still written */
+        (job.match(/written \+= await adtBatch\(env, stmts\);/g) || []).length === 2;
+    })(), null);
+  t('\u00a74 sweep speed (real source): the job note says what the run cost and what ended it \u2014 listings asked, found with a video, reads made, seconds used, and whether the clock or the cap stopped it',
+    (() => {
+      const job = src.slice(src.indexOf('async function adtoolVideoSweep(env) {'), src.indexOf('async function adVideoCohortRead(env, acct) {'));
+      return /const began = Date\.now\(\);/.test(job) && /const deadline = began \+ ADTOOL_VIDEO_SWEEP_MS;/.test(job) &&
+        /notes\.push\(asked \+ ' asked about, ' \+ withVideo \+ ' carry a video, '/.test(job) &&
+        /notes\.push\(fetches \+ ' reads in ' \+ Math\.round\(\(Date\.now\(\) - began\) \/ 1000\) \+ 's'\);/.test(job) &&
+        /its own clock stopped it, so there are listings it did not reach/.test(job) &&
+        /its own fetch cap stopped it, so there are listings it did not reach/.test(job) &&
+        /neither the clock nor the cap stopped it/.test(job) &&
+        /* a run cut short before the date pass says so too, rather than reporting a clean finish */
+        /if \(Date\.now\(\) > deadline\) stopped = 'deadline';/.test(job) &&
+        /else if \(fetches >= ADTOOL_VIDEO_SWEEP_FETCH_CAP\) stopped = 'cap';/.test(job) &&
+        /* and no ceiling is typed into the sentence a reader is shown */
+        !/40 ?s|700 reads|forty seconds/.test(job.slice(job.indexOf('const covered =')));
     })(), null);
 
   /* 4.8 ITEM 0 (§3 leftover): the real hours one click away, from the SAME assembling function the
@@ -4091,20 +4157,41 @@ function run(argv) {
       const i = src.indexOf("    /* A23: the five-minute sampler going quiet.");
       const blk = i < 0 ? '' : src.slice(i, src.indexOf('/* reconcile with the open set', i));
       return /const FRa = await adtoolFreshnessRules\(env\);/.test(blk) &&
-        /adtInSamplingWindow\(nowD\) && nowMins >= adtSamplingFromMin\(nowD\) \+ 15/.test(blk) &&
+        /adtInSamplingWindow\(nowD\) && nowMins >= adtSamplingFromMin\(nowD\) \+ ADTOOL_SAMPLER_ALERT_GRACE_MIN/.test(blk) &&
         /ageS == null \|\| ageS > Number\(FRa\.red_min\)/.test(blk) &&
         /MAX\(sampled_at\) AS t FROM adtool_intraday_ticks/.test(blk) &&
         /put\('A23', 'all',/.test(blk) && !/\bred_min: *\d/.test(blk);
     })(), null);
+  t('§6.7 grace: how long the alert waits after the window opens is ONE figure, kept beside the cadence and read by the alert, the today-freshness check and the probe alike',
+    F.ADTOOL_SAMPLER_ALERT_GRACE_MIN === 15 &&
+    /const ADTOOL_SAMPLER_ALERT_GRACE_MIN = 15;/.test(src) &&
+    (src.match(/adtSamplingFromMin\(now\w*\) \+ ADTOOL_SAMPLER_ALERT_GRACE_MIN/g) || []).length === 2 &&
+    /mins < fromMin \+ ADTOOL_SAMPLER_ALERT_GRACE_MIN/.test(src) &&
+    /* and nowhere is it still typed beside one of those three */
+    !/adtSamplingFromMin\(now\w*\) \+ 15\b/.test(src) && !/mins < fromMin \+ 15\b/.test(src),
+    F.ADTOOL_SAMPLER_ALERT_GRACE_MIN);
   t('§5 Data health: the Sampler runs panel stands on what the sampler actually writes \u2014 the ticks, not a job row and not a sync cursor',
     (() => {
-      const i = src.indexOf('const FRh = await adtoolFreshnessRules(env);');
-      const blk = i < 0 ? '' : src.slice(i, src.indexOf('const tile_stamps = {', i));
+      const i = src.indexOf('async function adtSamplerPanel(env, rules, nowD) {');
+      const blk = i < 0 ? '' : src.slice(i, src.indexOf('\n}', i));
       return /FROM adtool_intraday_ticks ORDER BY sampled_at DESC LIMIT \?1/.test(blk) &&
-        /adtSamplerRuns\(tickRows, \{ limit: ADTOOL_SAMPLER_RUNS_SHOWN, rules: FRh \}\)/.test(blk) &&
+        /adtSamplerRuns\(tickRows, \{ limit: ADTOOL_SAMPLER_RUNS_SHOWN, rules: R \}\)/.test(blk) &&
         /\(ADTOOL_SAMPLER_RUNS_SHOWN \+ 1\) \* 24/.test(blk) &&
-        /sent_to_ebay: false/.test(blk) && /in_sampling_window: adtInSamplingWindow\(nowH\)/.test(blk) &&
+        /sent_to_ebay: false/.test(blk) && /in_sampling_window: adtInSamplingWindow\(now\)/.test(blk) &&
         !/adtool_jobs/.test(blk) && !/FROM sync_state/.test(blk) && !/fetch\(/.test(blk);
+    })(), null);
+  t('\u00a76.7 Data health and the probe read the sampler through ONE function, so the page and the evidence a manager is handed cannot disagree about whether a sample landed',
+    (() => {
+      const page = src.slice(src.indexOf('  adtoolHealthPage: {'), src.indexOf('/* ADTOOL-P5-END'));
+      const probe = src.slice(src.indexOf('  adsFreshnessProbe: {'), src.indexOf('  backupStamp: {'));
+      return (src.match(/async function adtSamplerPanel\(/g) || []).length === 1 &&
+        (src.match(/await adtSamplerPanel\(env, FRh?, now\)/g) || []).length === 1 &&
+        /const sampler = await adtSamplerPanel\(env, FRh, new Date\(\)\);/.test(page) &&
+        /const lastSample = sampler\.last_sample;/.test(page) &&
+        /sampler = await adtSamplerPanel\(env, FR, now\);/.test(probe) &&
+        /* and neither of them keeps a grouping of its own beside it */
+        !/adtSamplerRuns\(/.test(page) && !/adtSamplerRuns\(/.test(probe) &&
+        !/adtool_intraday_ticks ORDER BY/.test(page) && !/adtool_intraday_ticks ORDER BY/.test(probe);
     })(), null);
   t('§5 Data health: the engine sends a stamp for every tile the page draws, each from the thing that last wrote that figure',
     (() => {
@@ -4179,6 +4266,65 @@ function run(argv) {
       const pureBlk = j < 0 ? '' : src.slice(j, src.indexOf('\nfunction adPeakUkDayOf(stamp) {', j));
       return !/fetch\(/.test(helper) && !/fetch\(/.test(pureBlk) && !/ebay/i.test(pureBlk) &&
         /INSERT INTO portal_config/.test(helper) && !/UPDATE /.test(helper);
+    })(), null);
+
+  /* \u00a76.7 THE FRESHNESS EVIDENCE BY KEY: the Data health panel without a browser session, so a
+     night check can settle "are today's figures real" on its own. */
+  t('\u00a76.7 probe: it is a sync-key route gated exactly as backupDump is, and it is NOT named with the adtool prefix \u2014 the dispatcher refuses that prefix unless the CALLER holds an advertising role, and a key route has no caller to hold one',
+    (() => {
+      const probe = src.slice(src.indexOf('  adsFreshnessProbe: {'), src.indexOf('  backupStamp: {'));
+      const dump = src.slice(src.indexOf('  backupDump: {'), src.indexOf('  backupDump: {') + 80);
+      return /^  adsFreshnessProbe: \{\n    auth: 'sync', fn: async \(p, ctx\) => \{/.test(probe) &&
+        /auth: 'sync'/.test(dump) &&
+        /if \(action\.indexOf\('adtool'\) === 0 && !adtRoleAllowed\(ctx2\.user\)\) throw new AuthError\('auth'\);/.test(src) &&
+        src.indexOf('  adsFreshnessProbe: {') > 0;
+    })(), null);
+  t('\u00a76.7 probe: it READS and nothing else \u2014 no eBay call of any kind and not one statement that changes a row',
+    (() => {
+      const probe = src.slice(src.indexOf('  adsFreshnessProbe: {'), src.indexOf('  backupStamp: {'));
+      return !/fetch\(/.test(probe) && !/ebay\.com/.test(probe) &&
+        !/INSERT INTO/.test(probe) && !/\bUPDATE \w/.test(probe) && !/DELETE FROM/.test(probe) && !/CREATE TABLE/.test(probe) &&
+        !/\.run\(\)/.test(probe) && !/HOT\.put/.test(probe) && !/method: '(POST|PUT|PATCH|DELETE)'/.test(probe) &&
+        /sent_to_ebay: false,/.test(probe) && /writes: 'none',/.test(probe) &&
+        /* a read that fails says so, because on an evidence route a refused look and a quiet day must not read the same */
+        /read_errors: readErrors,/.test(probe) && /readErrors\.push\(/.test(probe);
+    })(), null);
+  t('\u00a76.7 probe: it carries the five things the brief asks for \u2014 the thresholds through the one helper, the last twelve runs, the A23 state, the window verdict, and the cadence',
+    (() => {
+      const probe = src.slice(src.indexOf('  adsFreshnessProbe: {'), src.indexOf('  backupStamp: {'));
+      return /const FR = await adtoolFreshnessRules\(env\);/.test(probe) && /freshness_rules: FR,/.test(probe) &&
+        /sampler = await adtSamplerPanel\(env, FR, now\);/.test(probe) && /sampler: sampler,/.test(probe) &&
+        /FROM adtool_alerts WHERE rule_id = 'A23' ORDER BY fired_at DESC LIMIT 1/.test(probe) &&
+        /verdict: inWindow \? 'inside' : 'outside',/.test(probe) &&
+        /inside: inWindow,/.test(probe) && /const inWindow = adtInSamplingWindow\(now\);/.test(probe) &&
+        /every_min: ADTOOL_SAMPLER_EVERY_MIN,/.test(probe) && /sampling_window: windowState,/.test(probe);
+    })(), null);
+  t('\u00a76.7 probe: A23 open is cleared_at being empty \u2014 the same test the alerts screen draws \u2014 and a rule that never fired answers null, never a nought and never a date standing in for one',
+    (() => {
+      const probe = src.slice(src.indexOf('  adsFreshnessProbe: {'), src.indexOf('  backupStamp: {'));
+      return /open: !!\(a23Row && String\(a23Row\.cleared_at \|\| ''\) === ''\),/.test(probe) &&
+        /open_since: \(a23Row && String\(a23Row\.cleared_at \|\| ''\) === ''\) \? \(a23Row\.fired_at \|\| null\) : null,/.test(probe) &&
+        /ever_fired: !!a23Row,/.test(probe) &&
+        /* every field of the state falls back to null, so nothing reads as a zero or a blank date */
+        (probe.slice(probe.indexOf('const a23 = {'), probe.indexOf('/* THE WINDOW.')).match(/: null,/g) || []).length >= 8 &&
+        /* the rule's own words come from the rule table, not a second copy of them */
+        /what_it_says: \(ADTOOL_ALERT_RULES\.A23 \|\| \{\}\)\.text \|\| null,/.test(probe) &&
+        !/five-minute reading of eBay/.test(probe);
+    })(), null);
+  t('\u00a76.7 probe: the window is worked out from the Pacific zone at this instant and the grace is the alert\u2019s own, so the probe can never say silence is a fault at a minute the alert would not have',
+    (() => {
+      const probe = src.slice(src.indexOf('  adsFreshnessProbe: {'), src.indexOf('  backupStamp: {'));
+      return /opens_at: adtSamplingFromText\(now\),/.test(probe) && /window: adtSamplingWindowText\(now\),/.test(probe) &&
+        /grace_min: ADTOOL_SAMPLER_ALERT_GRACE_MIN,/.test(probe) &&
+        /alert_judging_now: inWindow && nowMins >= adtSamplingFromMin\(now\) \+ ADTOOL_SAMPLER_ALERT_GRACE_MIN,/.test(probe) &&
+        /* THE TWO SENTENCES A READER IS SHOWN name no figure at all and carry no em-dash. Both must
+           really be found, or this would pass by failing to look. */
+        (() => {
+          const a = probe.match(/'eBay has let[^']*'/), b = probe.match(/'eBay will not[^']*'/);
+          if (!a || !b) return false;
+          const words = a[0] + ' ' + b[0];
+          return !/\d/.test(words) && !/\u2014/.test(words) && /silence/.test(words);
+        })();
     })(), null);
 
   const passed = results.filter(r => r.ok).length;

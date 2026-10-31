@@ -4615,6 +4615,38 @@ async function ensureAdtoolFreshConfig(env) {
   try { await adtBatch(env, [one(K.amber_min, D.amber_min), one(K.red_min, D.red_min)]); ADTOOL_FRESH_CFG_OK = true; }
   catch (e) { /* the defaults already answer for an unseeded key; try again on the next call */ }
 }
+/* THE SAMPLER'S OWN RUNS, ASSEMBLED ONCE (31 Oct, §6.7). The Data health panel prints these and the
+   freshness probe answers with them by key, and evidence two readers can disagree about is not
+   evidence: so both ask this one function instead of keeping a read and an arithmetic each.
+   READ-ONLY, and grouped out of the ticks the sampler itself leaves behind rather than a record
+   beside them, for the reason adtSamplerRuns states: a run that landed nothing wrote nothing, and it
+   must show as a gap and not as a run.
+   The thresholds come in from the caller where it has already read them, because a page that prints
+   the badge has read them once for the whole answer and must not read them twice. */
+async function adtSamplerPanel(env, rules, nowD) {
+  const now = nowD || new Date();
+  const R = (rules && rules.red_min != null) ? rules : await adtoolFreshnessRules(env);
+  const lastRow = await env.DB.prepare('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks').first().catch(() => null);
+  const lastSample = lastRow && lastRow.t ? String(lastRow.t) : null;
+  /* Enough ticks to cover one run MORE than the panel shows, so the oldest row on it has a real gap
+     rather than a blank: at most a couple of dozen ticks belong to one run (a handful of accounts in
+     two families), and the figure is worked out from the number shown rather than typed, so widening
+     the panel widens the read with it. */
+  const tickRows = ((await env.DB.prepare('SELECT account, family, report_day, sampled_at, rows_total, rows_changed, rows_corrected FROM adtool_intraday_ticks ORDER BY sampled_at DESC LIMIT ?1')
+    .bind((ADTOOL_SAMPLER_RUNS_SHOWN + 1) * 24).all().catch(() => ({ results: [] }))).results) || [];
+  return Object.assign({
+    runs: adtSamplerRuns(tickRows, { limit: ADTOOL_SAMPLER_RUNS_SHOWN, rules: R }),
+    runs_shown: ADTOOL_SAMPLER_RUNS_SHOWN, every_min: ADTOOL_SAMPLER_EVERY_MIN,
+    ticks_read: tickRows.length, last_sample: lastSample,
+    /* the page badge's own verdict, which goes amber before the alert goes red: amber is a page
+       telling somebody who is already looking, red is the point at which somebody is told. */
+    verdict: adtFreshVerdict(lastSample, R, now.getTime()).verdict,
+    age_min: adtFreshAgeMin(lastSample, now.getTime()),
+    /* outside this window no sample CAN land, so neither the badge nor A23 judges it late there */
+    in_sampling_window: adtInSamplingWindow(now), sampling_window: adtSamplingWindowText(now),
+    alert_rule: 'A23', source: 'adtool_intraday_ticks', sent_to_ebay: false,
+  }, adtFreshStamp(lastSample));
+}
 
 /* ---- job: listings (facts + margins + taxonomy) ---- */
 /* ---- primary category fill (Phase 1 open item; read-only, one nullable column) ----
@@ -5428,7 +5460,7 @@ async function adtoolTodayFreshness(env) {
     let status, why;
     if (!adtInSamplingWindow(now)) { status = 'PASS'; why = 'outside sampling window (no same-day report task before ' + adtSamplingFromText(now) + ')'; }
     else if (ageMin != null && ageMin < 10) { status = 'PASS'; why = 'newest sample ' + ageMin + ' min old'; }
-    else if (mins < fromMin + 15) { status = 'PASS'; why = 'first task of the day still building (' + (ageMin == null ? 'no sample yet' : ageMin + ' min since the last) '); }
+    else if (mins < fromMin + ADTOOL_SAMPLER_ALERT_GRACE_MIN) { status = 'PASS'; why = 'first task of the day still building (' + (ageMin == null ? 'no sample yet' : ageMin + ' min since the last) '); }
     else { status = 'FAIL'; why = last ? 'stale: newest sample ' + ageMin + ' min old inside the window' : 'no sample ever landed'; }
     let grain = null; try { const pr = await env.DB.prepare("SELECT cursor, last_ok FROM sync_state WHERE job = 'adtoolToday' AND account = ''").first(); grain = pr ? { last_ok: pr.last_ok, note: JSON.parse(pr.cursor || '{}') } : null; } catch (e) { grain = null; }
     await write(status, why + (grain && grain.note ? ' · today grain ' + String(grain.last_ok) + 'Z rows ' + grain.note.rows + ' changed ' + grain.note.changed + ' in ' + grain.note.ms + ' ms' : ' · today grain never built (flag adtool_today?)'), last);
@@ -7185,7 +7217,7 @@ async function adtoolAlerts(env) {
     try {
       const FRa = await adtoolFreshnessRules(env);
       const nowD = new Date(), nowMins = nowD.getUTCHours() * 60 + nowD.getUTCMinutes();
-      if (adtInSamplingWindow(nowD) && nowMins >= adtSamplingFromMin(nowD) + 15) {
+      if (adtInSamplingWindow(nowD) && nowMins >= adtSamplingFromMin(nowD) + ADTOOL_SAMPLER_ALERT_GRACE_MIN) {
         const tk = await env.DB.prepare('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks').first();
         const lastS = tk && tk.t ? String(tk.t) : '';
         const ageS = adtFreshAgeMin(lastS, nowD.getTime());
@@ -7825,27 +7857,12 @@ const ADTOOL_ACTIONS_P5 = {
          on one source and cannot disagree about whether a sample landed. A run that landed nothing
          wrote no tick and shows here as a longer gap, which is the honest answer: the question is not
          whether the timer fired, it is whether anything arrived.
-         Enough ticks are read to cover one run more than the panel shows, so the oldest row on it has
-         a real gap rather than a blank: at most a couple of dozen ticks belong to one run (a handful
-         of accounts in two families), and the figure is worked out from the number shown rather than
-         typed, so widening the panel widens the read with it. */
+         The panel, the badge and the freshness probe all come out of adtSamplerPanel, which is where
+         the read, the grouping and the verdict now live: the probe is the evidence a manager is shown
+         when the page is doubted, so it must not be able to answer differently from the page. */
       const FRh = await adtoolFreshnessRules(env);
-      const lastSample = await maxOf('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks');
-      const tickRows = ((await env.DB.prepare('SELECT account, family, report_day, sampled_at, rows_total, rows_changed, rows_corrected FROM adtool_intraday_ticks ORDER BY sampled_at DESC LIMIT ?1')
-        .bind((ADTOOL_SAMPLER_RUNS_SHOWN + 1) * 24).all().catch(() => ({ results: [] }))).results) || [];
-      const samplerRuns = adtSamplerRuns(tickRows, { limit: ADTOOL_SAMPLER_RUNS_SHOWN, rules: FRh });
-      const nowH = new Date();
-      const sampler = Object.assign({
-        runs: samplerRuns, runs_shown: ADTOOL_SAMPLER_RUNS_SHOWN, every_min: ADTOOL_SAMPLER_EVERY_MIN,
-        ticks_read: tickRows.length, last_sample: lastSample,
-        /* the page badge's own verdict, which goes amber before the alert goes red: amber is a page
-           telling somebody who is already looking, red is the point at which somebody is told. */
-        verdict: adtFreshVerdict(lastSample, FRh, nowH.getTime()).verdict,
-        age_min: adtFreshAgeMin(lastSample, nowH.getTime()),
-        /* outside this window no sample CAN land, so neither the badge nor A23 judges it late there */
-        in_sampling_window: adtInSamplingWindow(nowH), sampling_window: adtSamplingWindowText(nowH),
-        alert_rule: 'A23', source: 'adtool_intraday_ticks', sent_to_ebay: false,
-      }, adtFreshStamp(lastSample));
+      const sampler = await adtSamplerPanel(env, FRh, new Date());
+      const lastSample = sampler.last_sample;
       /* A STAMP ON EVERY TILE. Each figure on this page is as old as the thing that last wrote it, and
          until now not one of them said so: a count of jobs with errors read the same whether it was
          worked out a minute or a day ago. The stamps come from the cursors and the tables themselves,
@@ -12777,6 +12794,12 @@ const ADTOOL_SAMPLER_EVERY_MIN = 5;
    one run or one invocation into two. */
 const ADTOOL_SAMPLER_RUN_SPLIT_S = Math.round(ADTOOL_SAMPLER_EVERY_MIN * 60 / 2);
 const ADTOOL_SAMPLER_RUNS_SHOWN = 12;
+/* HOW LONG AFTER THE WINDOW OPENS BEFORE SILENCE IS A FAULT. eBay will not accept a same-day report
+   task before midnight on its own Pacific clock, and the first task of the day then has to build
+   before anything can be sampled from it, so the minutes just after the window opens are quiet for a
+   reason. A23 waits this long before it judges, and now the probe says whether it is judging yet from
+   the same figure rather than a second copy of it. */
+const ADTOOL_SAMPLER_ALERT_GRACE_MIN = 15;
 function adtFreshRules(cfg) {
   /* the two figures as the engine will actually judge on them. Held to a range they mean something
      in rather than refused, for the same reason the pattern engine holds its own: a figure somebody
@@ -13850,6 +13873,31 @@ const ADTOOL_VIDEO_SWEEP_FETCH_CAP = 700;     /* fleet-wide, inside one invocati
 const ADTOOL_VIDEO_SWEEP_DATES = 12;          /* date lookups a run: a page read is ~1 MB, so few */
 const ADTOOL_VIDEO_RECHECK_DAYS = 7;
 const ADTOOL_VIDEO_SWEEP_MS = 40000;
+/* HOW MANY READS ARE IN THE AIR AT ONCE (31 Oct follow-up). Asked one after another a GetItem reply
+   takes about a second, so the forty-second clock bought about thirty-nine listings a run and the
+   1,224 live listings took over a day to get round, which the weekly re-check then never caught up
+   with. Eight at a time is the shape the 18 October study already proved on this very question: it
+   put 1,280 listings through the same call in about 130 seconds with twelve workers.
+   WHY NOT MORE. Each reply is read whole before the next slice goes out, so eight is eight replies
+   held in memory, and the fetch cap and the clock still decide when the run ends. The date pass gets
+   four, because every one of its lookups is TWO reads and the second of them is an item page of
+   about a megabyte. */
+const ADTOOL_VIDEO_SWEEP_PARALLEL = 8;        /* GetItem reads in flight, per account */
+const ADTOOL_VIDEO_SWEEP_DATE_PARALLEL = 4;   /* date lookups in flight: two reads and ~1 MB each */
+
+/* THE SLICES A RUN ASKS IN. Pure and on its own, so "eight at a time, in the order they were chosen"
+   is something a test can hold the sweep to rather than something read off the loop.
+   THE ORDER IS THE WHOLE POINT. The rotation hands the sweep its listings never-checked first and
+   longest-ago next, and that order is what makes a day's worth of runs cover the fleet: a helper that
+   sorted, de-duplicated or reshuffled them would quietly undo it. So this one only cuts, and it cuts
+   nothing out: same members, same order, in slices of n. */
+function adtFetchSlices(list, n) {
+  const size = Math.max(1, Math.round(Number(n) || 1));
+  const items = Array.isArray(list) ? list : [];
+  const out = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
 
 /* THE VIDEO IDS ON A LISTING, out of a Trading GetItem reply. Regex and not a parser: this worker has
    no XML parser and every other eBay read in this file is read the same way. A reply with the element
@@ -15204,19 +15252,30 @@ async function adVideoThumbFetch(env, acct, videoId, itemId) {
    one invocation's subrequest budget, and this is the only job in that slot that fetches anything, so
    the cap and the deadline are what keep it from eating the budget of the job ahead of it. In the
    steady state it asks about roughly the fleet divided by seven days of hours, which is a handful an
-   hour; the cap only bites on the first day, when nothing has ever been checked. */
+   hour; the cap only bites on the first day, when nothing has ever been checked.
+   31 OCT: THE READS GO OUT IN SLICES, not one after another. Asked singly the clock bought about
+   thirty-nine listings a run, so the first pass over the fleet would have taken more than a day and
+   the weekly re-check would never have caught up with itself. Nothing else about the run changed: the
+   same rows are chosen in the same order, the same row is written for each of them, the clock and the
+   cap are judged between slices, and whatever was read is written before the account hands back. */
 async function adtoolVideoSweep(env) {
   await ensureAdtoolVideoSchema(env);
   if ((await adtFlag(env, 'adtool_job_videosweep')) !== 'on') return;
   const t = await adtJobStart(env, 'adtoolVideoSweep');
   let asked = 0, withVideo = 0, lost = 0, dated = 0, fetches = 0, written = 0, refused = 0;
-  const deadline = Date.now() + ADTOOL_VIDEO_SWEEP_MS;
+  const began = Date.now();
+  const deadline = began + ADTOOL_VIDEO_SWEEP_MS;
+  /* WHAT ENDED THE RUN, carried out to the job note. A run that got round everything it was handed
+     is a different report from one cut off, and until the note says which, a thin run reads the same
+     either way: '' is nothing stopped it, and the other two are the clock and the fetch cap. */
+  let stopped = '';
   const notes = [];
   try {
     const today = ukDate('');
     const stale = adtAddDays(today, -ADTOOL_VIDEO_RECHECK_DAYS);
     await perAccount(env, 'adtoolVideoSweep', async (acct) => {
-      if (Date.now() > deadline || fetches >= ADTOOL_VIDEO_SWEEP_FETCH_CAP) return;
+      if (Date.now() > deadline) { stopped = 'deadline'; return; }
+      if (fetches >= ADTOOL_VIDEO_SWEEP_FETCH_CAP) { stopped = 'cap'; return; }
       /* NEVER CHECKED first, then longest ago, and an ACTIVE listing ahead of an ended one inside
          both: an ended listing's video cannot change and its days are already on the record. */
       const rows = (await env.DB.prepare(
@@ -15230,43 +15289,65 @@ async function adtoolVideoSweep(env) {
       if (!rows.length) return;
       const tok = await ebayAccessToken(env, acct);
       const stmts = [];
-      for (const r of rows) {
-        if (Date.now() > deadline || fetches >= ADTOOL_VIDEO_SWEEP_FETCH_CAP) break;
-        const iid = String(r.item_id);
-        const body = '<?xml version="1.0" encoding="utf-8"?><GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ItemID>' + iid + '</ItemID><OutputSelector>Item.VideoDetails</OutputSelector></GetItemRequest>';
-        let xml = '';
-        try {
-          fetches++;
-          const res = await fetch('https://api.ebay.com/ws/api.dll', { method: 'POST', headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'GetItem', 'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' }, body: body });
-          if (!res.ok) continue;                                    /* transport or 5xx: asked again next run */
-          xml = await res.text();
-        } catch (e) { continue; }
-        const got = adVideoIdsFromXml(xml);
-        if (!got.readable) { refused++; continue; }                  /* eBay refused this item: left unchecked */
-        asked++;
-        const n = got.ids.length;
-        if (n > 0) withVideo++;
-        /* first_seen is set ONCE, on the first run that found a video, and never moved afterwards:
-           it is the floor the cohort counts from when the upload day cannot be decoded, so a later
-           run must not quietly walk it forward.
-           A VIDEO THAT HAS GONE is written down as the day we first found it gone, and the row keeps
-           its first_seen and its date. The cohort is the listings that carry a video NOW, which is
-           what the owner asked for, so such a listing leaves it; the row is what stops the fact
-           disappearing with it, and the page counts them. A video that comes back clears the day. */
-        stmts.push(env.DB.prepare(
-          "INSERT INTO adtool_listing_video (account, item_id, video_ids_json, video_count, source, first_seen, checked_at) VALUES (?1, ?2, ?3, ?4, 'ebay GetItem', ?5, datetime('now')) " +
-          "ON CONFLICT(account, item_id) DO UPDATE SET video_ids_json = ?3, video_count = ?4, source = 'ebay GetItem'," +
-          " first_seen = CASE WHEN ?4 > 0 AND COALESCE(first_seen, '') = '' THEN ?5 ELSE first_seen END," +
-          " video_gone_on = CASE WHEN ?4 > 0 THEN '' WHEN COALESCE(video_count, 0) > 0 AND COALESCE(video_gone_on, '') = '' THEN ?6 ELSE video_gone_on END," +
-          " checked_at = datetime('now')"
-        ).bind(acct, iid, JSON.stringify(got.ids), n, n > 0 ? today : '', today));
+      /* EIGHT AT A TIME, SLICE AFTER SLICE. The reads inside a slice go out together and the slice is
+         read whole before the next goes out, so the clock and the cap are still judged between
+         slices and the rotation's order is still the order the answers are written in.
+         THE CAP IS SPENT BEFORE THE READS GO OUT, never counted as they come back: eight replies
+         landing at once could otherwise each push the tally past the ceiling, and the ceiling is what
+         keeps this job from eating the subrequest budget of the job ahead of it in the slot. A slice
+         trimmed to what is left of the cap is the last slice of the run. */
+      for (const slice of adtFetchSlices(rows, ADTOOL_VIDEO_SWEEP_PARALLEL)) {
+        if (Date.now() > deadline) { stopped = 'deadline'; break; }
+        const room = ADTOOL_VIDEO_SWEEP_FETCH_CAP - fetches;
+        if (room <= 0) { stopped = 'cap'; break; }
+        const batch = room < slice.length ? slice.slice(0, room) : slice;
+        fetches += batch.length;
+        const replies = await Promise.all(batch.map(async (r) => {
+          const iid = String(r.item_id);
+          const body = '<?xml version="1.0" encoding="utf-8"?><GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ItemID>' + iid + '</ItemID><OutputSelector>Item.VideoDetails</OutputSelector></GetItemRequest>';
+          try {
+            const res = await fetch('https://api.ebay.com/ws/api.dll', { method: 'POST', headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1193', 'X-EBAY-API-CALL-NAME': 'GetItem', 'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' }, body: body });
+            if (!res.ok) return { iid: iid, got: null };             /* transport or 5xx: asked again next run */
+            return { iid: iid, got: adVideoIdsFromXml(await res.text()) };
+          } catch (e) { return { iid: iid, got: null }; }
+        }));
+        /* the counting and the writing are done here, back in one thread and in the slice's own
+           order, so what the run reports and the order it writes in do not depend on which reply
+           happened to come back first. */
+        for (const rep of replies) {
+          if (!rep.got) continue;
+          if (!rep.got.readable) { refused++; continue; }             /* eBay refused this item: left unchecked */
+          asked++;
+          const n = rep.got.ids.length;
+          if (n > 0) withVideo++;
+          /* first_seen is set ONCE, on the first run that found a video, and never moved afterwards:
+             it is the floor the cohort counts from when the upload day cannot be decoded, so a later
+             run must not quietly walk it forward.
+             A VIDEO THAT HAS GONE is written down as the day we first found it gone, and the row keeps
+             its first_seen and its date. The cohort is the listings that carry a video NOW, which is
+             what the owner asked for, so such a listing leaves it; the row is what stops the fact
+             disappearing with it, and the page counts them. A video that comes back clears the day. */
+          stmts.push(env.DB.prepare(
+            "INSERT INTO adtool_listing_video (account, item_id, video_ids_json, video_count, source, first_seen, checked_at) VALUES (?1, ?2, ?3, ?4, 'ebay GetItem', ?5, datetime('now')) " +
+            "ON CONFLICT(account, item_id) DO UPDATE SET video_ids_json = ?3, video_count = ?4, source = 'ebay GetItem'," +
+            " first_seen = CASE WHEN ?4 > 0 AND COALESCE(first_seen, '') = '' THEN ?5 ELSE first_seen END," +
+            " video_gone_on = CASE WHEN ?4 > 0 THEN '' WHEN COALESCE(video_count, 0) > 0 AND COALESCE(video_gone_on, '') = '' THEN ?6 ELSE video_gone_on END," +
+            " checked_at = datetime('now')"
+          ).bind(acct, rep.iid, JSON.stringify(rep.got.ids), n, n > 0 ? today : '', today));
+        }
+        if (batch.length < slice.length) { stopped = 'cap'; break; }
       }
+      /* WHAT WAS READ IS WRITTEN whichever way the run ended: the batch goes in before this account
+         hands back, so a clock or a cap that cut the rotation short still leaves its answers behind
+         and the next run starts from them. */
       written += await adtBatch(env, stmts);
     });
     /* THE DATE PASS, a few listings a run. A date costs a media read and often a megabyte of item
        page, so it is kept well apart from the cheap GetItem rotation above and only ever runs for a
        listing whose day is not known yet. The lister's own record is the last resort before blank. */
-    if (Date.now() < deadline && fetches < ADTOOL_VIDEO_SWEEP_FETCH_CAP) {
+    if (Date.now() > deadline) stopped = 'deadline';
+    else if (fetches >= ADTOOL_VIDEO_SWEEP_FETCH_CAP) stopped = 'cap';
+    else {
       /* NEVER LOOKED UP first, then one given up on a week ago. A give-up is not for ever: eBay
          refusing the media read this morning is not eBay refusing it next week, and a row whose date
          could not be recovered is asked again on the same clock the video check itself runs on. */
@@ -15276,30 +15357,51 @@ async function adtoolVideoSweep(env) {
         " ORDER BY COALESCE(date_checked_at, '') ASC LIMIT " + ADTOOL_VIDEO_SWEEP_DATES
       ).all()).results || [];
       const stmts = [];
-      for (const r of need) {
-        if (Date.now() > deadline || fetches >= ADTOOL_VIDEO_SWEEP_FETCH_CAP) break;
-        let ids = [];
-        try { ids = JSON.parse(String(r.video_ids_json || '[]')) || []; } catch (e) { ids = []; }
-        fetches += 2;
-        const got = await adVideoThumbFetch(env, String(r.account), ids[0] || '', String(r.item_id));
-        let day = null, source = '', thumb = String(got.thumb || ''), note = (got.tried || []).join('; ').slice(0, 300);
-        if (thumb) { const dec = adVideoThumbDate(thumb); if (dec.day) { day = dec.day; source = got.source; } else note = (note + '; decode: ' + dec.note).slice(0, 300); }
-        if (!day) {
-          /* THE LISTER'S OWN RECORD, marked as such: it is the day the stage was ticked and not the
-             day eBay stored the file, so it is used only when eBay gave us nothing. */
-          const lad = await env.DB.prepare("SELECT updated_at FROM listing_ladder WHERE item_id = ?1 AND UPPER(COALESCE(video_status, '')) = 'DONE'").bind(String(r.item_id)).first().catch(() => null);
-          const u = String((lad && lad.updated_at) || '').slice(0, 10);
-          if (/^\d{4}-\d{2}-\d{2}$/.test(u)) { day = u; source = 'lister record'; }
+      /* FOUR AT A TIME, and the cap counted in PAIRS, because one lookup is a media read and an item
+         page: room for three reads is room for one lookup and not for two. */
+      for (const slice of adtFetchSlices(need, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL)) {
+        if (Date.now() > deadline) { stopped = 'deadline'; break; }
+        const room = Math.floor((ADTOOL_VIDEO_SWEEP_FETCH_CAP - fetches) / 2);
+        if (room <= 0) { stopped = 'cap'; break; }
+        const batch = room < slice.length ? slice.slice(0, room) : slice;
+        fetches += batch.length * 2;
+        const found = await Promise.all(batch.map(async (r) => {
+          let ids = [];
+          try { ids = JSON.parse(String(r.video_ids_json || '[]')) || []; } catch (e) { ids = []; }
+          const got = await adVideoThumbFetch(env, String(r.account), ids[0] || '', String(r.item_id));
+          let day = null, source = '', thumb = String(got.thumb || ''), note = (got.tried || []).join('; ').slice(0, 300);
+          if (thumb) { const dec = adVideoThumbDate(thumb); if (dec.day) { day = dec.day; source = got.source; } else note = (note + '; decode: ' + dec.note).slice(0, 300); }
+          if (!day) {
+            /* THE LISTER'S OWN RECORD, marked as such: it is the day the stage was ticked and not the
+               day eBay stored the file, so it is used only when eBay gave us nothing. */
+            const lad = await env.DB.prepare("SELECT updated_at FROM listing_ladder WHERE item_id = ?1 AND UPPER(COALESCE(video_status, '')) = 'DONE'").bind(String(r.item_id)).first().catch(() => null);
+            const u = String((lad && lad.updated_at) || '').slice(0, 10);
+            if (/^\d{4}-\d{2}-\d{2}$/.test(u)) { day = u; source = 'lister record'; }
+          }
+          return { row: r, day: day, source: source, thumb: thumb, note: note };
+        }));
+        for (const f of found) {
+          let source = f.source;
+          if (f.day) dated++; else { source = 'unknown date'; lost++; }
+          stmts.push(env.DB.prepare("UPDATE adtool_listing_video SET video_added_on = ?3, date_source = ?4, thumb_url = ?5, note = ?6, date_checked_at = datetime('now') WHERE account = ?1 AND item_id = ?2")
+            .bind(String(f.row.account), String(f.row.item_id), f.day, source, f.thumb, f.note));
         }
-        if (day) dated++; else { source = 'unknown date'; lost++; }
-        stmts.push(env.DB.prepare("UPDATE adtool_listing_video SET video_added_on = ?3, date_source = ?4, thumb_url = ?5, note = ?6, date_checked_at = datetime('now') WHERE account = ?1 AND item_id = ?2")
-          .bind(String(r.account), String(r.item_id), day, source, thumb, note));
+        if (batch.length < slice.length) { stopped = 'cap'; break; }
       }
       written += await adtBatch(env, stmts);
     }
     const covered = await env.DB.prepare('SELECT COUNT(*) AS n, SUM(CASE WHEN video_count > 0 THEN 1 ELSE 0 END) AS v FROM adtool_listing_video').first().catch(() => null);
     notes.push(asked + ' asked about, ' + withVideo + ' carry a video, ' + dated + ' dated, ' + lost + ' with no date eBay would give us');
     if (refused) notes.push(refused + ' refused by eBay');
+    /* WHAT THE RUN COST AND WHAT ENDED IT. A run that covered a third of the fleet and a run that
+       managed thirty listings read the same without these two, and they are the only way anybody
+       reading the job list can tell a healthy hour from a starved one. The seconds are measured, not
+       the ceiling, and the ceilings themselves are not printed here: they are on the probe, read from
+       the constants, so there is no figure in this sentence to go stale when one of them changes. */
+    notes.push(fetches + ' reads in ' + Math.round((Date.now() - began) / 1000) + 's');
+    notes.push(stopped === 'deadline' ? 'its own clock stopped it, so there are listings it did not reach'
+      : stopped === 'cap' ? 'its own fetch cap stopped it, so there are listings it did not reach'
+      : 'neither the clock nor the cap stopped it');
     if (covered) notes.push('on record: ' + (Number(covered.n) || 0) + ' listings, ' + (Number(covered.v) || 0) + ' with a video');
     await adtJobEnd(env, 'adtoolVideoSweep', t, written, 'ok', notes.join('; '));
   } catch (e) { await adtJobEnd(env, 'adtoolVideoSweep', t, written, 'error', String((e && e.message) || e)); throw e; }
@@ -24824,6 +24926,107 @@ const ROUTES = {
         sent_to_ebay: false,
         read_errors: readErrors,
         computed_at: new Date().toISOString(),
+      };
+    },
+  },
+
+  /* THE FRESHNESS EVIDENCE, BY KEY (owner's brief, 31 Oct, §6.7). Everything this tool says about
+     today stands on the five-minute reading, and until now the only way to see whether that reading
+     is landing was to open the Data health page in a browser with a portal session. This route is the
+     same evidence off the same function, so a night check or a manager with the key can settle "are
+     today's figures real" without one.
+     AUTHENTICATED EXACTLY AS backupDump IS: auth 'sync', so the SYNC_KEY and nothing else. NOT named
+     with the adtool prefix on purpose — the dispatcher refuses an action whose name begins with it
+     unless the CALLER holds an advertising role, and a key route has no caller to hold one.
+     IT WRITES NOTHING AND IT SENDS NOTHING. Four reads of the portal's own tables, no eBay call of
+     any kind, and no statement that changes a row: the runs are grouped out of the ticks the sampler
+     already left behind, and the A23 state is read from the alert table as the alerts job wrote it. */
+  adsFreshnessProbe: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const env = ctx.env;
+      const readErrors = [];
+      const q = async (what, sql, binds) => {
+        try {
+          const st = env.DB.prepare(sql);
+          const rs = await ((binds && binds.length) ? st.bind(...binds) : st).all();
+          return (rs && rs.results) || [];
+        } catch (e) { readErrors.push(what + ': ' + String((e && e.message) || e).slice(0, 160)); return null; }
+      };
+      const now = new Date();
+      /* FR, the two thresholds, named as every other answer on this tool names them and read through
+         the one helper: a probe that judged a gap by its own pair would be the second opinion this
+         route exists to rule out. */
+      const FR = await adtoolFreshnessRules(env);
+      /* THE SAME PANEL THE PAGE GETS, off the same function: runs newest first, each with when it
+         started, how long its samples spread over, how many rows it carried and the gap back to the
+         one before it. A probe that grouped the ticks its own way would be a second opinion, and a
+         second opinion is the one thing evidence must not be. */
+      let sampler = null;
+      try { sampler = await adtSamplerPanel(env, FR, now); }
+      catch (e) { readErrors.push('sampler runs: ' + String((e && e.message) || e).slice(0, 160)); }
+      /* THE A23 STATE as the alerts job left it: open or not, and since when. Newest first and the
+         newest row only, because that is the one a reader is being asked about; cleared_at empty is
+         open, which is the same test the alerts screen itself draws. Null where the rule has never
+         fired, and never a nought or a date standing in for one. */
+      const a23Rows = await q('A23', "SELECT alert_id, severity, fired_at, last_seen_at, cleared_at, snoozed_until, acknowledged_by, acknowledged_at, payload_json FROM adtool_alerts WHERE rule_id = 'A23' ORDER BY fired_at DESC LIMIT 1");
+      const a23Row = (a23Rows || [])[0] || null;
+      let a23Payload = null;
+      if (a23Row) { try { a23Payload = JSON.parse(String(a23Row.payload_json || 'null')); } catch (e) { a23Payload = null; } }
+      const a23 = {
+        rule: 'A23', ever_fired: !!a23Row,
+        open: !!(a23Row && String(a23Row.cleared_at || '') === ''),
+        open_since: (a23Row && String(a23Row.cleared_at || '') === '') ? (a23Row.fired_at || null) : null,
+        fired_at: a23Row ? (a23Row.fired_at || null) : null,
+        last_seen_at: a23Row ? (a23Row.last_seen_at || null) : null,
+        cleared_at: (a23Row && String(a23Row.cleared_at || '') !== '') ? a23Row.cleared_at : null,
+        severity: a23Row ? (a23Row.severity || null) : null,
+        acknowledged_by: (a23Row && String(a23Row.acknowledged_by || '') !== '') ? a23Row.acknowledged_by : null,
+        acknowledged_at: (a23Row && String(a23Row.acknowledged_at || '') !== '') ? a23Row.acknowledged_at : null,
+        snoozed_until: (a23Row && String(a23Row.snoozed_until || '') !== '') ? a23Row.snoozed_until : null,
+        payload: a23Payload,
+        what_it_says: (ADTOOL_ALERT_RULES.A23 || {}).text || null,
+        why_it_matters: (ADTOOL_ALERT_RULES.A23 || {}).why_matters || null,
+      };
+      /* THE WINDOW. Outside it no sample CAN land, because eBay refuses a same-day report task filed
+         before midnight on its own Pacific clock, so silence out there is not a fault and neither the
+         badge nor A23 treats it as one. The verdict is a word rather than a flag, because that is the
+         question a reader is asking. Both figures are worked out from the Pacific zone at this
+         instant, never from a constant, or the answer would be wrong all winter. */
+      const nowMins = now.getUTCHours() * 60 + now.getUTCMinutes();
+      const inWindow = adtInSamplingWindow(now);
+      const windowState = {
+        verdict: inWindow ? 'inside' : 'outside',
+        inside: inWindow,
+        opens_at: adtSamplingFromText(now),
+        window: adtSamplingWindowText(now),
+        /* the grace the alert keeps after the window opens, while eBay's first task of the day is
+           still building: the alert and this line read the one figure, so a reader cannot be told
+           silence is a fault at a minute when the alert would not have said so. */
+        grace_min: ADTOOL_SAMPLER_ALERT_GRACE_MIN,
+        alert_judging_now: inWindow && nowMins >= adtSamplingFromMin(now) + ADTOOL_SAMPLER_ALERT_GRACE_MIN,
+        why: inWindow
+          ? 'eBay has let a same-day report task be filed, so a sample can land and silence counts'
+          : 'eBay will not accept a same-day report task yet, so no sample can land and silence is not a fault',
+      };
+      /* the flags behind the reading itself, so a panel showing nothing can be told apart from a
+         sampler somebody switched off. */
+      const flags = await q('flags', "SELECT key, value, updated_at FROM portal_config WHERE key IN ('adtool_today', 'adtool_fresh_amber_min', 'adtool_fresh_red_min') ORDER BY key");
+      const span = ((await q('ticks', 'SELECT COUNT(*) AS samples, MIN(sampled_at) AS first, MAX(sampled_at) AS last FROM adtool_intraday_ticks')) || [])[0] || null;
+      return {
+        every_min: ADTOOL_SAMPLER_EVERY_MIN,
+        freshness_rules: FR,
+        freshness_keys: ADTOOL_FRESH_CONFIG_KEYS,
+        sampler: sampler,
+        a23: a23,
+        sampling_window: windowState,
+        ticks: span ? { samples: Number(span.samples) || 0, first: span.first || null, last: span.last || null } : null,
+        flags: flags,
+        uk_now: adtUkParts(now.getTime()),
+        where_to_look: 'Data health, under Sampler runs',
+        sent_to_ebay: false,
+        writes: 'none',
+        read_errors: readErrors,
+        computed_at: now.toISOString(),
       };
     },
   },
