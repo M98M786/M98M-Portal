@@ -21778,6 +21778,13 @@ const ROUTES = {
         /^\/sell\/inventory\/v1\/offer(\?|$)/, /^\/sell\/inventory\/v1\/offer\/[^/?]+$/, /^\/sell\/inventory\/v1\/offer\/[^/?]+\/publish$/,
         /^\/sell\/inventory\/v1\/location(\?|$)/, /^\/sell\/inventory\/v1\/inventory_item_group\/[^/?]+$/,
         /^\/sell\/account\/v1\/[a-z_]+(\?|$)/,
+        /* 31 Oct (owner): every listing of a connected account into its dynamic General campaign —
+           read campaigns + ads, create a campaign, add ads by listing id. No pause/delete here. */
+        /^\/sell\/marketing\/v1\/ad_campaign(\?|$)/, /^\/sell\/marketing\/v1\/ad_campaign\/\d+$/,
+        /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/ad(\?|$)/,
+        /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/get_ads_by_listing_id(\?|$)/,
+        /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_create_ads_by_listing_id$/,
+        /^\/sell\/marketing\/v1\/ad_campaign\/find_campaign_by_ad_reference(\?|$)/,
       ];
       if (!ok.some((r) => r.test(path))) throw new Error('SAY: path not allowed');
       if (['GET', 'POST'].indexOf(method) < 0) throw new Error('SAY: GET or POST only');
