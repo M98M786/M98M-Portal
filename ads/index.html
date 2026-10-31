@@ -866,7 +866,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261030-1956';
+var BUILD = '20261031-0005';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9428,9 +9428,8 @@ VIEW_CSS.push(
           '<div class="scroll" style="max-height:260px"><table class="tr-tbl"><thead><tr>' +
           '<th>Listing</th><th>Views</th><th>Sold</th><th>Conversion</th></tr></thead><tbody>';
         lows.forEach(function (r) {
-          h += '<tr><td><a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
-            esc(String(r.title || r.item_id).slice(0, 70)) + '</a>' +
-            '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(String(r.item_id)) + ' \u00b7 ' + esc(String(r.account)) + '</div></td>' +
+          /* owner, 31 Oct: the portal's standard listing cell (image, Product history, item number, account, eBay, History) */
+          h += '<tr><td>' + adtProductCell(r) + '</td>' +
             '<td>' + trN(r.views) + '</td><td>' + (r.transactions || 0) + '</td>' +
             '<td style="color:var(--bad);font-weight:800">' + (Number(r.cvr_l) || 0).toFixed(2) + '%</td></tr>';
         });
@@ -9447,9 +9446,7 @@ VIEW_CSS.push(
         rows.forEach(function (r) {
           var lctr = r.impressions ? (r.views / r.impressions * 100).toFixed(2) : '0.00';
           var lcvr = r.views ? (r.transactions / r.views * 100).toFixed(2) : '0.00';
-          h += '<tr><td><a href="https://www.ebay.co.uk/itm/' + esc(String(r.item_id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' +
-            esc(String(r.title || r.item_id).slice(0, 80)) + '</a>' +
-            '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(String(r.item_id)) + ' · ' + esc(String(r.account)) + '</div></td>' +
+          h += '<tr><td>' + adtProductCell(r) + '</td>' +
             '<td>' + trN(r.impressions) + '</td><td>' + trN(r.views) + '</td><td>' + (r.transactions || 0) + '</td>' +
             '<td>' + lctr + '%</td><td>' + lcvr + '%</td></tr>';
         });

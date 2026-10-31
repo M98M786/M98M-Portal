@@ -15245,7 +15245,7 @@ const ROUTES = {
         'WHERE date >= ?1 AND date <= ?2' + (account ? ' AND account = ?3' : '') + ' ORDER BY date'
       ).bind(...[dFrom, dTo].concat(account ? [account] : [])).all();
       const listings = await ctx.env.DB.prepare(
-        'SELECT t.account, t.item_id, t.impressions, t.views, t.transactions, i.title, i.status AS listing_status ' +
+        'SELECT t.account, t.item_id, t.impressions, t.views, t.transactions, i.title, i.status AS listing_status, i.image AS image ' +
         'FROM traffic_listing t LEFT JOIN items_api i ON i.item_id = t.item_id ' +
         'WHERE t.range_days = ?1' + (account ? ' AND t.account = ?2' : '') +
         ' ORDER BY t.impressions DESC LIMIT 200'
