@@ -13,13 +13,21 @@
   'use strict';
 
   var PR_ROLES = ['Management', 'Ops Head', 'Pricing'];
-  var PR = { data: null, acct: '', tab: 'revise', q: '', seg: 'all', sort: 'gap', showKept: false, onlySold: true, detail: null, mode: prLoadMode() };
+  var PR = { data: null, acct: '', tab: 'revise', q: '', seg: 'all', sort: 'gap', dir: 1, supSort: 'verdict', supDir: 1, decSort: 'at', decDir: -1, showKept: false, onlySold: true, detail: null, mode: prLoadMode() };
   var PR_SEG = {
     raise: ['Raise price', 'bad'], ads_high: ['Ads too high', 'warn'], reduce: ['Room to reduce', 'gold'], on_target: ['On target', 'ok'],
     dormant: ['No sales · 14d', 'mute'], spending_no_sales: ['Spending, no sales', 'bad'], cost_missing: ['Cost missing', 'warn']
   };
   var PR_TIER = { critical: ['Critical alert', 'bad'], red: ['Red alert', 'bad'], serious: ['Serious risk', 'warn'], moderate: ['Moderate risk', 'gold'], low: ['Low risk', 'mute'], '': ['Under 10p', 'mute'] };
   var PR_VERDICT = { downgrade: ['Downgrade — change supplier', 'bad'], watch: ['Watch', 'warn'], continue: ['Continue', 'ok'] };
+  /* 1 Nov (owner: "there are no options for sorting of numbers in price revision tab"): EVERY column
+     on every table here sorts — click a header to sort by it, click it again to reverse. A blank
+     ("—": no cost, no target, nothing sold) always sits at the bottom whichever way the arrow points,
+     so an unjudgeable listing never heads the list. The chips above the table stay as one-click
+     presets and light up when the sort matches one. */
+  var PR_SEG_RANK = { raise: 0, ads_high: 1, spending_no_sales: 2, cost_missing: 3, reduce: 4, on_target: 5, dormant: 6 };
+  var PR_TIER_RANK = { critical: 0, red: 1, serious: 2, moderate: 3, low: 4, '': 5 };
+  var PR_VERDICT_RANK = { downgrade: 0, watch: 1, continue: 2 };
   var PR_SRC = { sheet: '', orders: 'cost from orders', 'orders 180d': 'cost from older orders', hunt: 'cost from the hunt', link: 'cost from the link' };
 
   VIEW_CSS.push(
@@ -44,6 +52,8 @@
     '.pr-tbl{width:100%;border-collapse:collapse;font-size:12px}.pr-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:800;padding:7px 8px;text-align:right;border-bottom:1px solid var(--gold-line);white-space:nowrap}' +
     '.pr-tbl td{padding:8px;border-bottom:1px solid var(--gold-line);text-align:right;font-variant-numeric:tabular-nums;vertical-align:top;white-space:nowrap}' +
     '.pr-tbl th.l,.pr-tbl td.l{text-align:left}.pr-tbl td.w{white-space:normal}.pr-tbl tr.hot td{background:var(--bad-soft)}' +
+    '.pr-tbl th.s{cursor:pointer;user-select:none}.pr-tbl th.s:hover{color:var(--text-2)}.pr-tbl th.s.on{color:var(--gold-a)}' +
+    '.pr-ar{display:inline-block;width:9px;font-size:8px;margin-left:3px;vertical-align:1px}' +
     '.pr-scroll{overflow:auto;max-height:680px}' +
     '.pr-item{display:flex;gap:9px;align-items:flex-start;min-width:260px;max-width:360px;white-space:normal}' +
     '.pr-item img{width:40px;height:40px;border-radius:8px;object-fit:cover;flex:none;background:var(--panel-2)}' +
@@ -223,22 +233,80 @@
     if (PR.q) { var q = PR.q.toLowerCase(); out = out.filter(function (r) { return prS(r.title).toLowerCase().indexOf(q) >= 0 || prS(r.item_id).indexOf(q) >= 0 || prS(r.supplier).toLowerCase().indexOf(q) >= 0; }); }
     return out;
   }
-  function prSorted(rows) {
-    var s = PR.sort, out = rows.slice();
-    var g = function (r) { var v = F(r, 'gap'); return v === null || v === undefined ? 99 : prN(v); };
-    var a = function (r) { var v = F(r, 'actual'); return v === null || v === undefined ? 99 : prN(v); };
-    if (s === 'gap') { out.sort(function (x, y) { return g(x) - g(y); }); }
-    else if (s === 'actual') { out.sort(function (x, y) { return a(x) - a(y); }); }
-    else if (s === 'units') { out.sort(function (x, y) { return prN(y.units_30d) - prN(x.units_30d); }); }
-    else if (s === 'cpc') { out.sort(function (x, y) { return prN(y.cpc_per_unit_14d) - prN(x.cpc_per_unit_14d); }); }
-    else if (s === 'short') { out.sort(function (x, y) { return (Math.max(0, -g(y)) * prN(y.units_30d)) - (Math.max(0, -g(x)) * prN(x.units_30d)); }); }
-    return out;
+  /* The three tables' columns. `get` returns the value to sort on (null/'' = blank, always last);
+     `dir` is the direction a first click uses — money and counts open biggest-first, a gap or a
+     profit opens worst-first, words open A→Z. `text` compares as words, not numbers. */
+  var PR_COLS = {
+    item: { label: 'Listing', cls: 'l', text: true, dir: 1, get: function (r) { return prS(r.title) || prS(r.item_id); } },
+    paid: { label: 'Buyers pay', dir: -1, get: function (r) { return r.paid; } },
+    ali: { label: 'Ali cost', dir: -1, get: function (r) { return r.ali || null; } },
+    actual: { label: 'Actual / unit', dir: 1, sub: function () { return prModeLabel(true); }, get: function (r) { return F(r, 'actual'); } },
+    target: { label: 'Target', dir: -1, get: function (r) { return r.target; } },
+    gap: { label: 'Gap', dir: 1, get: function (r) { return F(r, 'gap'); } },
+    units30: { label: 'Sold 30d', dir: -1, get: function (r) { return r.units_30d || null; } },
+    units14: { label: 'Sold 14d', dir: -1, get: function (r) { return r.units_14d || null; } },
+    cpc: { label: 'CPC / unit 14d', dir: -1, get: function (r) { return r.units_14d ? r.cpc_per_unit_14d : null; } },
+    spend14: { label: 'Ads 14d', dir: -1, get: function (r) { return prN(r.spend_14d) || null; } },
+    verdict: { label: 'Verdict', cls: 'l', dir: 1, get: function (r) { var v = PR_SEG_RANK[F(r, 'segment')]; return v === undefined ? null : v; } },
+    /* chip-only: the money the gap is costing a month at today's volume */
+    short: { dir: -1, get: function (r) { var g = F(r, 'gap'); return (g === null || g === undefined) ? null : Math.max(0, -prN(g)) * prN(r.units_30d); } }
+  };
+  var PR_SUP_COLS = {
+    supplier: { label: 'Supplier', cls: 'l', text: true, dir: 1, get: function (s) { return prS(s.supplier); } },
+    verdict: { label: 'Verdict', cls: 'l', dir: 1, get: function (s) { var v = PR_VERDICT_RANK[s.verdict]; return v === undefined ? null : v; } },
+    items: { label: 'Items', dir: -1, get: function (s) { return s.items; } },
+    changes: { label: 'Moves 30d', dir: -1, get: function (s) { return s.changes_30d; } },
+    rises: { label: 'Rises / drops', dir: -1, get: function (s) { return s.rises_30d; } },
+    drift: { label: 'Drift / item', dir: -1, get: function (s) { return prN(s.drift_30d) || null; } },
+    worst: { label: 'Worst', cls: 'l', dir: 1, get: function (s) { var v = PR_TIER_RANK[s.worst_tier]; return v === undefined ? null : v; } },
+    days: { label: 'Days moved', dir: -1, get: function (s) { return s.days_changed_30d; } },
+    streak: { label: 'Streak', dir: -1, get: function (s) { return s.streak > 1 ? s.streak : null; } },
+    last: { label: 'Last move', cls: 'l', text: true, dir: -1, get: function (s) { return prS(s.last_change); } }
+  };
+  var PR_DEC_COLS = {
+    at: { label: 'When', cls: 'l', text: true, dir: -1, get: function (x) { return prS(x.at); } },
+    listing: { label: 'Listing', cls: 'l', text: true, dir: 1, get: function (x) { var r = prRow(x.item_id); return prS(r && r.title) || prS(x.item_id); } },
+    verdict: { label: 'Verdict', cls: 'l', text: true, dir: 1, get: function (x) { return prS(x.verdict); } },
+    price_now: { label: 'Price then', dir: -1, get: function (x) { return x.price_now; } },
+    price_target: { label: 'Aimed at', dir: -1, get: function (x) { return x.price_target; } },
+    note: { label: 'Note', cls: 'l', text: true, dir: 1, get: function (x) { return prS(x.note); } },
+    by: { label: 'By', cls: 'l', text: true, dir: 1, get: function (x) { return prS(x.by_email); } },
+    task: { label: 'Task', cls: 'l', text: true, dir: 1, get: function (x) { return prS(x.task_id); } }
+  };
+  function prBlank(v) { return v === null || v === undefined || v === '' || (typeof v === 'number' && !isFinite(v)); }
+  function prSortRows(rows, reg, key, dir) {
+    var col = reg[key];
+    if (!col) { return rows.slice(); }
+    return rows.slice().sort(function (x, y) {
+      var a = col.get(x), b = col.get(y), ab = prBlank(a), bb = prBlank(b);
+      if (ab || bb) { return ab && bb ? 0 : ab ? 1 : -1; }      // blanks last, whichever way the arrow points
+      return col.text ? dir * String(a).localeCompare(String(b)) : dir * (prN(a) - prN(b));
+    });
   }
+  /* the header row: a clickable <th> per column, the sorted one carrying its arrow */
+  function prHead(reg, keys, key, dir, attr) {
+    return keys.map(function (k) {
+      var col = reg[k], on = key === k;
+      return '<th class="s' + (col.cls ? ' ' + col.cls : '') + (on ? ' on' : '') + '" data-' + attr + '="' + k + '"' +
+        ' title="Sort by ' + esc(col.label) + (on ? (dir === 1 ? ' — now lowest first, click to reverse' : ' — now highest first, click to reverse') : '') + '">' +
+        esc(col.label) + '<span class="pr-ar">' + (on ? (dir === 1 ? '▲' : '▼') : '') + '</span>' +
+        (col.sub ? '<div class="pr-sub">' + esc(col.sub()) + '</div>' : '') + '</th>';
+    }).join('');
+  }
+  /* a header click: the same column reverses, a new one opens the way that column reads best */
+  function prSortClick(key, reg, sKey, dKey) {
+    if (PR[sKey] === key) { PR[dKey] = -PR[dKey]; }
+    else { PR[sKey] = key; PR[dKey] = (reg[key] && reg[key].dir) || 1; }
+    prPaint();
+  }
+  var PR_PRESETS = { gap: ['gap', 1], short: ['short', -1], actual: ['actual', 1], units: ['units30', -1], cpc: ['cpc', -1] };
+  function prSorted(rows) { return prSortRows(rows, PR_COLS, PR.sort, PR.dir); }
   function prTable(rows, withActions, kind) {
     var ads = PR.mode === 'ads';
-    var h = '<div class="pr-scroll"><table class="pr-tbl"><thead><tr><th class="l">Listing</th><th>Buyers pay</th><th>Ali cost</th><th>Actual / unit<div class="pr-sub">' + esc(prModeLabel(true)) + '</div></th><th>Target</th><th>Gap</th>' +
-      '<th>Sold 30d</th><th>Sold 14d</th>' + (ads ? '<th>CPC / unit 14d</th>' : '') + '<th>Ads 14d</th><th class="l">Verdict</th>' + (withActions ? '<th></th>' : '') + '</tr></thead><tbody>';
-    var cols = ads ? 12 : 11;
+    var keys = ['item', 'paid', 'ali', 'actual', 'target', 'gap', 'units30', 'units14'].concat(ads ? ['cpc'] : []).concat(['spend14', 'verdict']);
+    var h = '<div class="pr-scroll"><table class="pr-tbl"><thead><tr>' + prHead(PR_COLS, keys, PR.sort, PR.dir, 'pr-col') +
+      (withActions ? '<th></th>' : '') + '</tr></thead><tbody>';
+    var cols = keys.length + (withActions ? 1 : 0);
     if (!rows.length) { h += '<tr><td colspan="' + cols + '" class="l"><div class="empty">Nothing here.</div></td></tr>'; }
     rows.slice(0, 700).forEach(function (r) {
       var actual = F(r, 'actual'), other = r[prOtherPfx() + 'actual'];
@@ -281,7 +349,12 @@
     box.innerHTML = h;
     box.querySelectorAll('[data-pr-tab]').forEach(function (x) { x.onclick = function () { PR.tab = this.getAttribute('data-pr-tab'); PR.seg = 'all'; prPaint(); }; });
     box.querySelectorAll('[data-pr-seg]').forEach(function (x) { x.onclick = function () { PR.seg = this.getAttribute('data-pr-seg'); prPaint(); }; });
-    box.querySelectorAll('[data-pr-sort]').forEach(function (x) { x.onclick = function () { PR.sort = this.getAttribute('data-pr-sort'); prPaint(); }; });
+    box.querySelectorAll('[data-pr-sort]').forEach(function (x) {
+      x.onclick = function () { var p = PR_PRESETS[this.getAttribute('data-pr-sort')]; if (p) { PR.sort = p[0]; PR.dir = p[1]; prPaint(); } };
+    });
+    box.querySelectorAll('[data-pr-col]').forEach(function (x) { x.onclick = function () { prSortClick(this.getAttribute('data-pr-col'), PR_COLS, 'sort', 'dir'); }; });
+    box.querySelectorAll('[data-pr-scol]').forEach(function (x) { x.onclick = function () { prSortClick(this.getAttribute('data-pr-scol'), PR_SUP_COLS, 'supSort', 'supDir'); }; });
+    box.querySelectorAll('[data-pr-dcol]').forEach(function (x) { x.onclick = function () { prSortClick(this.getAttribute('data-pr-dcol'), PR_DEC_COLS, 'decSort', 'decDir'); }; });
     var kept = $('prKept');
     if (kept) { kept.onclick = function () { PR.showKept = !PR.showKept; prPaint(); }; }
     var sold = $('prSold');
@@ -297,7 +370,7 @@
     var unsold = rows.filter(function (r) { return !r.units_30d && F(r, 'segment') !== 'spending_no_sales'; }).length;
     if (PR.onlySold) { rows = rows.filter(function (r) { return r.units_30d > 0 || F(r, 'segment') === 'spending_no_sales'; }); }
     rows = prSorted(prFiltered(rows));
-    var chip = function (k, l) { return '<button class="pr-chip' + (PR.sort === k ? ' on' : '') + '" data-pr-sort="' + k + '">' + l + '</button>'; };
+    var chip = function (k, l) { var p = PR_PRESETS[k]; return '<button class="pr-chip' + (PR.sort === p[0] && PR.dir === p[1] ? ' on' : '') + '" data-pr-sort="' + k + '">' + l + '</button>'; };
     return '<div class="pr-tools"><span class="pr-sub">sort</span>' + chip('gap', 'Furthest from target') + chip('short', 'Most money short') + chip('actual', 'Lowest profit') + chip('units', 'Most sold') + (PR.mode === 'ads' ? chip('cpc', 'Highest CPC') : '') +
       (unsold ? '<button class="pr-chip' + (PR.onlySold ? ' on' : '') + '" id="prSold">' + (PR.onlySold ? 'sold in 30 days only · ' + unsold + ' unsold hidden' : 'showing ' + unsold + ' unsold too') + '</button>' : '') +
       (hidden ? '<button class="pr-chip' + (PR.showKept ? ' on' : '') + '" id="prKept">' + (PR.showKept ? 'hide' : 'show') + ' ' + hidden + ' kept in the last 14 days</button>' : '') +
@@ -313,7 +386,7 @@
     if (PR.seg !== 'all') { rows = rows.filter(function (r) { return PR.seg === 'loss' ? F(r, 'loss') : F(r, 'segment') === PR.seg; }); }
     rows = prSorted(prFiltered(rows));
     var chip = function (k, l, n) { return '<button class="pr-chip' + (PR.seg === k ? ' on' : '') + '" data-pr-seg="' + k + '">' + l + (n !== undefined ? ' <b>' + n + '</b>' : '') + '</button>'; };
-    var schip = function (k, l) { return '<button class="pr-chip' + (PR.sort === k ? ' on' : '') + '" data-pr-sort="' + k + '">' + l + '</button>'; };
+    var schip = function (k, l) { var p = PR_PRESETS[k]; return '<button class="pr-chip' + (PR.sort === p[0] && PR.dir === p[1] ? ' on' : '') + '" data-pr-sort="' + k + '">' + l + '</button>'; };
     var segs = PR.mode === 'ads' ? ['raise', 'ads_high', 'reduce', 'on_target', 'spending_no_sales', 'dormant', 'cost_missing'] : ['raise', 'reduce', 'on_target', 'cost_missing'];
     var lossN = rows.length ? (d.rows || []).filter(function (r) { return F(r, 'loss'); }).length : 0;
     return '<div class="pr-tools">' + chip('all', 'All', (d.rows || []).length) +
@@ -355,8 +428,10 @@
     var d = PR.data, sups = d.suppliers || [];
     if (!sups.length) { return '<div class="hu-hint">No supplier cost moves recorded yet. From today every change the Main Sheet shows is kept, and suppliers are assessed on their last 30 days here.</div>'; }
     var h = '<div class="pr-sub" style="margin-bottom:6px">Assessed on the last 30 days of cost moves (90 days kept): <b>downgrade</b> = a red or critical rise, four rises, or moves on three days running · <b>watch</b> = two rises, a moderate-or-worse rise, or 20p+ drift per item · otherwise <b>continue</b>. A supplier the Main Sheet names only by its link is grouped by that link.</div>' +
-      '<div class="pr-scroll"><table class="pr-tbl"><thead><tr><th class="l">Supplier</th><th class="l">Verdict</th><th>Items</th><th>Moves 30d</th><th>Rises / drops</th><th>Drift / item</th><th class="l">Worst</th><th>Days moved</th><th>Streak</th><th class="l">Last move</th><th class="l">Listings</th></tr></thead><tbody>';
-    sups.forEach(function (s) {
+      '<div class="pr-scroll"><table class="pr-tbl"><thead><tr>' +
+      prHead(PR_SUP_COLS, ['supplier', 'verdict', 'items', 'changes', 'rises', 'drift', 'worst', 'days', 'streak', 'last'], PR.supSort, PR.supDir, 'pr-scol') +
+      '<th class="l">Listings</th></tr></thead><tbody>';
+    prSortRows(sups, PR_SUP_COLS, PR.supSort, PR.supDir).forEach(function (s) {
       h += '<tr' + (s.verdict === 'downgrade' ? ' class="hot"' : '') + '><td class="l w" style="max-width:220px"><b>' + (/^https?:\/\//i.test(prS(s.supplier)) ? prSupHtml(s.supplier) : esc(prS(s.supplier).slice(0, 60))) + '</b><div class="pr-sub">' + esc((s.accounts || []).join(', ')) + '</div></td>' +
         '<td class="l w" style="max-width:240px">' + prTag(PR_VERDICT, s.verdict) + '<div class="pr-sub">' + esc(prS(s.why)) + '</div></td>' +
         '<td>' + s.items + '</td><td>' + s.changes_30d + '<div class="pr-sub">' + s.changes_90d + ' in 90d</div></td><td>' + s.rises_30d + ' / ' + s.drops_30d + '</td>' +
@@ -372,8 +447,9 @@
   function prTabDecisions() {
     var d = PR.data, decs = d.decisions || [];
     if (!decs.length) { return '<div class="hu-hint">No decisions recorded yet.</div>'; }
-    var h = '<div class="pr-scroll"><table class="pr-tbl"><thead><tr><th class="l">When</th><th class="l">Listing</th><th class="l">Verdict</th><th>Price then</th><th>Aimed at</th><th class="l">Note</th><th class="l">By</th><th class="l">Task</th></tr></thead><tbody>';
-    decs.forEach(function (x) {
+    var h = '<div class="pr-scroll"><table class="pr-tbl"><thead><tr>' +
+      prHead(PR_DEC_COLS, ['at', 'listing', 'verdict', 'price_now', 'price_target', 'note', 'by', 'task'], PR.decSort, PR.decDir, 'pr-dcol') + '</tr></thead><tbody>';
+    prSortRows(decs, PR_DEC_COLS, PR.decSort, PR.decDir).forEach(function (x) {
       var r = prRow(x.item_id);
       h += '<tr><td class="l">' + prWhen(x.at) + '</td><td class="l w" style="max-width:300px"><a data-pr-open="' + esc(prS(x.item_id)) + '" class="mono" style="color:var(--gold-a);cursor:pointer">' + esc(prS(x.item_id)) + '</a> · ' + esc(prS(x.account)) + (r ? '<div class="pr-sub">' + esc(prS(r.title).slice(0, 70)) + '</div>' : '') + '</td>' +
         '<td class="l"><span class="pr-tag ' + (x.verdict === 'end' ? 'bad' : x.verdict === 'revise' ? 'gold' : x.verdict === 'flag' ? 'warn' : 'mute') + '">' + esc(prS(x.verdict)) + '</span>' + (x.segment ? '<div class="pr-sub">' + esc((PR_SEG[x.segment] || [x.segment])[0]) + '</div>' : '') + '</td>' +
