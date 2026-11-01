@@ -18293,6 +18293,120 @@ function srIsItemRow(vals) {
   if (!t) return false;
   return !/^(grand\s*)?totals?$/i.test(t);
 }
+/* 1 Nov (owner: "add item links, product history in the P&L page of sales analysis, and show
+   previous sold history with the portal's standards"). The Sales Analysis day tabs carry NO item
+   number — column A, the Item Title, is the only identifier, the same wall the signals engine hit —
+   so a P&L row is resolved to its listing BY TITLE against items_api: the row's own account first,
+   then any account, then a long shared opening for a title eBay has since been edited (iPhone 17 →
+   18 and the like). A row that does not resolve keeps its plain title and says so, because a wrong
+   link on a money page is worse than no link. */
+function srTitleKey(s) {
+  return String(s == null ? '' : s).replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#0?39;/g, "'")
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+/* The near-match rule, for a title eBay has been edited since the book row was typed (a model
+   inserted: "iPhone 17 16 15" → "iPhone 18 17 16 15"). It has to be strict, because this catalogue
+   is full of listings whose titles differ by one word, and a wrong link on a money page is worse
+   than none: the candidate must share 80% of its words AND be a clear winner over the runner-up.
+   Two near-identical case listings therefore resolve to neither, which is the honest answer. */
+const SR_NEAR_MIN = 0.80, SR_NEAR_EDGE = 0.15, SR_TOKENS_MIN = 5;
+function srTokens(key) {
+  const seen = {}, out = [];
+  for (const w of String(key).split(' ')) { if (w && !seen[w]) { seen[w] = 1; out.push(w); } }
+  return out;
+}
+function srJaccard(a, b) {
+  if (!a.length || !b.length) return 0;
+  const inB = {};
+  for (const w of b) inB[w] = 1;
+  let hit = 0;
+  for (const w of a) if (inB[w]) hit++;
+  return hit / (a.length + b.length - hit);
+}
+async function srAttachListings(env, items) {
+  const out = { matched: 0, of: items.length, by: { account: 0, any: 0, prefix: 0 } };
+  if (!items.length) return out;
+  const rs = await env.DB.prepare(
+    'SELECT item_id, account, title, image, price, status, start_time, first_seen, api_synced_at FROM items_api'
+  ).all().catch(() => ({ results: [] }));
+  /* one listing per title: a live one beats an ended one, then the most recently synced */
+  const beats = (cur, cand) => {
+    const a = String(cur.status) === 'ACTIVE', b = String(cand.status) === 'ACTIVE';
+    if (a !== b) return b;
+    return String(cand.api_synced_at || '') > String(cur.api_synced_at || '');
+  };
+  const byAcct = {}, byAny = {}, keys = [];
+  let toks = null;                 // candidate token sets, built once and only if a near-match is needed
+  for (const it of (rs.results || [])) {
+    const k = srTitleKey(it.title);
+    if (!k) continue;
+    const ak = String(it.account) + '|' + k;
+    if (!byAcct[ak] || beats(byAcct[ak], it)) byAcct[ak] = it;
+    if (!byAny[k]) { byAny[k] = it; keys.push(k); } else if (beats(byAny[k], it)) byAny[k] = it;
+  }
+  const need = [];
+  for (const row of items) {
+    const k = srTitleKey(row.title);
+    if (!k) continue;
+    let hit = null, how = '';
+    for (const a of (row.account_list || [])) { if (byAcct[a + '|' + k]) { hit = byAcct[a + '|' + k]; how = 'account'; break; } }
+    if (!hit && byAny[k]) { hit = byAny[k]; how = 'any'; }
+    if (!hit) {
+      const mine = srTokens(k);
+      if (mine.length >= SR_TOKENS_MIN) {
+        if (!toks) { toks = keys.map((kk) => ({ kk, t: srTokens(kk) })); }
+        let best = 0, bestKey = '', second = 0;
+        for (const c of toks) {
+          const j = srJaccard(mine, c.t);
+          if (j > best) { second = best; best = j; bestKey = c.kk; } else if (j > second) { second = j; }
+        }
+        if (best >= SR_NEAR_MIN && best - second >= SR_NEAR_EDGE) { hit = byAny[bestKey]; how = 'near'; }
+      }
+    }
+    if (!hit) continue;
+    out.matched++; out.by[how]++;
+    row.item_id = String(hit.item_id); row.account = String(hit.account); row.image = hit.image || '';
+    row.list_price = Number(hit.price) || 0; row.listing_status = String(hit.status || '');
+    row.match = how;
+    row.born = String(hit.start_time || hit.first_seen || '');
+    need.push(row);
+  }
+  if (!need.length) return out;
+  /* the sold history the rest of the portal shows: our own non-cancelled, non-refunded units over
+     7 / 14 / 30 days, plus every unit ever against the weeks the listing has been live inside the
+     order history — the Active-listings arithmetic, unchanged, so the two pages cannot disagree. */
+  const ids = need.map((r) => r.item_id);
+  const win = {}, ever = {};
+  for (let i = 0; i < ids.length; i += 90) {
+    const ch = ids.slice(i, i + 90), ph = ch.map((_, n) => '?' + (n + 1)).join(',');
+    for (const r of (((await env.DB.prepare(
+      "SELECT item_id, SUM(CASE WHEN created_at >= datetime('now','-7 day') THEN MAX(qty,1) ELSE 0 END) AS u7, " +
+      "SUM(CASE WHEN created_at >= datetime('now','-14 day') THEN MAX(qty,1) ELSE 0 END) AS u14, SUM(MAX(qty,1)) AS u30 " +
+      "FROM orders WHERE created_at >= datetime('now','-30 day') AND (refunded IS NULL OR refunded <= 0) AND status != 'CANCELLED' " +
+      'AND item_id IN (' + ph + ') GROUP BY item_id'
+    ).bind(...ch).all().catch(() => ({ results: [] }))).results) || [])) win[r.item_id] = r;
+    for (const r of (((await env.DB.prepare(
+      "SELECT item_id, SUM(MAX(qty,1)) AS u_all, MIN(created_at) AS first_order, MAX(created_at) AS last_order FROM orders " +
+      "WHERE (refunded IS NULL OR refunded <= 0) AND status != 'CANCELLED' AND item_id IN (" + ph + ') GROUP BY item_id'
+    ).bind(...ch).all().catch(() => ({ results: [] }))).results) || [])) ever[r.item_id] = r;
+  }
+  const floorRow = await env.DB.prepare("SELECT MIN(created_at) AS f FROM orders WHERE status != 'CANCELLED'").first().catch(() => null);
+  const floorMs = Date.parse(String((floorRow && floorRow.f) || '')) || 0;
+  const now = Date.now(), WEEK = 7 * 86400000;
+  for (const row of need) {
+    const w = win[row.item_id] || {}, a = ever[row.item_id] || {};
+    row.sold_7d = Number(w.u7) || 0; row.sold_14d = Number(w.u14) || 0; row.sold_30d = Number(w.u30) || 0;
+    row.sold_all = Number(a.u_all) || 0;
+    row.last_sold = String(a.last_order || '').slice(0, 10);
+    const bornMs = Date.parse(String(row.born || '')) || 0;
+    let since = Math.max(bornMs, floorMs);
+    if (!since) since = Date.parse(String(a.first_order || '')) || 0;
+    const weeks = since ? Math.max(1, (now - since) / WEEK) : 0;
+    row.weeks_covered = weeks ? Math.round(weeks * 10) / 10 : 0;
+    row.avg_week = weeks ? Math.round((row.sold_all / weeks) * 10) / 10 : null;
+  }
+  return out;
+}
 function srIsTotalRow(vals) {
   const t = String(vals['Item Title'] == null ? '' : vals['Item Title']).trim();
   return /^(grand\s*)?totals?$/i.test(t);
@@ -24138,11 +24252,15 @@ const ROUTES = {
         b.vat += srVal(v, 'VAT to HMRC');
       }
       const items = Object.values(by).map((b) => ({ title: b.title, accounts: Object.keys(b.accounts).join(', '),
+        account_list: Object.keys(b.accounts),
         qty: b.qty, sold: round2(b.sold), ali: round2(b.ali), ads: round2(b.ads), returns: round2(b.ret),
         raw: round2(b.raw), actual: round2(b.actual), vat: round2(b.vat), rows: b.rows }));
       const order = String(p.order || 'losses');
       items.sort(order === 'best' ? (a, b) => b.actual - a.actual : (a, b) => a.actual - b.actual);
-      return { from, to, account: account || 'all', n: items.length, items: items.slice(0, 200) };
+      const out = items.slice(0, 200);
+      const resolved = await srAttachListings(ctx.env, out);
+      return { from, to, account: account || 'all', n: items.length, items: out, resolved,
+        sold_note: 'The money columns are the book\'s own, for the range chosen. Sold 7 / 14 / 30 days and the weekly average are OUR order history for the listing the title resolved to — every non-cancelled, non-refunded unit, the same arithmetic the Active listings page uses — so they do not move with the range.' };
     },
   },
 
