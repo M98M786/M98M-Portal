@@ -41,16 +41,21 @@
      than as a day eBay has not finished counting. A day still filling is now named, kept out of
      the totals it would drag down, drawn hatched, and put beside the last full day for scale. */
 
-  function trLoad() {
+  /* 2 Nov (owner): this page refreshes itself every 2 minutes. A quiet refresh keeps what is on
+     screen while it fetches — no spinner, no flicker — so a figure only ever changes when a newer
+     one has actually arrived. The stamp beside Refresh says when that last happened. */
+  function trLoad(quiet) {
     var box = $('trBody');
     if (!box) { return; }
-    box.innerHTML = '<div class="spinner"></div>';
+    if (!quiet) { box.innerHTML = '<div class="spinner"></div>'; }
     var payload = { range: TR.range };
     if (TR.account) { payload.account = TR.account; }
     if (TR.mode === 'today') { payload.from = trShift(ukToday(), -6); payload.to = ukToday(); }
     else if ((TR.mode === 'custom' || TR.mode === 'd3') && TR.from && TR.to) { payload.from = TR.from; payload.to = TR.to; }
-    api('trafficBoard', payload).then(function (d) {
+    return api('trafficBoard', payload).then(function (d) {
       d = d || {};
+      var stamp = $('trStamp');
+      if (stamp) { stamp.textContent = 'updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · every 2 min'; }
       // fold per-account day rows into one series when "all accounts"
       var byDay = {};
       (d.days || []).forEach(function (r) {
@@ -200,7 +205,8 @@
             '<input type="date" id="trFrom" class="minibtn" style="padding:5px 6px"><input type="date" id="trTo" class="minibtn" style="padding:5px 6px">' +
             '<button class="minibtn" id="trApply">Apply</button>' +
             '<select class="alx-sel" id="trAcc"><option value="">All accounts</option></select>' +
-            '<button class="minibtn" id="trRefresh" style="margin-left:auto">Refresh</button></div>' +
+            '<span id="trStamp" style="margin-left:auto;font-size:10.5px;color:var(--text-3);font-weight:700;white-space:nowrap"></span>' +
+            '<button class="minibtn" id="trRefresh">Refresh</button></div>' +
           '<div id="trBody"><div class="spinner"></div></div>' +
         '</div></div>';
     },
@@ -251,8 +257,13 @@
         sel.onchange = function () { TR.account = String(this.value || ''); trLoad(); };
       });
       var rf = $('trRefresh');
-      if (rf) { rf.onclick = trLoad; }
+      /* onclick hands the handler a MouseEvent — passing trLoad straight in would make every
+         manual Refresh a QUIET one and drop the spinner the person just asked for */
+      if (rf) { rf.onclick = function () { trLoad(); }; }
       trLoad();
+      /* the shell's poller: it stops by itself when this page leaves the screen, skips a tick
+         while the tab is in the background, and gives up after repeated failures */
+      if (typeof adtPoll === 'function') { adtPoll('trBody', 120000, function () { return trLoad(true); }); }
     }
   };
 })();

@@ -1603,6 +1603,43 @@ function enterApp(user){
   /* TRUTH v2 WO-06/WO-10: My desk slims to the person's own work; Tools and Rules & SOPs live
      in a Library group at the bottom; Returns & INAD sits with Customer Service; Truth Check
      joins Management. Old entries stay reachable until their modules flip (R9). */
+  /* 2 Nov (owner): "I need to pin some pages on portals of management in my desk page — we need it
+     with this same arrangement of pages". Management's own running order, sitting under My desk and
+     open by default, in HIS order — not alphabetical and not the department order. Three of them
+     (the advertising Overview, Product history, Where each listing advertises) live only in the
+     /ads/ portal's sidebar and are hidden from this one; hidden has always meant "not listed, still
+     routable", so pinning them here is the one place they are reachable from the main portal.
+     A pinned entry is a SECOND link to the same page: it never removes that page from its own
+     department, which is why buildGroup is told not to claim it. */
+  var PIN_EMAILS = ['zaidkaleem987@gmail.com', 'm98m786@gmail.com', 'mrhasibullah91@gmail.com', 'mrhasibullah@googlemail.com'];
+  var PIN_KEYS = ['traffic', 'overview', 'adtoolOverview', 'dashboard', 'signals', 'adsCentre', 'activeListings',
+                  'adtoolProduct', 'adtoolItemCampaigns', 'adtoolPeak', 'adtoolStopped', 'potentialCpc', 'goLive', 'huntQueue'];
+  /* a label that reads right in a mixed list: "Overview" alone says nothing next to Business overview */
+  var PIN_LABEL = { adtoolOverview: 'Advertising overview', dashboard: 'Sales analysis', adtoolStopped: 'Activated & stopped' };
+  /* gmail treats dots and googlemail.com as the same mailbox, and Sir Hasib signs in under both
+     spellings — so compare the normalised address, never the typed one */
+  function pinNorm(e){
+    var s = String(e || '').trim().toLowerCase(), at = s.lastIndexOf('@');
+    if (at < 1) { return s; }
+    var local = s.slice(0, at).split('+')[0], host = s.slice(at + 1);
+    if (host === 'googlemail.com') { host = 'gmail.com'; }
+    if (host === 'gmail.com') { local = local.replace(/\./g, ''); }
+    return local + '@' + host;
+  }
+  var PIN_SET = {}; PIN_EMAILS.forEach(function(e){ PIN_SET[pinNorm(e)] = 1; });
+  function pinnedViews(){
+    /* the /ads/ portal carries only the advertising views, so this set would come out half-empty
+       there — it belongs to the main portal's sidebar and nowhere else */
+    if (window.M98M_ADS_ONLY) { return []; }
+    if (!STATE.user || !PIN_SET[pinNorm(STATE.user.email)]) { return []; }
+    return PIN_KEYS.map(function(k){
+      var v = VIEWS[k];
+      if (!v) { return null; }
+      v.key = k;
+      if (!canSee(v)) { return null; }                 // the role gate still decides, pinned or not
+      return { key: k, icon: v.icon, label: PIN_LABEL[k] || v.label };
+    }).filter(Boolean);
+  }
   var NAV_DEPTS = [
     { name:'My desk',     keys:['home','tasks','approvals','reports'] },   // owner 10 Sept: My reports on every staff member's own desk
     { name:'Management',  keys:[
@@ -1717,7 +1754,7 @@ function enterApp(user){
   try { navOpen = JSON.parse(localStorage.getItem('m98m:navOpen') || '{}') || {}; } catch(e){}
   function navSaveOpen(){ try { localStorage.setItem('m98m:navOpen', JSON.stringify(navOpen)); } catch(e){} }
   var groupOf = {};
-  function buildGroup(name, members){
+  function buildGroup(name, members, pinned){
     var h = document.createElement('div');
     h.className = 'nav-dept';
     var label = document.createElement('span'); label.textContent = name; h.appendChild(label);
@@ -1725,7 +1762,7 @@ function enterApp(user){
     sec.className = 'nav-sec';
     sec.dataset.dept = name;
     var hasCurrent = members.some(function(v){ return v.key === landing; });
-    var open = (name in navOpen) ? !!navOpen[name] : (hasCurrent || name === 'My desk');
+    var open = (name in navOpen) ? !!navOpen[name] : (hasCurrent || name === 'My desk' || name === 'Pinned');
     if (hasCurrent) { open = true; }                     // the group you are in never hides itself
     if (!open) { h.classList.add('closed'); sec.classList.add('closed'); }
     h.onclick = function(){
@@ -1736,11 +1773,17 @@ function enterApp(user){
     };
     nav.appendChild(h);
     nav.appendChild(sec);
-    members.forEach(function(v){ placed[v.key]=1; groupOf[v.key]=name; sec.appendChild(navLink(v)); });
+    /* a pinned entry is a shortcut, not a home: claiming the key here would delete the page from
+       its own department and point __navReveal at the wrong group */
+    members.forEach(function(v){ if(!pinned){ placed[v.key]=1; groupOf[v.key]=name; } sec.appendChild(navLink(v)); });
   }
   NAV_DEPTS.forEach(function(dept){
     var members = dept.keys.filter(function(k){ return byKey[k]; }).map(function(k){ return byKey[k]; });
     if(members.length) buildGroup(dept.name, members);
+    if(dept.name === 'My desk'){
+      var pins = pinnedViews();
+      if(pins.length) buildGroup('Pinned', pins, true);
+    }
   });
   var rest = visible.filter(function(v){ return !placed[v.key]; });
   if(rest.length){ buildGroup('More', rest); }
