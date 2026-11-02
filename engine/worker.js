@@ -28261,6 +28261,10 @@ const ROUTES = {
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/ad(\?|$)/,
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/get_ads_by_listing_id(\?|$)/,
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_create_ads_by_listing_id$/,
+        /* 3 Nov: undo an add. A coverage sweep that counted only General campaigns treated a
+           CPC-only listing as unpromoted and put 27 ABRT listings into the General campaign too —
+           the red-line duplicate (and double billing). Removing a General ad restores CPC-only. */
+        /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_delete_ads_by_listing_id$/,
         /^\/sell\/marketing\/v1\/ad_campaign\/find_campaign_by_ad_reference(\?|$)/,
         /* 31 Oct (owner, §4): ONE video read, so the upload day behind a product video can be looked
            up by hand the same way the sweep looks it up. READ ONLY and GET only, enforced below.
