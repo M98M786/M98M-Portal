@@ -754,6 +754,35 @@ function engineCall(action, payload, timeoutMs){
     .then(function(j){ clearTimeout(t); if(!j.ok){ if(j.error==='auth' && STATE.session){ authSelfHeal(); } throw new Error(j.error||'request failed'); } return j.data; },
           function(e){ clearTimeout(t); throw e; });
 }
+/* 2 Nov 2026 — THE OFFICE CHANGED BROADBAND AND THE WHOLE STAFF SAW "Failed to fetch".
+   The page itself loaded (GitHub Pages) and Google's sign-in button rendered (accounts.google.com),
+   so the only thing their new connection could not reach was the Engine's own address — a bare
+   `*.workers.dev` hostname, which consumer ISPs here do block. A blocked host does not answer with
+   an error the portal can explain: fetch simply throws, and the login card printed the browser's
+   own words, which told nobody anything.
+   So a network-level failure (NOT a refusal, NOT a timeout) now means ONE thing: this connection
+   cannot reach the Engine. The portal says so in words, and falls back to the Apps Script front
+   door, which is a google.com address and reachable wherever the sign-in button itself loaded.
+   Everything Apps Script knows — sign-in, the config, the task and hunt desks — keeps working; an
+   Engine-only screen says why it cannot, instead of printing "Failed to fetch". The flag expires
+   after a minute so a passing glitch costs one slow call, not the session. */
+var ENGINE_DOWN_AT = 0, ENGINE_DOWN_FOR_MS = 60000;
+function engineUnreachable(){ return ENGINE_DOWN_AT && (Date.now() - ENGINE_DOWN_AT) < ENGINE_DOWN_FOR_MS; }
+function isNetworkFail(e){
+  if(!e || e.name === 'AbortError') { return false; }           // a timeout is the Engine being slow, not unreachable
+  if(typeof TypeError !== 'undefined' && e instanceof TypeError) { return true; }
+  return /failed to fetch|load failed|networkerror|network request failed|err_/i.test(String(e.message || ''));
+}
+function engineWentDark(e){
+  if(!isNetworkFail(e)) { return false; }
+  if(!engineUnreachable()){
+    ENGINE_DOWN_AT = Date.now();
+    try { toast('This connection cannot reach the Engine — running through the sheet backend. Some screens will be unavailable.'); } catch(x){}
+  }
+  ENGINE_DOWN_AT = Date.now();
+  return true;
+}
+var ENGINE_BLOCKED_MSG = 'this screen is served by the Engine (m98m-engine.m98m786.workers.dev) and this internet connection cannot reach it — try mobile data or another network, and tell Sir Hasib the office connection is blocking it';
 /* 13 Sept: a 2.5 s first try sent the checkpoint LIST to Apps Script on any slow engine moment
    while the SUBMIT stayed on the engine — two different answers for "your slots", and the submit
    then refused the slot the screen had offered. These reads wait for the engine like a write. */
@@ -763,9 +792,29 @@ function engineApi(action, payload, engineOnly){
   /* Engine-ONLY actions (the ENGINE_ACTIONS list) get a patient first try and NEVER detour
      through Apps Script: AS cannot know them, and asking it costs 10–20 s of "unknown action"
      before the engine got its real retry. That detour is what made the truth pages crawl. */
+  /* the Engine is known to be out of reach on this connection: go straight to Apps Script rather
+     than spending 15 s per call proving it again */
+  if(engineUnreachable()){
+    return apiSend(action, payload).then(function(j){
+      if(j.ok){ return j.data; }
+      if(String(j.error||'') === 'unknown action'){ throw new Error(ENGINE_BLOCKED_MSG); }
+      if(j.error === 'auth' && STATE.session){ authSelfHeal(); }
+      throw new Error(j.error || 'request failed');
+    });
+  }
   return engineCall(action, payload, isWrite ? 15000 : (engineOnly ? 15000 : (ENGINE_PATIENT[action] || 2500)))
     .catch(function(e){
       if(e && e.message === 'auth'){ throw e; }        // a real refusal is an answer, not an outage
+      /* a blocked host, not a slow one: the request never left the browser, so even a write is
+         safe to send down the other road */
+      if(engineWentDark(e)){
+        return apiSend(action, payload).then(function(j){
+          if(j.ok){ return j.data; }
+          if(String(j.error||'') === 'unknown action'){ throw new Error(ENGINE_BLOCKED_MSG); }
+          if(j.error === 'auth' && STATE.session){ authSelfHeal(); }
+          throw new Error(j.error || 'request failed');
+        }, function(){ throw new Error(ENGINE_BLOCKED_MSG); });
+      }
       if(isWrite){
         throw new Error(e && e.name === 'AbortError' ? 'the Engine did not answer in time — REFRESH the screen you acted on before retrying; the action may have completed' : (e && e.message) || 'request failed');
       }
@@ -867,7 +916,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261031-2046';
+var BUILD = '20261102-1322';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -14145,7 +14194,7 @@ function boot(){
   /* Engine first for the public config: the worker is stable infrastructure and answers it
      without auth; the sheet front door is the fallback. (1 Sept: an AS burst-throttle here
      dead-ended boots at "Backend not reachable" while a valid portal session sat in storage.) */
-  engineCall('getPublicConfig', {}, 6000).catch(function(){ return api('getPublicConfig'); }).then(function(cfg){
+  engineCall('getPublicConfig', {}, 6000).catch(function(e){ engineWentDark(e); return api('getPublicConfig'); }).then(function(cfg){
     STATE.config=cfg;
     try{ localStorage.setItem('m98m:cfg', JSON.stringify(cfg)); }catch(e){}
     bootSignIn(cfg);
