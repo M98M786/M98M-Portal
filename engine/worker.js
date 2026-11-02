@@ -90,7 +90,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
    this file cannot matter. */
 function cronMap() {
   return {
-    '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync],
+    '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync, trafficNow],
     /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
        carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
     /* adsItems LEFT this slot on 24 Oct. It used to read 2 campaigns per account per tick, which
@@ -16832,6 +16832,58 @@ async function trafficSync(env) {
   });
 }
 
+/* 2 Nov 2026 (owner: "account traffic page is not getting updated timely — it should take data from
+   the API after every 5 minutes, these numbers are still from a long time"). trafficSync runs once
+   an hour at :40 and pulls 31 days for every account — the right shape for history, the wrong one
+   for freshness, which is why the page could show figures an hour old.
+   This is the light pass that rides the 5-minute tick: TODAY and yesterday only, ONE call per
+   account, and a row is written ONLY when eBay's answer actually moved — the same guarded-write
+   rule that took the D1 bill from $55 back to $5 in October. Thirty-one days of unchanged history
+   are not rewritten twelve times an hour, and the per-listing drilldown stays on its four-a-day
+   clock where it belongs.
+   WHAT THIS CANNOT DO: eBay publishes the traffic report on its own slow clock — the current day
+   lands hours behind, which is what the page's own "eBay has not finished reporting today" banner
+   says. This does not make today live; it puts eBay's newest answer on screen within five minutes
+   of eBay having it instead of up to an hour later. */
+async function trafficNow(env) {
+  await perAccount(env, 'trafficNow', async (acct) => {
+    const tok = await ebayAccessToken(env, acct);
+    const d8 = (n) => ukDate(new Date(Date.now() - n * 86400000).toISOString()).replace(/-/g, '');
+    const url = 'https://api.ebay.com/sell/analytics/v1/traffic_report?dimension=DAY' +
+      '&filter=' + encodeURIComponent('marketplace_ids:{EBAY_GB},date_range:[' + d8(1) + '..' + d8(0) + ']') +
+      '&metric=LISTING_IMPRESSION_TOTAL,LISTING_VIEWS_TOTAL,TRANSACTION,CLICK_THROUGH_RATE,SALES_CONVERSION_RATE';
+    const r = await fetch(url, { headers: { authorization: 'Bearer ' + tok } });
+    /* a refusal (a rate limit especially) must be recorded, not swallowed: perAccount writes it to
+       sync_state.last_error, and the stored figures simply keep their last good values */
+    if (!r.ok) throw new Error('traffic_report ' + r.status + ': ' + (await r.text()).slice(0, 120));
+    const d = await r.json();
+    const keys = ((d.header || {}).metrics || []).map(m => m.key);
+    const idx = (k) => keys.indexOf(k);
+    const since = ukDate(new Date(Date.now() - 86400000).toISOString());
+    const have = {};
+    for (const row of (((await env.DB.prepare(
+      'SELECT date, impressions, views, transactions, ctr, cvr FROM traffic_daily WHERE account = ?1 AND date >= ?2'
+    ).bind(acct, since).all()).results) || [])) have[row.date] = row;
+    const stmts = [];
+    for (const rec of (d.records || [])) {
+      const day = String(((rec.dimensionValues || [])[0] || {}).value || '');
+      if (!/^\d{8}$/.test(day)) continue;
+      const date = day.slice(0, 4) + '-' + day.slice(4, 6) + '-' + day.slice(6, 8);
+      const v = (i) => i >= 0 ? Number(((rec.metricValues || [])[i] || {}).value || 0) : 0;
+      const imp = v(idx('LISTING_IMPRESSION_TOTAL')), vie = v(idx('LISTING_VIEWS_TOTAL')), tr = v(idx('TRANSACTION'));
+      const ctr = v(idx('CLICK_THROUGH_RATE')), cvr = v(idx('SALES_CONVERSION_RATE'));
+      const o = have[date];
+      if (o && Number(o.impressions) === imp && Number(o.views) === vie && Number(o.transactions) === tr &&
+          Number(o.ctr) === ctr && Number(o.cvr) === cvr) continue;        // nothing moved — write nothing
+      stmts.push(env.DB.prepare(
+        'INSERT INTO traffic_daily (account, date, impressions, views, transactions, ctr, cvr) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
+        'ON CONFLICT(account, date) DO UPDATE SET impressions=?3, views=?4, transactions=?5, ctr=?6, cvr=?7'
+      ).bind(acct, date, imp, vie, tr, ctr, cvr));
+    }
+    if (stmts.length) await env.DB.batch(stmts);
+  });
+}
+
 async function adsReportKick(env) {
   await perAccount(env, 'adsReportKick', async (acct) => {
     const camps = await env.DB.prepare('SELECT COUNT(*) AS n FROM campaigns WHERE account = ?1').bind(acct).first();
@@ -25160,7 +25212,7 @@ const ROUTES = {
     auth: 'sync', fn: async (p, ctx) => {
       const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, backup, adsReportKick, adsReportPoll,
         csSync, violationsSync, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday,
-        trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan,
+        trafficSync, trafficNow, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan,
         selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch,
         trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep, policyScan, trackingInboxRetry,
         adtoolRollups, adtoolTruth, adtoolVideoSweep };
@@ -26614,7 +26666,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, policyScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume, adtoolPeakSwitch, adtoolPeakPlan };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, trafficNow, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, policyScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume, adtoolPeakSwitch, adtoolPeakPlan };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
