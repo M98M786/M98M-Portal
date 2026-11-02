@@ -50,9 +50,24 @@ const GOLIVE_PUBLISHERS_DEFAULT = ['zaidkaleem987@gmail.com', 'mrhasibullah91@go
    lock the office itself out before the address is typed in. */
 const IP_FREE_EMAILS = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com', 'mrhasibullah@googlemail.com', 'mrhasibullah@gmail.com'];   // 22 Oct: Sir Hasib's third management email signs in from anywhere too
 class LocationError extends Error {}
+/* 2 Nov 2026 — the office broadband changed address and every member of staff was locked out of
+   the portal at once (the owner: "ip has changed now fix it, portal is not working overall, remove
+   the ip firewall for two days"). This is a DATED pause, not a switch somebody has to remember to
+   flip back: while now is before the instant below the gate stands down, and the moment it passes
+   the gate re-arms itself against whatever OFFICE_IP then holds. The office addresses are left
+   recorded on the Worker throughout, so re-arming needs nothing but the new address added. An
+   unparseable date leaves the gate ARMED — this fails closed, never open.
+   TO END IT EARLY: set this to a past instant (or '') and deploy. TO RE-ARM FOR GOOD: put the new
+   office address into the OFFICE_IP variable and let this date pass. */
+const OFFICE_GATE_OFF_UNTIL = '2026-11-05T00:00:00Z';   // 05:00 PKT on 5 Nov — two full working days
+function officeGateOff(now) {
+  const t = Date.parse(OFFICE_GATE_OFF_UNTIL || '');
+  return !!t && (now || Date.now()) < t;
+}
 function officeGate(env, req, email) {
   const allow = String(env.OFFICE_IP || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!allow.length) return;
+  if (officeGateOff()) return;
   if (IP_FREE_EMAILS.indexOf(String(email || '').toLowerCase()) >= 0) return;
   const ip = String(req.headers.get('cf-connecting-ip') || '').trim();
   for (const a of allow) {
