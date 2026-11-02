@@ -2171,7 +2171,9 @@ function run(argv) {
 
   t('which campaign: the column is added guarded, beside the switch it belongs with, and born blank so no existing row changes the day it lands (regex over the real source)', (() => {
     const sch = src.slice(src.indexOf('async function ensureAdtoolPhase16Schema(env) {'), src.indexOf('const ADTOOL_REGISTER_P16'));
-    const added = /try \{ await env\.DB\.prepare\("ALTER TABLE adtool_peak_items ADD COLUMN campaign_id TEXT DEFAULT ''"\)\.run\(\); \} catch \(e\)/.test(sch);
+    /* guarded is adtDdlOne's business since 2 Nov: it forgives "already there" and writes down
+       anything else, which is what keeps the schema marker from claiming a column that never landed */
+    const added = /await adtDdlOne\(env, "ALTER TABLE adtool_peak_items ADD COLUMN campaign_id TEXT DEFAULT ''"\);/.test(sch);
     const blank = !/ADD COLUMN campaign_id TEXT NOT NULL/.test(src) && !/ADD COLUMN campaign_id TEXT DEFAULT 'all'/.test(src);
     /* beside the switch, in the one place every added column on this table is added */
     return added && blank && sch.indexOf('ADD COLUMN auto INTEGER DEFAULT 0') < sch.indexOf('ADD COLUMN campaign_id');
@@ -3403,7 +3405,7 @@ function run(argv) {
   /* the table, the column, the config and the register */
   t('§3 tables: the schedule table holds exactly the columns the brief names, one row per listing per UK day, and the hold column is added guarded (real source)',
     /CREATE TABLE IF NOT EXISTS adtool_peak_schedule \(account TEXT, item_id TEXT NOT NULL, day TEXT NOT NULL, states_json TEXT, source TEXT, reasons_json TEXT, dead_json TEXT, profile_days INTEGER, computed_at TEXT, PRIMARY KEY \(account, item_id, day\)\)/.test(src) &&
-    /try \{ await env\.DB\.prepare\("ALTER TABLE adtool_peak_items ADD COLUMN hold TEXT DEFAULT 'auto'"\)\.run\(\); \} catch \(e\) \{/.test(src), null);
+    /await adtDdlOne\(env, "ALTER TABLE adtool_peak_items ADD COLUMN hold TEXT DEFAULT 'auto'"\);/.test(src), null);
   t('§3 config: the planner’s stop flag and the seven figures are seeded by ONE function, never written back over a figure somebody has set (real source)',
     (() => {
       const seed = src.slice(src.indexOf('async function ensureAdtoolPeakPlanConfig(env) {'), src.indexOf('const ADTOOL_REGISTER_P16 = ['));
@@ -5747,6 +5749,168 @@ function run(argv) {
     /* and the page invents nothing: no state is put on an ad eBay has never stamped */
     const honest = /return 'eBay has never stamped this ad, so it is being served';/.test(pkSrc);
     return beside && link && type && reading && mark && nolive && prefix && honest;
+  })(), null);
+
+  /* ══ THE SCHEMA GUARDS ARE PAID ONCE, NOT ONCE PER ISOLATE (2 Nov) ═════════════════════════════
+     Measured live through adsListingProbe: a cold isolate spent 5,627 ms of a 5,870 ms answer
+     inside the ensure families and a second cold isolate 10,303 ms, while a warm isolate answered
+     the same listing in 147 to 373 ms. These tests hold the three halves of the fix and, above all,
+     the safety: one version marker read once, batches for the statements that still have to run,
+     and nothing skipped on a database that has not had a statement applied. ══ */
+  const scSrc = src.slice(src.indexOf('/* ---- ONE MARKER FOR THE WHOLE OF THIS VERSION'), src.indexOf('let BATCH_SCHEMA_OK = false;'));
+  /* EVERY DDL STATEMENT IN THE ENGINE, AS ITS OWN TEXT. Each CREATE TABLE / CREATE INDEX / ALTER
+     TABLE keyword opens a string literal, so the statement is read from that literal's own quote,
+     through every literal glued to it by a bare +, to the closing quote. A statement finished off
+     with a name rather than a literal (ALTER TABLE ' + table) is taken from the start of its line
+     instead, so the names it is built out of are inside the fingerprint as well. A keyword with
+     anything but its own opening quote in front of it is prose in a comment, not a statement. */
+  const ddlFingerprint = (s) => {
+    const KW = /CREATE TABLE IF NOT EXISTS|CREATE UNIQUE INDEX IF NOT EXISTS|CREATE INDEX IF NOT EXISTS|ALTER TABLE/g;
+    const closeFrom = (i, q) => { let j = i; while (j < s.length) { const c = s.charAt(j); if (c === '\\') j++; else if (c === q) return j; j++; } return -1; };
+    const list = []; let m, guard = -1;
+    while ((m = KW.exec(s)) !== null) {
+      if (m.index < guard) continue;                          /* a later fragment of one already taken */
+      const q = s.charAt(m.index - 1);
+      if (q !== '"' && q !== "'") continue;                   /* prose in a comment, not a statement */
+      let end = closeFrom(m.index, q);
+      if (end < 0) continue;
+      end++;
+      for (;;) {
+        const g = /^(\s*\+\s*)(["'])/.exec(s.slice(end, end + 40));
+        if (!g) break;
+        const e2 = closeFrom(end + g[1].length + 1, g[2]);
+        if (e2 < 0) break;
+        end = e2 + 1;
+      }
+      const from = /^\s*\+\s*[A-Za-z_$]/.test(s.slice(end, end + 8)) ? s.lastIndexOf('\n', m.index) + 1 : m.index - 1;
+      list.push(s.slice(from, end).replace(/\s+/g, ' ').trim());
+      guard = end;
+    }
+    let h = 2166136261; const txt = list.join('\n');
+    for (let j = 0; j < txt.length; j++) { h ^= txt.charCodeAt(j); h = Math.imul(h, 16777619) >>> 0; }
+    return { n: list.length, hash: list.length + '-' + ('0000000' + h.toString(16)).slice(-8) };
+  };
+  const fp = ddlFingerprint(src);
+  const fpStored = (src.match(/const ADTOOL_SCHEMA_DDL_HASH = '([^']+)';/) || [])[1] || '';
+  const fpVersion = (src.match(/const ADTOOL_SCHEMA_VERSION = '([^']+)';/) || [])[1] || '';
+  t('schema marker: the fingerprint of every DDL statement in the engine still matches the hash stored beside the version — if this fails you have added or changed a CREATE TABLE, CREATE INDEX or ALTER TABLE, so BUMP ADTOOL_SCHEMA_VERSION and set ADTOOL_SCHEMA_DDL_HASH to the fingerprint printed here, or every database already marked will never be given your statement',
+    fp.n > 150 && fpVersion.length > 0 && fp.hash === fpStored, { found: fp.hash, stored: fpStored, version: fpVersion });
+  t('schema marker: every family that owns an isolate flag asks the marker first, and the one pass that writes the marker runs every one of those families', (() => {
+    /* the gate, in this exact shape, in every family that has an isolate flag: the flag first (a
+       warm isolate costs nothing at all), then the marker, then the flag is set and it returns */
+    const flags = (src.match(/^let ([A-Z0-9_]+_OK) = false;$/gm) || []).map(l => l.replace(/^let | = false;$/g, ''));
+    const gated = flags.filter(f => src.indexOf('  if (' + f + ') return;\n  if (await adtSchemaMarked(env)) { ' + f + ' = true; return; }') >= 0);
+    /* 28 families: every flag in the file is gated, and none is gated any other way */
+    const all = gated.length === flags.length && flags.length === 28 &&
+      (src.match(/if \(await adtSchemaMarked\(env\)\) \{/g) || []).length === 28;
+    /* and the pass runs the lot. The list is read out of the source and held against the gated
+       functions: a family gated on the marker and left out of the list would be a family the pass
+       never applied, and the marker would be written over its statements. */
+    const fam = src.slice(src.indexOf('function adtSchemaFamilies() {'), src.indexOf('async function adtSchemaSettleRun(env) {'));
+    const listed = (fam.match(/, (ensure[A-Za-z0-9]+)\]/g) || []).map(x => x.replace(/, |\]/g, ''));
+    /* read out of the source rather than typed: every ensure function whose body asks the marker.
+       Two of them ask it after their own long comment, so the gate is looked for in the body and
+       not on the second line. */
+    const owners = []; const reFn = /async function (ensure[A-Za-z0-9]+)\(env\) \{/g; let gm;
+    while ((gm = reFn.exec(src)) !== null) {
+      if (src.slice(gm.index, src.indexOf('\n}', gm.index)).indexOf('if (await adtSchemaMarked(env)) {') >= 0) owners.push(gm[1]);
+    }
+    const same = owners.length === 28 && listed.length === 28 &&
+      owners.slice().sort().join(',') === listed.slice().sort().join(',');
+    /* phase 1B owns no flag and is not listed, because phase 1 awaits it, which is the only way it
+       has ever run: that is the one family the list is allowed to leave out */
+    const oneB = /async function ensureAdtoolPhase1bSchema\(env\) \{/.test(src) &&
+      src.indexOf('await ensureAdtoolPhase1bSchema(env);\n  ADTOOL_P1_SCHEMA_OK = true;') >= 0 &&
+      fam.indexOf('ensureAdtoolPhase1bSchema') < 0;
+    /* the families run one at a time and in order, never two lots of DDL at once */
+    const ordered = /for \(const f of adtSchemaFamilies\(\)\) \{\n      try \{ await f\[1\]\(env\); \} catch \(e\) \{ adtSchemaRefused\(f\[0\], String\(\(e && e\.message\) \|\| e\)\); \}/.test(src);
+    return all && same && oneB && ordered;
+  })(), null);
+  t('schema marker: a database that has not had a statement applied still gets it — no marker, an unreadable marker, another version and a refused statement all run everything', (() => {
+    /* ONE READ OF ONE CONFIG ROW, kept for the isolate, and a read that throws reads as behind:
+       portal_config itself is born in ensureTruthSchema, so the table not existing yet must be the
+       safe answer rather than an exception */
+    const read = /ADTOOL_SCHEMA_MARK = env\.DB\.prepare\('SELECT value FROM portal_config WHERE key = \?1'\)\.bind\(ADTOOL_SCHEMA_KEY\)\.first\(\)/.test(scSrc) &&
+      /\.then\(r => String\(\(r && r\.value\) \|\| ''\)\)\.catch\(\(\) => ''\);/.test(scSrc) &&
+      /if \(!ADTOOL_SCHEMA_MARK\) \{/.test(scSrc);
+    /* the gate skips only on an exact match, so a blank row and any other version both run */
+    const exact = /if \(\(await adtSchemaMarkRead\(env\)\) === ADTOOL_SCHEMA_VERSION\) return true;/.test(scSrc) &&
+      scSrc.indexOf('indexOf(ADTOOL_SCHEMA_VERSION)') < 0 && !/>=\s*ADTOOL_SCHEMA_VERSION/.test(scSrc);
+    /* while the pass is inside the families every one of them runs, marker or no marker */
+    const inside = /if \(ADTOOL_SCHEMA_INSIDE\) return false;/.test(scSrc) &&
+      /ADTOOL_SCHEMA_INSIDE = true;/.test(scSrc) && /\} finally \{ ADTOOL_SCHEMA_INSIDE = false; \}/.test(scSrc);
+    /* THE MARKER IS WRITTEN ONLY WHEN NOTHING WAS REFUSED, and the gate asks the row again after
+       the pass rather than assuming it landed: a family left out of the list, or a pass that could
+       not finish, therefore leaves every family running its own guards as it does today */
+    const onlyClean = /if \(ADTOOL_SCHEMA_REFUSED\.length\) return \{ version: '', refused: ADTOOL_SCHEMA_REFUSED\.slice\(0, 40\) \};/.test(scSrc) &&
+      scSrc.indexOf('ADTOOL_SCHEMA_REFUSED.length) return') < scSrc.indexOf('INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2') &&
+      /return \(await adtSchemaMarkRead\(env\)\) === ADTOOL_SCHEMA_VERSION;/.test(scSrc) &&
+      /try \{ await adtSchemaSettle\(env\); \} catch \(e\) \{ return false; \}/.test(scSrc);
+    /* the write names the version and is the only write of that row in the engine */
+    const write = (src.match(/\.bind\(ADTOOL_SCHEMA_KEY, ADTOOL_SCHEMA_VERSION\)\.run\(\)/g) || []).length === 1 &&
+      /ADTOOL_SCHEMA_MARK = Promise\.resolve\(ADTOOL_SCHEMA_VERSION\);/.test(scSrc) &&
+      scSrc.indexOf('ADTOOL_SCHEMA_MARK = Promise.resolve') > scSrc.indexOf('.bind(ADTOOL_SCHEMA_KEY, ADTOOL_SCHEMA_VERSION).run()');
+    /* the pass happens once per isolate, and a failure to write is itself a refusal */
+    const once = /function adtSchemaSettle\(env\) \{ return ADTOOL_SCHEMA_SETTLE \|\| \(ADTOOL_SCHEMA_SETTLE = adtSchemaSettleRun\(env\)\); \}/.test(scSrc) &&
+      /adtSchemaRefused\('marker', String\(\(e && e\.message\) \|\| e\)\);/.test(scSrc);
+    return read && exact && inside && onlyClean && write && once;
+  })(), null);
+  t('schema marker: "already there" is the only answer a guarded statement is forgiven for, and a refused batch is run again one statement at a time so the rest still land', (() => {
+    /* duplicate column name is what a guarded ALTER says on every live database and is not a
+       failure; anything else is written down, and that is what keeps the marker unwritten */
+    const forgive = /if \(\/duplicate column name\|already exists\/i\.test\(why\)\) return true;/.test(scSrc) &&
+      /adtSchemaRefused\(sql, why\);\n    return false;/.test(scSrc);
+    const fallback = /for \(const s of sqls\) \{ if \(!\(await adtDdlOne\(env, s\)\)\) ok = false; \}/.test(scSrc) &&
+      scSrc.indexOf('try { await adtBatch(env, sqls.map(s => env.DB.prepare(s))); return true; }') < scSrc.indexOf('for (const s of sqls) {');
+    /* a seed that did not land is a statement of this version that was not accepted, so it is
+       written down too, and it is still never fatal to the page that happened to run it */
+    const seed = /async function adtSeedRun\(env, stmts, what\) \{/.test(scSrc) &&
+      /catch \(e\) \{ adtSchemaRefused\(what, String\(\(e && e\.message\) \|\| e\)\); return false; \}/.test(scSrc) &&
+      (src.match(/await adtSeedRun\(env, /g) || []).length >= 12;
+    /* the two config seeds only claim their isolate flag when the seed actually landed */
+    const cfg = /if \(await adtSeedRun\(env, \[one\(K\.amber_min, D\.amber_min\), one\(K\.red_min, D\.red_min\)\], 'freshness config'\)\) ADTOOL_FRESH_CFG_OK = true;/.test(src) &&
+      /if \(await adtSeedRun\(env, stmts, 'peak plan config'\)\) ADTOOL_PEAK_CFG_OK = true;/.test(src);
+    /* and the ledger cannot grow without bound on a database refusing everything */
+    const capped = /if \(ADTOOL_SCHEMA_REFUSED\.length < 40\) ADTOOL_SCHEMA_REFUSED\.push\(/.test(scSrc);
+    return forgive && fallback && seed && cfg && capped;
+  })(), null);
+  t('schema guards: what still has to run goes in batches, the guarded ALTERs stay one at a time, and the written order is kept so a table lands before its index', (() => {
+    /* a run of CREATEs is flushed before the next ALTER, which is what keeps the order */
+    const run = /async function adtDdlRun\(env, ddl\) \{/.test(scSrc) &&
+      /if \(\/\^\\s\*ALTER\\s\/i\.test\(q\)\) \{ await flush\(\); if \(!\(await adtDdlOne\(env, q\)\)\) ok = false; \}\n    else pend\.push\(q\);/.test(scSrc) &&
+      /const flush = async \(\) => \{ if \(!pend\.length\) return; const b = pend; pend = \[\]; if \(!\(await adtDdlBatch\(env, b\)\)\) ok = false; \};/.test(scSrc) &&
+      /try \{ await adtBatch\(env, sqls\.map\(s => env\.DB\.prepare\(s\)\)\); return true; \}/.test(scSrc);
+    /* NOT ONE FAMILY STILL AWAITS ITS DDL ONE STATEMENT AT A TIME. The six families that already
+       batched now go through the same runner, and the five that looped do too. */
+    const noLoops = !/for \(const [qds] of ddl\) \{ try \{ await env\.DB\.prepare/.test(src) &&
+      !/\]\) \{ try \{ await env\.DB\.prepare\([qds]\)\.run\(\); \} catch/.test(src) &&
+      (src.match(/await adtDdlRun\(env, /g) || []).length === 20 &&
+      src.indexOf('await adtBatch(env, ddl.map(s => env.DB.prepare(s)))') < 0;
+    /* every guarded ALTER left in the families goes through adtDdlOne, and the only raw guarded
+       ALTER left in the engine is the rollup's own repair of sales_daily, which is no family's */
+    const alters = (src.match(/await adtDdlOne\(env, /g) || []).length === 19 &&
+      (src.match(/env\.DB\.prepare\('ALTER |env\.DB\.prepare\("ALTER /g) || []).length === 1 &&
+      /catch \(e\) \{ try \{ await env\.DB\.prepare\('ALTER TABLE sales_daily ADD COLUMN pri_est INTEGER DEFAULT 0'\)/.test(src);
+    /* the truth family keeps the KV tag it already had: an edge-cached read is cheaper still, and it
+       answers on a database whose portal_config cannot be read at all */
+    const kv = /try \{ if \(\(await env\.HOT\.get\('schema:tag'\)\) === tag\) \{ TRUTH_SCHEMA_OK = true; return; \} \} catch \(e\) \{\}/.test(src);
+    return run && noLoops && alters && kv;
+  })(), null);
+  t('product history probe: the guards’ own figure says whether the marker answered for them or this answer paid for them', (() => {
+    /* schema_ms was already clocked; beside it now sit the three figures that explain it */
+    const named = /T\.schema_skipped = adtSchemaSkipped\(\);/.test(plSrc) &&
+      /T\.schema_version = ADTOOL_SCHEMA_VERSION;/.test(plSrc) &&
+      /T\.schema_refused = ADTOOL_SCHEMA_REFUSED\.length;/.test(plSrc) &&
+      plSrc.indexOf("clock('schema_ms'") < plSrc.indexOf('T.schema_skipped');
+    /* and it is honest: skipped means no DDL ran on this isolate at all, which is exactly "the
+       settle pass was never needed", not "the marker said so afterwards" */
+    const honest = /function adtSchemaSkipped\(\) \{ return ADTOOL_SCHEMA_SETTLE === null; \}/.test(scSrc);
+    /* the probe returns the timings whole, so all three arrive by key with no second route */
+    const pr = src.slice(src.indexOf('  adsListingProbe: {'), src.indexOf("  /* §3 of the 31 Oct brief, read-only and by key"));
+    const byKey = /timings: d\.timings,/.test(pr) && pr.indexOf('schema_skipped') > 0 && pr.indexOf('schema_refused') > 0;
+    /* the three sit in the timings and nowhere near the figures: still no money on this route */
+    const clean = !/spend|profit|revenue|actual|margin/.test(pr.slice(pr.indexOf('return {')));
+    return named && honest && byKey && clean;
   })(), null);
 
   const passed = results.filter(r => r.ok).length;

@@ -971,11 +971,182 @@ function pvTokens(s) {
     .split(' ').filter((w) => w.length >= 3 && !STOP[w] && !/^\d+$/.test(w)).slice(0, 40);
 }
 
+/* ---- ONE MARKER FOR THE WHOLE OF THIS VERSION'S SCHEMA (2 Nov) --------------------------------
+   MEASURED THROUGH adsListingProbe, 2 Nov: a cold isolate spent 5,627 ms of a 5,870 ms answer
+   inside these guards, and a second cold isolate 10,303 ms, while a warm isolate answered the same
+   listing in 147 to 373 ms. The slow log showed every advertising page with a worst open between
+   10 and 19 seconds. The guards are idempotent, so that cost bought nothing: the families below
+   hold 187 statements of CREATE TABLE IF NOT EXISTS, CREATE INDEX IF NOT EXISTS and guarded ALTER
+   (192 run, two of the sites being loops over a list of columns), each its own round trip, and the
+   bill was paid again by whichever page happened to arrive first on each new isolate, for ever.
+   So the version is written down. One row in portal_config holds the version the database has been
+   brought up to, and every ensure function returns at once when that row equals the constant below:
+   ONE read of ONE config row in place of dozens of round trips of DDL.
+   WHAT IS NEVER SKIPPED, because a fast page missing a column is worse than a slow one:
+     - no row at all (a database that has never seen the guards) runs everything;
+     - a row that cannot be read runs everything, so portal_config not existing yet is safe;
+     - a row holding any other version runs everything;
+     - and the row is written ONLY after every statement of this version has been accepted, by the
+       one pass that runs every family (adtSchemaSettle below). A statement the database refused for
+       any reason other than "already there" leaves the marker unwritten, and the next isolate tries
+       the lot again exactly as every isolate does today. That is slower than today on a database
+       that is genuinely refusing a statement, which is precisely when everything should be retried.
+   WHAT CHANGED BESIDES THE SPEED, and it is worth naming: a seed or a forced default inside these
+   families used to be rewritten once per isolate and is now written once per VERSION. The one that
+   matters is adtool_campaign_truth, forced on rather than defaulted; bumping the version forces it
+   again, and nothing else in these families writes over a figure somebody has set.
+   BUMPING IT: add or change a DDL statement anywhere in this file and scripts/adtool-test.js fails
+   until ADTOOL_SCHEMA_VERSION and ADTOOL_SCHEMA_DDL_HASH are both moved on. The fingerprint covers
+   every DDL statement in the file, which is wider than these families on purpose: a CREATE put
+   anywhere is a reason to look. That is deliberate: a marker that could go stale by accident is a
+   column that never lands. */
+const ADTOOL_SCHEMA_VERSION = '2026-11-02.1';
+/* the fingerprint of every DDL statement in engine/worker.js, held to this value by the suite */
+const ADTOOL_SCHEMA_DDL_HASH = '195-b1518cd2';
+const ADTOOL_SCHEMA_KEY = 'adtool_schema_version';
+let ADTOOL_SCHEMA_MARK = null;      /* the one marker read per isolate */
+let ADTOOL_SCHEMA_SETTLE = null;    /* the one apply pass per isolate, and the proof DDL ran here */
+let ADTOOL_SCHEMA_INSIDE = false;   /* true while that pass is inside the families, so they all run */
+const ADTOOL_SCHEMA_REFUSED = [];   /* a statement the database would not accept, and why */
+function adtSchemaMarkRead(env) {
+  if (!ADTOOL_SCHEMA_MARK) {
+    ADTOOL_SCHEMA_MARK = env.DB.prepare('SELECT value FROM portal_config WHERE key = ?1').bind(ADTOOL_SCHEMA_KEY).first()
+      .then(r => String((r && r.value) || '')).catch(() => '');   /* unreadable reads as behind */
+  }
+  return ADTOOL_SCHEMA_MARK;
+}
+/* THE GATE every ensure function asks, and the only place the marker decides anything. True means
+   every statement of this version is already on the database and the family may return at once.
+   False means the family runs its own guards, exactly as it did before any of this existed. */
+async function adtSchemaMarked(env) {
+  if (ADTOOL_SCHEMA_INSIDE) return false;
+  if ((await adtSchemaMarkRead(env)) === ADTOOL_SCHEMA_VERSION) return true;
+  /* behind, or unreadable: bring the whole version up, once per isolate, and then ask the marker
+     again rather than assume. A pass that could not finish answers false, and the caller falls
+     back to its own guards: a family left out of the list below is therefore slow, never skipped. */
+  try { await adtSchemaSettle(env); } catch (e) { return false; }
+  return (await adtSchemaMarkRead(env)) === ADTOOL_SCHEMA_VERSION;
+}
+function adtSchemaSettle(env) { return ADTOOL_SCHEMA_SETTLE || (ADTOOL_SCHEMA_SETTLE = adtSchemaSettleRun(env)); }
+/* did the marker answer for the guards on this isolate, or did this isolate have to apply them? */
+function adtSchemaSkipped() { return ADTOOL_SCHEMA_SETTLE === null; }
+function adtSchemaRefused(what, why) {
+  if (ADTOOL_SCHEMA_REFUSED.length < 40) ADTOOL_SCHEMA_REFUSED.push(String(what).slice(0, 90) + ' :: ' + String(why).slice(0, 120));
+}
+/* EVERY FAMILY OF THIS VERSION, in the order they already run in: portal_config is born in
+   ensureTruthSchema and a dozen families seed a row into it, adtool_number_register is born in
+   phase 1 and every register seeds into that, and the phase chain (6 -> 5 -> 4 -> 3 -> 1) orders
+   itself. ensureAdtoolPhase1bSchema is not listed because ensureAdtoolPhase1Schema awaits it, which
+   is the only way it has ever run. The suite holds this list against the gated functions. */
+function adtSchemaFamilies() {
+  return [
+    ['truth', ensureTruthSchema],
+    ['batch', ensureBatchSchema],
+    ['ads reading columns', ensureAdsReadingColumns],
+    ['campaign funding columns', ensureCampaignFundingColumns],
+    ['campaign events campaign id', ensureCampaignEventsCampaignId],
+    ['phase 1', ensureAdtoolPhase1Schema],
+    ['freshness config', ensureAdtoolFreshConfig],
+    ['phase 2', ensureAdtoolPhase2Schema],
+    ['phase 3', ensureAdtoolPhase3Schema],
+    ['phase 4', ensureAdtoolPhase4Schema],
+    ['phase 5', ensureAdtoolPhase5Schema],
+    ['phase 6', ensureAdtoolPhase6Schema],
+    ['phase 7', ensureAdtoolPhase7Schema],
+    ['phase 8', ensureAdtoolPhase8Schema],
+    ['phase 9 register', ensureAdtoolPhase9Register],
+    ['sale', ensureAdtoolSaleSchema],
+    ['phase 11 register', ensureAdtoolPhaseBu3Register],
+    ['departments register', ensureAdtoolPhaseDeptsRegister],
+    ['campaign board register', ensureAdtoolPhaseCampaignBoardRegister],
+    ['phase 15', ensureAdtoolPhase15Schema],
+    ['phase 15 register', ensureAdtoolPhase15Register],
+    ['phase 16', ensureAdtoolPhase16Schema],
+    ['peak plan config', ensureAdtoolPeakPlanConfig],
+    ['phase 16 register', ensureAdtoolPhase16Register],
+    ['video', ensureAdtoolVideoSchema],
+    ['intraday', ensureAdtoolSchema],
+    ['traffic', ensureTrafficSchema],
+    ['price', ensurePriceSchema],
+  ];
+}
+async function adtSchemaSettleRun(env) {
+  ADTOOL_SCHEMA_INSIDE = true;
+  ADTOOL_SCHEMA_REFUSED.length = 0;
+  try {
+    /* one family at a time and in order, because two lots of DDL started at once on one database is
+       not a saving worth having. A family that throws is written down and the rest still run: the
+       point of the pass is to leave the database as complete as it can be made, and the marker then
+       says whether it was made complete. */
+    for (const f of adtSchemaFamilies()) {
+      try { await f[1](env); } catch (e) { adtSchemaRefused(f[0], String((e && e.message) || e)); }
+    }
+  } finally { ADTOOL_SCHEMA_INSIDE = false; }
+  if (ADTOOL_SCHEMA_REFUSED.length) return { version: '', refused: ADTOOL_SCHEMA_REFUSED.slice(0, 40) };
+  try {
+    await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')")
+      .bind(ADTOOL_SCHEMA_KEY, ADTOOL_SCHEMA_VERSION).run();
+    ADTOOL_SCHEMA_MARK = Promise.resolve(ADTOOL_SCHEMA_VERSION);
+    return { version: ADTOOL_SCHEMA_VERSION, refused: [] };
+  } catch (e) {
+    adtSchemaRefused('marker', String((e && e.message) || e));
+    return { version: '', refused: ADTOOL_SCHEMA_REFUSED.slice(0, 40) };
+  }
+}
+/* ---- THE TWO WAYS A SCHEMA STATEMENT IS RUN ----
+   A CREATE ... IF NOT EXISTS cannot fail on a database that already holds the thing, so those go in
+   batches: D1 takes fifty statements in one round trip. A guarded ALTER cannot go in a batch,
+   because "duplicate column name" is its ORDINARY answer on a live database and a batch is one
+   transaction, so one refusal would roll back every statement beside it. Those are still run one at
+   a time, and the only change is that a refusal for any OTHER reason is written down, which is what
+   stops the marker being written over a column that never landed. */
+async function adtDdlOne(env, sql) {
+  try { await env.DB.prepare(sql).run(); return true; }
+  catch (e) {
+    const why = String((e && e.message) || e);
+    if (/duplicate column name|already exists/i.test(why)) return true;   /* already there: the usual answer */
+    adtSchemaRefused(sql, why);
+    return false;
+  }
+}
+async function adtDdlBatch(env, sqls) {
+  if (!sqls || !sqls.length) return true;
+  try { await adtBatch(env, sqls.map(s => env.DB.prepare(s))); return true; }
+  catch (e) {
+    /* one statement was refused and took the rest of its transaction down with it: run them singly,
+       so the others still land and so the refusal names itself */
+    let ok = true;
+    for (const s of sqls) { if (!(await adtDdlOne(env, s))) ok = false; }
+    return ok;
+  }
+}
+/* ONE FAMILY'S DDL, IN THE ORDER IT IS WRITTEN. A run of CREATEs is flushed before the next ALTER,
+   so a table still lands before its index and a column before anything that reads it. */
+async function adtDdlRun(env, ddl) {
+  let pend = [], ok = true;
+  const flush = async () => { if (!pend.length) return; const b = pend; pend = []; if (!(await adtDdlBatch(env, b))) ok = false; };
+  for (const q of (ddl || [])) {
+    if (/^\s*ALTER\s/i.test(q)) { await flush(); if (!(await adtDdlOne(env, q))) ok = false; }
+    else pend.push(q);
+  }
+  await flush();
+  return ok;
+}
+/* a seed or a register row: an INSERT and never DDL, never fatal to the page that happened to run
+   it, and written down the same way, because a seed that did not land is a statement of this
+   version that was not accepted. */
+async function adtSeedRun(env, stmts, what) {
+  if (!stmts || !stmts.length) return true;
+  try { await adtBatch(env, stmts); return true; }
+  catch (e) { adtSchemaRefused(what, String((e && e.message) || e)); return false; }
+}
+
 /* 1 Oct (owner batch): every new column/table of this batch, each statement on its own so an
    "already exists" never blocks the next. Called lazily by the actions and jobs that need it. */
 let BATCH_SCHEMA_OK = false;
 async function ensureBatchSchema(env) {
   if (BATCH_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { BATCH_SCHEMA_OK = true; return; }
   const ddl = [
     "ALTER TABLE orders ADD COLUMN refunded_at TEXT DEFAULT ''",
     "ALTER TABLE late_marks ADD COLUMN tracked_at TEXT DEFAULT ''",
@@ -986,7 +1157,7 @@ async function ensureBatchSchema(env) {
     "CREATE INDEX IF NOT EXISTS idx_rcn_ref ON recheck_notes(ref_date, days)",
     "CREATE TABLE IF NOT EXISTS golive_campaign (item_id TEXT PRIMARY KEY, campaign_type TEXT DEFAULT '', set_by TEXT DEFAULT '', set_at TEXT)",
   ];
-  for (const d of ddl) { try { await env.DB.prepare(d).run(); } catch (e) { /* already there */ } }
+  await adtDdlRun(env, ddl);
   BATCH_SCHEMA_OK = true;
 }
 
@@ -2606,10 +2777,10 @@ function adsAgeWords(stamp, nowMs) {
 let ADS_READING_COLS_OK = false;
 async function ensureAdsReadingColumns(env) {
   if (ADS_READING_COLS_OK) return;
-  for (const s of ['ALTER TABLE campaign_ads ADD COLUMN ad_records INTEGER DEFAULT 1',
-    'ALTER TABLE campaigns ADD COLUMN ads_synced_at TEXT']) {
-    try { await env.DB.prepare(s).run(); } catch (e) { /* already there, which is the usual case */ }
-  }
+  if (await adtSchemaMarked(env)) { ADS_READING_COLS_OK = true; return; }
+  /* already there is the usual case, and adtDdlOne is where that is told apart from a refusal */
+  await adtDdlRun(env, ['ALTER TABLE campaign_ads ADD COLUMN ad_records INTEGER DEFAULT 1',
+    'ALTER TABLE campaigns ADD COLUMN ads_synced_at TEXT']);
   ADS_READING_COLS_OK = true;
 }
 /* Owner batch 28 Oct: how eBay sets a campaign's ad rate, and the funding object it sent, as two
@@ -2620,10 +2791,9 @@ async function ensureAdsReadingColumns(env) {
 let ADS_FUNDING_COLS_OK = false;
 async function ensureCampaignFundingColumns(env) {
   if (ADS_FUNDING_COLS_OK) return;
-  for (const s of ["ALTER TABLE campaigns ADD COLUMN ad_rate_strategy TEXT DEFAULT ''",
-    "ALTER TABLE campaigns ADD COLUMN funding_json TEXT DEFAULT ''"]) {
-    try { await env.DB.prepare(s).run(); } catch (e) { /* already there, which is the usual case */ }
-  }
+  if (await adtSchemaMarked(env)) { ADS_FUNDING_COLS_OK = true; return; }
+  await adtDdlRun(env, ["ALTER TABLE campaigns ADD COLUMN ad_rate_strategy TEXT DEFAULT ''",
+    "ALTER TABLE campaigns ADD COLUMN funding_json TEXT DEFAULT ''"]);
   ADS_FUNDING_COLS_OK = true;
 }
 
@@ -4598,6 +4768,7 @@ function adtCapHour(samples, budget) {
 let ADTOOL_P1_SCHEMA_OK = false;
 async function ensureAdtoolPhase1Schema(env) {
   if (ADTOOL_P1_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P1_SCHEMA_OK = true; return; }
   const ddl = [
     "CREATE TABLE IF NOT EXISTS adtool_orders (account TEXT NOT NULL, order_id TEXT NOT NULL, item_id TEXT DEFAULT '', created_utc TEXT, created_local TEXT, local_date TEXT, local_hour INTEGER, slot INTEGER, weekday INTEGER, qty INTEGER DEFAULT 1, sale_price REAL DEFAULT 0, status TEXT DEFAULT '', refunded REAL DEFAULT 0, ali_cost REAL DEFAULT 0, ebay_fees REAL DEFAULT 0, order_earning REAL DEFAULT 0, vat_ex_ads REAL DEFAULT 0, raw_ex_ads REAL DEFAULT 0, cost_pending INTEGER DEFAULT 0, ad_attributed INTEGER, updated_at TEXT, PRIMARY KEY (account, order_id))",
     "CREATE INDEX IF NOT EXISTS idx_adto_item_day ON adtool_orders(item_id, local_date)",
@@ -4626,12 +4797,12 @@ async function ensureAdtoolPhase1Schema(env) {
     "CREATE TABLE IF NOT EXISTS adtool_number_register (metric_id TEXT PRIMARY KEY, name TEXT, formula TEXT, source_tables TEXT, recompute TEXT, recheck TEXT, owner TEXT DEFAULT 'adtool', phase INTEGER DEFAULT 1, added_at TEXT)",
     "CREATE TABLE IF NOT EXISTS adtool_fixture (kind TEXT NOT NULL, k1 TEXT NOT NULL, k2 TEXT NOT NULL DEFAULT '', spend REAL DEFAULT 0, clicks INTEGER DEFAULT 0, units INTEGER DEFAULT 0, revenue REAL DEFAULT 0, profit REAL, margin REAL, extra TEXT DEFAULT '', PRIMARY KEY (kind, k1, k2))",
   ];
-  for (const q of ddl) { try { await env.DB.prepare(q).run(); } catch (e) { /* exists / raced */ } }
+  await adtDdlRun(env, ddl);
   /* owner-approved single nullable column on the existing grain: eBay's primary category path */
-  try { await env.DB.prepare('ALTER TABLE items_api ADD COLUMN primary_category TEXT').run(); } catch (e) { /* already there */ }
+  await adtDdlOne(env, 'ALTER TABLE items_api ADD COLUMN primary_category TEXT');
   /* one nullable column on the existing grain: orders whose eBay fees had not landed when the day was rolled */
-  try { await env.DB.prepare('ALTER TABLE adtool_listing_day ADD COLUMN pending_fee_orders INTEGER').run(); } catch (e) { /* already there */ }
-  for (const g of ['adtool_listing_week', 'adtool_listing_month']) for (const c of ['pending_cost_orders', 'pending_fee_orders']) { try { await env.DB.prepare('ALTER TABLE ' + g + ' ADD COLUMN ' + c + ' INTEGER').run(); } catch (e) { /* already there */ } }
+  await adtDdlOne(env, 'ALTER TABLE adtool_listing_day ADD COLUMN pending_fee_orders INTEGER');
+  for (const g of ['adtool_listing_week', 'adtool_listing_month']) for (const c of ['pending_cost_orders', 'pending_fee_orders']) await adtDdlOne(env, 'ALTER TABLE ' + g + ' ADD COLUMN ' + c + ' INTEGER');
   await ensureAdtoolPhase1bSchema(env);
   ADTOOL_P1_SCHEMA_OK = true;
 }
@@ -4643,16 +4814,16 @@ async function ensureAdtoolPhase1bSchema(env) {
     "CREATE TABLE IF NOT EXISTS adtool_listing_today (account TEXT NOT NULL, item_id TEXT NOT NULL, report_day TEXT, uk_day TEXT, spend REAL, cpc_spend REAL, clicks INTEGER, impressions INTEGER, attr_units INTEGER, attr_revenue REAL, orders INTEGER DEFAULT 0, units INTEGER DEFAULT 0, revenue REAL DEFAULT 0, raw_priced_sum REAL DEFAULT 0, refunds REAL DEFAULT 0, pending_cost_orders INTEGER DEFAULT 0, pending_fee_orders INTEGER DEFAULT 0, actual_profit REAL, sampled_at TEXT, orders_at TEXT, unpriced_orders INTEGER, PRIMARY KEY (account, item_id))",
     'CREATE INDEX IF NOT EXISTS idx_adtlt_item ON adtool_listing_today(item_id)',
   ];
-  for (const q of ddl) { try { await env.DB.prepare(q).run(); } catch (e) { /* exists / raced */ } }
-  try { await env.DB.prepare('ALTER TABLE adtool_listing_hour ADD COLUMN carry_spend REAL').run(); } catch (e) { /* already there */ }
+  await adtDdlRun(env, ddl);
+  await adtDdlOne(env, 'ALTER TABLE adtool_listing_hour ADD COLUMN carry_spend REAL');
   /* WHEN THIS HOUR ROW WAS LAST REBUILT (1 Nov). The Peak time page's stamp read the roll-up's last
      SUCCESSFUL finish, so through thirty hours of killed runs it read “updated 07:26 UK” all day
      while the figures beside it stood still. The stamp reads the newest of these now, which is the
      only thing that moves when the roll-up actually commits an hour. */
-  try { await env.DB.prepare('ALTER TABLE adtool_listing_hour ADD COLUMN computed_at TEXT').run(); } catch (e) { /* already there */ }
-  try { await env.DB.prepare('ALTER TABLE adtool_listing_today ADD COLUMN unpriced_orders INTEGER').run(); } catch (e) { /* already there */ }
+  await adtDdlOne(env, 'ALTER TABLE adtool_listing_hour ADD COLUMN computed_at TEXT');
+  await adtDdlOne(env, 'ALTER TABLE adtool_listing_today ADD COLUMN unpriced_orders INTEGER');
   const seed = ADTOOL_REGISTER_P1B.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 1, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6").bind(...r));
-  try { await adtBatch(env, seed); } catch (e) { /* the register is documentation; never let it stop a job */ }
+  await adtSeedRun(env, seed, 'register p1b');   /* the register is documentation; never let it stop a job */
 }
 const ADTOOL_REGISTER_P1B = [
   ['TODAY_GRAIN', 'Today\'s figures per listing', 'Today\'s spend, clicks, sales from ads and orders for each listing, refreshed every five minutes. eBay publishes no ad figures for today until around 08:00 UK, so before then a listing shows its orders only.', 'adtool_intraday_latest, orders → adtool_listing_today', 'Every five minutes, and skipped when nothing has changed', 'The newest reading is under ten minutes old through the day'],
@@ -4687,10 +4858,12 @@ async function ensureAdtoolFreshConfig(env) {
      DO NOTHING on conflict, so a figure somebody has already set is never written back over, and once
      per isolate, so the hourly sweep is not two writes an hour for the life of the worker. */
   if (ADTOOL_FRESH_CFG_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_FRESH_CFG_OK = true; return; }
   const K = ADTOOL_FRESH_CONFIG_KEYS, D = ADTOOL_FRESH_DEFAULTS;
   const one = (key, value) => env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key, String(value));
-  try { await adtBatch(env, [one(K.amber_min, D.amber_min), one(K.red_min, D.red_min)]); ADTOOL_FRESH_CFG_OK = true; }
-  catch (e) { /* the defaults already answer for an unseeded key; try again on the next call */ }
+  /* the defaults already answer for an unseeded key, so a seed that did not land is not fatal; it
+     is written down, which keeps the marker unwritten, and the next call tries again */
+  if (await adtSeedRun(env, [one(K.amber_min, D.amber_min), one(K.red_min, D.red_min)], 'freshness config')) ADTOOL_FRESH_CFG_OK = true;
 }
 /* THE SAMPLER'S OWN RUNS, ASSEMBLED ONCE (31 Oct, §6.7). The Data health panel prints these and the
    freshness probe answers with them by key, and evidence two readers can disagree about is not
@@ -6202,6 +6375,16 @@ async function adtoolListingCompute(env, iid, p) {
     try { await ensureAdtoolPhase2Schema(env); } catch (e) { /* the campaign map answers null, as before */ }
     try { await ensureAdtoolPhase3Schema(env); } catch (e) { /* the pattern bundle answers null, as before */ }
   });
+  /* WAS THAT FIGURE A SKIP OR THE WORK ITSELF? The three guards above cost a cold isolate 5,627 ms
+     of a 5,870 ms answer before the schema marker existed, and nothing on the outside could tell
+     that apart from a slow database. `schema_skipped` is true when the marker answered for all
+     three and no DDL ran on this isolate at all, false when this very answer paid for bringing the
+     database up to this version, and `schema_refused` counts the statements it could not get
+     accepted, which is the only reason the marker would stay unwritten and the skip never arrive.
+     Three measures, no figure on the page: adsListingProbe prints them by key. */
+  T.schema_skipped = adtSchemaSkipped();
+  T.schema_version = ADTOOL_SCHEMA_VERSION;
+  T.schema_refused = ADTOOL_SCHEMA_REFUSED.length;
   const today = ukDate(''), todayUtc = utcDate();
   const yday = adtAddDays(today, -1);
   /* THE HOUR WINDOW, BOUNDED TO WHAT THE PAGE DRAWS AND NAMED IN THE ANSWER. The page draws two
@@ -6504,9 +6687,10 @@ function parseAdsReportCampaignTsv(tsv) {
 let ADTOOL_P2_SCHEMA_OK = false;
 async function ensureAdtoolPhase2Schema(env) {
   if (ADTOOL_P2_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P2_SCHEMA_OK = true; return; }
   await ensureAdtoolPhase1Schema(env);
   /* nullable columns at the existing grain (owner's rule): what eBay returns for a campaign and the portal never stored */
-  for (const c of ['bid_pct TEXT', 'start_date TEXT', 'end_date TEXT']) { try { await env.DB.prepare('ALTER TABLE campaigns ADD COLUMN ' + c).run(); } catch (e) { /* already there */ } }
+  for (const c of ['bid_pct TEXT', 'start_date TEXT', 'end_date TEXT']) await adtDdlOne(env, 'ALTER TABLE campaigns ADD COLUMN ' + c);
   /* every advertising read path comes through here, and most of them now name ad_records and
      ads_synced_at, so the two columns are made sure of before any of those queries runs */
   await ensureAdsReadingColumns(env);
@@ -6520,7 +6704,7 @@ async function ensureAdtoolPhase2Schema(env) {
     'CREATE INDEX IF NOT EXISTS idx_adtad_item_day ON adtool_ads_daily(item_id, day)',
     'CREATE TABLE IF NOT EXISTS adtool_ads_daily_vintage (account TEXT, item_id TEXT, campaign_id TEXT, day TEXT, family TEXT, pulled_at TEXT, spend REAL, clicks INTEGER, units INTEGER, revenue REAL, impressions INTEGER, PRIMARY KEY (account, item_id, campaign_id, day, family, pulled_at))',
   ];
-  await adtBatch(env, ddl.map(s => env.DB.prepare(s)));
+  await adtDdlRun(env, ddl);
   await adtoolRegisterSeedP2(env);
   ADTOOL_P2_SCHEMA_OK = true;
 }
@@ -6945,6 +7129,7 @@ function adtWeekBehaviour(weeksDesc) {
 let ADTOOL_P3_SCHEMA_OK = false;
 async function ensureAdtoolPhase3Schema(env) {
   if (ADTOOL_P3_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P3_SCHEMA_OK = true; return; }
   await ensureAdtoolPhase1Schema(env);
   const ddl = [
     'CREATE TABLE IF NOT EXISTS adtool_profiles (scope TEXT NOT NULL, scope_id TEXT NOT NULL, kind TEXT NOT NULL, computed_day TEXT NOT NULL, json TEXT, PRIMARY KEY (scope, scope_id, kind, computed_day))',
@@ -6955,7 +7140,7 @@ async function ensureAdtoolPhase3Schema(env) {
     "CREATE TABLE IF NOT EXISTS adtool_regimes (scope TEXT, scope_id TEXT, kind TEXT, detected_day TEXT, note TEXT DEFAULT '', shape_json TEXT, PRIMARY KEY (scope, scope_id, kind, detected_day))",
     "CREATE TABLE IF NOT EXISTS adtool_stage_events (item_id TEXT, day TEXT, from_stage TEXT, to_stage TEXT, account TEXT DEFAULT '', PRIMARY KEY (item_id, day))",
   ];
-  await adtBatch(env, ddl.map(s => env.DB.prepare(s)));
+  await adtDdlRun(env, ddl);
   await adtoolRegisterSeedP3(env);
   ADTOOL_P3_SCHEMA_OK = true;
 }
@@ -7413,6 +7598,7 @@ function adtStageExplain() {
 let ADTOOL_P4_SCHEMA_OK = false;
 async function ensureAdtoolPhase4Schema(env) {
   if (ADTOOL_P4_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P4_SCHEMA_OK = true; return; }
   await ensureAdtoolPhase3Schema(env);
   const ddl = [
     'CREATE TABLE IF NOT EXISTS adtool_forecast (account TEXT, item_id TEXT NOT NULL, made_day TEXT NOT NULL, target_day TEXT NOT NULL, model TEXT, units_mean REAL, units_lo REAL, units_hi REAL, revenue_mean REAL, spend_mean REAL, ad_profit_mean REAL, PRIMARY KEY (item_id, made_day, target_day))',
@@ -7420,7 +7606,7 @@ async function ensureAdtoolPhase4Schema(env) {
     "CREATE TABLE IF NOT EXISTS adtool_model_scores (item_id TEXT NOT NULL, scored_day TEXT NOT NULL, model TEXT NOT NULL, mase REAL, coverage80 REAL, chosen INTEGER DEFAULT 0, params_json TEXT DEFAULT '', PRIMARY KEY (item_id, scored_day, model))",
     'CREATE INDEX IF NOT EXISTS idx_adtms_day ON adtool_model_scores(scored_day, chosen)',
   ];
-  await adtBatch(env, ddl.map(s => env.DB.prepare(s)));
+  await adtDdlRun(env, ddl);
   await adtoolRegisterSeedP4(env);
   ADTOOL_P4_SCHEMA_OK = true;
 }
@@ -7777,6 +7963,7 @@ function adtPdf(lines) {
 let ADTOOL_P5_SCHEMA_OK = false;
 async function ensureAdtoolPhase5Schema(env) {
   if (ADTOOL_P5_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P5_SCHEMA_OK = true; return; }
   await ensureAdtoolPhase4Schema(env);
   const ddl = [
     "CREATE TABLE IF NOT EXISTS adtool_alerts (alert_id TEXT PRIMARY KEY, rule_id TEXT, severity TEXT, account TEXT DEFAULT '', item_id TEXT DEFAULT '', campaign_id TEXT DEFAULT '', fired_at TEXT, last_seen_at TEXT, cleared_at TEXT DEFAULT '', acknowledged_by TEXT DEFAULT '', acknowledged_at TEXT DEFAULT '', snoozed_until TEXT DEFAULT '', payload_json TEXT DEFAULT '{}')",
@@ -7786,7 +7973,7 @@ async function ensureAdtoolPhase5Schema(env) {
     "CREATE TABLE IF NOT EXISTS adtool_roas (day TEXT PRIMARY KEY, computed_at TEXT, json TEXT)",
     "CREATE TABLE IF NOT EXISTS adtool_cap_days (item_id TEXT, day TEXT, cap_hour INTEGER, budget REAL, PRIMARY KEY (item_id, day))",
   ];
-  await adtBatch(env, ddl.map(s => env.DB.prepare(s)));
+  await adtDdlRun(env, ddl);
   await adtoolRegisterSeedP5(env);
   ADTOOL_P5_SCHEMA_OK = true;
 }
@@ -8760,6 +8947,7 @@ function adtCarryForward(listings) {
 let ADTOOL_P6_SCHEMA_OK = false;
 async function ensureAdtoolPhase6Schema(env) {
   if (ADTOOL_P6_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P6_SCHEMA_OK = true; return; }
   await ensureAdtoolPhase5Schema(env);
   const ddl = [
     "CREATE TABLE IF NOT EXISTS adtool_decisions (decision_id TEXT PRIMARY KEY, day TEXT, batch TEXT DEFAULT 'morning', account TEXT, item_id TEXT, decision TEXT, rules_json TEXT DEFAULT '[]', inputs_json TEXT DEFAULT '{}', expected_value REAL, confidence TEXT, why TEXT DEFAULT '', action TEXT DEFAULT '', mode TEXT DEFAULT 'shadow', applied_at TEXT DEFAULT '', applied_by TEXT DEFAULT '', api_result_json TEXT DEFAULT '', undo_json TEXT DEFAULT '', undone_at TEXT DEFAULT '', outcome_day TEXT DEFAULT '', outcome_ad_profit REAL, outcome_score INTEGER)",
@@ -8768,10 +8956,12 @@ async function ensureAdtoolPhase6Schema(env) {
     "CREATE TABLE IF NOT EXISTS adtool_rule_scores (rule_id TEXT, scored_day TEXT, decisions INTEGER, right_n INTEGER, score REAL, trusted INTEGER DEFAULT 1, PRIMARY KEY (rule_id, scored_day))",
     "CREATE TABLE IF NOT EXISTS adtool_carry (rule_id TEXT, run_day TEXT, selected INTEGER, tested INTEGER, rate INTEGER, base_rate INTEGER, trusted INTEGER, spend REAL, window_json TEXT DEFAULT '', PRIMARY KEY (rule_id, run_day))",
   ];
-  await adtBatch(env, ddl.map(s => env.DB.prepare(s)));
-  try { await env.DB.prepare('ALTER TABLE adtool_decisions ADD COLUMN outcome_actual_profit REAL').run(); } catch (e) { /* already there */ }
-  try { await env.DB.prepare('ALTER TABLE adtool_decisions ADD COLUMN outcome_score_adprofit INTEGER').run(); } catch (e) { /* already there — the ad-profit score kept beside the law score for the side-by-side */ }
-  try { await env.DB.prepare('ALTER TABLE adtool_decisions ADD COLUMN outcome_provisional INTEGER DEFAULT 0').run(); } catch (e) { /* already there — 1 while the scored day still has unpriced orders or no final ads report; re-scored on later runs */ }
+  await adtDdlRun(env, ddl);
+  await adtDdlOne(env, 'ALTER TABLE adtool_decisions ADD COLUMN outcome_actual_profit REAL');
+  /* the ad-profit score kept beside the law score for the side-by-side */
+  await adtDdlOne(env, 'ALTER TABLE adtool_decisions ADD COLUMN outcome_score_adprofit INTEGER');
+  /* 1 while the scored day still has unpriced orders or no final ads report; re-scored on later runs */
+  await adtDdlOne(env, 'ALTER TABLE adtool_decisions ADD COLUMN outcome_provisional INTEGER DEFAULT 0');
   await adtoolRegisterSeedP6(env);
   ADTOOL_P6_SCHEMA_OK = true;
 }
@@ -9142,12 +9332,13 @@ function adtProductNarrativeTemplate(N) {
 let ADTOOL_P7_SCHEMA_OK = false;
 async function ensureAdtoolPhase7Schema(env) {
   if (ADTOOL_P7_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P7_SCHEMA_OK = true; return; }
   await ensureAdtoolPhase6Schema(env);
-  await adtBatch(env, [
+  await adtDdlRun(env, [
     "CREATE TABLE IF NOT EXISTS adtool_narratives (scope TEXT, scope_id TEXT, day TEXT, text TEXT, inputs_json TEXT, model TEXT DEFAULT 'template', validated INTEGER DEFAULT 1, unsourced_json TEXT DEFAULT '[]', made_at TEXT, PRIMARY KEY (scope, scope_id, day))",
     "CREATE TABLE IF NOT EXISTS adtool_analyst_calls (day TEXT, scope TEXT, scope_id TEXT, tokens_in INTEGER, tokens_out INTEGER, model TEXT, at TEXT, PRIMARY KEY (day, scope, scope_id))",
-  ].map(s => env.DB.prepare(s)));
-  await adtBatch(env, [['NARRATIVE', 'Plain-English narrative per scope per day', 'written from the computed numbers only: deterministic templates, optionally rewritten by the model with the same numbers; a validator rejects any number not present in the inputs', 'adtool_reports, adtool_listing_day, adtool_profiles, adtool_stages, adtool_decisions', 'adtoolAnalyst daily in the morning chain', 'zero narratives with unsourced numbers over 7 days (ADTOOL_NARRATIVE_CLEAN)']].map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 7, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 7").bind(r[0], r[1], r[2], r[3], r[4], r[5])));
+  ]);
+  await adtSeedRun(env, [['NARRATIVE', 'Plain-English narrative per scope per day', 'written from the computed numbers only: deterministic templates, optionally rewritten by the model with the same numbers; a validator rejects any number not present in the inputs', 'adtool_reports, adtool_listing_day, adtool_profiles, adtool_stages, adtool_decisions', 'adtoolAnalyst daily in the morning chain', 'zero narratives with unsourced numbers over 7 days (ADTOOL_NARRATIVE_CLEAN)']].map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 7, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 7").bind(r[0], r[1], r[2], r[3], r[4], r[5])), 'register p7');
   ADTOOL_P7_SCHEMA_OK = true;
 }
 const ADTOOL_ANALYST_PROMPT = 'You rewrite an advertising summary for a UK eBay seller into clear plain English for a manager who is not an analyst. Rules you must follow exactly: use ONLY the numbers in the text you are given; never add, infer, round differently, or compute a new number; never add advice that the numbers do not state; keep every figure identical including the currency symbol and the times sign; British English; no headings, no bullet points, no emoji; at most four sentences; do not mention that you are a model.';
@@ -9315,12 +9506,13 @@ function adtApplyPlan(decision, inputs, membership) {
 let ADTOOL_P8_SCHEMA_OK = false;
 async function ensureAdtoolPhase8Schema(env) {
   if (ADTOOL_P8_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P8_SCHEMA_OK = true; return; }
   await ensureAdtoolPhase7Schema(env);
-  await adtBatch(env, [
+  await adtDdlRun(env, [
     "CREATE TABLE IF NOT EXISTS adtool_apply_log (id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT, account TEXT, item_id TEXT DEFAULT '', campaign_id TEXT DEFAULT '', decision_id TEXT DEFAULT '', op TEXT, payload_json TEXT, mode TEXT, http_status INTEGER, response TEXT DEFAULT '', undo_json TEXT DEFAULT '', undone_at TEXT DEFAULT '', at TEXT)",
     'CREATE INDEX IF NOT EXISTS idx_adtap_day ON adtool_apply_log(day, account)',
-  ].map(s => env.DB.prepare(s)));
-  await adtBatch(env, [['LIVE_APPLY', 'Live actions sent to eBay', '§6.11 apply path: ad pause/resume, bid change, daily budget change, only for confident decisions and only for an account whose own switch is on; caps 30 actions per account per day, 3 bid changes per listing per week, nothing between 22:00 and 06:00 UK; every call and response logged with an undo for 7 days', 'adtool_decisions, campaign_ads, campaigns, adtool_apply_log', 'adtoolApply after the morning batch (only with the account switch on)', 'the apply log against the eBay campaign screen on the first night']].map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 8, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 8").bind(r[0], r[1], r[2], r[3], r[4], r[5])));
+  ]);
+  await adtSeedRun(env, [['LIVE_APPLY', 'Live actions sent to eBay', '§6.11 apply path: ad pause/resume, bid change, daily budget change, only for confident decisions and only for an account whose own switch is on; caps 30 actions per account per day, 3 bid changes per listing per week, nothing between 22:00 and 06:00 UK; every call and response logged with an undo for 7 days', 'adtool_decisions, campaign_ads, campaigns, adtool_apply_log', 'adtoolApply after the morning batch (only with the account switch on)', 'the apply log against the eBay campaign screen on the first night']].map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 8, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 8").bind(r[0], r[1], r[2], r[3], r[4], r[5])), 'register p8');
   ADTOOL_P8_SCHEMA_OK = true;
 }
 async function adtApplyMembership(env, iid) {
@@ -9665,10 +9857,11 @@ const ADTOOL_REGISTER_P9 = [
 let ADTOOL_P9_REG_OK = false;
 async function ensureAdtoolPhase9Register(env) {
   if (ADTOOL_P9_REG_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P9_REG_OK = true; return; }
   const stmts = ADTOOL_REGISTER_P9.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 9, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 9").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
   /* the Running today page flag is born ON (a read-only page); a manager can still switch it off in Flags */
   stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_page_runtoday', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
-  try { await adtBatch(env, stmts); } catch (e) { /* documentation and a default; never let it stop a page */ }
+  await adtSeedRun(env, stmts, 'register p9');   /* documentation and a default; never let it stop a page */
   ADTOOL_P9_REG_OK = true;
 }
 
@@ -10118,6 +10311,7 @@ const ADTOOL_REGISTER_P10 = [
 let ADTOOL_SALE_SCHEMA_OK = false;
 async function ensureAdtoolSaleSchema(env) {
   if (ADTOOL_SALE_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_SALE_SCHEMA_OK = true; return; }
   await ensureAdtoolPhase1Schema(env);
   const ddl = [
     "CREATE TABLE IF NOT EXISTS adtool_sale_membership_day (account TEXT NOT NULL, item_id TEXT NOT NULL, day TEXT NOT NULL, promo_id TEXT DEFAULT '', in_sale INTEGER DEFAULT 0, basis TEXT DEFAULT 'none', discount_pct REAL, disc_src TEXT DEFAULT '', price REAL, updated_at TEXT, PRIMARY KEY (account, item_id, day))",
@@ -10127,20 +10321,20 @@ async function ensureAdtoolSaleSchema(env) {
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_adt_sale_task_open ON adtool_sale_tasks(account, item_id, kind) WHERE status = 'open'",
     "CREATE INDEX IF NOT EXISTS idx_adt_sale_mem_item ON adtool_sale_membership_day(item_id, day)",
   ];
-  await adtBatch(env, ddl.map(s => env.DB.prepare(s)));
+  await adtDdlRun(env, ddl);
   /* disc_src distinguishes an OBSERVED discount (an order proved the price buyers paid) from the event text alone;
      added after the first release, so an ALTER for any table already created without it. */
-  try { await env.DB.prepare("ALTER TABLE adtool_sale_membership_day ADD COLUMN disc_src TEXT DEFAULT ''").run(); } catch (e) { /* already there */ }
+  await adtDdlOne(env, "ALTER TABLE adtool_sale_membership_day ADD COLUMN disc_src TEXT DEFAULT ''");
   /* event_promo = the ACCOUNT's running markdown event on every row (member or not), so event_running is the
      account's state rather than inferred from the row's own promo_id; eligible_basis says which clock set the date */
-  try { await env.DB.prepare("ALTER TABLE adtool_sale_membership_day ADD COLUMN event_promo TEXT DEFAULT ''").run(); } catch (e) { /* already there */ }
-  try { await env.DB.prepare("ALTER TABLE adtool_sale_timeline ADD COLUMN eligible_basis TEXT DEFAULT ''").run(); } catch (e) { /* already there */ }
+  await adtDdlOne(env, "ALTER TABLE adtool_sale_membership_day ADD COLUMN event_promo TEXT DEFAULT ''");
+  await adtDdlOne(env, "ALTER TABLE adtool_sale_timeline ADD COLUMN eligible_basis TEXT DEFAULT ''");
   const seeds = ADTOOL_REGISTER_P10.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 10, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 10").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
   /* the snapshot behaviour and the page are born ON; a manager can switch either off in Flags. DO NOTHING never
      overrides an existing choice (adtool_page_sales may already be set by Apps Script). */
   seeds.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_sale_snapshot', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
   seeds.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_page_sales', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
-  try { await adtBatch(env, seeds); } catch (e) { /* documentation + defaults; never let it stop a page */ }
+  await adtSeedRun(env, seeds, 'register p10');   /* documentation + defaults; never let it stop a page */
   ADTOOL_SALE_SCHEMA_OK = true;
 }
 
@@ -10470,11 +10664,12 @@ const ADTOOL_REGISTER_P11 = [
 let ADTOOL_BU3_REG_OK = false;
 async function ensureAdtoolPhaseBu3Register(env) {
   if (ADTOOL_BU3_REG_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_BU3_REG_OK = true; return; }
   const stmts = ADTOOL_REGISTER_P11.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 11, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 11").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
   /* both new pages are born ON (read-only analytics); a manager can switch either off in Flags */
   stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_page_cpc', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
   stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_page_overview', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
-  try { await adtBatch(env, stmts); } catch (e) { /* documentation and a default; never let it stop a page */ }
+  await adtSeedRun(env, stmts, 'register p11');   /* documentation and a default; never let it stop a page */
   ADTOOL_BU3_REG_OK = true;
 }
 
@@ -10955,11 +11150,12 @@ const ADTOOL_REGISTER_P13 = [
 let ADTOOL_P13_REG_OK = false;
 async function ensureAdtoolPhaseDeptsRegister(env) {
   if (ADTOOL_P13_REG_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P13_REG_OK = true; return; }
   await ensureAdtoolPhase1Schema(env);
   const stmts = ADTOOL_REGISTER_P13.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 13, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 13").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
   /* born ON: the page only reads. A manager can switch it off in Flags. */
   stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_page_depts', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
-  try { await adtBatch(env, stmts); } catch (e) { /* documentation and a default; never let it stop a page */ }
+  await adtSeedRun(env, stmts, 'register p13');   /* documentation and a default; never let it stop a page */
   ADTOOL_P13_REG_OK = true;
 }
 async function adtoolDeptConfig(env) {
@@ -11425,6 +11621,7 @@ const ADTOOL_REGISTER_P14 = [
 let ADTOOL_P14_REG_OK = false;
 async function ensureAdtoolPhaseCampaignBoardRegister(env) {
   if (ADTOOL_P14_REG_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P14_REG_OK = true; return; }
   await ensureAdtoolPhase2Schema(env);
   const stmts = ADTOOL_REGISTER_P14.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 14, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 14").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
   /* both pages are born ON and only read; a manager can switch either off in Flags */
@@ -11437,9 +11634,12 @@ async function ensureAdtoolPhaseCampaignBoardRegister(env) {
      'off' from the day it was added, and INSERT OR IGNORE would leave that 'off' standing for ever.
      This SETS it. That is safe because the flag buys nothing from eBay and sends nothing to eBay: it
      only decides whether a report in hand is stored per campaign as well as summed per listing. The
-     page switches above are the ones to use if a page has to go away. */
+     page switches above are the ones to use if a page has to go away.
+     2 Nov: with the schema marker in front of this family, this force runs once per SCHEMA VERSION
+     rather than once per isolate. It is the one write in these families that overrules a stored
+     value, so it is the one worth saying out loud: bumping ADTOOL_SCHEMA_VERSION forces it again. */
   stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_campaign_truth', 'on', datetime('now')) ON CONFLICT(key) DO UPDATE SET value = 'on', updated_at = datetime('now')"));
-  try { await adtBatch(env, stmts); } catch (e) { /* documentation and two defaults; never let it stop a page */ }
+  await adtSeedRun(env, stmts, 'register p14');   /* documentation and two defaults; never let it stop a page */
   ADTOOL_P14_REG_OK = true;
 }
 async function adtoolCampaignMoneyRows(env, w, acct, accounts) {
@@ -12014,20 +12214,22 @@ async function ensureCampaignEventsCampaignId(env) {
      guarded way every other added column in this file is; older rows resolve their name against the
      campaign map instead and say on the row that the link is a name match. */
   if (ADTOOL_CAMPEV_CID_OK) return;
-  try { await env.DB.prepare("ALTER TABLE campaign_events ADD COLUMN campaign_id TEXT DEFAULT ''").run(); } catch (e) { /* already there */ }
+  if (await adtSchemaMarked(env)) { ADTOOL_CAMPEV_CID_OK = true; return; }
+  await adtDdlOne(env, "ALTER TABLE campaign_events ADD COLUMN campaign_id TEXT DEFAULT ''");
   ADTOOL_CAMPEV_CID_OK = true;
 }
 let ADTOOL_P15_SCHEMA_OK = false;
 async function ensureAdtoolPhase15Schema(env) {
   if (ADTOOL_P15_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P15_SCHEMA_OK = true; return; }
   await ensureAdtoolPhase2Schema(env);
   await ensureCampaignEventsCampaignId(env);
-  await adtBatch(env, [
+  await adtDdlRun(env, [
     /* the by-hand peak list. A removal KEEPS the row and stamps who took it off and when, so the
        list can be read back; the page lists only the rows that have not been taken off. */
     "CREATE TABLE IF NOT EXISTS adtool_peak_items (account TEXT, item_id TEXT PRIMARY KEY, hours TEXT DEFAULT '', note TEXT DEFAULT '', added_by TEXT, added_at TEXT, removed_by TEXT DEFAULT '', removed_at TEXT DEFAULT '')",
     'CREATE INDEX IF NOT EXISTS idx_adtpeak_open ON adtool_peak_items(removed_at, account)',
-  ].map(s => env.DB.prepare(s)));
+  ]);
   ADTOOL_P15_SCHEMA_OK = true;
 }
 
@@ -12045,6 +12247,7 @@ const ADTOOL_REGISTER_P15 = [
 let ADTOOL_P15_REG_OK = false;
 async function ensureAdtoolPhase15Register(env) {
   if (ADTOOL_P15_REG_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P15_REG_OK = true; return; }
   await ensureAdtoolPhase15Schema(env);
   const stmts = ADTOOL_REGISTER_P15.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 15, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 15").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
   /* all three are born ON, and a switch somebody has already set is left exactly as it stands.
@@ -12059,7 +12262,7 @@ async function ensureAdtoolPhase15Register(env) {
   for (const key of ['adtool_page_changes', 'adtool_page_peak', 'adtool_job_peakswitch']) {
     stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, 'on', datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key));
   }
-  try { await adtBatch(env, stmts); } catch (e) { /* documentation and a default; never let it stop a page */ }
+  await adtSeedRun(env, stmts, 'register p15');   /* documentation and a default; never let it stop a page */
   ADTOOL_P15_REG_OK = true;
 }
 
@@ -15261,6 +15464,7 @@ function adVideoVsNoVideo(rows) {
 let ADTOOL_P16_SCHEMA_OK = false;
 async function ensureAdtoolPhase16Schema(env) {
   if (ADTOOL_P16_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P16_SCHEMA_OK = true; return; }
   await ensureAdtoolPhase15Schema(env);
   try { await ensureCampaignFundingColumns(env); } catch (e) { /* adDynamicRate falls back to the name */ }
   /* whether the system switches this row for itself. The column is born 0 and every row already on
@@ -15273,30 +15477,30 @@ async function ensureAdtoolPhase16Schema(env) {
      the insert and sets it to 1 when the hours parse and 0 when there are none, so a new row behaves
      the way the page promises without the column's default deciding anything. Guarded, in the way
      every added column in this file is. */
-  try { await env.DB.prepare('ALTER TABLE adtool_peak_items ADD COLUMN auto INTEGER DEFAULT 0').run(); } catch (e) { /* already there */ }
+  await adtDdlOne(env, 'ALTER TABLE adtool_peak_items ADD COLUMN auto INTEGER DEFAULT 0');
   /* WHICH CAMPAIGN’S AD the hours switch (owner, 31 Oct: "give option in peak listings to select
      campaign, in which campaign we need to run this product?"). Born '', and '' means every
      pay-per-click campaign the listing is in, which is exactly what every row on this list has
      always done: the column lands on months of existing rows and not one of them behaves
      differently the day after. Guarded, beside the switch it belongs with. */
-  try { await env.DB.prepare("ALTER TABLE adtool_peak_items ADD COLUMN campaign_id TEXT DEFAULT ''").run(); } catch (e) { /* already there */ }
+  await adtDdlOne(env, "ALTER TABLE adtool_peak_items ADD COLUMN campaign_id TEXT DEFAULT ''");
   /* THE HOLD (owner, 31 Oct, §3): 'auto' is the schedule, 'on' is all day on, 'off' is all day off.
      Born 'auto', which is what every row on this list did the day before this column existed: the
      schedule only ever takes an hour OFF inside the hours somebody already typed, so a row that has
      never been near the planner behaves identically either way. A hold is a person overruling the
      pattern for a listing, so it is written to the audit trail with who set it. Guarded, beside the
      two columns above it. */
-  try { await env.DB.prepare("ALTER TABLE adtool_peak_items ADD COLUMN hold TEXT DEFAULT 'auto'").run(); } catch (e) { /* already there */ }
+  await adtDdlOne(env, "ALTER TABLE adtool_peak_items ADD COLUMN hold TEXT DEFAULT 'auto'");
   /* THE DAY'S SCHEDULE, one row per listing per UK day, written by the planner and read by the switch.
      Separate from adtool_peak_items on purpose: the list is what a person keeps and this is what the
      system worked out, so a schedule can be rewritten at a slot boundary without touching anybody's row,
      and a day with no row here means the listing runs on its typed hours exactly as it did before any
      of this existed. states_json is 24 of 'ON' / 'OFF'; reasons_json is 24 short lines saying why each
      hour reads the way it does; dead_json is what the pattern found, applied or only proposed. */
-  await adtBatch(env, [
+  await adtDdlRun(env, [
     'CREATE TABLE IF NOT EXISTS adtool_peak_schedule (account TEXT, item_id TEXT NOT NULL, day TEXT NOT NULL, states_json TEXT, source TEXT, reasons_json TEXT, dead_json TEXT, profile_days INTEGER, computed_at TEXT, PRIMARY KEY (account, item_id, day))',
     'CREATE INDEX IF NOT EXISTS idx_adtpksch_day ON adtool_peak_schedule(day, item_id)',
-  ].map(s => env.DB.prepare(s)));
+  ]);
   ADTOOL_P16_SCHEMA_OK = true;
 }
 let ADTOOL_PEAK_CFG_OK = false;
@@ -15314,6 +15518,7 @@ async function ensureAdtoolPeakPlanConfig(env) {
      over, and once per isolate, so a job that runs every quarter hour is not eight D1 writes every
      quarter hour for the life of the worker. */
   if (ADTOOL_PEAK_CFG_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_PEAK_CFG_OK = true; return; }
   const K = ADTOOL_PEAK_PLAN_CONFIG_KEYS, D = ADTOOL_PEAK_PLAN_DEFAULTS;
   const one = (key, value) => env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key, value);
   /* the planner's own stop flag, beside the switch job's. Born on, because the owner asked for this to
@@ -15330,7 +15535,9 @@ async function ensureAdtoolPeakPlanConfig(env) {
   for (const k of ['lookback_days', 'min_days', 'dead_min_clicks', 'proven_share', 'proven_min_orders', 'min_block_h', 'plan_time']) {
     stmts.push(one(K[k], String(D[k])));
   }
-  try { await adtBatch(env, stmts); ADTOOL_PEAK_CFG_OK = true; } catch (e) { /* a default; never let it stop a job, and try again on the next run */ }
+  /* a default; never let it stop a job. A seed that did not land is written down, which keeps the
+     marker unwritten, and the next run tries again. */
+  if (await adtSeedRun(env, stmts, 'peak plan config')) ADTOOL_PEAK_CFG_OK = true;
 }
 const ADTOOL_REGISTER_P16 = [
   ['LIVE_SPLIT', 'Every live listing, in one of three places', 'Each listing eBay still shows as active goes in exactly one place: on pay-per-click if it has a live pay-per-click ad; dynamic if it has none of those but is live in a campaign whose rate is a dynamic one; and without pay-per-click if neither. Being advertised means the same thing here as on every other advertising page. The three counts are then checked against a SEPARATE count of the live listings, which is the real check: a listing in two places, or in none, shows up as the three not adding up, and the page says so. The third place counts two kinds apart inside itself: one is advertised on pay-on-sale, the other is not advertised at all.', 'campaign_ads, campaigns, items_api, adtool_listing_day', 'Worked out when you open the page and held for a couple of minutes after a read, while the all-accounts answer is prepared every hour so the page opens at once', 'Unit tests put every pattern of memberships in exactly one of the three, the two kinds of the third add back up to it, and the page’s own line checks the three against the separate active count'],
@@ -15367,6 +15574,7 @@ const ADTOOL_REGISTER_P16 = [
 let ADTOOL_P16_REG_OK = false;
 async function ensureAdtoolPhase16Register(env) {
   if (ADTOOL_P16_REG_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_P16_REG_OK = true; return; }
   await ensureAdtoolPhase16Schema(env);
   const stmts = ADTOOL_REGISTER_P16.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 16, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 16").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
   /* both pages are born ON. Neither writes anything and neither reaches eBay: one counts the live
@@ -15382,7 +15590,7 @@ async function ensureAdtoolPhase16Register(env) {
      Kept here as well as in the jobs: a page opening is still the commonest way these land, and the
      page-side call is the one that was there before the probe found the keys missing. */
   try { await ensureAdtoolPeakPlanConfig(env); } catch (e) { /* a default; never let it stop a page */ }
-  try { await adtBatch(env, stmts); } catch (e) { /* documentation and a default; never let it stop a page */ }
+  await adtSeedRun(env, stmts, 'register p16');   /* documentation and a default; never let it stop a page */
   ADTOOL_P16_REG_OK = true;
 }
 
@@ -16270,22 +16478,23 @@ const ADTOOL_ACTIONS_P16 = {
 let ADTOOL_VIDEO_SCHEMA_OK = false;
 async function ensureAdtoolVideoSchema(env) {
   if (ADTOOL_VIDEO_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_VIDEO_SCHEMA_OK = true; return; }
   /* ONE ROW PER LISTING, whether or not it carries a video: a listing asked about and found to have
      none is a fact worth keeping, because it is what stops the sweep asking about it again an hour
      later and is what `checked_at` orders the whole rotation by. video_count 0 is therefore a real
      answer and the cohort is built on video_count > 0 rather than on a row existing.
      `first_seen` is the first day we saw a video on it, which is the floor the cohort counts from
      when the upload day itself could not be decoded. */
-  await adtBatch(env, [
+  await adtDdlRun(env, [
     'CREATE TABLE IF NOT EXISTS adtool_listing_video (account TEXT NOT NULL, item_id TEXT NOT NULL, video_ids_json TEXT, video_count INTEGER DEFAULT 0, video_added_on TEXT, video_gone_on TEXT, date_source TEXT, source TEXT, thumb_url TEXT, first_seen TEXT, checked_at TEXT, date_checked_at TEXT, note TEXT, PRIMARY KEY (account, item_id))',
     'CREATE INDEX IF NOT EXISTS idx_adtlv_checked ON adtool_listing_video(checked_at)',
     'CREATE INDEX IF NOT EXISTS idx_adtlv_item ON adtool_listing_video(item_id)',
-  ].map(s => env.DB.prepare(s)));
+  ]);
   const one = (key, value) => env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key, value);
   /* the sweep's own stop flag and the page's, seeded before either is read, for the reason the
      pattern engine's seed states: a key nobody has written reads as blank, blank is not 'on', and a
      job that read its own flag first would have returned having swept nothing, in silence. */
-  try { await adtBatch(env, [one('adtool_job_videosweep', 'on'), one('adtool_page_videos', 'on')]); } catch (e) { /* a default; never let it stop a job */ }
+  await adtSeedRun(env, [one('adtool_job_videosweep', 'on'), one('adtool_page_videos', 'on')], 'video flags');   /* a default; never let it stop a job */
   ADTOOL_VIDEO_SCHEMA_OK = true;
 }
 
@@ -16889,6 +17098,7 @@ function adtPeriodParamsOf(w) {
 let ADTOOL_SCHEMA_OK = false;
 async function ensureAdtoolSchema(env) {
   if (ADTOOL_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_SCHEMA_OK = true; return; }
   const ddl = [
     "CREATE TABLE IF NOT EXISTS adtool_ads_intraday (account TEXT NOT NULL, item_id TEXT NOT NULL, family TEXT NOT NULL, report_day TEXT NOT NULL, sampled_at TEXT NOT NULL, " +
       "cum_spend REAL DEFAULT 0, cum_clicks INTEGER DEFAULT 0, cum_units INTEGER DEFAULT 0, cum_revenue REAL DEFAULT 0, cum_impressions INTEGER DEFAULT 0, " +
@@ -16901,7 +17111,7 @@ async function ensureAdtoolSchema(env) {
       "kicked_at TEXT DEFAULT '', rows_total INTEGER DEFAULT 0, rows_changed INTEGER DEFAULT 0, rows_corrected INTEGER DEFAULT 0, source TEXT DEFAULT 'api', " +
       "PRIMARY KEY (account, family, report_day, sampled_at))",
   ];
-  for (const q of ddl) { try { await env.DB.prepare(q).run(); } catch (e) { /* exists / raced another isolate */ } }
+  await adtDdlRun(env, ddl);
   ADTOOL_SCHEMA_OK = true;
 }
 async function adtoolIntradayOn(env) {
@@ -17291,7 +17501,8 @@ async function trafficSync(env) {
 let TRAFFIC_SCHEMA_OK = false;
 async function ensureTrafficSchema(env) {
   if (TRAFFIC_SCHEMA_OK) return;
-  for (const d of [
+  if (await adtSchemaMarked(env)) { TRAFFIC_SCHEMA_OK = true; return; }
+  await adtDdlRun(env, [
     'CREATE TABLE IF NOT EXISTS traffic_hour (account TEXT NOT NULL, date TEXT NOT NULL, hour INTEGER NOT NULL, ' +
       'impressions INTEGER DEFAULT 0, views INTEGER DEFAULT 0, transactions INTEGER DEFAULT 0, ' +
       'samples INTEGER DEFAULT 0, updated_at TEXT, PRIMARY KEY (account, date, hour))',
@@ -17323,7 +17534,7 @@ async function ensureTrafficSchema(env) {
       'baseline_hour INTEGER, readings INTEGER DEFAULT 0, first_at TEXT, last_at TEXT, ' +
       'PRIMARY KEY (account, date))',
     'CREATE INDEX IF NOT EXISTS idx_traffic_clock_baseline_date ON traffic_clock_baseline(date)',
-  ]) { try { await env.DB.prepare(d).run(); } catch (e) { /* already there */ } }
+  ]);
   TRAFFIC_SCHEMA_OK = true;
 }
 /* the same calendar date one month earlier — 31 Mar steps back to 28/29 Feb, never to 3 Mar */
@@ -18506,6 +18717,7 @@ function prSupplierAssessment(hist, supOf, acctOf, d30, yday, today) {
 let PRICE_SCHEMA_OK = false;
 async function ensurePriceSchema(env) {
   if (PRICE_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { PRICE_SCHEMA_OK = true; return; }
   const ddl = [
     "CREATE TABLE IF NOT EXISTS cost_history (id INTEGER PRIMARY KEY AUTOINCREMENT, item_id TEXT NOT NULL, account TEXT DEFAULT '', old_cost REAL DEFAULT 0, new_cost REAL DEFAULT 0, delta_p INTEGER DEFAULT 0, tier TEXT DEFAULT '', supplier TEXT DEFAULT '', seen_at TEXT, seen_day TEXT DEFAULT '')",
     'CREATE INDEX IF NOT EXISTS idx_cost_history_item ON cost_history(item_id, seen_at)',
@@ -18514,7 +18726,7 @@ async function ensurePriceSchema(env) {
     'CREATE INDEX IF NOT EXISTS idx_price_decisions_item ON price_decisions(item_id, id)',
     "ALTER TABLE price_watch ADD COLUMN tier TEXT DEFAULT ''",
   ];
-  for (const d of ddl) { try { await env.DB.prepare(d).run(); } catch (e) { /* already there */ } }
+  await adtDdlRun(env, ddl);
   /* first run: the rises the old desk already recorded become the first pages of the history */
   try {
     const c = await env.DB.prepare('SELECT COUNT(*) AS n FROM cost_history').first();
@@ -19232,6 +19444,7 @@ async function openSync(env) {
 let TRUTH_SCHEMA_OK = false;
 async function ensureTruthSchema(env) {
   if (TRUTH_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { TRUTH_SCHEMA_OK = true; return; }
   const ddl = [
     "ALTER TABLE orders ADD COLUMN payment_status TEXT",
     "ALTER TABLE orders ADD COLUMN cancel_state TEXT",
@@ -19322,13 +19535,15 @@ async function ensureTruthSchema(env) {
      FIRST request of every fresh isolate — ~5 s added to whichever staff click happened to land
      on a cold isolate (measured: 5.5 s then 0.3 s for the same action). The DDL is idempotent, so
      it only needs to run once per DDL text: a KV tag (edge-cached read, ~ms) remembers which
-     DDL text has already been applied; a changed list (new column/table) runs once and re-tags. */
+     DDL text has already been applied; a changed list (new column/table) runs once and re-tags.
+     2 Nov: the schema marker above this family answers first and usually means nothing here runs at
+     all. The KV tag is kept beside it on purpose, because it answers on a database whose
+     portal_config cannot be read, and what the pass does run now travels in batches: five trips for
+     the fifty-three CREATEs, and the twenty-one guarded ALTERs one at a time as they must be. */
   let tag = 'schema:' + ddl.length + ':';
   { let h = 2166136261; const txt = ddl.join('\n'); for (let i = 0; i < txt.length; i++) { h ^= txt.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } tag += h.toString(16); }
   try { if ((await env.HOT.get('schema:tag')) === tag) { TRUTH_SCHEMA_OK = true; return; } } catch (e) {}
-  for (const s of ddl) {
-    try { await env.DB.prepare(s).run(); } catch (e) { /* duplicate column / raced isolate */ }
-  }
+  await adtDdlRun(env, ddl);
   TRUTH_SCHEMA_OK = true;
   try { await env.HOT.put('schema:tag', tag); } catch (e) {}
 }
@@ -26967,7 +27182,13 @@ const ROUTES = {
       return {
         item_id: iid,
         /* ms per read group and the total. The groups ran at the same time, so they overlap and must
-           never be added up: reads_ms is the wall clock of the read phase. */
+           never be added up: reads_ms is the wall clock of the read phase.
+           THE SCHEMA GUARDS ARE IN HERE TOO, and they are the reason this route was written: on a
+           cold isolate `schema_ms` was 5,627 of 5,870 ms. Beside it, `schema_skipped` says whether
+           the version marker answered for them (true, and no DDL ran on this isolate) or whether
+           this answer paid to bring the database up to `schema_version`, and `schema_refused`
+           counts the statements the database would not accept, which is the one thing that keeps
+           the marker unwritten and the skip from ever arriving. */
         timings: d.timings,
         /* how many rows came back, which is the other half of why a page is slow */
         rows: { days: (d.days || []).length, hours: (d.hours || []).length, hour_profile: Number(hw.profile_rows) || 0, weeks: (d.weeks || []).length, months: (d.months || []).length, hours_window: [hw.from || '', hw.to || ''], hours_day: hw.hours_day || '' },
