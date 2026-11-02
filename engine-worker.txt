@@ -16774,25 +16774,38 @@ async function trafficSync(env) {
   await perAccount(env, 'trafficSync', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
     const d8 = (n) => ukDate(new Date(Date.now() - n * 86400000).toISOString()).replace(/-/g, '');
+    /* 2 Nov: 31 days became 90. The page compares a window with the SAME DATES ONE MONTH EARLIER,
+       and a 30-day window compared against the month before it needs 60 days of history — at 31
+       days stored, the comparison for anything but "today" had nothing to stand on. The extra days
+       are nearly free because the write below is guarded: a settled day is read, found identical
+       and skipped, so this hourly pass writes only the days that actually moved. */
     const dayUrl = 'https://api.ebay.com/sell/analytics/v1/traffic_report?dimension=DAY' +
-      '&filter=' + encodeURIComponent('marketplace_ids:{EBAY_GB},date_range:[' + d8(30) + '..' + d8(0) + ']') +
+      '&filter=' + encodeURIComponent('marketplace_ids:{EBAY_GB},date_range:[' + d8(89) + '..' + d8(0) + ']') +
       '&metric=LISTING_IMPRESSION_TOTAL,LISTING_VIEWS_TOTAL,TRANSACTION,CLICK_THROUGH_RATE,SALES_CONVERSION_RATE';
     const dr = await fetch(dayUrl, { headers: { authorization: 'Bearer ' + tok } });
     if (dr.ok) {
       const d = await dr.json();
       const keys = ((d.header || {}).metrics || []).map(m => m.key);
       const idx = k => keys.indexOf(k);
+      const seen = {};
+      for (const row of (((await env.DB.prepare(
+        'SELECT date, impressions, views, transactions, ctr, cvr FROM traffic_daily WHERE account = ?1 AND date >= ?2'
+      ).bind(acct, ukDate(new Date(Date.now() - 89 * 86400000).toISOString())).all()).results) || [])) seen[row.date] = row;
       const stmts = [];
       for (const rec of (d.records || [])) {
         const day = String(((rec.dimensionValues || [])[0] || {}).value || '');
         if (!/^\d{8}$/.test(day)) continue;
         const v = i => i >= 0 ? Number(((rec.metricValues || [])[i] || {}).value || 0) : 0;
+        const date = day.slice(0,4) + '-' + day.slice(4,6) + '-' + day.slice(6,8);
+        const imp = v(idx('LISTING_IMPRESSION_TOTAL')), vie = v(idx('LISTING_VIEWS_TOTAL')), tr = v(idx('TRANSACTION'));
+        const ctr = v(idx('CLICK_THROUGH_RATE')), cvr = v(idx('SALES_CONVERSION_RATE'));
+        const o = seen[date];
+        if (o && Number(o.impressions) === imp && Number(o.views) === vie && Number(o.transactions) === tr &&
+            Number(o.ctr) === ctr && Number(o.cvr) === cvr) continue;      // settled and unchanged — no write
         stmts.push(env.DB.prepare(
           'INSERT INTO traffic_daily (account, date, impressions, views, transactions, ctr, cvr) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ' +
           'ON CONFLICT(account, date) DO UPDATE SET impressions=?3, views=?4, transactions=?5, ctr=?6, cvr=?7'
-        ).bind(acct, day.slice(0,4) + '-' + day.slice(4,6) + '-' + day.slice(6,8),
-          v(idx('LISTING_IMPRESSION_TOTAL')), v(idx('LISTING_VIEWS_TOTAL')), v(idx('TRANSACTION')),
-          v(idx('CLICK_THROUGH_RATE')), v(idx('SALES_CONVERSION_RATE'))));
+        ).bind(acct, date, imp, vie, tr, ctr, cvr));
       }
       for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
     }
@@ -16845,7 +16858,35 @@ async function trafficSync(env) {
    lands hours behind, which is what the page's own "eBay has not finished reporting today" banner
    says. This does not make today live; it puts eBay's newest answer on screen within five minutes
    of eBay having it instead of up to an hour later. */
+/* 2 Nov 2026 (owner: "add 24 hours clock, in which hours how much traffic came, make a breakdown").
+   eBay's Analytics traffic report has TWO dimensions, DAY and LISTING — there is no hourly one, so
+   an hour-by-hour figure cannot be asked for. What CAN be done is what the advertising tool already
+   does for ad spend: read the running daily total every five minutes and keep each rise. The hour a
+   rise is credited to is the hour we SAW it, and eBay publishes the current day hours behind, so the
+   curve says "when eBay reported it", not "when the buyer looked" — the page says so too.
+   A restatement downwards is ignored rather than written as negative traffic. */
+let TRAFFIC_SCHEMA_OK = false;
+async function ensureTrafficSchema(env) {
+  if (TRAFFIC_SCHEMA_OK) return;
+  for (const d of [
+    'CREATE TABLE IF NOT EXISTS traffic_hour (account TEXT NOT NULL, date TEXT NOT NULL, hour INTEGER NOT NULL, ' +
+      'impressions INTEGER DEFAULT 0, views INTEGER DEFAULT 0, transactions INTEGER DEFAULT 0, ' +
+      'samples INTEGER DEFAULT 0, updated_at TEXT, PRIMARY KEY (account, date, hour))',
+    'CREATE INDEX IF NOT EXISTS idx_traffic_hour_date ON traffic_hour(date)',
+  ]) { try { await env.DB.prepare(d).run(); } catch (e) { /* already there */ } }
+  TRAFFIC_SCHEMA_OK = true;
+}
+/* the same calendar date one month earlier — 31 Mar steps back to 28/29 Feb, never to 3 Mar */
+function monthBack(ymd) {
+  const m0 = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m0) return '';
+  let y = Number(m0[1]), mo = Number(m0[2]) - 1, d = Number(m0[3]);
+  if (mo < 1) { mo = 12; y--; }
+  const lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  return y + '-' + String(mo).padStart(2, '0') + '-' + String(Math.min(d, lastDay)).padStart(2, '0');
+}
 async function trafficNow(env) {
+  await ensureTrafficSchema(env);
   await perAccount(env, 'trafficNow', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
     const d8 = (n) => ukDate(new Date(Date.now() - n * 86400000).toISOString()).replace(/-/g, '');
@@ -16864,7 +16905,7 @@ async function trafficNow(env) {
     for (const row of (((await env.DB.prepare(
       'SELECT date, impressions, views, transactions, ctr, cvr FROM traffic_daily WHERE account = ?1 AND date >= ?2'
     ).bind(acct, since).all()).results) || [])) have[row.date] = row;
-    const stmts = [];
+    const stmts = [], hourly = [];
     for (const rec of (d.records || [])) {
       const day = String(((rec.dimensionValues || [])[0] || {}).value || '');
       if (!/^\d{8}$/.test(day)) continue;
@@ -16873,6 +16914,23 @@ async function trafficNow(env) {
       const imp = v(idx('LISTING_IMPRESSION_TOTAL')), vie = v(idx('LISTING_VIEWS_TOTAL')), tr = v(idx('TRANSACTION'));
       const ctr = v(idx('CLICK_THROUGH_RATE')), cvr = v(idx('SALES_CONVERSION_RATE'));
       const o = have[date];
+      /* the hour-by-hour curve: whatever this day's running total gained since the last reading is
+         credited to the hour we are in now (UK clock, the same clock the figures are reported on).
+         Only today is tracked — a settled day never moves — and a downward restatement is dropped. */
+      if (date === ukDate('')) {
+        const dImp = Math.max(0, imp - Number((o || {}).impressions || 0));
+        const dVie = Math.max(0, vie - Number((o || {}).views || 0));
+        const dTr = Math.max(0, tr - Number((o || {}).transactions || 0));
+        if (dImp || dVie || dTr) {
+          const hour = Number(new Date().toLocaleString('en-GB', { hour: 'numeric', hour12: false, timeZone: 'Europe/London' })) % 24;
+          hourly.push(env.DB.prepare(
+            "INSERT INTO traffic_hour (account, date, hour, impressions, views, transactions, samples, updated_at) " +
+            "VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, datetime('now')) " +
+            'ON CONFLICT(account, date, hour) DO UPDATE SET impressions = impressions + ?4, views = views + ?5, ' +
+            "transactions = transactions + ?6, samples = samples + 1, updated_at = datetime('now')"
+          ).bind(acct, date, hour, dImp, dVie, dTr));
+        }
+      }
       if (o && Number(o.impressions) === imp && Number(o.views) === vie && Number(o.transactions) === tr &&
           Number(o.ctr) === ctr && Number(o.cvr) === cvr) continue;        // nothing moved — write nothing
       stmts.push(env.DB.prepare(
@@ -16881,6 +16939,7 @@ async function trafficNow(env) {
       ).bind(acct, date, imp, vie, tr, ctr, cvr));
     }
     if (stmts.length) await env.DB.batch(stmts);
+    if (hourly.length) await env.DB.batch(hourly);
   });
 }
 
@@ -19740,7 +19799,32 @@ const ROUTES = {
          from the server rather than the viewer's clock — eBay's traffic report runs many hours
          behind for the CURRENT day, so today's row is always a part-day that would otherwise be
          read as a collapse in traffic. Yesterday and earlier are settled. */
+      /* 2 Nov (owner: "previous exact date last month same day comparison … I need date comparisons
+         in the same bar, merged with the data"). The window is shifted back one CALENDAR month —
+         2 Nov against 2 Oct, not "31 days ago" — and every day carries the date it is matched with,
+         so the page can draw the pair in one bar without doing date arithmetic of its own. */
+      await ensureTrafficSchema(ctx.env);
+      const pFrom = monthBack(dFrom), pTo = monthBack(dTo);
+      const prev = (pFrom && pTo) ? await ctx.env.DB.prepare(
+        'SELECT account, date, impressions, views, transactions, ctr, cvr FROM traffic_daily ' +
+        'WHERE date >= ?1 AND date <= ?2' + (account ? ' AND account = ?3' : '') + ' ORDER BY date'
+      ).bind(...[pFrom, pTo].concat(account ? [account] : [])).all() : { results: [] };
+      /* the 24-hour breakdown of ONE day (today unless asked otherwise), summed across accounts
+         unless one is chosen. These are the portal's own five-minute readings, not an eBay feed. */
+      const hourDay = okDate(p.hour_date) ? String(p.hour_date) : ukDate('');
+      const hours = await ctx.env.DB.prepare(
+        'SELECT hour, SUM(impressions) AS impressions, SUM(views) AS views, SUM(transactions) AS transactions, ' +
+        'SUM(samples) AS samples, MAX(updated_at) AS updated_at FROM traffic_hour WHERE date = ?1' +
+        (account ? ' AND account = ?2' : '') + ' GROUP BY hour ORDER BY hour'
+      ).bind(...[hourDay].concat(account ? [account] : [])).all().catch(() => ({ results: [] }));
+      const hoursPrev = await ctx.env.DB.prepare(
+        'SELECT hour, SUM(impressions) AS impressions, SUM(views) AS views, SUM(transactions) AS transactions ' +
+        'FROM traffic_hour WHERE date = ?1' + (account ? ' AND account = ?2' : '') + ' GROUP BY hour ORDER BY hour'
+      ).bind(...[monthBack(hourDay)].concat(account ? [account] : [])).all().catch(() => ({ results: [] }));
       return { days: days.results || [], listings: listings.results || [], range,
+        prev_days: prev.results || [], prev_from: pFrom, prev_to: pTo,
+        hours: hours.results || [], hours_prev: hoursPrev.results || [], hour_date: hourDay, hour_prev_date: monthBack(hourDay),
+        hours_note: 'eBay publishes traffic by DAY and by LISTING — never by hour. This clock is the portal\'s own: the running daily total is read every five minutes and each rise is credited to the hour it was seen in. It therefore shows when eBay REPORTED the traffic, which trails when the buyer actually looked, and it only holds hours since this was switched on (2 Nov 2026).',
         from: dFrom, to: dTo, low_conversion: lows, today: ukDate(''),
         note: 'eBay counts the current day many hours behind, so today is always a part-day here and is kept out of the totals; every earlier day is settled. The portal re-reads the report hourly, and the per-listing table four times a day.' };
     },
