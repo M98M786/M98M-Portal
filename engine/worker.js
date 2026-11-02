@@ -90,7 +90,22 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
    this file cannot matter. */
 function cronMap() {
   return {
-    '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync, trafficNow],
+    '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync],
+    /* trafficNow LEFT this slot on 2 Nov, the same day it joined it. It rode LAST, behind four heavy
+       API syncs, and this file's own law is that a job queued after them can silently never run once
+       the invocation's subrequest budget is gone. It is also the one job here that must not be
+       missed: it reads eBay's running daily total and keeps the RISE, so a tick that never happens
+       is not a late figure, it is an hour of the day's curve that nothing will ever fill in.
+       Its own invocation now, at :04 :09 :14 and so on, which is a minute no other entry in this map
+       occupies: the five-minute slots sit on minutes ending 0 or 5 and 2 or 7, the quarter-hour slots
+       on 0/15, 1/16, 5/20 and 8/23, and the hourly jobs at :20 :25 :30 :40 :50. Own invocation = own
+       subrequest budget, so a packed sync slot can never starve it again.
+       THE CADENCE IS NOT THIS SLOT'S BUSINESS. The slot only offers a turn every five minutes; how
+       many of those turns an account may take is worked out from the quota eBay itself states, and
+       the accounts are spread across the ticks of one cycle so a tick is one or two eBay calls rather
+       than eight. That is why the sampler did not simply move to a slower slot: a quota that rises
+       should speed it up without a cron change, and a quota that falls should slow it down. */
+    '4-59/5 * * * *': [trafficNow],
     /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
        carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
     /* adsItems LEFT this slot on 24 Oct. It used to read 2 campaigns per account per tick, which
@@ -150,7 +165,12 @@ function cronMap() {
        :20 hourly = rollups (spec §10); 05:20 UTC = the morning chain (06:20 BST): truth check now,
        profiles / forecast / report / decisions / analyst as their phases land. Every job is
        flag-gated in portal_config (adtool_*); flags off = the invocation returns at once. */
-    '20 * * * *': [adtoolRollups],
+    /* trafficQuota rides LAST here, for the same reason adtoolVideoSweep rides last in its own slot:
+       it is the only job in this slot that calls eBay, and this file's law is that the cheap D1 work
+       goes ahead of anything that fetches. One GET per account per hour on eBay's own rate-limit
+       endpoint is what the five-minute sampler's whole cadence is worked out from, so it must not be
+       the job that loses a budget fight. No new slot was needed for it. */
+    '20 * * * *': [adtoolRollups, trafficQuota],
     /* adtoolVideoSweep rides LAST here (31 Oct, §4). This slot already carries one light D1-only job,
        and this file's own law is that the cheap reads go ahead of anything that fetches: the sweep is
        the only job in the slot that calls eBay, so last is where it cannot eat the budget of the job
@@ -16800,6 +16820,10 @@ async function trafficSync(env) {
         const imp = v(idx('LISTING_IMPRESSION_TOTAL')), vie = v(idx('LISTING_VIEWS_TOTAL')), tr = v(idx('TRANSACTION'));
         const ctr = v(idx('CLICK_THROUGH_RATE')), cvr = v(idx('SALES_CONVERSION_RATE'));
         const o = seen[date];
+        /* 2 Nov: this write used to be the five-minute clock's baseline as well as the page's day
+           figure, so every :40 pass quietly absorbed the largest rise of the day and the hour clock
+           lost it for ever. The clock keeps its own baseline now (traffic_clock_baseline, written by
+           trafficNow and by nothing else), so what happens to this row is this job's business alone. */
         if (o && Number(o.impressions) === imp && Number(o.views) === vie && Number(o.transactions) === tr &&
             Number(o.ctr) === ctr && Number(o.cvr) === cvr) continue;      // settled and unchanged — no write
         stmts.push(env.DB.prepare(
@@ -16873,6 +16897,33 @@ async function ensureTrafficSchema(env) {
       'impressions INTEGER DEFAULT 0, views INTEGER DEFAULT 0, transactions INTEGER DEFAULT 0, ' +
       'samples INTEGER DEFAULT 0, updated_at TEXT, PRIMARY KEY (account, date, hour))',
     'CREATE INDEX IF NOT EXISTS idx_traffic_hour_date ON traffic_hour(date)',
+    /* 2 Nov 2026, hours after the clock was switched on: eBay refused the five-minute sampler with
+       429 "Too many requests" on six of eight accounts. Eight accounts times 288 runs a day is 2,304
+       traffic-report calls against the Analytics quota, and the job still reported ok at fleet level,
+       so it looked healthy from the outside while most accounts were being turned away.
+       traffic_quota            WHAT EBAY ITSELF SAYS it will allow for getTrafficReport, per account:
+                                the limit, how many calls are left and when the window resets, read
+                                hourly from eBay's own rate-limit endpoint. The sampler's cadence is
+                                worked out from this and from nothing typed into this file.
+                                last_call_at is the sampler's own stamp: the moment it last actually
+                                reached eBay for that account, which is the only figure that means an
+                                account was READ. A tick that skipped inside the quota ran without
+                                error, so sync_state.last_ok cannot tell the two apart.
+       traffic_clock_baseline   THE RUNNING DAILY TOTAL THE CLOCK LAST SAW, per account and day, and
+                                the sampler is the only thing that writes it. The clock used to
+                                measure its rise against traffic_daily, which the hourly history pass
+                                rewrites at :40 for every account, so once an hour the largest rise of
+                                the day was absorbed into the baseline and lost to the clock for ever.
+                                baseline_hour is the hour of the day's FIRST reading, which credits no
+                                hour at all: that reading is everything since midnight, and tipping it
+                                into one hour put tens of thousands of impressions on a single bar. */
+    'CREATE TABLE IF NOT EXISTS traffic_quota (account TEXT PRIMARY KEY, call_limit INTEGER, ' +
+      'remaining INTEGER, reset_at TEXT, window_sec INTEGER, read_at TEXT, last_call_at TEXT, note TEXT)',
+    'CREATE TABLE IF NOT EXISTS traffic_clock_baseline (account TEXT NOT NULL, date TEXT NOT NULL, ' +
+      'impressions INTEGER DEFAULT 0, views INTEGER DEFAULT 0, transactions INTEGER DEFAULT 0, ' +
+      'baseline_hour INTEGER, readings INTEGER DEFAULT 0, first_at TEXT, last_at TEXT, ' +
+      'PRIMARY KEY (account, date))',
+    'CREATE INDEX IF NOT EXISTS idx_traffic_clock_baseline_date ON traffic_clock_baseline(date)',
   ]) { try { await env.DB.prepare(d).run(); } catch (e) { /* already there */ } }
   TRAFFIC_SCHEMA_OK = true;
 }
@@ -16885,6 +16936,195 @@ function monthBack(ymd) {
   const lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate();
   return y + '-' + String(mo).padStart(2, '0') + '-' + String(Math.min(d, lastDay)).padStart(2, '0');
 }
+/* TRAFFIC-SAMPLER-PURE-BEGIN */
+/* ---- THE SAMPLER'S OWN RULES (2 Nov 2026, the refusals) --------------------------------------
+   Within an hour of the five-minute clock going live, eBay was answering 429 "Too many requests" on
+   six of its eight accounts. The arithmetic says why: 8 accounts x 288 runs a day = 2,304 calls on
+   the Analytics quota, plus the hourly history pass on top of it. These are the rules that keep the
+   sampler inside the quota, and they are pure on purpose, so the arithmetic behind "may I call eBay
+   now" is a test and not a hope.
+   NOT ONE LIMIT BELOW IS A GUESS. The limit comes from eBay's own rate-limit endpoint, and the
+   cadence is worked out from it: see trfCadenceMin. What IS set here is the stance, not the figure
+   -- how much of the quota the sampler refuses to spend, how long it waits after being turned away,
+   and how often its own invocation offers it a turn. */
+const TRAFFIC_QUOTA_RESERVE_PCT = 20;          // the share of eBay's limit the sampler never spends
+const TRAFFIC_QUOTA_RESERVE_KEY = 'adtool_traffic_quota_reserve';
+const TRAFFIC_BACKOFF_KEY = 'adtool_traffic_backoff_';       // + account, a UTC instant
+const TRAFFIC_BACKOFF_MIN_KEY = 'adtool_traffic_backoff_min_';   // + account, the step that set it
+const TRAFFIC_BACKOFF_FIRST_MIN = 15;          // the first rung of the ladder after a refusal
+const TRAFFIC_BACKOFF_MAX_MIN = 120;           // and its ceiling
+const TRAFFIC_TICK_MIN = 5;                    // the sampler's own cron slot: see cronMap
+/* TWO PATHS, AND THE ORDER MATTERS. The traffic report is a USER-authorised call: each account has
+   its own eBay token, so the quota that actually refuses it is that account's own, and eBay publishes
+   that on user_rate_limit against the account's own token. rate_limit is the APPLICATION's figure and
+   eBay only answers it to an application token, so it is the fallback: a figure shared by every
+   account is still better than a cadence nobody read, and the note says which of the two answered. */
+const TRAFFIC_QUOTA_USER_PATH = '/developer/analytics/v1_beta/user_rate_limit';
+const TRAFFIC_QUOTA_PATH = '/developer/analytics/v1_beta/rate_limit';
+const TRAFFIC_QUOTA_API = 'analytics';
+const TRAFFIC_QUOTA_RESOURCE = 'getTrafficReport';
+/* D1 stamps a time as "2026-11-02 15:53:37", with no zone, and it is UTC. Date.parse reads a bare
+   string of that shape as LOCAL time in some runtimes, which on a BST day is a whole hour out, and
+   an hour out on a quarter-hour cadence is the difference between a skip and a call. */
+function trfParseUtc(v) {
+  const t0 = String(v == null ? '' : v).trim();
+  if (!t0) return null;
+  const iso = /[Zz]$|[+-]\d\d:?\d\d$/.test(t0) ? t0 : t0.replace(' ', 'T') + 'Z';
+  const t = Date.parse(iso);
+  return isFinite(t) ? t : null;
+}
+/* THE CALLS THE SAMPLER WILL NOT SPEND. The reserve is not caution for its own sake: the hourly
+   history pass, the per-listing drilldown and anything else that ever reads this report draw on the
+   same quota, and a sampler that spends the lot leaves them to be refused instead. A limit nobody
+   has read yet is not a limit of nought, it is unknown, and unknown is null. */
+function trfReserveCalls(limit, pct) {
+  const L = Number(limit);
+  if (!isFinite(L) || L <= 0) return null;
+  /* A KEY NOBODY HAS SET IS NOT A RESERVE OF NOUGHT. Number(null) and Number('') are both 0, and 0
+     is a perfectly legal reserve, so an unset config key read through Number alone would quietly
+     hand the sampler the WHOLE quota to spend -- the opposite of what this figure is for. An absent
+     key takes the default; a key somebody really has set to nought is honoured. */
+  const raw = (pct === null || pct === undefined || String(pct).trim() === '') ? NaN : Number(pct);
+  const p = (isFinite(raw) && raw >= 0 && raw < 100) ? raw : TRAFFIC_QUOTA_RESERVE_PCT;
+  return Math.ceil(L * p / 100);
+}
+/* THE CADENCE COMES FROM THE QUOTA, NOT FROM THE CRON. What is left of eBay's limit after the
+   reserve, spread over a whole day and divided between the accounts, is how often one account may be
+   read. Rounded UP to a tenth of a minute, because rounding the interval down is spending calls the
+   quota does not have. Nothing known about the limit answers null: there is no interval to impose. */
+function trfSampleIntervalMin(limit, pct, accounts) {
+  const L = Number(limit), n = Math.floor(Number(accounts) || 0);
+  if (!isFinite(L) || L <= 0 || n <= 0) return null;
+  const usable = L - (trfReserveCalls(L, pct) || 0);
+  if (usable <= 0) return null;
+  const perAccountPerDay = usable / n;
+  if (perAccountPerDay <= 0) return null;
+  return Math.ceil(1440 / perAccountPerDay * 10) / 10;
+}
+/* AND THE CADENCE IN FORCE, which is the quota's answer where eBay has given one and the backoff
+   ladder's own first rung where it has not. That rung is this file's existing answer to "we do not
+   know, so wait this long"; reusing it guesses no limit, cannot hammer eBay, and holds the clock at
+   a useful rate through the hour before the quota reader has run even once. */
+function trfCadenceMin(limit, pct, accounts) {
+  const iv = trfSampleIntervalMin(limit, pct, accounts);
+  return iv == null ? TRAFFIC_BACKOFF_FIRST_MIN : iv;
+}
+/* WHICH ACCOUNTS BELONG TO WHICH TICK. Eight accounts read on one tick is eight eBay calls on one
+   invocation; spread over the ticks of a cycle it is one or two. The share is taken from an index in
+   a STABLE list and never from the rotation perAccount applies, or an account's turn would move every
+   hour and some would be read twice over while others waited. */
+function trfCycleTicks(intervalMin, tickMin) {
+  const i = Number(intervalMin), t = Number(tickMin) || TRAFFIC_TICK_MIN;
+  if (!isFinite(i) || i <= 0) return 1;
+  return Math.max(1, Math.ceil(i / t));
+}
+function trfTickIndex(nowMs, tickMin) {
+  const t = Number(tickMin) || TRAFFIC_TICK_MIN;
+  return Math.floor(Number(nowMs) / 60000 / t);
+}
+function trfAccountTick(index, accounts, cycleTicks) {
+  const n = Math.max(1, Math.floor(Number(accounts) || 1));
+  const c = Math.max(1, Math.floor(Number(cycleTicks) || 1));
+  const i = Math.min(Math.max(0, Math.floor(Number(index) || 0)), n - 1);
+  return Math.min(c - 1, Math.floor(i * c / n));
+}
+/* THE LADDER. Fifteen minutes after the first refusal, doubling to a ceiling of two hours, and the
+   first good read clears it: a refused account is not a broken one, and an account that has been
+   asleep two hours has to be allowed to try again or it never comes back. */
+function trfBackoffNextMin(prevMin) {
+  const p = Number(prevMin);
+  if (!isFinite(p) || p <= 0) return TRAFFIC_BACKOFF_FIRST_MIN;
+  return Math.min(TRAFFIC_BACKOFF_MAX_MIN, p * 2);
+}
+function trfBackoffUntil(nowMs, prevMin) {
+  const min = trfBackoffNextMin(prevMin);
+  return { minutes: min, until: new Date(Number(nowMs) + min * 60000).toISOString() };
+}
+function trfBackoffLeftMin(until, nowMs) {
+  const t = trfParseUtc(until);
+  if (t == null) return null;
+  const left = (t - Number(nowMs)) / 60000;
+  return left > 0 ? Math.round(left * 10) / 10 : null;
+}
+/* THE ONE DECISION, AND ITS ORDER MATTERS. A refusal is honoured first, because an account eBay has
+   just turned away must not be asked again whatever else is true. Then the reserve, because a call
+   that would eat into it is a call we have already decided not to make. Then the account's turn in
+   the cycle, and a last guard against a tick delivered twice. Only when all four pass does anything
+   reach eBay: every skip is SAID in sync_state instead of being discovered as a 429. */
+function trfSampleDecision(o) {
+  const s = o || {};
+  const nowMs = Number(s.now_ms) || 0;
+  const left = trfBackoffLeftMin(s.backoff_until, nowMs);
+  if (left != null) return { call: false, reason: 'backoff', left_min: left,
+    note: 'eBay turned this account away, so it is held back until ' + String(s.backoff_until) };
+  const rem = s.remaining == null ? null : Number(s.remaining);
+  const res = s.reserve == null ? null : Number(s.reserve);
+  if (rem != null && res != null && isFinite(rem) && isFinite(res) && rem < res)
+    return { call: false, reason: 'reserve', left_min: null,
+      note: 'holding back to keep the quota reserve: eBay says ' + rem + ' calls are left, against a reserve of ' + res };
+  const iv = s.interval_min == null ? null : Number(s.interval_min);
+  if (iv != null && isFinite(iv) && iv > 0) {
+    const tickMin = Number(s.tick_min) || TRAFFIC_TICK_MIN;
+    const c = trfCycleTicks(iv, tickMin);
+    if (c > 1 && (trfTickIndex(nowMs, tickMin) % c) !== trfAccountTick(s.index, s.accounts, c))
+      return { call: false, reason: 'turn', left_min: null, note: '' };
+    const lastMs = trfParseUtc(s.last_call_at);
+    /* one tick of grace, so cron jitter can never starve an account of its turn, and nothing more */
+    if (lastMs != null && (nowMs - lastMs) / 60000 < Math.max(0, iv - tickMin))
+      return { call: false, reason: 'early', left_min: null, note: '' };
+  }
+  return { call: true, reason: 'due', left_min: null, note: '' };
+}
+/* THE BASELINE RULE. The FIRST reading of a day records where the running total stood and credits no
+   hour whatsoever: that total is everything since midnight, and the hours it accrued in are gone, so
+   crediting it to the hour it was seen in put a day's traffic on one bar. Every later reading credits
+   the rise since the last one. A restatement downwards moves nothing and the stored mark stays at the
+   high-water mark, so a climb back up to it is never counted a second time. */
+function trfClockCredit(prev, now) {
+  const num = (v) => { const n = Number(v); return isFinite(n) && n > 0 ? Math.round(n) : 0; };
+  const n = { impressions: num((now || {}).impressions), views: num((now || {}).views), transactions: num((now || {}).transactions) };
+  if (!prev) return { baseline: true, credit: null, store: n };
+  const p = { impressions: num(prev.impressions), views: num(prev.views), transactions: num(prev.transactions) };
+  const c = { impressions: Math.max(0, n.impressions - p.impressions), views: Math.max(0, n.views - p.views),
+    transactions: Math.max(0, n.transactions - p.transactions) };
+  return { baseline: false, credit: (c.impressions || c.views || c.transactions) ? c : null,
+    store: { impressions: Math.max(p.impressions, n.impressions), views: Math.max(p.views, n.views),
+      transactions: Math.max(p.transactions, n.transactions) } };
+}
+/* EBAY'S ANSWER, READ AND NOT INTERPRETED. The rate-limit endpoint returns every API the token can
+   reach; the one figure that governs this sampler is the getTrafficReport resource of the Analytics
+   API. An answer that does not carry it gives null, never a limit of nought, because "eBay did not
+   say" and "eBay allows nothing" must not look the same to the job that reads this. */
+function trfQuotaFromRateLimits(body) {
+  let d = body;
+  if (typeof d === 'string') { try { d = JSON.parse(d); } catch (e) { return null; } }
+  for (const L of (((d || {}).rateLimits) || [])) {
+    if (String((L || {}).apiName || '').toLowerCase() !== TRAFFIC_QUOTA_API) continue;
+    for (const r of (((L || {}).resources) || [])) {
+      if (String((r || {}).name || '') !== TRAFFIC_QUOTA_RESOURCE) continue;
+      const rate = ((r.rates || [])[0]) || {};
+      const lim = Number(rate.limit);
+      if (!isFinite(lim) || lim <= 0) continue;
+      const rem = rate.remaining == null ? null : Number(rate.remaining);
+      const win = rate.timeWindow == null ? null : Number(rate.timeWindow);
+      return { limit: Math.floor(lim), remaining: (rem != null && isFinite(rem)) ? Math.floor(rem) : null,
+        reset_at: rate.reset ? String(rate.reset) : null, window_sec: (win != null && isFinite(win)) ? win : null,
+        context: String((L || {}).apiContext || ''), version: String((L || {}).apiVersion || '') };
+    }
+  }
+  return null;
+}
+/* and the plain sentence that goes into sync_state beside it, carrying eBay's figures and no figure
+   of ours: a reader must be able to see the quota without being handed the endpoint. */
+function trfQuotaNote(q) {
+  if (!q) return 'eBay named no traffic-report limit in its answer';
+  return 'eBay allows ' + q.limit + ' traffic-report calls in this window ' +
+    (q.scope === 'application' ? 'across the whole application' : 'for this account') + ' and ' +
+    (q.remaining == null ? 'does not say how many are left' : q.remaining + ' are left') +
+    (q.reset_at ? ', resetting at ' + q.reset_at : '') +
+    (q.window_sec ? ', over a window of ' + q.window_sec + ' seconds' : '');
+}
+/* TRAFFIC-SAMPLER-PURE-END */
 /* 2 Nov 2026 (owner: "where is the breakdown of hours? i need hour to hour bars in this page too").
    ONE reader for the whole hour block, because the page and the key-authed probe must never come to
    disagree about whether an hour holds anything. There are TWO sources behind THREE series:
@@ -16995,17 +17235,123 @@ async function trafficHourBlock(env, o) {
     read_errors: readErrors, sent_to_ebay: false, writes: 'none',
   };
 }
+/* ---- THE SAMPLER ITSELF (2 Nov 2026, rewritten the same day it shipped) ----------------------
+   The job is unchanged in what it MEASURES: eBay's running daily total, read often, with every rise
+   credited to the hour it was seen in. What changed is that it now asks three questions before it
+   reaches eBay at all, and records the answer when any of them says no. Written out because the
+   order is the whole fix: a skip costs nothing, a refusal costs the hour.
+   THE PLAN IS READ ONCE FOR THE WHOLE RUN. Four reads at the top rather than four per account: the
+   old shape would have been thirty-two D1 reads a tick, 9,216 a day, which is the family of bill
+   that took this worker from $5 to $55 in October. */
+async function trafficSamplePlan(env) {
+  const all = await apiAccounts(env).catch(() => []);
+  /* SORTED, deliberately. perAccount rotates the running order every hour to share the subrequest
+     tail; an account's turn in the cycle must NOT move with it, or the stagger would reshuffle
+     hourly and read some accounts twice while others waited. */
+  const order = all.slice().sort();
+  const one = async (sql, binds) => {
+    try {
+      const st = env.DB.prepare(sql);
+      const rs = await ((binds && binds.length) ? st.bind(...binds) : st).all();
+      return (rs && rs.results) || [];
+    } catch (e) { return []; }
+  };
+  const cfg = {};
+  for (const r of await one("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_traffic_%'")) cfg[String(r.key)] = String(r.value == null ? '' : r.value);
+  const quota = {};
+  for (const r of await one('SELECT account, call_limit, remaining, last_call_at FROM traffic_quota')) quota[String(r.account)] = r;
+  const today = ukDate('');
+  const base = {};
+  for (const r of await one('SELECT account, impressions, views, transactions FROM traffic_clock_baseline WHERE date = ?1', [today])) base[String(r.account)] = r;
+  const notes = {};
+  for (const r of await one("SELECT account, cursor FROM sync_state WHERE job = 'trafficNow'")) notes[String(r.account)] = String(r.cursor || '');
+  /* THE GOVERNING LIMIT. eBay states the quota per token, so each account is judged by its own
+     figure where it has one; an account whose quota has never been read borrows the SMALLEST limit
+     any account was given, because the binding limit is the one that refuses first. */
+  let floorLimit = null;
+  for (const k of Object.keys(quota)) {
+    const L = Number((quota[k] || {}).call_limit);
+    if (isFinite(L) && L > 0 && (floorLimit == null || L < floorLimit)) floorLimit = L;
+  }
+  const pct = cfg[TRAFFIC_QUOTA_RESERVE_KEY];
+  const limitOf = (acct) => {
+    const L = Number((quota[acct] || {}).call_limit);
+    return (isFinite(L) && L > 0) ? L : floorLimit;
+  };
+  return {
+    today, order, accounts: order.length, cfg, quota, base, notes, pct,
+    limit_of: limitOf,
+    reserve_of: (acct) => trfReserveCalls(limitOf(acct), pct),
+    remaining_of: (acct) => {
+      const r = (quota[acct] || {}).remaining;
+      const n = Number(r);
+      return (r == null || !isFinite(n)) ? null : n;             // eBay did not say is null, never nought
+    },
+    interval_of: (acct) => trfCadenceMin(limitOf(acct), pct, order.length),
+    backoff_of: (acct) => cfg[TRAFFIC_BACKOFF_KEY + acct] || '',
+    backoff_min_of: (acct) => Number(cfg[TRAFFIC_BACKOFF_MIN_KEY + acct]) || 0,
+  };
+}
+/* THE SKIP, SAID OUT LOUD. sync_state.cursor is where it goes, because the traffic probe already
+   reads that column beside last_ok and last_error, so the evidence a manager is handed grows a
+   sentence rather than a field nobody looks at. Written ONLY when it changes: a note a tick is 2,304
+   D1 writes a day for no new information. An ordinary wait for an account's turn says nothing at all
+   -- that is the cadence working, not news -- and a good read clears whatever the last refusal left.
+   `had` null means write it regardless, for the hourly job where the figures move every time. */
+async function trfSay(env, job, account, note, had) {
+  const n = String(note == null ? '' : note).slice(0, 220);
+  if (had !== null && had !== undefined && n === String(had)) return;
+  await env.DB.prepare(
+    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES (?1, ?2, ?3, '', '') " +
+    'ON CONFLICT(job, account) DO UPDATE SET cursor = ?3'
+  ).bind(String(job), String(account), n).run().catch(() => { /* a note must never fail a sync */ });
+}
+async function trfBackoffSet(env, account, b) {
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')")
+      .bind(TRAFFIC_BACKOFF_KEY + account, String(b.until)),
+    env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')")
+      .bind(TRAFFIC_BACKOFF_MIN_KEY + account, String(b.minutes)),
+  ]).catch(() => { /* the ladder is a courtesy to eBay, never a reason to lose the reading */ });
+}
+async function trfBackoffClear(env, account) {
+  await env.DB.prepare('DELETE FROM portal_config WHERE key = ?1 OR key = ?2')
+    .bind(TRAFFIC_BACKOFF_KEY + account, TRAFFIC_BACKOFF_MIN_KEY + account).run().catch(() => {});
+}
 async function trafficNow(env) {
   await ensureTrafficSchema(env);
+  const plan = await trafficSamplePlan(env);
   await perAccount(env, 'trafficNow', async (acct) => {
+    const nowMs = Date.now();
+    /* SKIP BEFORE CALL. Every reason to stay away from eBay is settled here, from stored state
+       alone, before a token is minted or a byte is sent. */
+    const decided = trfSampleDecision({
+      now_ms: nowMs, backoff_until: plan.backoff_of(acct),
+      remaining: plan.remaining_of(acct), reserve: plan.reserve_of(acct),
+      interval_min: plan.interval_of(acct), tick_min: TRAFFIC_TICK_MIN,
+      index: plan.order.indexOf(acct), accounts: plan.accounts,
+      last_call_at: (plan.quota[acct] || {}).last_call_at,
+    });
+    if (!decided.call) {
+      if (decided.note) await trfSay(env, 'trafficNow', acct, decided.note, plan.notes[acct]);
+      return;
+    }
     const tok = await ebayAccessToken(env, acct);
     const d8 = (n) => ukDate(new Date(Date.now() - n * 86400000).toISOString()).replace(/-/g, '');
     const url = 'https://api.ebay.com/sell/analytics/v1/traffic_report?dimension=DAY' +
       '&filter=' + encodeURIComponent('marketplace_ids:{EBAY_GB},date_range:[' + d8(1) + '..' + d8(0) + ']') +
       '&metric=LISTING_IMPRESSION_TOTAL,LISTING_VIEWS_TOTAL,TRANSACTION,CLICK_THROUGH_RATE,SALES_CONVERSION_RATE';
     const r = await fetch(url, { headers: { authorization: 'Bearer ' + tok } });
-    /* a refusal (a rate limit especially) must be recorded, not swallowed: perAccount writes it to
-       sync_state.last_error, and the stored figures simply keep their last good values */
+    /* A REFUSAL PUTS THIS ACCOUNT TO SLEEP before it is recorded, so the ladder is set even though
+       the throw below hands the error to perAccount. Fifteen minutes, then thirty, an hour, two. */
+    if (r.status === 429) {
+      const b = trfBackoffUntil(nowMs, plan.backoff_min_of(acct));
+      await trfBackoffSet(env, acct, b);
+      await trfSay(env, 'trafficNow', acct, 'eBay turned this account away, so it is held back until ' + b.until, plan.notes[acct]);
+      throw new Error('traffic_report 429: ' + (await r.text()).slice(0, 120) + ' | held back ' + b.minutes + ' min');
+    }
+    /* any other refusal must be recorded, not swallowed: perAccount writes it to sync_state.last_error,
+       and the stored figures simply keep their last good values */
     if (!r.ok) throw new Error('traffic_report ' + r.status + ': ' + (await r.text()).slice(0, 120));
     const d = await r.json();
     const keys = ((d.header || {}).metrics || []).map(m => m.key);
@@ -17015,7 +17361,13 @@ async function trafficNow(env) {
     for (const row of (((await env.DB.prepare(
       'SELECT date, impressions, views, transactions, ctr, cvr FROM traffic_daily WHERE account = ?1 AND date >= ?2'
     ).bind(acct, since).all()).results) || [])) have[row.date] = row;
-    const stmts = [], hourly = [];
+    /* ONE BATCH, ONE TRANSACTION, and the stamp that says eBay was reached rides inside it: the
+       quota row's last_call_at is the only figure that means this account was READ, because a tick
+       that skipped inside the quota also returns without error and also stamps last_ok. */
+    const stmts = [env.DB.prepare(
+      "INSERT INTO traffic_quota (account, last_call_at) VALUES (?1, datetime('now')) " +
+      "ON CONFLICT(account) DO UPDATE SET last_call_at = datetime('now')"
+    ).bind(acct)];
     for (const rec of (d.records || [])) {
       const day = String(((rec.dimensionValues || [])[0] || {}).value || '');
       if (!/^\d{8}$/.test(day)) continue;
@@ -17023,24 +17375,46 @@ async function trafficNow(env) {
       const v = (i) => i >= 0 ? Number(((rec.metricValues || [])[i] || {}).value || 0) : 0;
       const imp = v(idx('LISTING_IMPRESSION_TOTAL')), vie = v(idx('LISTING_VIEWS_TOTAL')), tr = v(idx('TRANSACTION'));
       const ctr = v(idx('CLICK_THROUGH_RATE')), cvr = v(idx('SALES_CONVERSION_RATE'));
-      const o = have[date];
-      /* the hour-by-hour curve: whatever this day's running total gained since the last reading is
-         credited to the hour we are in now (UK clock, the same clock the figures are reported on).
-         Only today is tracked — a settled day never moves — and a downward restatement is dropped. */
-      if (date === ukDate('')) {
-        const dImp = Math.max(0, imp - Number((o || {}).impressions || 0));
-        const dVie = Math.max(0, vie - Number((o || {}).views || 0));
-        const dTr = Math.max(0, tr - Number((o || {}).transactions || 0));
-        if (dImp || dVie || dTr) {
-          const hour = Number(new Date().toLocaleString('en-GB', { hour: 'numeric', hour12: false, timeZone: 'Europe/London' })) % 24;
-          hourly.push(env.DB.prepare(
-            "INSERT INTO traffic_hour (account, date, hour, impressions, views, transactions, samples, updated_at) " +
+      /* THE HOUR-BY-HOUR CURVE, measured against THE CLOCK'S OWN BASELINE and nothing else. It used
+         to measure against the traffic_daily row for today, which the hourly history pass rewrites
+         at :40 for all ninety days it carries -- so once an hour the largest rise of the day was
+         quietly absorbed into the baseline and lost to the clock for ever. The baseline row below is
+         the sampler's alone; no other job in this file touches that table.
+         Only today is tracked: a settled day never moves, and the day is held against the one the
+         PLAN was read for as well as the clock's. A tick that begins at 23:59 and reaches this line
+         after midnight would otherwise measure the new day against the old day's baseline row and
+         credit a whole day's traffic to the first hour; it skips instead, and the next tick opens
+         the new day properly. */
+      if (date === ukDate('') && date === plan.today) {
+        const cc = trfClockCredit(plan.base[acct] || null, { impressions: imp, views: vie, transactions: tr });
+        const hour = Number(new Date().toLocaleString('en-GB', { hour: 'numeric', hour12: false, timeZone: 'Europe/London' })) % 24;
+        if (cc.baseline) {
+          /* THE DAY'S FIRST READING CREDITS NO HOUR. The running total at this moment is everything
+             since midnight, and the hours it accrued in are unknowable, so it is recorded as where
+             the day started from and baseline_hour says which hour that was. DO NOTHING on conflict,
+             so two ticks racing the first reading of a day cannot credit it twice. */
+          stmts.push(env.DB.prepare(
+            'INSERT INTO traffic_clock_baseline (account, date, impressions, views, transactions, baseline_hour, readings, first_at, last_at) ' +
+            "VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, datetime('now'), datetime('now')) " +
+            'ON CONFLICT(account, date) DO NOTHING'
+          ).bind(acct, date, cc.store.impressions, cc.store.views, cc.store.transactions, hour));
+        } else {
+          stmts.push(env.DB.prepare(
+            'UPDATE traffic_clock_baseline SET impressions = ?3, views = ?4, transactions = ?5, ' +
+            "readings = readings + 1, last_at = datetime('now') WHERE account = ?1 AND date = ?2"
+          ).bind(acct, date, cc.store.impressions, cc.store.views, cc.store.transactions));
+          if (cc.credit) stmts.push(env.DB.prepare(
+            'INSERT INTO traffic_hour (account, date, hour, impressions, views, transactions, samples, updated_at) ' +
             "VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, datetime('now')) " +
             'ON CONFLICT(account, date, hour) DO UPDATE SET impressions = impressions + ?4, views = views + ?5, ' +
             "transactions = transactions + ?6, samples = samples + 1, updated_at = datetime('now')"
-          ).bind(acct, date, hour, dImp, dVie, dTr));
+          ).bind(acct, date, hour, cc.credit.impressions, cc.credit.views, cc.credit.transactions));
         }
+        /* the stored baseline is the one this run just wrote, so a second record for the same day in
+           the same answer cannot be read against a stale mark */
+        plan.base[acct] = cc.store;
       }
+      const o = have[date];
       if (o && Number(o.impressions) === imp && Number(o.views) === vie && Number(o.transactions) === tr &&
           Number(o.ctr) === ctr && Number(o.cvr) === cvr) continue;        // nothing moved — write nothing
       stmts.push(env.DB.prepare(
@@ -17048,9 +17422,146 @@ async function trafficNow(env) {
         'ON CONFLICT(account, date) DO UPDATE SET impressions=?3, views=?4, transactions=?5, ctr=?6, cvr=?7'
       ).bind(acct, date, imp, vie, tr, ctr, cvr));
     }
-    if (stmts.length) await env.DB.batch(stmts);
-    if (hourly.length) await env.DB.batch(hourly);
+    for (let k = 0; k < stmts.length; k += 50) await env.DB.batch(stmts.slice(k, k + 50));
+    /* a good read ends the ladder and withdraws whatever the last skip had to say */
+    if (plan.backoff_of(acct) || plan.backoff_min_of(acct)) await trfBackoffClear(env, acct);
+    await trfSay(env, 'trafficNow', acct, '', plan.notes[acct]);
   });
+}
+
+/* ---- READ THE QUOTA, DO NOT GUESS IT (2 Nov 2026) -------------------------------------------
+   eBay publishes what it will allow on an endpoint of its own, per API and per resource, with how
+   many calls are left and when the window resets. One GET per account per hour, and nothing of that
+   endpoint is used for anything else. Everything the sampler decides is worked out from what this
+   stores, so the cadence is eBay's own arithmetic and not a figure somebody typed into this file.
+   It is a READ: it changes nothing at eBay and it cannot. */
+async function trafficQuota(env) {
+  await ensureTrafficSchema(env);
+  /* the application token is minted at most ONCE for the whole run, and only if an account's own
+     figure could not be had: eight token mints an hour to answer the same application-wide question
+     eight times would be a cost for no extra truth. */
+  let appTok = null, appTried = false;
+  const appToken = async () => {
+    if (appTried) return appTok;
+    appTried = true;
+    try {
+      const appId = await secret(env, 'EBAY_APP_ID'), cert = await secret(env, 'EBAY_CERT_ID');
+      const tr = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
+        method: 'POST',
+        headers: { authorization: 'Basic ' + btoa(appId + ':' + cert), 'content-type': 'application/x-www-form-urlencoded' },
+        body: 'grant_type=client_credentials&scope=' + encodeURIComponent('https://api.ebay.com/oauth/api_scope'),
+      });
+      appTok = tr.ok ? ((await tr.json()).access_token || null) : null;
+    } catch (e) { appTok = null; }
+    return appTok;
+  };
+  await perAccount(env, 'trafficQuota', async (acct) => {
+    let q = null, scope = '', refused = '';
+    const r = await ebayRestFetch(env, acct, 'GET', TRAFFIC_QUOTA_USER_PATH);
+    if (r.ok) { q = trfQuotaFromRateLimits(r.body); if (q) scope = 'account'; }
+    else refused = 'user_rate_limit ' + r.status + ': ' + String(r.body || '').slice(0, 120);
+    if (!q) {
+      const tok = await appToken();
+      if (tok) {
+        const ar = await fetch('https://api.ebay.com' + TRAFFIC_QUOTA_PATH, { headers: { authorization: 'Bearer ' + tok, accept: 'application/json' } });
+        const body = await ar.text();
+        if (ar.ok) { q = trfQuotaFromRateLimits(body); if (q) scope = 'application'; }
+        else refused = (refused ? refused + ' | ' : '') + 'rate_limit ' + ar.status + ': ' + body.slice(0, 120);
+      }
+    }
+    /* A REFUSAL IS NOT A QUOTA OF NOUGHT. Nothing is stored when eBay would not answer, so the
+       sampler keeps the last figure it had, falls back to the ladder's own first rung if it never
+       had one, and the reason sits in sync_state where the next question can be answered from it. */
+    if (!q) throw new Error('traffic quota unread: ' + (refused || 'eBay named no traffic-report limit'));
+    q.scope = scope;
+    const note = trfQuotaNote(q);
+    await env.DB.prepare(
+      'INSERT INTO traffic_quota (account, call_limit, remaining, reset_at, window_sec, read_at, note) ' +
+      "VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), ?6) " +
+      'ON CONFLICT(account) DO UPDATE SET call_limit = ?2, remaining = ?3, reset_at = ?4, window_sec = ?5, ' +
+      "read_at = datetime('now'), note = ?6"
+    ).bind(acct, q.limit, q.remaining, q.reset_at, q.window_sec, note).run();
+    await trfSay(env, 'trafficQuota', acct, note, null);
+  });
+}
+
+/* ---- WHAT STANDS BEHIND THE DAY'S FIGURES (2 Nov 2026, item 3) -------------------------------
+   The hour clock is a SAMPLER, and an hour in which eBay turned the sampler away must never read as
+   an hour in which nothing happened. This is the one reader of the sampler's own state: how often an
+   account is allowed to be read, what eBay says the limit is and how much of it is left, which
+   accounts are being held back after a refusal, when the day's first reading landed, how many
+   readings stand behind the day, and the hour before which the clock was not yet counting.
+   It is kept apart from trafficHourBlock on purpose: that function's shape is what the page reads
+   the bars out of, and this is the state of the machine that filled them.
+   READ ONLY, every read behind its own try, and it reaches nothing outside the database. */
+async function trafficClockState(env, o) {
+  const account = String((o && o.account) || '');
+  const day = String((o && o.day) || ukDate(''));
+  const errs = [];
+  const q = async (what, sql, binds) => {
+    try {
+      const st = env.DB.prepare(sql);
+      const rs = await ((binds && binds.length) ? st.bind(...binds) : st).all();
+      return (rs && rs.results) || [];
+    } catch (e) { errs.push(what + ': ' + String((e && e.message) || e).slice(0, 160)); return []; }
+  };
+  const A = account ? [account] : [];
+  /* the fleet's account count whether or not one account is being shown: an account's turn in the
+     cycle is set by how many accounts share the quota, not by what the reader is looking at */
+  const fleet = (await q('api accounts', 'SELECT name FROM accounts WHERE api_enabled = 1 ORDER BY name LIMIT 40')).map((r) => String(r.name));
+  const qRows = await q('traffic_quota', 'SELECT account, call_limit, remaining, reset_at, read_at, last_call_at FROM traffic_quota' +
+    (account ? ' WHERE account = ?1' : '') + ' LIMIT 40', A);
+  const bRows = await q('traffic_clock_baseline', 'SELECT account, baseline_hour, readings, first_at, last_at FROM traffic_clock_baseline ' +
+    'WHERE date = ?1' + (account ? ' AND account = ?2' : '') + ' LIMIT 40', [day].concat(A));
+  const cfg = {};
+  for (const r of await q('portal_config traffic', "SELECT key, value FROM portal_config WHERE key LIKE 'adtool_traffic_%' LIMIT 80")) cfg[String(r.key)] = String(r.value == null ? '' : r.value);
+  /* THE BINDING LIMIT is the smallest any account was told, and the binding remainder the smallest
+     left, because the first account to be refused is the one that governs the whole cadence. */
+  let limit = null, remaining = null, readAt = null, lastRead = null;
+  for (const r of qRows) {
+    const L = Number(r.call_limit);
+    if (isFinite(L) && L > 0 && (limit == null || L < limit)) limit = L;
+    const M = r.remaining == null ? null : Number(r.remaining);
+    if (M != null && isFinite(M) && (remaining == null || M < remaining)) remaining = M;
+    if (r.read_at && String(r.read_at) > String(readAt || '')) readAt = String(r.read_at);
+    if (r.last_call_at && String(r.last_call_at) > String(lastRead || '')) lastRead = String(r.last_call_at);
+  }
+  const nowMs = Date.now();
+  const held = [];
+  for (const k of Object.keys(cfg)) {
+    if (k.indexOf(TRAFFIC_BACKOFF_KEY) !== 0 || k.indexOf(TRAFFIC_BACKOFF_MIN_KEY) === 0) continue;
+    const name = k.slice(TRAFFIC_BACKOFF_KEY.length);
+    if (account && name !== account) continue;
+    const left = trfBackoffLeftMin(cfg[k], nowMs);
+    if (left != null) held.push({ account: name, until: cfg[k], minutes_left: left });
+  }
+  held.sort((a, b) => (a.account < b.account ? -1 : 1));
+  /* THE DAY'S OWN READINGS. The first one landed is the point before which no hour is counted, and
+     the count is what a reader is entitled to weigh the day's bars against: one reading behind a day
+     means the bars are a baseline and nothing else. Where no single account is on screen the count is
+     the total across the accounts shown, because every one of them has to be read for an hour of the
+     fleet's curve to be whole. */
+  let firstAt = null, readings = null, baseHour = null;
+  for (const r of bRows) {
+    if (r.first_at && (firstAt == null || String(r.first_at) < firstAt)) firstAt = String(r.first_at);
+    const n = Number(r.readings);
+    if (isFinite(n)) readings = (readings || 0) + n;
+    const h = r.baseline_hour == null ? null : Number(r.baseline_hour);
+    /* the LATEST of them, because an hour is only wholly counted once every account's clock had
+       started: before that hour, some account's figures are missing from it */
+    if (h != null && isFinite(h) && (baseHour == null || h > baseHour)) baseHour = h;
+  }
+  const pct = cfg[TRAFFIC_QUOTA_RESERVE_KEY];
+  return {
+    sampling_every_min: trfCadenceMin(limit, pct, fleet.length),
+    sampling_from_quota: limit != null,
+    quota_limit: limit, quota_remaining: remaining,
+    quota_reserve: trfReserveCalls(limit, pct), quota_read_at: readAt,
+    backoff_accounts: held, accounts: fleet.length || null,
+    first_reading_today: firstAt, readings_today: readings, baseline_hour: baseHour,
+    last_reading_at: lastRead, clock_day: day,
+    read_errors: errs, sent_to_ebay: false, writes: 'none',
+  };
 }
 
 async function adsReportKick(env) {
@@ -19926,7 +20437,14 @@ const ROUTES = {
          earlier day has rows, the block SAYS so rather than moving the day underneath the reader. */
       const hourDay = okDate(p.hour_date) ? String(p.hour_date) : ukDate('');
       const HB = await trafficHourBlock(ctx.env, { day: hourDay, account, from: dFrom, to: dTo, today: ukDate('') });
+      /* AND THE STATE OF THE MACHINE THAT FILLED THOSE BARS (2 Nov, after eBay refused the sampler
+         on six of eight accounts within an hour of it going live). An hour the sampler was turned
+         away in is not an hour nothing happened in, and the page cannot tell the two apart from the
+         bars alone: this carries how often an account may be read, eBay's own limit and what is left
+         of it, which accounts are being held back, and how many readings stand behind the day. */
+      const CS = await trafficClockState(ctx.env, { account, day: hourDay });
       return { days: days.results || [], listings: listings.results || [], range,
+        hour_clock_state: CS,
         prev_days: prev.results || [], prev_from: pFrom, prev_to: pTo,
         hours: HB.hours, hours_prev: HB.hours_prev, hour_date: HB.hour_date, hour_prev_date: HB.hour_prev_date,
         hours_sold: HB.hours_sold, hours_sold_prev: HB.hours_sold_prev,
@@ -20000,6 +20518,10 @@ const ROUTES = {
           hours_sold_avg: HB.hours_sold_avg, hours_sold_avg_days: HB.hours_sold_avg_days,
         },
         traffic_now: { accounts: runs, last_ok: lastOk || null, refusals: runs.filter((r) => String(r.last_error || '') !== '') },
+        /* WHY IT HOLDS WHAT IT HOLDS. The refusals above say the sampler was turned away; this says
+           what it is allowed to do about it -- eBay's own limit, what is left of it, the cadence
+           that falls out of it, who is being held back, and how many readings the day stands on. */
+        hour_clock_state: await trafficClockState(env, { account, day }),
         where_to_look: 'Account traffic, under By hour',
         sent_to_ebay: false, writes: 'none', read_errors: readErrors,
         computed_at: new Date().toISOString(),
@@ -25483,7 +26005,7 @@ const ROUTES = {
         trafficSync, trafficNow, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan,
         selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch,
         trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep, policyScan, trackingInboxRetry,
-        adtoolRollups, adtoolTruth, adtoolVideoSweep };
+        adtoolRollups, adtoolTruth, adtoolVideoSweep, trafficQuota };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
@@ -25768,6 +26290,10 @@ const ROUTES = {
         cs_metrics: 'SELECT * FROM cs_metrics',
         cs_standards: 'SELECT * FROM cs_standards',
         traffic_daily: 'SELECT * FROM traffic_daily',
+        /* 2 Nov: the sampler's own two tables. Without them "the clock holds nothing" and "eBay is
+           refusing us" are the same thing seen from outside, which is how the fault hid for an hour. */
+        traffic_quota: 'SELECT * FROM traffic_quota',
+        traffic_clock_baseline: "SELECT * FROM traffic_clock_baseline WHERE date >= datetime('now','-30 day')",
         late_marks: 'SELECT * FROM late_marks',
         listing_decisions: 'SELECT * FROM listing_decisions',
         violations: 'SELECT * FROM violations',
@@ -27094,10 +27620,16 @@ const ROUTES = {
            It is the only path on this list that does not live on api.ebay.com: the Media API is served
            from apim.ebay.com, so the host is chosen from the path rather than fixed. */
         /^\/commerce\/media\/v1_beta\/video\/[0-9a-zA-Z_-]{1,64}$/,
+        /* 2 Nov (the traffic refusals): eBay's own rate-limit endpoint, so the quota behind the
+           five-minute traffic sampler can be READ rather than guessed at. It is the same path the
+           hourly trafficQuota job reads, through the same function, so what works by hand is what
+           the job does. READ ONLY and GET only, enforced below. Nothing else of that endpoint. */
+        /^\/developer\/analytics\/v1_beta\/(user_)?rate_limit(\?|$)/,
       ];
       if (!ok.some((r) => r.test(path))) throw new Error('SAY: path not allowed');
       if (['GET', 'POST'].indexOf(method) < 0) throw new Error('SAY: GET or POST only');
       if (/^\/commerce\/media\//.test(path) && method !== 'GET') throw new Error('SAY: the video read is GET only');
+      if (/^\/developer\//.test(path) && method !== 'GET') throw new Error('SAY: the quota read is GET only');
       /* THE CALL ITSELF IS THE SHARED ONE. The video sweep's date pass reads the very same media path
          through this same function, so what works here is what the job does: same host, same headers,
          same token minted for the named account. */

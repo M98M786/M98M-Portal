@@ -36,13 +36,18 @@ function run(argv) {
      a hope. */
   const iAS = src.indexOf('/* ADSTATUS-PURE-BEGIN */'); const jAS = src.indexOf('/* ADSTATUS-PURE-END */');
   if (iAS < 0 || jAS < 0) return 'FAIL: ad-status block markers not found';
-  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '') + (i15 >= 0 && j15 >= 0 ? '\n' + src.slice(i15, j15) : '') + (i16 >= 0 && j16 >= 0 ? '\n' + src.slice(i16, j16) : '') + '\n' + src.slice(i17, j17) + '\n' + src.slice(iAS, jAS);   /* pure helpers of every phase */
+  /* 2 Nov: the traffic sampler's own rules — the quota-to-cadence arithmetic, the stagger across the
+     ticks of a cycle, the backoff ladder and the baseline rule. Pure on purpose, because "may I call
+     eBay now" is the question that decides whether the owner's hour clock holds anything at all. */
+  const iTR = src.indexOf('/* TRAFFIC-SAMPLER-PURE-BEGIN */'); const jTR = src.indexOf('/* TRAFFIC-SAMPLER-PURE-END */');
+  if (iTR < 0 || jTR < 0) return 'FAIL: traffic sampler block markers not found';
+  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '') + (i15 >= 0 && j15 >= 0 ? '\n' + src.slice(i15, j15) : '') + (i16 >= 0 && j16 >= 0 ? '\n' + src.slice(i16, j16) : '') + '\n' + src.slice(i17, j17) + '\n' + src.slice(iAS, jAS) + '\n' + src.slice(iTR, jTR);   /* pure helpers of every phase */
   const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
   /* JavaScriptCore has no btoa/atob; the Workers runtime does. Small stand-ins so the PDF test can run here. */
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -3326,8 +3331,14 @@ function run(argv) {
     const block = i < 0 ? '' : src.slice(i, src.indexOf('\n}', i)).replace(/\/\*[\s\S]*?\*\//g, '');
     const slots = (block.match(/'[^']+':\s*\[[^\]]*adtoolPeakPlan[^\]]*\]/g) || []).map(s => s.slice(1, s.indexOf("':")));
     const inFile = (file && Array.isArray(file.crons)) ? file.crons.map(String) : [];
+    /* "crons.json is untouched" held as a FACT and not as a count: both slots were already
+       registered and both already carry other jobs, so the planner took no slot of its own. A
+       literal length here failed the next time another change legitimately needed a slot, which
+       made a test about the peak planner go red over the traffic sampler. */
+    const shared = (block.match(/'[^']+':\s*\[[^\]]*adtoolPeakPlan[^\]]*\]/g) || [])
+      .every(s => s.slice(s.indexOf('[') + 1, s.indexOf(']')).split(',').length > 1);
     return slots.length === 2 && slots.indexOf('30 23 * * *') >= 0 && slots.indexOf('0 * * * *') >= 0 &&
-      slots.every(s => inFile.indexOf(s) >= 0) && inFile.length === 17 &&
+      slots.every(s => inFile.indexOf(s) >= 0) && shared &&
       /'0 \* \* \* \*': \[adtoolPeakPlan, financeSync/.test(block);
   })(), null);
 
@@ -4934,7 +4945,11 @@ function run(argv) {
     })(), null);
 
   /* the engine half: the reads behind those series */
-  const trHB = src.slice(src.indexOf('async function trafficHourBlock(env, o) {'), src.indexOf('async function trafficNow(env) {'));
+  /* THE FUNCTION'S OWN BODY, not everything up to the next one: slicing to `async function
+     trafficNow` made the sampler's helpers, which do write, count as the hour block's own code. A
+     top-level declaration ends at the first `}` in column one. */
+  const trHBi = src.indexOf('async function trafficHourBlock(env, o) {');
+  const trHB = src.slice(trHBi, src.indexOf('\n}\n', trHBi) + 3);
   const trBoard = src.slice(src.indexOf('  trafficBoard: {'), src.indexOf('  /* THE HOUR BLOCK, READABLE WITH THE SYNC KEY ALONE'));
   /* the probe WITH the note above it: the reason it is authenticated the way it is, and the reason
      it is not named adtool*, are written there and are the part a reader needs. */
@@ -5003,6 +5018,282 @@ function run(argv) {
     /WHERE job = 'trafficNow' ORDER BY account LIMIT 20/.test(trProbe) &&
     /refusals: runs\.filter\(\(r\) => String\(r\.last_error \|\| ''\) !== ''\)/.test(trProbe) &&
     /db_now: nowRow \? nowRow\.now : null/.test(trProbe), null);
+
+  /* ===== THE SAMPLER INSIDE THE QUOTA (2 Nov, the 429s) =====================================
+     Within an hour of the five-minute clock going live, eBay was answering "Too many requests" on
+     six of its eight accounts, the fleet row still read ok, and the owner opened the page to nothing.
+     8 accounts x 288 runs a day = 2,304 traffic-report calls. These are the rules that keep it
+     inside the quota, and the arithmetic below is the whole of the fix. */
+  t('traffic quota: the reserve is a share of EBAY’S OWN limit, the default is used when nobody has set one, and a limit nobody has read is null rather than a limit of nought',
+    F.trfReserveCalls(1000, null) === Math.ceil(1000 * F.TRAFFIC_QUOTA_RESERVE_PCT / 100) &&
+    F.trfReserveCalls(1000, '') === F.trfReserveCalls(1000, null) &&
+    F.trfReserveCalls(1000, 'rubbish') === F.trfReserveCalls(1000, null) &&
+    /* and a key somebody really HAS set to nought is honoured, which is why an unset key cannot
+       simply be read through Number: both come out 0 and they mean opposite things */
+    F.trfReserveCalls(1000, 50) === 500 && F.trfReserveCalls(1000, 0) === 0 && F.trfReserveCalls(1000, '0') === 0 &&
+    F.trfReserveCalls(null, null) === null && F.trfReserveCalls(0, null) === null &&
+    F.trfReserveCalls(-5, null) === null,
+    [F.trfReserveCalls(1000, null), F.trfReserveCalls(1000, 50), F.trfReserveCalls(null, null)]);
+  t('traffic quota: the CADENCE falls out of the quota — what is left after the reserve, spread over a day, divided between the accounts',
+    /* 1000 a day, a fifth held back, eight accounts: 800 / 8 = 100 reads each, one every 14.4 min */
+    F.trfSampleIntervalMin(1000, 20, 8) === 14.4 &&
+    /* halve the limit and the wait doubles; take more reserve and it stretches */
+    F.trfSampleIntervalMin(500, 20, 8) === 28.8 && F.trfSampleIntervalMin(1000, 50, 8) === 23.1 &&
+    /* fewer accounts share it out further */
+    F.trfSampleIntervalMin(1000, 20, 4) === 7.2 &&
+    /* and the rounding is always UP: rounding an interval down is spending calls the quota has not got */
+    F.trfSampleIntervalMin(999, 20, 8) === 14.5,
+    [F.trfSampleIntervalMin(1000, 20, 8), F.trfSampleIntervalMin(500, 20, 8), F.trfSampleIntervalMin(1000, 50, 8), F.trfSampleIntervalMin(999, 20, 8)]);
+  t('traffic quota: nothing known about the limit is NOT an interval of nought — it is null, and the cadence in force then is the backoff ladder’s own first rung',
+    F.trfSampleIntervalMin(null, 20, 8) === null && F.trfSampleIntervalMin(0, 20, 8) === null &&
+    F.trfSampleIntervalMin(1000, 20, 0) === null && F.trfSampleIntervalMin(1000, 20, null) === null &&
+    /* a limit smaller than its own reserve leaves nothing to spend, which is null and never a divide by nought */
+    F.trfSampleIntervalMin(1, 99, 8) === null &&
+    F.trfCadenceMin(null, 20, 8) === F.TRAFFIC_BACKOFF_FIRST_MIN &&
+    F.trfCadenceMin(1000, 20, 8) === 14.4,
+    [F.trfSampleIntervalMin(null, 20, 8), F.trfCadenceMin(null, 20, 8)]);
+  t('traffic quota: the accounts are STAGGERED across the ticks of one cycle, so a tick is one or two eBay calls and never eight, and every account gets exactly one turn per cycle',
+    (() => {
+      const iv = F.trfSampleIntervalMin(1000, 20, 8), n = 8;
+      const c = F.trfCycleTicks(iv, F.TRAFFIC_TICK_MIN);                      // 14.4 min / 5 = 3 ticks
+      const want = []; for (let i = 0; i < n; i++) want.push(F.trfAccountTick(i, n, c));
+      const perTick = {}; want.forEach(w => { perTick[w] = (perTick[w] || 0) + 1; });
+      const onEveryTick = F.trfCycleTicks(F.TRAFFIC_TICK_MIN, F.TRAFFIC_TICK_MIN) === 1 &&
+        F.trfAccountTick(7, 8, 1) === 0;                                      // a cycle of one tick serves all
+      return c === 3 && JSON.stringify(want) === JSON.stringify([0, 0, 0, 1, 1, 1, 2, 2]) &&
+        Object.keys(perTick).length === c && Math.max.apply(null, Object.keys(perTick).map(k => perTick[k])) <= Math.ceil(n / c) &&
+        /* a tick index advances once per tick and the cycle repeats */
+        F.trfTickIndex(Date.parse('2026-11-02T15:04:00Z'), 5) - F.trfTickIndex(Date.parse('2026-11-02T14:59:00Z'), 5) === 1 &&
+        onEveryTick;
+    })(), null);
+  t('traffic backoff: the ladder is fifteen minutes, then thirty, an hour, two, and no further — and a refusal at the ceiling stays at the ceiling',
+    (() => {
+      const steps = []; let m = 0;
+      for (let k = 0; k < 6; k++) { m = F.trfBackoffNextMin(m); steps.push(m); }
+      const first = F.TRAFFIC_BACKOFF_FIRST_MIN, max = F.TRAFFIC_BACKOFF_MAX_MIN;
+      return JSON.stringify(steps) === JSON.stringify([first, first * 2, first * 4, max, max, max]) &&
+        F.trfBackoffNextMin(null) === first && F.trfBackoffNextMin(0) === first &&
+        F.trfBackoffNextMin('') === first && F.trfBackoffNextMin(-9) === first;
+    })(), null);
+  t('traffic backoff: the instant stored is exactly that many minutes ahead, and an instant that has passed is no backoff at all rather than a wait of nought',
+    (() => {
+      const now = Date.parse('2026-11-02T15:00:00Z');
+      const b1 = F.trfBackoffUntil(now, 0), b2 = F.trfBackoffUntil(now, b1.minutes);
+      return b1.minutes === F.TRAFFIC_BACKOFF_FIRST_MIN && b1.until === '2026-11-02T15:15:00.000Z' &&
+        b2.minutes === F.TRAFFIC_BACKOFF_FIRST_MIN * 2 && b2.until === '2026-11-02T15:30:00.000Z' &&
+        F.trfBackoffLeftMin(b1.until, now) === 15 && F.trfBackoffLeftMin(b1.until, now + 16 * 60000) === null &&
+        F.trfBackoffLeftMin('', now) === null && F.trfBackoffLeftMin(null, now) === null &&
+        /* D1 stamps a time with no zone and means UTC; read as local it would be a whole hour out on a BST day */
+        F.trfParseUtc('2026-11-02 15:00:00') === now && F.trfParseUtc('2026-11-02T15:00:00Z') === now &&
+        F.trfParseUtc('') === null && F.trfParseUtc('not a time') === null;
+    })(), null);
+  t('traffic sampler: THE ORDER OF THE SKIPS — a refusal is honoured before anything else, then the quota reserve, then the account’s turn, and only a decision that passes all three reaches eBay',
+    (() => {
+      const now = Date.parse('2026-11-02T15:04:00Z');
+      const base = { now_ms: now, remaining: 900, reserve: 200, interval_min: 14.4, tick_min: 5, accounts: 8, index: 0, last_call_at: '' };
+      const due = F.trfSampleDecision(base);
+      /* a held-back account is skipped even with a full quota and its turn on this very tick */
+      const held = F.trfSampleDecision(Object.assign({}, base, { backoff_until: '2026-11-02T15:30:00Z' }));
+      /* the reserve bites before the turn is even looked at */
+      const thin = F.trfSampleDecision(Object.assign({}, base, { remaining: 199 }));
+      const exact = F.trfSampleDecision(Object.assign({}, base, { remaining: 200 }));
+      /* not this account's tick */
+      const other = F.trfSampleDecision(Object.assign({}, base, { index: 7 }));
+      /* its tick, but it was read a moment ago: a tick delivered twice must not read twice */
+      const early = F.trfSampleDecision(Object.assign({}, base, { last_call_at: '2026-11-02 15:03:00' }));
+      /* eBay not saying how many calls are left is not nought left */
+      const unknown = F.trfSampleDecision(Object.assign({}, base, { remaining: null }));
+      return due.call === true && due.reason === 'due' &&
+        held.call === false && held.reason === 'backoff' && held.left_min === 26 &&
+        thin.call === false && thin.reason === 'reserve' && /199/.test(thin.note) && /200/.test(thin.note) &&
+        exact.call === true && other.call === false && other.reason === 'turn' && other.note === '' &&
+        early.call === false && early.reason === 'early' && unknown.call === true;
+    })(), null);
+  t('traffic sampler: THE BASELINE RULE — a day’s first reading credits no hour, the second credits the difference, and a restatement downwards credits nothing and does not lower the mark',
+    (() => {
+      const first = F.trfClockCredit(null, { impressions: 40000, views: 900, transactions: 12 });
+      const second = F.trfClockCredit(first.store, { impressions: 40250, views: 912, transactions: 12 });
+      const still = F.trfClockCredit(second.store, { impressions: 40250, views: 912, transactions: 12 });
+      const down = F.trfClockCredit(second.store, { impressions: 39000, views: 900, transactions: 11 });
+      const backUp = F.trfClockCredit(down.store, { impressions: 40250, views: 912, transactions: 12 });
+      const past = F.trfClockCredit(backUp.store, { impressions: 40300, views: 912, transactions: 12 });
+      return first.baseline === true && first.credit === null && first.store.impressions === 40000 &&
+        second.baseline === false && second.credit.impressions === 250 && second.credit.views === 12 &&
+        second.credit.transactions === 0 && second.store.impressions === 40250 &&
+        /* nothing moved is null, never a credit of nought written into the hour */
+        still.credit === null &&
+        /* the mark holds at the high-water figure, so the climb back to it is not counted a second time */
+        down.credit === null && down.store.impressions === 40250 && backUp.credit === null &&
+        past.credit.impressions === 50;
+    })(), null);
+  t('traffic quota: eBay’s own answer is read and not interpreted, and an answer that names no traffic-report limit gives null rather than a limit of nought',
+    (() => {
+      const body = JSON.stringify({ rateLimits: [
+        { apiContext: 'sell', apiName: 'marketing', apiVersion: 'v1', resources: [{ name: 'getAdReport', rates: [{ limit: 5000, remaining: 4999, reset: 'x', timeWindow: 86400 }] }] },
+        { apiContext: 'sell', apiName: 'analytics', apiVersion: 'v1', resources: [
+          { name: 'getUserRateLimits', rates: [{ limit: 10, remaining: 9 }] },
+          { name: F.TRAFFIC_QUOTA_RESOURCE, rates: [{ limit: 1000, remaining: 812, reset: '2026-11-03T07:00:00.000Z', timeWindow: 86400 }] }] },
+      ] });
+      const q = F.trfQuotaFromRateLimits(body), qObj = F.trfQuotaFromRateLimits(JSON.parse(body));
+      const none = F.trfQuotaFromRateLimits(JSON.stringify({ rateLimits: [{ apiName: 'analytics', resources: [{ name: 'somethingElse', rates: [{ limit: 7 }] }] }] }));
+      const nought = F.trfQuotaFromRateLimits(JSON.stringify({ rateLimits: [{ apiName: 'analytics', resources: [{ name: F.TRAFFIC_QUOTA_RESOURCE, rates: [{ limit: 0, remaining: 0 }] }] }] }));
+      const silent = F.trfQuotaFromRateLimits(JSON.stringify({ rateLimits: [{ apiName: 'analytics', resources: [{ name: F.TRAFFIC_QUOTA_RESOURCE, rates: [{ limit: 1000 }] }] }] }));
+      return q && q.limit === 1000 && q.remaining === 812 && q.window_sec === 86400 &&
+        q.reset_at === '2026-11-03T07:00:00.000Z' && JSON.stringify(q) === JSON.stringify(qObj) &&
+        none === null && nought === null && F.trfQuotaFromRateLimits('not json') === null &&
+        F.trfQuotaFromRateLimits(null) === null &&
+        /* eBay stating a limit but not the remainder is "does not say", not nought left */
+        silent && silent.remaining === null && silent.window_sec === null;
+    })(), null);
+  t('traffic quota: the sentence that goes into sync_state carries eBay’s figures and not one figure of ours, and says plainly when eBay named no limit at all',
+    (() => {
+      const note = F.trfQuotaNote({ limit: 1000, remaining: 812, reset_at: '2026-11-03T07:00:00.000Z', window_sec: 86400, scope: 'account' });
+      const app = F.trfQuotaNote({ limit: 1000, remaining: 812, scope: 'application' });
+      const quiet = F.trfQuotaNote({ limit: 1000, remaining: null, reset_at: null, window_sec: null });
+      return /1000/.test(note) && /812/.test(note) && /86400/.test(note) && !/—/.test(note) &&
+        /does not say how many are left/.test(quiet) && !/—/.test(quiet) &&
+        /* a per-account figure and an application-wide one are not the same claim, so the sentence says which */
+        /for this account/.test(note) && /across the whole application/.test(app) && !/—/.test(app) &&
+        F.trfQuotaNote(null) === 'eBay named no traffic-report limit in its answer';
+    })(), null);
+
+  /* ---- the sampler's own source: the order, the slot, the allow-list, the baseline's one owner ---- */
+  const trNowI = src.indexOf('async function trafficNow(env) {');
+  const trNow = src.slice(trNowI, src.indexOf('\n}\n', trNowI) + 3);
+  const trPlanI = src.indexOf('async function trafficSamplePlan(env) {');
+  const trPlan = src.slice(trPlanI, src.indexOf('\n}\n', trPlanI) + 3);
+  const trQuotaI = src.indexOf('async function trafficQuota(env) {');
+  const trQuota = src.slice(trQuotaI, src.indexOf('\n}\n', trQuotaI) + 3);
+  const trStateI = src.indexOf('async function trafficClockState(env, o) {');
+  const trState = src.slice(trStateI, src.indexOf('\n}\n', trStateI) + 3);
+  const trSyncI = src.indexOf('async function trafficSync(env) {');
+  /* comments stripped: the hourly pass must not WRITE the clock's tables, and the comment that says
+     so names one of them. A checker that cannot tell a note from a write is a checker that punishes
+     the explanation. */
+  const trSync = src.slice(trSyncI, src.indexOf('\n}\n', trSyncI) + 3).replace(/\/\*[\s\S]*?\*\//g, '');
+  const cronBlk = src.slice(src.indexOf('function cronMap() {'), src.indexOf('\n}\n', src.indexOf('function cronMap() {')));
+  t('traffic sampler (real source): SKIP BEFORE CALL — the decision is taken from stored state and returned on before a token is minted or a byte is sent to eBay',
+    trNow.indexOf('const decided = trfSampleDecision({') > 0 &&
+    trNow.indexOf('trfSampleDecision({') < trNow.indexOf('ebayAccessToken(') &&
+    trNow.indexOf('if (!decided.call) {') < trNow.indexOf('ebayAccessToken(') &&
+    trNow.indexOf('ebayAccessToken(') < trNow.indexOf('await fetch(') &&
+    /if \(!decided\.call\) \{\n      if \(decided\.note\) await trfSay\(env, 'trafficNow', acct, decided\.note, plan\.notes\[acct\]\);\n      return;\n    \}/.test(trNow) &&
+    /* and only ONE call reaches eBay in the whole job */
+    (trNow.match(/await fetch\(/g) || []).length === 1,
+    [trNow.indexOf('trfSampleDecision({'), trNow.indexOf('ebayAccessToken('), trNow.indexOf('await fetch(')]);
+  t('traffic sampler (real source): a 429 puts the account to sleep BEFORE the refusal is thrown, so the ladder is set even though perAccount takes the error',
+    trNow.indexOf('if (r.status === 429) {') < trNow.indexOf("throw new Error('traffic_report 429:") &&
+    /const b = trfBackoffUntil\(nowMs, plan\.backoff_min_of\(acct\)\);\n      await trfBackoffSet\(env, acct, b\);/.test(trNow) &&
+    /await trfBackoffSet\(env, acct, b\);[\s\S]{0,200}throw new Error\('traffic_report 429:/.test(trNow) &&
+    /* and a good read ends the ladder and withdraws the last skip's note */
+    /if \(plan\.backoff_of\(acct\) \|\| plan\.backoff_min_of\(acct\)\) await trfBackoffClear\(env, acct\);/.test(trNow) &&
+    /await trfSay\(env, 'trafficNow', acct, '', plan\.notes\[acct\]\);/.test(trNow), null);
+  t('traffic sampler (real source): the plan is FOUR reads for the whole run, not four per account, and the stagger index comes from a sorted list rather than perAccount’s hourly rotation',
+    (trPlan.match(/await one\(/g) || []).length === 4 &&
+    /const order = all\.slice\(\)\.sort\(\);/.test(trPlan) && /perAccount rotates/.test(trPlan) &&
+    /plan\.order\.indexOf\(acct\)/.test(trNow) &&
+    /WHERE key LIKE 'adtool_traffic_%'/.test(trPlan) &&
+    /* and an account with no quota of its own borrows the smallest limit any account was given */
+    /floorLimit == null \|\| L < floorLimit/.test(trPlan) &&
+    /return \(r == null \|\| !isFinite\(n\)\) \? null : n;/.test(trPlan),
+    (trPlan.match(/await one\(/g) || []).length);
+  t('traffic sampler (real source): the note is written ONLY when it changes, because a note a tick is two thousand D1 writes a day for no new information, and an ordinary wait for a turn says nothing at all',
+    /if \(had !== null && had !== undefined && n === String\(had\)\) return;/.test(src) &&
+    /ON CONFLICT\(job, account\) DO UPDATE SET cursor = \?3/.test(src) &&
+    /if \(decided\.note\) await trfSay\(/.test(trNow) &&
+    /return \{ call: false, reason: 'turn', left_min: null, note: '' \}/.test(src) &&
+    /return \{ call: false, reason: 'early', left_min: null, note: '' \}/.test(src), null);
+  t('traffic sampler (real source): THE CLOCK’S BASELINE IS ITS OWN — only the sampler writes traffic_clock_baseline, the hourly history pass never touches it, and the rise is no longer measured against the row that pass rewrites',
+    /INSERT INTO traffic_clock_baseline/.test(trNow) && /UPDATE traffic_clock_baseline SET/.test(trNow) &&
+    (src.match(/INTO traffic_clock_baseline|UPDATE traffic_clock_baseline/g) || []).length === 2 &&
+    trSync.indexOf('traffic_clock_baseline') < 0 && trSync.indexOf('traffic_hour') < 0 &&
+    /* the credit now comes from the baseline row, never from the traffic_daily row the :40 pass rewrites */
+    /trfClockCredit\(plan\.base\[acct\] \|\| null, \{ impressions: imp, views: vie, transactions: tr \}\)/.test(trNow) &&
+    !/Math\.max\(0, imp - Number\(\(o \|\| \{\}\)\.impressions \|\| 0\)\)/.test(trNow),
+    (src.match(/INTO traffic_clock_baseline|UPDATE traffic_clock_baseline/g) || []).length);
+  t('traffic sampler (real source): the day’s FIRST reading credits no hour and is written race-safe, so two ticks meeting at a day’s start cannot tip a day’s traffic into one bar twice',
+    /if \(cc\.baseline\) \{/.test(trNow) &&
+    /ON CONFLICT\(account, date\) DO NOTHING/.test(trNow) &&
+    /* the hour credit lives on the OTHER branch, so a baseline reading cannot reach traffic_hour */
+    trNow.indexOf('if (cc.credit) stmts.push(env.DB.prepare(') > trNow.indexOf('} else {') &&
+    trNow.indexOf('INSERT INTO traffic_hour') > trNow.indexOf('} else {') &&
+    /baseline_hour, readings, first_at, last_at/.test(trNow) &&
+    /* and the stamp that means eBay was actually reached rides in the same transaction */
+    /INSERT INTO traffic_quota \(account, last_call_at\)/.test(trNow) &&
+    /only figure that means this account was READ/.test(trNow), null);
+  t('traffic quota (real source): the ACCOUNT’S OWN limit is asked for first on its own token, because the traffic report is a user-authorised call and the account’s own quota is the one that refuses it',
+    /const r = await ebayRestFetch\(env, acct, 'GET', TRAFFIC_QUOTA_USER_PATH\);/.test(trQuota) &&
+    /const TRAFFIC_QUOTA_USER_PATH = '\/developer\/analytics\/v1_beta\/user_rate_limit';/.test(src) &&
+    /const TRAFFIC_QUOTA_PATH = '\/developer\/analytics\/v1_beta\/rate_limit';/.test(src) &&
+    /INSERT INTO traffic_quota \(account, call_limit, remaining, reset_at, window_sec, read_at, note\)/.test(trQuota) &&
+    /await trfSay\(env, 'trafficQuota', acct, note, null\);/.test(trQuota) &&
+    /q\.scope = scope;/.test(trQuota) &&
+    trQuota.indexOf('TRAFFIC_QUOTA_USER_PATH') < trQuota.indexOf('TRAFFIC_QUOTA_PATH') &&
+    /* the application-wide figure is the FALLBACK, on an application token minted once for the whole
+       run: eBay answers rate_limit only to an application token, and eight mints an hour to ask the
+       same application-wide question eight times is a cost for no extra truth */
+    /if \(appTried\) return appTok;/.test(trQuota) && /grant_type=client_credentials/.test(trQuota) &&
+    (trQuota.match(/ebayRestFetch\(/g) || []).length === 1 &&
+    /* a refusal stores NOTHING, so the last good figure stands and the reason is recorded instead */
+    /if \(!q\) throw new Error\('traffic quota unread: '/.test(trQuota) &&
+    trQuota.indexOf("throw new Error('traffic quota unread") < trQuota.indexOf('INSERT INTO traffic_quota') &&
+    /* and the only POST in it is eBay's own token mint: nothing in this job can change anything at eBay */
+    (trQuota.match(/method: 'POST'/g) || []).length === 1 && !/'PUT'|'DELETE'/.test(trQuota), null);
+  t('traffic quota (real source): the allow-list carries the two rate-limit paths and nothing else of that endpoint, and it is GET only',
+    /\/\^\\\/developer\\\/analytics\\\/v1_beta\\\/\(user_\)\?rate_limit\(\\\?\|\$\)\//.test(src) &&
+    /if \(\/\^\\\/developer\\\/\/\.test\(path\) && method !== 'GET'\) throw new Error\('SAY: the quota read is GET only'\);/.test(src) &&
+    (src.match(/developer\\\/analytics/g) || []).length === 1, null);
+  t('traffic crons (real source + real file): the sampler has an invocation of its OWN, is gone from the packed five-minute slot, and the quota reader rides last in a slot of cheap work',
+    (() => {
+      let file = null; try { file = JSON.parse(readFile('engine/crons.json')); } catch (e) {}
+      const inFile = (file && Array.isArray(file.crons)) ? file.crons.map(String) : [];
+      const bare = cronBlk.replace(/\/\*[\s\S]*?\*\//g, '');
+      const slots = (bare.match(/'[^']+':\s*\[[^\]]*\btrafficNow\b[^\]]*\]/g) || []);
+      return slots.length === 1 && slots[0].indexOf("'4-59/5 * * * *'") === 0 && /\[trafficNow\]/.test(slots[0]) &&
+        /'\*\/5 \* \* \* \*': \[orderSync, adsSync, cpcAudit, adsIntraday, openSync\]/.test(bare) &&
+        /'20 \* \* \* \*': \[adtoolRollups, trafficQuota\]/.test(bare) &&
+        inFile.indexOf('4-59/5 * * * *') >= 0 && inFile.indexOf('20 * * * *') >= 0 &&
+        /* and the minute is clear of every other entry in the map, which is the whole reason for it */
+        !/'[0-9,-]*4-59\/5/.test(bare.replace("'4-59/5 * * * *'", '')) &&
+        /Own invocation = own\n       subrequest budget/.test(cronBlk) && /THE CADENCE IS NOT THIS SLOT'S BUSINESS/.test(cronBlk);
+    })(), null);
+  t('traffic clock state: it is the one reader of the sampler’s state, it writes nothing and reaches nothing outside the database, and an unread quota answers null rather than nought',
+    !/\b(INSERT|UPDATE|DELETE|CREATE|ALTER)\b/.test(trState) && !/fetch\(/.test(trState) &&
+    !/ensureTrafficSchema/.test(trState) && /read_errors: errs, sent_to_ebay: false, writes: 'none'/.test(trState) &&
+    /errs\.push\(what \+ ': '/.test(trState) &&
+    /let limit = null, remaining = null, readAt = null, lastRead = null;/.test(trState) &&
+    /sampling_every_min: trfCadenceMin\(limit, pct, fleet\.length\)/.test(trState) &&
+    /sampling_from_quota: limit != null/.test(trState) &&
+    /* every read is bounded */
+    (trState.match(/LIMIT \d+/g) || []).length === 4, (trState.match(/LIMIT \d+/g) || []).length);
+  t('traffic clock state: the governing figures are the SMALLEST any account was given, because the first account to be refused is the one that sets the whole cadence',
+    /limit == null \|\| L < limit/.test(trState) && /remaining == null \|\| M < remaining/.test(trState) &&
+    /the first account to be refused is the one that governs/.test(trState) &&
+    /* the fleet count is read whether or not one account is on screen: the turn is set by who shares the quota */
+    /WHERE api_enabled = 1 ORDER BY name LIMIT 40/.test(trState) && /an account's turn in the\n     cycle is set by how many accounts share the quota/.test(trState), null);
+  t('traffic clock state: it answers the questions the bars cannot — the cadence, eBay’s limit and what is left, who is held back, the day’s first reading, how many readings stand behind it, and the hour before which nothing was counted',
+    ['sampling_every_min:', 'quota_limit:', 'quota_remaining:', 'quota_reserve:', 'backoff_accounts:',
+     'first_reading_today:', 'readings_today:', 'baseline_hour:', 'last_reading_at:']
+      .every(k => trState.indexOf(k) > 0) &&
+    /held\.push\(\{ account: name, until: cfg\[k\], minutes_left: left \}\)/.test(trState) &&
+    /const left = trfBackoffLeftMin\(cfg\[k\], nowMs\);/.test(trState) &&
+    /* a backoff whose instant has passed is not a held account */
+    /if \(left != null\) held\.push/.test(trState) &&
+    /* and the minutes key is never mistaken for an account name */
+    /k\.indexOf\(TRAFFIC_BACKOFF_MIN_KEY\) === 0\) continue;/.test(trState), null);
+  t('traffic clock state: it reaches BOTH the page and the key-authed probe, through the one function, so the screen and the evidence a manager is handed cannot disagree about why an hour is empty',
+    (src.match(/async function trafficClockState\(/g) || []).length === 1 &&
+    (src.match(/await trafficClockState\(/g) || []).length === 2 &&
+    /hour_clock_state: CS,/.test(trBoard) &&
+    /const CS = await trafficClockState\(ctx\.env, \{ account, day: hourDay \}\);/.test(trBoard) &&
+    /hour_clock_state: await trafficClockState\(env, \{ account, day \}\),/.test(trProbe) &&
+    /* and the hour block's own shape is untouched: the page reads its bars out of that */
+    !/hour_clock_state/.test(trHB), null);
+  t('traffic sampler: the two tables are readable with the sync key, because from outside "the clock holds nothing" and "eBay is refusing us" were the same thing — which is how the fault hid for an hour',
+    /traffic_quota: 'SELECT \* FROM traffic_quota',/.test(src) &&
+    /traffic_clock_baseline: "SELECT \* FROM traffic_clock_baseline WHERE date >= datetime\('now','-30 day'\)",/.test(src) &&
+    /* and the quota can be read on demand rather than waited for */
+    /adtoolRollups, adtoolTruth, adtoolVideoSweep, trafficQuota \};/.test(src), null);
 
   /* the page half */
   t('traffic page: BOTH bar rows are drawn, off ONE helper, after the tiles and the so-far-today line \u2014 the owner asked for the comparison bars of views as well as impressions',
