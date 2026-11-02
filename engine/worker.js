@@ -22855,7 +22855,9 @@ const ROUTES = {
       const sql = (withPath) =>
         'SELECT i.item_id, i.account, i.title, i.price, i.image, i.status, i.sold_30d, ' + (withPath ? "COALESCE(i.primary_category, '')" : "''") + ' AS path, ' +
         "COALESCE(f.ali_cost, 0) AS ali_cost, COALESCE(f.oe, 0) AS oe, COALESCE(f.profit, 0) AS sheet_profit, COALESCE(f.category, '') AS sheet_cat, COALESCE(f.current_sup, '') AS supplier, " +
-        "COALESCE(f.sup1_link, '') AS f1, COALESCE(f.sup2_link, '') AS f2, COALESCE(f.sup3_link, '') AS f3, COALESCE(f.enriched_at, '') AS facts_at, COALESCE(f.campaign_name, '') AS sheet_campaign, COALESCE(f.campaign_type, '') AS sheet_campaign_type " +
+        "COALESCE(f.sup1_link, '') AS f1, COALESCE(f.sup2_link, '') AS f2, COALESCE(f.sup3_link, '') AS f3, " +
+        "COALESCE(f.sup1, '') AS sup1, COALESCE(f.sup2, '') AS sup2, COALESCE(f.sup3, '') AS sup3, " +
+        "COALESCE(f.enriched_at, '') AS facts_at, COALESCE(f.campaign_name, '') AS sheet_campaign, COALESCE(f.campaign_type, '') AS sheet_campaign_type " +
         'FROM items_api i LEFT JOIN items_facts f ON f.item_id = i.item_id WHERE i.item_id = ?1';
       let it;
       try { it = await DB.prepare(sql(true)).bind(id).first(); } catch (e) { it = await DB.prepare(sql(false)).bind(id).first(); }
@@ -22915,17 +22917,22 @@ const ROUTES = {
       const alerts = (await DB.prepare("SELECT old_cost, new_cost, sell_price, margin_after, alerted_at, COALESCE(tier, '') AS tier, acked_by, acked_at, note FROM price_watch WHERE item_id = ?1 ORDER BY alerted_at DESC LIMIT 20").bind(id).all().catch(() => ({ results: [] }))).results || [];
       const decisions = (await DB.prepare('SELECT id, verdict, note, price_now, price_target, segment, by_email, at, task_id FROM price_decisions WHERE item_id = ?1 ORDER BY id DESC LIMIT 20').bind(id).all().catch(() => ({ results: [] }))).results || [];
       const isUrl = (v) => /^https?:\/\//i.test(String(v || '').trim());
-      const pick = (cands) => { for (const [src, v] of cands) if (isUrl(v)) return { url: String(v).trim(), src, price: prLinkCost(v) }; return null; };
+      const pick = (cands, name) => { for (const [src, v] of cands) if (isUrl(v)) return { url: String(v).trim(), src, price: prLinkCost(v), supplier: String(name || '') }; return null; };
       const links = [
-        pick([['portal', s && s.s1], ['sheet', it.f1], ['go-live', g && g.ali_link], ['hunt', hunt && hunt.link1]]),
-        pick([['portal', s && s.s2], ['sheet', it.f2], ['hunt', hunt && hunt.link2]]),
-        pick([['portal', s && s.s3], ['sheet', it.f3], ['hunt', hunt && hunt.link3]]),
+        pick([['portal', s && s.s1], ['sheet', it.f1], ['go-live', g && g.ali_link], ['hunt', hunt && hunt.link1]], it.sup1),
+        pick([['portal', s && s.s2], ['sheet', it.f2], ['hunt', hunt && hunt.link2]], it.sup2),
+        pick([['portal', s && s.s3], ['sheet', it.f3], ['hunt', hunt && hunt.link3]], it.sup3),
       ].filter(Boolean);
+      /* orders waiting to be bought: the number that turns "which supplier" into today's job */
+      const openRow = await DB.prepare(
+        "SELECT COUNT(*) AS n FROM orders WHERE item_id = ?1 AND status = 'NOT_STARTED'"
+      ).bind(id).first().catch(() => null);
       const h30 = history.filter((h) => String(h.seen_day || '') >= d30);
       return {
         item: { item_id: it.item_id, account: it.account, title: it.title, image: it.image || '', status: it.status, price: n(it.price), sold_30d: n(it.sold_30d), category_path: it.path || '', sheet_category: it.sheet_cat || '',
           supplier: it.supplier || '', facts_at: it.facts_at || '', sheet_oe: n(it.oe), sheet_profit: n(it.sheet_profit), sheet_campaign: it.sheet_campaign || '', sheet_campaign_type: it.sheet_campaign_type || '',
-          hunter: pv ? pv.hunter_email || '' : '', lister: pv ? pv.lister_email || '' : (g ? g.lister || '' : ''), live_at: g ? g.live_at || '' : '' },
+          hunter: pv ? pv.hunter_email || '' : '', lister: pv ? pv.lister_email || '' : (g ? g.lister || '' : ''), live_at: g ? g.live_at || '' : '',
+          sup_names: [it.sup1 || '', it.sup2 || '', it.sup3 || ''], open_orders: n(openRow && openRow.n) },
         cost: { sheet: n(it.ali_cost), paid_avg_30d: j.ali_paid, paid_avg_180d: o.cost_units180 > 0 ? round2(o.cost180 / o.cost_units180) : 0,
           paid_costs_seen: Object.keys(paidCosts).map((c) => ({ cost: Number(c), orders: paidCosts[c] })).sort((x, y) => y.orders - x.orders).slice(0, 8),
           hunt_source_price: hunt ? hunt.source_price || '' : '', link_price: linkCost, used: j.ali, source: j.ali_source },
