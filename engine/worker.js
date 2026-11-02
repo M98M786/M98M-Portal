@@ -12864,6 +12864,11 @@ async function adtoolPeakCompute(env, acct) {
     const parsed = adPeakHoursParse(r.hours);
     const auto = Number(r.auto == null ? 1 : r.auto) ? 1 : 0;
     const sw = switchable[id] || [];
+    /* HOW MANY PAY-PER-CLICK CAMPAIGNS THIS LISTING IS IN, by the same rule the fill job decides
+       on and off the read already made above. The count the page prints beside the campaign is the
+       count that decides whether a job may name one at all, so a page and a job can never come to
+       disagree about a listing being in one campaign or in two. */
+    const fillC = adPeakCampaignFill(sw);
     const ls = lastSwitch.by_item[id] || null;
     /* THE CAMPAIGN THE ROW NAMES, and from here on everything this row says is said about that
        campaign alone, by the same filter the job uses. A row naming none is every pay-per-click
@@ -12918,6 +12923,9 @@ async function adtoolPeakCompute(env, acct) {
          and the one the hours act on is marked, which is not the same question as the field above:
          that one says which campaign the row NAMES, these say which campaigns the listing IS IN. */
       campaigns_now: adPeakCampaignsNow(sw, pickC.chosen),
+      /* and HOW MANY campaigns that is, counted once each. It is not the length of the list above:
+         that list is one entry per ad reading, and eBay returns several readings of one campaign. */
+      campaigns_n: fillC.campaigns_n,
       hours_parsed: parsed.ranges, hours_text: parsed.ranges ? adPeakHoursText(parsed.ranges) : '', hours_problem: parsed.reason || '',
       auto: auto, switchable: pickC.rows.length > 0,
       next_change: parsed.ranges ? adPeakNextChange(parsed.ranges, nowUk.hour) : '',
@@ -12986,7 +12994,16 @@ async function adtoolPeakCompute(env, acct) {
       on_pattern: manual.filter(m => m.schedule_today && m.schedule_today.source === 'pattern').length,
       pattern_proposed: manual.filter(m => (m.dead_proposal || []).length > 0).length,
       held: manual.filter(m => m.hold === 'on' || m.hold === 'off').length,
-      not_tracking: manual.filter(m => m.tracking && m.tracking.tracking === false).length },
+      not_tracking: manual.filter(m => m.tracking && m.tracking.tracking === false).length,
+      /* THE ONE LINE AT THE TOP OF THE LIST (owner, 2 Nov, item 3): how many rows name the campaign
+         their hours switch, how many switch every campaign they are in, and how many have no
+         pay-per-click campaign to switch at all. Split on NAMING first, so the three are exclusive
+         and always add up to the list: a row that names a campaign is counted as naming one even
+         where that campaign has no ad on the listing just now, which is the thing `campaign_missing`
+         says against the row itself rather than a bucket of its own. */
+      campaign_named: manual.filter(m => m.campaign_id).length,
+      campaign_all: manual.filter(m => !m.campaign_id && m.campaigns_n > 0).length,
+      campaign_none: manual.filter(m => !m.campaign_id && m.campaigns_n === 0).length },
     plan_rules: adPeakPlanRules(cfg),
     plan_rules_text: 'the pattern is read over the last ' + adPeakPlanRules(cfg).lookback_days + ' days and only acted on from ' + adPeakPlanRules(cfg).min_days +
       ' days of hours onwards; an hour counts as dead only after it has spent money or drawn ' + adPeakPlanRules(cfg).dead_min_clicks +
@@ -13590,6 +13607,44 @@ function adPeakCampaignPick(rows, chosen) {
   if (!cid) return { chosen: '', rows: all, missing: false, all_campaigns: true };
   const kept = all.filter(r => String((r && r.campaign_id) || '') === cid);
   return { chosen: cid, rows: kept, missing: kept.length === 0, all_campaigns: false };
+}
+/* ---- THE FILL RULE: which rows a job may name a campaign for, and which it must leave alone ----
+   (owner, 2 Nov: "select the current campaigns of all the items present in peak times as their
+   selected campaigns".) Handed the switchable ads for ONE listing, it answers which pay-per-click
+   campaigns that listing is in, counted once each, and whether a job may write one of them down:
+     one campaign  → naming it changes nothing about what the hours switch, because that campaign is
+                     already everything they switch, so it is only the truth being recorded;
+     two or more   → naming one would STOP THE OTHER BEING SWITCHED, which is a change to what
+                     happens on eBay, so no job ever chooses here: a person does, from the row;
+     none          → there is nothing to name.
+   Pure on purpose, because the whole safety of the fill is this one rule and nothing else: with live
+   apply on for every account, a rule that filled a two-campaign listing would quietly take one of
+   its campaigns out of the switch at 17:00 the same evening.
+   A campaign read twice counts ONCE. eBay returns several ad records per listing per campaign (the
+   duplicate-ad fault of 24 Oct), and two readings of one campaign are not two campaigns: counting
+   the records would read a single-campaign listing as a many-campaign one and leave it unfilled.
+   A pay-on-sale ad is never counted, having no state to switch. A row whose funding model was never
+   read is counted, because the membership rule that produced these rows has already held them to
+   pay-per-click: dropping it here would read the listing as being in no campaign at all. */
+function adPeakCampaignFill(rows) {
+  const seen = {}, ids = [], names = {};
+  for (const r of (rows || [])) {
+    if (!r) continue;
+    const fm = String(r.funding_model == null ? '' : r.funding_model).trim().toUpperCase();
+    if (fm && fm !== 'COST_PER_CLICK') continue;
+    const cid = String(r.campaign_id == null ? '' : r.campaign_id).trim();
+    if (!cid) continue;
+    if (!seen[cid]) { seen[cid] = 1; ids.push(cid); }
+    if (!names[cid]) names[cid] = String(r.name == null ? '' : r.name);
+  }
+  const one = ids.length === 1;
+  return {
+    campaigns: ids, campaigns_n: ids.length,
+    fill: one, campaign_id: one ? ids[0] : '', campaign_name: one ? String(names[ids[0]] || '') : '',
+    /* which of the three this listing is, in one word, so a count, a note and the decision itself
+       can never drift apart from one another */
+    reason: ids.length === 0 ? 'none' : one ? 'one' : 'many',
+  };
 }
 /* WHICH CAMPAIGNS THE LISTING IS IN RIGHT NOW (owner, 2 Nov: "in peak listings also show the
    current campaign of the item along with the product history"). The rows handed in are the ones
@@ -16364,6 +16419,80 @@ async function adtoolPeakSwitch(env) {
       (bySchedule ? '; ' + bySchedule + ' read their hour off today\'s schedule' : '') +
       (byHold ? (bySchedule ? ' and ' : '; ') + byHold + ' off a hold somebody set' : ''));
   } catch (e) { await adtJobEnd(env, 'adtoolPeakSwitch', t, written, 'error', String(e && e.message || e)); throw e; }
+}
+/* ---- NAMING THE OBVIOUS ONES, ONCE (owner, 2 Nov, item 1) ------------------------------------
+   "Select the current campaigns of all the items present in peak times as their selected
+   campaigns." Every row on the by-hand list that names no campaign is read the way the page reads
+   it, and where the listing is in EXACTLY ONE running pay-per-click campaign that campaign is
+   written down. Nothing else is touched.
+   IT SENDS NOTHING TO EBAY, and it must not change what the quarter-hourly switch sends either.
+   That is what holds the rule to one campaign: a listing in one campaign already has every one of
+   its ads switched by its hours, so naming that campaign records what is already true and the
+   17:00 and 23:00 ticks do exactly what they did the evening before. A listing in TWO is the
+   opposite: naming one of them would take the other out of the switch, which is a real change to
+   real ads on a fleet where live apply is now on for all eight accounts. Those rows are counted,
+   named in the job's note and left for a person to decide from the row.
+   Run BY HAND, through runJobKey, and on no cron: it is a once-over of a list people keep, not a
+   standing rule, and a job that re-ran nightly would keep re-naming rows somebody had cleared on
+   purpose. Idempotent either way: it reads only the rows naming nothing, and its write names the
+   campaign only while the row still names none, so a second run fills nothing and says so. */
+async function adtoolPeakCampaignFill(env) {
+  await ensureAdtoolPhase16Schema(env);     // the campaign column this job writes lives there
+  const t = await adtJobStart(env, 'adtoolPeakCampaignFill');
+  let written = 0;
+  try {
+    /* the rows naming nothing, and only those: a row somebody has already set is never read, so it
+       can never be overwritten by this. Behind a try, in the way every added column in this file is
+       read: a database that has not taken the ALTER has no campaign to fill and says so. */
+    let rows = [];
+    try {
+      rows = (await env.DB.prepare("SELECT account, item_id, hours FROM adtool_peak_items WHERE removed_at = '' AND COALESCE(campaign_id, '') = '' ORDER BY added_at DESC LIMIT " + ADTOOL_PEAK_MANUAL_CAP).all()).results || [];
+    } catch (e) {
+      await adtJobEnd(env, 'adtoolPeakCampaignFill', t, 0, 'ok', 'this database cannot record a campaign against a peak listing yet, so there was nothing to fill');
+      return;
+    }
+    if (!rows.length) {
+      await adtJobEnd(env, 'adtoolPeakCampaignFill', t, 0, 'ok', 'every row on the by-hand list already names the campaign its hours switch: 0 filled, 0 left because they are in more than one, 0 with no running pay-per-click campaign');
+      return;
+    }
+    /* THE SAME READ THE PAGE MAKES, through the same function: the campaigns this job may name are
+       exactly the ads the switch itself can act on, so a campaign written here is never one the
+       switch would then fail to find. */
+    const switchable = await adtPeakSwitchable(env, rows.map(r => String(r.item_id)));
+    const setStmts = [], auditStmts = [], accounts = {}, many = [];
+    let filled = 0, none = 0;
+    for (const row of rows) {
+      const id = String(row.item_id || ''), acct = String(row.account || '');
+      const f = adPeakCampaignFill(switchable[id] || []);
+      if (f.reason === 'many') { many.push(id); continue; }   // counted, named below, never written
+      if (f.reason === 'none') { none++; continue; }          // nothing to name
+      filled++;
+      if (acct) accounts[acct] = 1;
+      /* the guard on the write is the whole of the idempotence: the row has to still be on the list
+         and still name nothing by the time this lands, so two runs, or a manager setting the
+         campaign from the row while this was reading, can never be overwritten by it. */
+      setStmts.push(env.DB.prepare("UPDATE adtool_peak_items SET campaign_id = ?2 WHERE item_id = ?1 AND removed_at = '' AND COALESCE(campaign_id, '') = ''").bind(id, f.campaign_id));
+      /* ONE AUDIT ROW PER LISTING, so the day this ran is readable from the trail and not only from
+         the job note: who did it, which listing, what it was (nothing: every pay-per-click campaign
+         it is in) and what it became. */
+      auditStmts.push(env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES ('adtool (campaign fill)', 'ADTOOL_PEAK_CAMPAIGN_FILL', ?1, '', ?2, datetime('now'))")
+        .bind(id, (f.campaign_name || f.campaign_id) + ' (' + f.campaign_id + ')'));
+    }
+    if (setStmts.length) { await adtBatch(env, setStmts); written = setStmts.length; }
+    /* the trail must never block the fill: on a database with no audit table the campaigns are
+       still written down and the note still says what happened */
+    if (auditStmts.length) { try { await adtBatch(env, auditStmts); } catch (e) { /* the note stands as the record */ } }
+    /* THE PAGE'S MEMO, dropped at the end for the all-accounts entry and for every account a row
+       was filled on, so the next reader sees the campaigns this job wrote rather than the list it
+       read a minute before. */
+    await adtPeakCacheClear(env, '');
+    for (const a of Object.keys(accounts)) await adtPeakCacheClear(env, a);
+    await adtJobEnd(env, 'adtoolPeakCampaignFill', t, written, 'ok',
+      filled + ' of ' + rows.length + ' named their one campaign; ' + many.length +
+      ' left alone because the listing is in more than one running pay-per-click campaign, which a person decides from the row; ' +
+      none + ' have no running pay-per-click campaign to name' +
+      (many.length ? ' · in more than one: ' + many.join(', ') : ''));
+  } catch (e) { await adtJobEnd(env, 'adtoolPeakCampaignFill', t, written, 'error', String(e && e.message || e)); throw e; }
 }
 
 const ADTOOL_ACTIONS_P16 = {
@@ -26619,7 +26748,10 @@ const ROUTES = {
         trafficSync, trafficNow, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan,
         selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch,
         trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep, policyScan, trackingInboxRetry,
-        adtoolRollups, adtoolTruth, adtoolVideoSweep, trafficQuota };
+        adtoolRollups, adtoolTruth, adtoolVideoSweep, trafficQuota,
+        /* a once-over of the peak list, run by hand and on no cron slot: it names the campaign a
+           listing is already wholly switched in, and never chooses for one in two (2 Nov) */
+        adtoolPeakCampaignFill };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

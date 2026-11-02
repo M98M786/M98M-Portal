@@ -53,7 +53,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -2296,7 +2296,9 @@ function run(argv) {
   t('which campaign: the copy under the picker is plain, the row links the campaign, and the page keeps its own class prefix', (() => {
     const copy = /The hours switch the ad in this campaign only\. Its ads in other campaigns are left as they are\./.test(pkSrc);
     const row = /all its pay-per-click campaigns/.test(pkSrc) && /adtCampaignLink\(cid, String\(\(r && r\.campaign_name\) \|\| ''\) \|\| cid\)/.test(pkSrc);
-    const why = /but it has no pay-per-click ad in the campaign named below, so nothing happens/.test(pkSrc) && /r\.campaign_missing/.test(pkSrc);
+    /* 2 Nov: the campaign sits in its own column now, so the reason names what it is talking
+       about rather than pointing at a position in the cell it used to share */
+    const why = /but it has no pay-per-click ad in the campaign this row names, so nothing happens/.test(pkSrc) && /r\.campaign_missing/.test(pkSrc);
     const prefix = /\.pkt-add select\{/.test(pkSrc) && !/\.adt-add select\{/.test(pkSrc);
     /* and every field the engine sends against a campaign is used: its name, what its ad is doing,
        and the campaign's own state where that is something other than plain running */
@@ -5316,8 +5318,9 @@ function run(argv) {
   t('traffic sampler: the two tables are readable with the sync key, because from outside "the clock holds nothing" and "eBay is refusing us" were the same thing — which is how the fault hid for an hour',
     /traffic_quota: 'SELECT \* FROM traffic_quota',/.test(src) &&
     /traffic_clock_baseline: "SELECT \* FROM traffic_clock_baseline WHERE date >= datetime\('now','-30 day'\)",/.test(src) &&
-    /* and the quota can be read on demand rather than waited for */
-    /adtoolRollups, adtoolTruth, adtoolVideoSweep, trafficQuota \};/.test(src), null);
+    /* and the quota can be read on demand rather than waited for. 2 Nov: the peak campaign fill
+       joined the same key-run map behind it, so the entry is checked and not the map's closing brace */
+    /adtoolRollups, adtoolTruth, adtoolVideoSweep, trafficQuota,/.test(src), null);
 
   /* the page half */
   t('traffic page: BOTH bar rows are drawn, off ONE helper, after the tiles and the so-far-today line \u2014 the owner asked for the comparison bars of views as well as impressions',
@@ -5561,7 +5564,8 @@ function run(argv) {
     /* declared once and called once: the table has one home and it is that block */
     const once = (pkSrc.match(/periodsBlock\(/g) || []).length === 2 && /function periodsBlock\(r\) \{/.test(pkSrc);
     /* and that block is the second row under the listing, the one patternBlock fills */
-    const where = /<tr class="pkt-sub2"><td colspan="10">' \+ patternBlock\(r, s\)/.test(pkSrc);
+    /* 2 Nov: the table gained the Campaign column, so the block under the row spans eleven */
+    const where = /<tr class="pkt-sub2"><td colspan="11">' \+ patternBlock\(r, s\)/.test(pkSrc);
     const link = /href="#adtoolProduct\/' \+ esc\(id\) \+ '" target="_blank" rel="noopener"/.test(pkSrc) && /the full Product history/.test(pkSrc);
     /* this file's own prefix throughout, and not one class borrowed from Product history's file */
     const prefix = /'\.pkt-per\{/.test(pkSrc) && /'\.pkt-moving\{/.test(pkSrc) && /'\.pkt-open\{/.test(pkSrc) && !/\.at-tbl/.test(pkSrc) && !/\.at-src/.test(pkSrc);
@@ -5766,6 +5770,143 @@ function run(argv) {
     /* and the page invents nothing: no state is put on an ad eBay has never stamped */
     const honest = /return 'eBay has never stamped this ad, so it is being served';/.test(pkSrc);
     return beside && link && type && reading && mark && nolive && prefix && honest;
+  })(), null);
+
+  /* ══ EVERY PEAK ROW NAMES ITS OWN CAMPAIGN (owner, 2 Nov) ═════════════════════════════════════
+     Measured on the live list the night this was asked for: 88 rows, none naming a campaign, of
+     which 68 are in exactly one running pay-per-click campaign, 10 are in two and 10 are in none.
+     The fill job may write the 68, because for them naming the campaign is only the truth being
+     recorded, and must never touch the 10 in two, because naming one of those would take the other
+     out of the 17:00 and 23:00 switch on a fleet where live apply is on for all eight accounts. ══ */
+  t('peak campaign fill: exactly one running pay-per-click campaign fills, two or more never do, none never does, and two readings of one campaign are still one campaign', (() => {
+    const ad = (cid, name, extra) => Object.assign({ campaign_id: cid, name: name, funding_model: 'COST_PER_CLICK', ad_synced_at: '2026-11-02 16:00:00' }, extra || {});
+    /* THE 68: one campaign, so it is named, with its own name carried for the audit row */
+    const one = F.adPeakCampaignFill([ad('C1', 'General')]);
+    const oneOk = one.fill === true && one.campaign_id === 'C1' && one.campaign_name === 'General' &&
+      one.reason === 'one' && one.campaigns_n === 1 && one.campaigns.join(',') === 'C1';
+    /* THE 10 IN TWO: never chosen for, and the answer says why in one word rather than by an empty id */
+    const many = F.adPeakCampaignFill([ad('C1', 'General'), ad('C2', 'Winners')]);
+    const manyOk = many.fill === false && many.campaign_id === '' && many.campaign_name === '' &&
+      many.reason === 'many' && many.campaigns_n === 2;
+    /* THE 10 IN NONE: nothing to name, and a listing read as being in no campaign is not a fill */
+    const none = F.adPeakCampaignFill([]), nil = F.adPeakCampaignFill(null);
+    const noneOk = none.fill === false && none.reason === 'none' && none.campaigns_n === 0 &&
+      nil.fill === false && nil.reason === 'none' && nil.campaigns_n === 0;
+    /* eBay returns several ad records per listing per campaign (24 Oct). Counting the records would
+       read a one-campaign listing as a two-campaign one and leave it unfilled for ever. */
+    const dup = F.adPeakCampaignFill([ad('C1', 'General'), ad('C1', 'General'), ad('C1', '')]);
+    const dupOk = dup.fill === true && dup.campaigns_n === 1 && dup.campaign_name === 'General';
+    /* a pay-on-sale ad has no state to switch, so it is not a campaign this rule counts: a listing
+       with one pay-per-click ad and one pay-on-sale ad is a ONE-campaign listing */
+    const mixed = F.adPeakCampaignFill([ad('C1', 'General'), ad('C9', 'Promoted', { funding_model: 'COST_PER_SALE' })]);
+    const mixedOk = mixed.fill === true && mixed.campaign_id === 'C1' && mixed.campaigns_n === 1;
+    /* a reading with no funding model at all still counts: the membership rule that produced these
+       rows has already held them to pay-per-click, and dropping it would read the listing as being
+       in no campaign and fill nothing for ever */
+    const bare = F.adPeakCampaignFill([{ campaign_id: 'C1' }]);
+    const bareOk = bare.fill === true && bare.campaign_id === 'C1' && bare.campaign_name === '';
+    /* and a row with no campaign id is not a campaign */
+    const blank = F.adPeakCampaignFill([{ campaign_id: '' }, null, ad('C1', 'General')]);
+    const blankOk = blank.fill === true && blank.campaigns_n === 1;
+    return oneOk && manyOk && noneOk && dupOk && mixedOk && bareOk && blankOk;
+  })(), null);
+  t('peak campaign fill: the job names only the obvious ones, writes one audit row per listing, never chooses for a listing in more than one, and drops the page’s memo', (() => {
+    const fj = src.slice(src.indexOf('async function adtoolPeakCampaignFill(env) {'), src.indexOf('const ADTOOL_ACTIONS_P16 = {'));
+    if (fj.length < 500) return false;
+    /* it reads ONLY the rows naming nothing, so a campaign somebody set is never read, let alone
+       overwritten, and the write carries the same guard so two runs cannot fight each other */
+    const onlyBlank = /SELECT account, item_id, hours FROM adtool_peak_items WHERE removed_at = '' AND COALESCE\(campaign_id, ''\) = ''/.test(fj) &&
+      /UPDATE adtool_peak_items SET campaign_id = \?2 WHERE item_id = \?1 AND removed_at = '' AND COALESCE\(campaign_id, ''\) = ''/.test(fj);
+    /* the decision is the pure rule and nothing else, off the read the page is judged on too */
+    const byRule = /const switchable = await adtPeakSwitchable\(env, rows\.map\(r => String\(r\.item_id\)\)\);/.test(fj) &&
+      /const f = adPeakCampaignFill\(switchable\[id\] \|\| \[\]\);/.test(fj) &&
+      /if \(f\.reason === 'many'\) \{ many\.push\(id\); continue; \}/.test(fj) &&
+      /if \(f\.reason === 'none'\) \{ none\+\+; continue; \}/.test(fj);
+    /* ONE write and ONE audit row per filled listing, pushed in the same pass, so the trail cannot
+       hold more or fewer rows than the fill itself wrote */
+    const perListing = (fj.match(/setStmts\.push\(/g) || []).length === 1 &&
+      (fj.match(/auditStmts\.push\(/g) || []).length === 1 &&
+      /INSERT INTO audit \(actor, action, target, old, new, at\) VALUES \('adtool \(campaign fill\)', 'ADTOOL_PEAK_CAMPAIGN_FILL', \?1, '', \?2, datetime\('now'\)\)/.test(fj) &&
+      /\.bind\(id, \(f\.campaign_name \|\| f\.campaign_id\) \+ ' \(' \+ f\.campaign_id \+ '\)'\)/.test(fj);
+    /* the trail never blocks the fill, and the fill is never hidden by the trail failing */
+    const trail = /if \(auditStmts\.length\) \{ try \{ await adtBatch\(env, auditStmts\); \} catch \(e\)/.test(fj) &&
+      fj.indexOf('await adtBatch(env, setStmts)') < fj.indexOf('await adtBatch(env, auditStmts)');
+    /* the memo goes at the end, for the all-accounts entry and for every account it filled on */
+    const memo = /await adtPeakCacheClear\(env, ''\);/.test(fj) &&
+      /for \(const a of Object\.keys\(accounts\)\) await adtPeakCacheClear\(env, a\);/.test(fj) &&
+      fj.indexOf("await adtPeakCacheClear(env, '')") > fj.indexOf('await adtBatch(env, setStmts)');
+    /* the note carries all three figures and names the ones it left alone */
+    const note = /' of ' \+ rows\.length \+ ' named their one campaign; ' \+ many\.length \+/.test(fj) &&
+      /' left alone because the listing is in more than one running pay-per-click campaign/.test(fj) &&
+      /' have no running pay-per-click campaign to name'/.test(fj) &&
+      /\(many\.length \? ' · in more than one: ' \+ many\.join\(', '\) : ''\)/.test(fj);
+    /* and it reaches eBay with nothing at all: no fetch, and no row written to the apply log, which
+       is the only table in this tool that records something having been sent */
+    const sendsNothing = fj.indexOf('fetch(') < 0 && fj.indexOf('adtool_apply_log') < 0 && fj.indexOf('ebayAccessToken') < 0;
+    return onlyBlank && byRule && perListing && trail && memo && note && sendsNothing;
+  })(), null);
+  t('peak campaign fill: the job runs by key and sits on no cron slot, because a once-over of a list people keep must not re-name rows somebody cleared on purpose', (() => {
+    const rk = src.slice(src.indexOf('  runJobKey: {'), src.indexOf('  asRunJob: {'));
+    const byKey = rk.length > 200 && /adtoolPeakCampaignFill \};/.test(rk);
+    const cm = src.slice(src.indexOf('function cronMap() {'), src.indexOf('export default {'));
+    const noCron = cm.length > 1000 && cm.indexOf('adtoolPeakCampaignFill') < 0;
+    /* it keeps its own row in the job trail, under its own name, like every other job here */
+    const trail = /const t = await adtJobStart\(env, 'adtoolPeakCampaignFill'\);/.test(src) &&
+      (src.match(/await adtJobEnd\(env, 'adtoolPeakCampaignFill'/g) || []).length === 4;
+    /* a database that never took the campaign column has nothing to fill and says so rather than
+       failing, and a list that already names its campaigns is not an error either */
+    const graceful = /this database cannot record a campaign against a peak listing yet, so there was nothing to fill/.test(src) &&
+      /every row on the by-hand list already names the campaign its hours switch/.test(src);
+    return byKey && noCron && trail && graceful;
+  })(), null);
+  t('peak rows: the Campaign cell is on the row itself with the count of campaigns the listing is in, and the row’s own control opens the same picker the add form uses', (() => {
+    /* its own column, in the header and in the row, carrying the explainer the picker carries */
+    const col = /<th>Campaign' \+ reg\('which campaign', 'how'\) \+ '<\/th>/.test(pkSrc) &&
+      /'<td>' \+ campaignCell\(r\) \+ '<\/td>'/.test(pkSrc) && /function campaignCell\(r\) \{/.test(pkSrc);
+    /* the campaign itself is still the link, and still "all its pay-per-click campaigns" where the
+       row names none: the cell was moved, not rewritten */
+    const named = /var h = campChosen\(r\);/.test(pkSrc) && /all its pay-per-click campaigns/.test(pkSrc);
+    /* the count beside it is the ENGINE's own, which is the count its fill rule decided on, and the
+       page falls back to the row's own list only where the answer carries no count */
+    const count = /campaigns_n: fillC\.campaigns_n,/.test(src) && /const fillC = adPeakCampaignFill\(sw\);/.test(src) &&
+      /var n = num\(r && r\.campaigns_n\);/.test(pkSrc) && /pay-per-click ' \+ plural\(n, 'campaign', 'campaigns'\) \+ ' just now/.test(pkSrc) &&
+      /this answer does not say how many campaigns it is in/.test(pkSrc);
+    /* a listing in more than one with none named is marked plainly, and they are named */
+    const plural2 = /if \(!cid && n != null && n > 1\)/.test(pkSrc) &&
+      /Its hours switch every one of them<\/b>/.test(pkSrc) && /function campsNamed\(r\)/.test(pkSrc);
+    /* ONE picker still, in one container, now put on three forms by one function */
+    const picker = (pkSrc.match(/<div id="pktCampWrap">/g) || []).length === 1 &&
+      /function campWrapHtml\(\) \{ return '<div id="pktCampWrap">' \+ campaignInner\(formItem\(\)\) \+ '<\/div>'; \}/.test(pkSrc) &&
+      (pkSrc.match(/campWrapHtml\(\)/g) || []).length === 3;
+    /* the control opens the row's own form and saves through the action the add form saves through,
+       with the row's hours, note and switch travelling back untouched: a save about the campaign
+       must not wipe the hours, and must not arm a listing somebody left to a person */
+    const control = /data-pkcampedit="/.test(pkSrc) && /function campaignForm\(id, row\)/.test(pkSrc) &&
+      /auto: autoForSave\(row\), campaign_id: want \}/.test(pkSrc) &&
+      /function autoForSave\(row\) \{\n    return !\(row && row\.auto != null && !Number\(row\.auto\)\);/.test(pkSrc) &&
+      /Clearing the campaign puts its hours back across every pay-per-click campaign it is in\./.test(pkSrc);
+    /* it opens UNDER the row, so the row keeps its History link and the By period block stays where
+       it is, and only one of the two forms is ever open */
+    const where = /PK\.campEdit === id \? '<tr class="pkt-sub2"><td colspan="11">' \+ campaignForm\(id, r\)/.test(pkSrc) &&
+      /PK\.edit = null; PK\.campEdit = id;/.test(pkSrc) && /PK\.edit = id; PK\.campEdit = null;/.test(pkSrc);
+    return col && named && count && plural2 && picker && control && where;
+  })(), null);
+  t('peak page: the one line at the top of the list is the answer’s own three counts, which are exclusive and add up to the list, and an answer carrying none of them prints nothing', (() => {
+    /* the engine splits on NAMING first, so the three can never overlap or leave a row out */
+    const eng = /campaign_named: manual\.filter\(m => m\.campaign_id\)\.length,/.test(src) &&
+      /campaign_all: manual\.filter\(m => !m\.campaign_id && m\.campaigns_n > 0\)\.length,/.test(src) &&
+      /campaign_none: manual\.filter\(m => !m\.campaign_id && m\.campaigns_n === 0\)\.length \},/.test(src);
+    /* the page reads them and adds up nothing else: the total is the three of them */
+    const page = /campaign_named: num\(C\.campaign_named\),/.test(pkSrc) &&
+      /var tot = C\.campaign_named \+ C\.campaign_all \+ C\.campaign_none;/.test(pkSrc) &&
+      /name the campaign their hours switch/.test(pkSrc) &&
+      /switch every pay-per-click campaign they are in/.test(pkSrc) &&
+      /have no pay-per-click campaign to switch/.test(pkSrc);
+    /* NULL IS NEVER NOUGHT: an older answer carrying no counts prints no sentence at all */
+    const nul = /if \(C\.campaign_named == null \|\| C\.campaign_all == null \|\| C\.campaign_none == null\) return '';/.test(pkSrc);
+    /* and it is at the top of the list, above the two notes that were already there */
+    const top = /campaignLine\(counts\(\)\) \+ periodsNote\(\) \+ campaignsNowNote\(\);/.test(pkSrc);
+    return eng && page && nul && top;
   })(), null);
 
   /* ══ THE SCHEMA GUARDS ARE PAID ONCE, NOT ONCE PER ISOLATE (2 Nov) ═════════════════════════════
