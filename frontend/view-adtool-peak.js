@@ -1160,6 +1160,11 @@
           ? 'but it has no pay-per-click ad in the campaign named below, so nothing happens'
           : 'but it has no pay-per-click ad to switch, so nothing happens') + '</div>';
     }
+    var onAcct = liveSwitchOf(r);
+    if (onAcct === false) {
+      return '<span class="pkt-tag quiet">the system writes it down</span>' +
+        '<div class="pkt-sm2">it switches this listing once live apply is on for this account</div>';
+    }
     return '<span class="pkt-tag live">the system switches it</span>';
   }
   /* WHICH CAMPAIGN this row runs in. One named, and its hours switch that campaign's ad alone; none
@@ -1195,7 +1200,12 @@
     var L = r.last_switch;
     if (!L || typeof L !== 'object') return '<span class="pkt-sm2">never switched</span>';
     var to = String(L.to || '').toUpperCase(), mode = String(L.mode || '').toLowerCase();
-    var word = to === 'ACTIVE' ? 'switched on' : (to === 'PAUSED' ? 'switched off' : 'changed');
+    /* a would-send row changed nothing on eBay, so it cannot be reported in the past tense: the
+       row used to read "switched on 2 Nov 17:01" for an account whose switch is off (owner, 3 Nov) */
+    var done = mode === 'live';
+    var word = to === 'ACTIVE' ? (done ? 'switched on' : 'would have switched on')
+      : to === 'PAUSED' ? (done ? 'switched off' : 'would have switched off')
+      : (done ? 'changed' : 'would have changed');
     if (L.refused) {
       /* eBay answered the request with a refusal: nothing changed, and the job will not ask again until the hours change */
       return '<span class="pkt-sm2">eBay refused ' + (to === 'ACTIVE' ? 'switching on' : 'switching off') + ' (HTTP ' + esc(String(L.http_status || '')) + ')' + (L.at ? ' at ' + esc(String(L.at).slice(11, 16)) + ' UTC' : '') + '; not asked again until the hours change</span>';
@@ -1211,24 +1221,37 @@
      account that IS live whose own daily ceiling of peak switches is used up. A blocked row printed
      as "on, so changes are sent" says the opposite of what is happening, and the change is still
      owed rather than done. The engine's `switch_note` says why in its own words. */
+  /* 3 Nov (owner: "products are live on eBay in campaigns but showing off, so nothing is sent"): this
+     chip is about the ACCOUNT'S live-apply switch and never about the listing's ad. Read beside a
+     listing that is running on eBay, "off, so nothing is sent" was taken to mean the ad was off. It
+     now says whose switch it is and what it does to the hours, and the ad's own state is printed
+     beside it, so the two can no longer be confused for one another. */
   var SWITCH_STATE = {
-    'live': ['pkt-tag live', 'on, so changes are sent'],
-    'would-send': ['pkt-tag off', 'off, so nothing is sent'],
+    'live': ['pkt-tag live', 'live apply is on: the hours are sent to eBay'],
+    'would-send': ['pkt-tag off', 'live apply is off: the hours are written down only'],
     'blocked': ['pkt-tag quiet', 'held at this account\'s daily ceiling']
   };
+  /* the listing's own ad state, said in the same cell as the account switch so nobody reads one for
+     the other: the switch governs whether we SEND, the ad state is what eBay is doing right now. */
+  function adStateLine(r) {
+    if (!r || r.live_now == null) return '';
+    return '<div class="pkt-sm2">' + (r.live_now ? 'its ad is running on eBay now' : 'its ad is not running on eBay now') + '</div>';
+  }
   function switchCell(r) {
     var st = String((r && r.switch_state) || '').toLowerCase().trim();
+    var acct = String((r && r.account) || '').trim();
+    var who = acct ? '<div class="pkt-sm2">' + esc(acct) + '</div>' : '';
     var S = SWITCH_STATE[st];
     if (S) {
       var note = String((r && r.switch_note) || '').trim();
-      return '<span class="' + S[0] + '">' + esc(S[1]) + '</span>' +
-        (note ? '<div class="pkt-sm2">' + esc(note) + '</div>' : '');
+      return '<span class="' + S[0] + '">' + esc(S[1]) + '</span>' + who +
+        (note ? '<div class="pkt-sm2">' + esc(note) + '</div>' : '') + adStateLine(r);
     }
     var v = liveSwitchOf(r);
     if (v == null && r && r.account) { var m = switchOf(r.account); if (m !== undefined) v = !!m; }
-    if (v == null) return '<span class="pkt-sm2">not in this answer</span>';
-    return v ? '<span class="pkt-tag live">on, so changes are sent</span>'
-      : '<span class="pkt-tag off">off, so nothing is sent</span>';
+    if (v == null) return '<span class="pkt-sm2">not in this answer</span>' + adStateLine(r);
+    return v ? '<span class="pkt-tag live">live apply is on: the hours are sent to eBay</span>'
+      : '<span class="pkt-tag off">live apply is off: the hours are written down only</span>';
   }
 
   function manualPanel() {

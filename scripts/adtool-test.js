@@ -1861,6 +1861,23 @@ function run(argv) {
     const slot = src.slice(i, src.indexOf('\n', i));
     return own && gone && !/adtoolPeakSwitch/.test(slot) && (src.match(/adtoolPeakSwitch\]/g) || []).length === 1;
   })(), null);
+  /* 3 Nov, the owner read "off, so nothing is sent" beside a listing that was running on eBay and took it
+     to mean the ad was off. The chip is about the ACCOUNT's live-apply switch; the ad's own state is a
+     different fact and now sits beside it, and a change that was only written down may never be reported
+     in the past tense. */
+  t('peak page: the live-apply chip names the switch, not the ad, and the ad\'s own state is printed beside it', (() => {
+    const v = readFile('frontend/view-adtool-peak.js');
+    const chip = /'live apply is off: the hours are written down only'/.test(v) && /'live apply is on: the hours are sent to eBay'/.test(v) &&
+      !/'off, so nothing is sent'/.test(v) && !/'on, so changes are sent'/.test(v);
+    const state = /function adStateLine\(r\) \{/.test(v) && /its ad is running on eBay now/.test(v) && /its ad is not running on eBay now/.test(v) &&
+      (v.match(/adStateLine\(r\)/g) || []).length >= 3;
+    return chip && state;
+  })(), null);
+  t('peak page: a change that was only written down is never reported as having happened', (() => {
+    const v = readFile('frontend/view-adtool-peak.js');
+    return /var done = mode === 'live';/.test(v) && /would have switched on/.test(v) && /would have switched off/.test(v) &&
+      /the system writes it down/.test(v);
+  })(), null);
   t('peak page: every by-hand row says what its hours were read as, what happens next, what the system last did, and whether that account is switched on', (() => { const m = (() => { const a = src.indexOf('const manual = manualRows.map(r => {'); return src.slice(a, src.indexOf('const allAccounts =', a)); })(); return /hours_parsed: parsed\.ranges/.test(m) && /next_change: parsed\.ranges \? adPeakNextChange/.test(m) && /last_switch: ls \? \{ at: ls\.at, to: ls\.to, mode: ls\.mode, http_status: ls\.http_status \|\| 0, refused: !!ls\.refused \} : null/.test(m) && /live_switch_on: !!liveSwitch\[a\]/.test(m) && /auto: auto/.test(m); })(), null);
   t('peak page: the line promising nothing on the page reaches eBay is gone, because it stopped being true', !/never a timer: eBay cannot run an ad by the hour, so nothing here is sent to eBay/.test(src) && /the system switches these on at the start of their hours/.test(src), null);
 
