@@ -201,7 +201,18 @@ export default {
        joined the github.io address — the caller's own origin is echoed back only when listed. */
     const allowedList = String(env.ALLOWED_ORIGIN || '*').split(',').map(x => x.trim()).filter(Boolean);
     const reqOrigin = req.headers.get('origin') || '';
-    const origin = allowedList.indexOf(reqOrigin) >= 0 ? reqOrigin : (allowedList[0] || '*');
+    /* 2 Nov 2026 — THE "Failed to fetch" THAT LOCKED THE WHOLE STAFF OUT.
+       An origin that was not an exact string match got the FIRST allowed origin echoed back at it,
+       which is a different site's name: the browser then threw the answer away and reported its own
+       "Failed to fetch", while Cloudflare counted the call as served — requests arriving, zero
+       errors, nobody able to sign in. One character of difference in the address bar (a www., a
+       bare http://, a second custom domain) was enough to take the portal down for everyone on it.
+       Any M98M address is now echoed back as itself: this is OUR domain and our GitHub Pages site,
+       whatever subdomain or scheme the browser arrived on. Nothing is loosened for a foreign site —
+       CORS only decides whose browser may READ a reply, and every call is still authenticated. */
+    const isOurs = /^https?:\/\/([a-z0-9-]+\.)*m98mltd\.co\.uk$/i.test(reqOrigin) ||
+                   /^https:\/\/m98m786\.github\.io$/i.test(reqOrigin);
+    const origin = (allowedList.indexOf(reqOrigin) >= 0 || isOurs) ? reqOrigin : (allowedList[0] || '*');
     const cors = {
       'access-control-allow-origin': origin,
       'access-control-allow-methods': 'POST, OPTIONS',
