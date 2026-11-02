@@ -5890,8 +5890,13 @@ async function adtFresh(env, grain) {
      window the tag carries in_window = false and the next sample time, so the shell prints "no samples until
      07:05 UTC" instead of a red stale mark against yesterday's last tick. */
   if (grain === 'today') {
-    const t = await env.DB.prepare('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks').first().catch(() => null);
-    const o = await env.DB.prepare("SELECT MAX(last_ok) AS t FROM sync_state WHERE job = 'orderSync'").first().catch(() => null);
+    /* 2 Nov: two reads with nothing to say to each other, so they go at the same time rather than
+       one after the other. Every page header in the tool waits on this pair. */
+    const TO = await Promise.all([
+      env.DB.prepare('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks').first().catch(() => null),
+      env.DB.prepare("SELECT MAX(last_ok) AS t FROM sync_state WHERE job = 'orderSync'").first().catch(() => null),
+    ]);
+    const t = TO[0], o = TO[1];
     const now = new Date(), inWin = adtInSamplingWindow(now), fromTxt = adtSamplingFromText(now);
     return { grain: 'adtool_listing_today', sampled_at: t && t.t ? String(t.t) : null, orders_at: o && o.t ? String(o.t) : null, cadence: 'every 5 min', ads_window: adtSamplingWindowText(now), provisional: true,
       in_window: inWin, next_sample_at: inWin ? null : fromTxt, note: inWin ? null : 'no ad figures from eBay until ' + fromTxt + ', orders are live now' };
@@ -6162,7 +6167,177 @@ const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunTo
      cohort and eBay's traffic windows, and it runs the Overview's own two actions for the cohort on
      top of that. None of those move inside two minutes, and the ceiling is what keeps a page flag
      switched off honoured inside the time the gate states. */
-  adtoolVideoBoard: 120000 };
+  adtoolVideoBoard: 120000,
+  /* 2 Nov: Product history. The same two minutes the other listing-level pages take, and for the
+     same reason: it reads the finished day figures, which move once an hour, and the today grain,
+     which moves every few minutes, and it is a page a person reads rather than acts on. The two
+     writes that page DOES make, a note and a written narrative, drop this entry themselves rather
+     than leaving a reader looking at their own note missing for two minutes. */
+  adtoolListing: 120000 };
+/* ---- PRODUCT HISTORY, ASSEMBLED (owner, 2 Nov: "product history page takes a lot of time to get open") ----
+   THE SAME FIGURES, FETCHED DIFFERENTLY, AND NOT ONE OF THEM WORKED OUT A NEW WAY. This composition
+   used to run its reads one after another: the listing row, the day rows, the hour rows, the weeks,
+   the months, the action log, the picture, two sale reads, the today grain, two freshness reads, the
+   campaign map's four and the pattern bundle's five. Six and twenty trips to the database, each
+   waiting on the one before it, for a page a person opens to read.
+   The independent reads now go in GROUPS, each group one trip through adtBatchRead, and the groups
+   run at the same time, so the page waits for the slowest group instead of for the sum of all of
+   them. The groups are drawn around WHAT CAN FAIL and not around what is tidy: a batch is one
+   statement to the database, so a table a migration never took would take its whole group down with
+   it. Every read that stood behind a try of its own still stands behind a try of its own, and the
+   two sale reads are still guarded as the pair they always were.
+   THE SCHEMA GUARDS RUN FIRST, in their old order, 1 then 2 then 3. Two lots of DDL started at once
+   on one database is not a saving worth having, and after an isolate's first run each is a flag.
+   `timings` is a measure and not a decoration: the page prints the total in its footer, and
+   adsListingProbe prints the groups, so "the page is slow" can be answered with a figure from
+   outside the portal. */
+async function adtoolListingCompute(env, iid, p) {
+  const T = {}, t0 = Date.now();
+  const clock = async (key, fn) => { const a = Date.now(); try { return await fn(); } finally { T[key] = Date.now() - a; } };
+  await clock('schema_ms', async () => {
+    await ensureAdtoolPhase1Schema(env);
+    /* the two guards the campaign map and the pattern bundle read behind, awaited HERE instead of
+       inside those groups, so the groups can never run two lots of DDL at the same time. A guard
+       that fails leaves its own group answering null, exactly as it did when the group ran alone. */
+    try { await ensureAdtoolPhase2Schema(env); } catch (e) { /* the campaign map answers null, as before */ }
+    try { await ensureAdtoolPhase3Schema(env); } catch (e) { /* the pattern bundle answers null, as before */ }
+  });
+  const today = ukDate(''), todayUtc = utcDate();
+  const yday = adtAddDays(today, -1);
+  /* THE HOUR WINDOW, BOUNDED TO WHAT THE PAGE DRAWS AND NAMED IN THE ANSWER. The page draws two
+     things out of the hour grain and nothing else: the 24 hours of the last day it holds a day row
+     for, and the 28-day hour profile behind the heat map, the time slots and the count of hours with
+     a reading. It was sent every hour row of those 28 days, up to 672 of them, and drew one day's
+     worth, so only the drawn day travels now. The ordering clause is the one it always had, because
+     a day older than the window must still draw the empty chart it drew before.
+     The profile is read as its own statement over THE SAME 28 days the heat map and
+     the slots were always built from, asking for the six columns those sums use instead of thirteen,
+     and the sums themselves are the same loop over the same rows in the same order: that is why no
+     figure on the page moves. The 28-day floor is on the drawn day as well, because a listing whose
+     last day row is older than that drew an empty hour chart before and must still draw one. */
+  const hourFrom = adtAddDays(today, -28);
+  /* ---- the groups ---- */
+  const core = [
+    env.DB.prepare('SELECT * FROM adtool_listings WHERE item_id = ?1').bind(iid),
+    /* days <= yesterday only: listing_day's own today row has no ad columns (contract §3) — today comes from the today
+       grain below, and the view's "yesterday" chart takes the last day here */
+    env.DB.prepare('SELECT day, weekday, dom, orders, units, revenue, actual_profit, pending_cost_orders, pending_fee_orders, refunds, clicks, spend, cpc_spend, attr_units, attr_revenue, roas, ad_active_campaigns, ad_paused_campaigns FROM adtool_listing_day WHERE item_id = ?1 AND day <= ?2 ORDER BY day').bind(iid, yday),
+    /* the one day the hour chart draws: the newest day row at or before yesterday, inside the window */
+    env.DB.prepare('SELECT day, hour, orders, units, revenue, spend_s, clicks_s, attr_units_s, spend_r, clicks_r, attr_units_r, samples, hourly_status FROM adtool_listing_hour WHERE item_id = ?1 AND day >= ?2 AND day = (SELECT MAX(day) FROM adtool_listing_day WHERE item_id = ?1 AND day <= ?3) ORDER BY day, hour').bind(iid, hourFrom, yday),
+    /* and the 28-day profile the heat map, the slots and the hourly note are summed from */
+    env.DB.prepare('SELECT day, hour, orders, units, revenue, hourly_status FROM adtool_listing_hour WHERE item_id = ?1 AND day >= ?2 ORDER BY day, hour').bind(iid, hourFrom),
+    env.DB.prepare('SELECT iso_week, days, orders, units, revenue, actual_profit, pending_cost_orders, pending_fee_orders, clicks, spend, attr_units, attr_revenue FROM adtool_listing_week WHERE item_id = ?1 ORDER BY iso_week').bind(iid),
+    env.DB.prepare('SELECT month, days, orders, units, revenue, actual_profit, pending_cost_orders, pending_fee_orders, clicks, spend, attr_units, attr_revenue FROM adtool_listing_month WHERE item_id = ?1 ORDER BY month').bind(iid),
+    env.DB.prepare('SELECT type, note, by_email, at FROM adtool_actions WHERE item_id = ?1 ORDER BY at DESC LIMIT 30').bind(iid),
+    env.DB.prepare('SELECT image FROM items_api WHERE item_id = ?1').bind(iid),
+  ];
+  const G = await clock('reads_ms', () => Promise.all([
+    clock('core_ms', () => adtBatchRead(env, core)),
+    /* Phase 1B: the today window comes from the today grain (listing_day's own today row has no ad columns) */
+    clock('today_ms', () => env.DB.prepare('SELECT report_day, uk_day, spend, cpc_spend, clicks, impressions, attr_units, attr_revenue, orders, units, revenue, raw_priced_sum, refunds, actual_profit, pending_cost_orders, pending_fee_orders, unpriced_orders, sampled_at, orders_at FROM adtool_listing_today WHERE item_id = ?1 AND uk_day = ?2').bind(iid, today).first().catch(() => null)),
+    /* Phase 5 (big update): the Active-listings fields — Currently in Sale Event (today's membership) and Eligible
+       for Sale Event On (the observed timeline). Guarded AS A PAIR, which is how they were guarded before: the sale
+       grains may not exist until marketingSync runs, and then neither field is known rather than one of them. */
+    clock('sale_ms', () => adtBatchRead(env, [
+      env.DB.prepare('SELECT in_sale FROM adtool_sale_membership_day WHERE item_id = ?1 AND day = ?2').bind(iid, today),
+      env.DB.prepare('SELECT eligible_on FROM adtool_sale_timeline WHERE item_id = ?1 ORDER BY updated_at DESC LIMIT 1').bind(iid),
+    ]).catch(() => null)),
+    clock('where_ms', () => adtWhereRows(env, iid).catch(() => null)),
+    clock('profile_ms', () => adtListingProfileBundle(env, iid).catch(() => null)),
+    /* the three reads whose tables belong to phases this page never seeds (decisions, narratives,
+       descriptors). Each keeps its OWN try, because that is what it had: one missing table must not
+       empty the other two. They run together, so three guards cost one trip. */
+    clock('notes_ms', () => Promise.all([
+      env.DB.prepare("SELECT day, batch, decision, rules_json, why, action, confidence, expected_value, outcome_score, COALESCE(outcome_provisional, 0) AS outcome_provisional FROM adtool_decisions WHERE item_id = ?1 ORDER BY day DESC, batch LIMIT 1").bind(iid).first().catch(() => null),
+      env.DB.prepare("SELECT text, model, validated, day FROM adtool_narratives WHERE scope = 'listing' AND scope_id = ?1 ORDER BY day DESC LIMIT 1").bind(iid).first().catch(() => null),
+      env.DB.prepare('SELECT day, json FROM adtool_descriptors WHERE item_id = ?1 ORDER BY day').bind(iid).all().then(r => (r && r.results) || []).catch(() => null),
+    ])),
+    clock('fresh_ms', () => Promise.all([adtFresh(env, 'day'), adtFresh(env, 'today')])),
+  ]));
+  const cr = G[0], tRowRaw = G[1], saleRows = G[2], where = G[3], profile = G[4], notes = G[5], freshPair = G[6];
+  const L = (cr[0] || [])[0];
+  if (!L) throw new Error('SAY: no listing with that id in the tool yet (the rollup has not seen it)');
+  const days = cr[1] || [], hours = cr[2] || [], hourProfile = cr[3] || [], weeks = cr[4] || [], months = cr[5] || [], actions = cr[6] || [];
+  const img = (cr[7] || [])[0];
+  const sm = saleRows ? (saleRows[0] || [])[0] : null, st = saleRows ? (saleRows[1] || [])[0] : null;
+  const saleField = saleRows
+    ? { in_sale: sm ? Number(sm.in_sale) === 1 : false, eligible_on: st && st.eligible_on ? String(st.eligible_on) : null }
+    : { in_sale: false, eligible_on: null };
+  const tRow = adtTodayRowHonest(tRowRaw, todayUtc);
+  const kpis = { yesterday: adtWindowSums(days, yday, yday), d7: adtWindowSums(days, adtAddDays(today, -7), yday), d30: adtWindowSums(days, adtAddDays(today, -30), yday) };
+  kpis.today = tRow
+    ? Object.assign({ days: 1, day: today, provisional: true, ads_sampled: tRow.spend != null, roas: Number(tRow.spend) > 0 ? round2(Number(tRow.attr_revenue) / Number(tRow.spend)) : null }, tRow)
+    : { days: 0, day: today, provisional: true, ads_sampled: false, orders: 0, units: 0, revenue: 0, spend: null, cpc_spend: null, clicks: null, attr_units: null, attr_revenue: null, actual_profit: null, pending_cost_orders: 0, pending_fee_orders: 0, unpriced_orders: 0, roas: null };
+  /* all time = every day to yesterday + the today grain spliced in (never listing_day's today row) */
+  const spliced = tRow ? days.concat([Object.assign({ day: today }, tRow, { spend: Number(tRow.spend) || 0, clicks: Number(tRow.clicks) || 0, attr_units: Number(tRow.attr_units) || 0, attr_revenue: Number(tRow.attr_revenue) || 0 })]) : days;
+  kpis.all = Object.assign(adtWindowSums(spliced, '2000-01-01', today), { includes_today: !!tRow, provisional: !!tRow });
+  /* a caller's own window (contract §1) is answered the same way, and echoed */
+  const w = (p && (p.period || p.from)) ? adtPeriod(p, today) : null;
+  if (w) kpis.window = Object.assign(adtWindowSums(spliced, w.from, w.to), { includes_today: w.includes_today, provisional: w.includes_today });
+  const fresh = freshPair[0], freshToday = freshPair[1];
+  /* weekday profile (plain means for Phase 1; shrinkage and p-values arrive with Phase 3); profit is the item's own, under the law */
+  const wd = ADTOOL_DOW.map((n, i) => ({ day: n, dates: 0, units: 0, attr_units: 0, spend: 0, actual_profit: 0, pending_cost_orders: 0, pending_fee_orders: 0, orders: 0 }));
+  for (const r of days) { if (r.day < adtAddDays(today, -30) || r.day > yday) continue; const w2 = wd[r.weekday]; w2.dates++; w2.units += r.units; w2.attr_units += r.attr_units; w2.spend += r.spend; w2.actual_profit += Number(r.actual_profit) || 0; w2.pending_cost_orders += Number(r.pending_cost_orders) || 0; w2.pending_fee_orders += Number(r.pending_fee_orders) || 0; w2.orders += r.orders; }
+  for (const w2 of wd) { w2.units_day = w2.dates ? round2(w2.units / w2.dates) : null; w2.attr_units_day = w2.dates ? round2(w2.attr_units / w2.dates) : null; w2.spend_day = w2.dates ? round2(w2.spend / w2.dates) : null; w2.actual_profit = round2(w2.actual_profit); w2.profit_day = w2.dates ? round2(w2.actual_profit / w2.dates) : null; }
+  /* hour × weekday (28 days, orders) and slots — the same sums over the same 28 days of hours, in the same order */
+  const heat = []; for (let d = 0; d < 7; d++) heat.push(new Array(24).fill(0));
+  const slots = [0, 1, 2, 3].map(s => ({ slot: s, orders: 0, units: 0, revenue: 0 }));
+  let sampledHours = 0, reconciledHours = 0;
+  for (const h of hourProfile) { const w2 = adtWeekdayOf(h.day); heat[w2][h.hour] += h.units; const sl = slots[adtSlot(h.hour)]; sl.orders += h.orders; sl.units += h.units; sl.revenue += h.revenue; if (h.hourly_status === 'sampled' || h.hourly_status === 'partial') sampledHours++; if (h.hourly_status === 'reconciled') reconciledHours++; }
+  const slotTotal = slots.reduce((t, s) => t + s.orders, 0);
+  for (const s of slots) { s.share = slotTotal ? round2(s.orders / slotTotal) : null; s.orders_day = round2(s.orders / 28); s.revenue_day = round2(s.revenue / 28); s.revenue = round2(s.revenue); }
+  /* dates of the month, all time */
+  const dom = []; for (let d = 1; d <= 31; d++) dom.push({ dom: d, dates: 0, units: 0 });
+  for (const r of days) { const x = dom[r.dom - 1]; if (x) { x.dates++; x.units += r.units; } }
+  for (const x of dom) x.units_day = x.dates ? round2(x.units / x.dates) : null;
+  const camps = JSON.parse(L.campaigns_json || '[]');
+  /* 28 Oct spec: forecasting left the portal and nothing renders this field, so the two reads behind it are gone. */
+  const forecast = null;
+  const decision = notes[0], narrative = notes[1];
+  const age = L.start_time ? Math.floor((Date.now() - new Date(String(L.start_time).replace(' ', 'T') + 'Z').getTime()) / 86400000) : null;
+  /* Phase 4 big update: week-to-week behaviour — one descriptor snapshot per ISO week (the last sampled day of the
+     week), then adtWeekBehaviour says what changed vs the week before, the likely why and the recommended action.
+     The P&L stays the single real-profit figure (kpis/weeks under the law); the yesterday chart data is unchanged. */
+  let weeks_behaviour = [];
+  try {
+    const drows = notes[2] || [];
+    const perWeek = {};
+    for (const r of drows) { let j = {}; try { j = JSON.parse(r.json); } catch (e) {} const wk = adtIsoWeek(r.day); perWeek[wk] = { iso_week: wk, day: r.day, descriptors: { weekday_ratio: j.weekday_ratio, slot_hhi: j.slot_hhi, cv28: j.cv28 != null ? j.cv28 : j.volatility_cv28, ad_dependence28: j.ad_dependence28, spend_elasticity: j.spend_elasticity } }; }
+    const weeksDesc = Object.keys(perWeek).sort().slice(-8).map(w2 => perWeek[w2]);
+    weeks_behaviour = adtWeekBehaviour(weeksDesc);
+  } catch (e) { weeks_behaviour = []; }
+  /* THE GROUPS RAN TOGETHER, so their figures OVERLAP and must never be added up: `reads_ms` is the
+     wall clock of the whole read phase and the group figures say which of them was the slow one.
+     `shape_ms` is the arithmetic after the reads, which is the half no round trip can explain. */
+  T.shape_ms = Date.now() - t0 - (T.schema_ms || 0) - (T.reads_ms || 0);
+  T.total_ms = Date.now() - t0;
+  return {
+    item_id: iid,   /* the whole response is this one listing's: profit keys below are item-level by construction */
+    header: { item_id: iid, account: L.account, title: L.title, image: img && img.image ? String(img.image) : null, category: L.m98m_category, category_source: L.category_source, is_case: !!L.is_case, case_type: L.case_type, ebay_category_path: L.ebay_category_path, price: L.price, margin: L.margin_before_ads, margin_source: L.margin_source, breakeven_roas: L.breakeven_roas, start_time: L.start_time, age_days: age, status: L.status, first_ad_day: L.first_ad_day, first_order_day: L.first_order_day, last_ad_day: L.last_ad_day, stage: null, in_sale: saleField.in_sale, eligible_on: saleField.eligible_on },
+    period: w, kpis, fresh, fresh_today: freshToday, campaigns: camps, where, profile, forecast, decision, narrative, days, hours, weeks, weeks_note: 'the week and month grains hold finished days only — the current ISO week / month run Monday / the 1st to yesterday; today lives on the today grain (kpis.today)', weeks_behaviour, months, weekday: wd, heat, slots, dom, actions,
+    /* WHAT THE HOURS IN THIS ANSWER COVER, said in the answer rather than left to be guessed: the
+       `hours` rows are one day, the day the hour chart draws, and the profile behind the heat map,
+       the slots and the note below was summed over the 28 days named here. */
+    hours_window: { from: hourFrom, to: yday, days: 28, hours_day: hours.length ? String(hours[0].day) : '', profile_rows: hourProfile.length,
+      note: 'the hour rows sent are the one day the hour chart draws; the heat map, the time slots and the hourly note are summed on the engine over the 28 days named here' },
+    hourly_note: sampledHours + reconciledHours ? ('hourly ad figures are the tool’s own samples from 17 Sep 2026 (' + reconciledHours + ' hours reconciled to the final report, ' + sampledHours + ' still sampled)') : 'no sampled ad hours yet for this listing',
+    profit_label: 'Profit (Sales Analysis law)',
+    timings: T,
+    computed_at: new Date().toISOString(), source: 'adtool_listing_day / adtool_listing_hour (eBay ads report, orders, Sales Analysis law)', sample_size: days.length,
+  };
+}
+/* THE PRODUCT PAGE'S OWN MEMO, dropped by the writes that page makes. Named keys, as the peak
+   page's clearer names its own: the key carries the listing and the reader's profit class and
+   nothing else, so both classes' entries for this one listing go and no other listing is touched.
+   It never throws: a memo that survives this is a page up to two minutes behind, which is the
+   ceiling the action states anyway, and that is not worth failing somebody's note over. */
+async function adtListingCacheClear(env, iid) {
+  const id = String(iid || '').replace(/\D/g, '');
+  if (!id) return;
+  for (const cls of ['p', 'np']) {
+    try { await env.HOT.delete(adtKvKey('adtoolListing', cls, { item_id: id })); } catch (e) { /* the read window catches it */ }
+  }
+}
 const ADTOOL_ACTIONS = {
   adtoolFlags: {
     auth: 'any', fn: async (p, ctx) => {
@@ -6203,83 +6378,20 @@ const ADTOOL_ACTIONS = {
       await adtGate(ctx, 'adtool_page_product');
       const iid = String((p && p.item_id) || '').replace(/\D/g, '');
       if (!iid) throw new Error('SAY: give an item id');
-      const env = ctx.env;
-      await ensureAdtoolPhase1Schema(env);
-      const L = await env.DB.prepare('SELECT * FROM adtool_listings WHERE item_id = ?1').bind(iid).first();
-      if (!L) throw new Error('SAY: no listing with that id in the tool yet (the rollup has not seen it)');
-      const today = ukDate(''), todayUtc = utcDate();
-      const yday = adtAddDays(today, -1);
-      /* days ≤ yesterday only: listing_day's own today row has no ad columns (contract §3) — today comes from the today
-         grain below, and the view's "yesterday" chart takes the last day here */
-      const days = (await env.DB.prepare('SELECT day, weekday, dom, orders, units, revenue, actual_profit, pending_cost_orders, pending_fee_orders, refunds, clicks, spend, cpc_spend, attr_units, attr_revenue, roas, ad_active_campaigns, ad_paused_campaigns FROM adtool_listing_day WHERE item_id = ?1 AND day <= ?2 ORDER BY day').bind(iid, yday).all()).results || [];
-      const hours = (await env.DB.prepare('SELECT day, hour, orders, units, revenue, spend_s, clicks_s, attr_units_s, spend_r, clicks_r, attr_units_r, samples, hourly_status FROM adtool_listing_hour WHERE item_id = ?1 AND day >= ?2 ORDER BY day, hour').bind(iid, adtAddDays(today, -28)).all()).results || [];
-      const weeks = (await env.DB.prepare('SELECT iso_week, days, orders, units, revenue, actual_profit, pending_cost_orders, pending_fee_orders, clicks, spend, attr_units, attr_revenue FROM adtool_listing_week WHERE item_id = ?1 ORDER BY iso_week').bind(iid).all()).results || [];
-      const months = (await env.DB.prepare('SELECT month, days, orders, units, revenue, actual_profit, pending_cost_orders, pending_fee_orders, clicks, spend, attr_units, attr_revenue FROM adtool_listing_month WHERE item_id = ?1 ORDER BY month').bind(iid).all()).results || [];
-      const actions = (await env.DB.prepare('SELECT type, note, by_email, at FROM adtool_actions WHERE item_id = ?1 ORDER BY at DESC LIMIT 30').bind(iid).all()).results || [];
-      const img = await env.DB.prepare('SELECT image FROM items_api WHERE item_id = ?1').bind(iid).first();
-      /* Phase 5 (big update): the Active-listings fields — Currently in Sale Event (today's membership) and Eligible
-         for Sale Event On (the observed timeline). Guarded: the sale grains may not exist until marketingSync runs. */
-      let saleField = { in_sale: false, eligible_on: null };
-      try {
-        const sm = await env.DB.prepare('SELECT in_sale FROM adtool_sale_membership_day WHERE item_id = ?1 AND day = ?2').bind(iid, today).first();
-        const st = await env.DB.prepare('SELECT eligible_on FROM adtool_sale_timeline WHERE item_id = ?1 ORDER BY updated_at DESC LIMIT 1').bind(iid).first();
-        saleField = { in_sale: sm ? Number(sm.in_sale) === 1 : false, eligible_on: st && st.eligible_on ? String(st.eligible_on) : null };
-      } catch (e) { saleField = { in_sale: false, eligible_on: null }; }
-      /* Phase 1B: the today window comes from the today grain (listing_day's own today row has no ad columns) */
-      const tRow = adtTodayRowHonest(await env.DB.prepare('SELECT report_day, uk_day, spend, cpc_spend, clicks, impressions, attr_units, attr_revenue, orders, units, revenue, raw_priced_sum, refunds, actual_profit, pending_cost_orders, pending_fee_orders, unpriced_orders, sampled_at, orders_at FROM adtool_listing_today WHERE item_id = ?1 AND uk_day = ?2').bind(iid, today).first().catch(() => null), todayUtc);
-      const kpis = { yesterday: adtWindowSums(days, yday, yday), d7: adtWindowSums(days, adtAddDays(today, -7), yday), d30: adtWindowSums(days, adtAddDays(today, -30), yday) };
-      kpis.today = tRow
-        ? Object.assign({ days: 1, day: today, provisional: true, ads_sampled: tRow.spend != null, roas: Number(tRow.spend) > 0 ? round2(Number(tRow.attr_revenue) / Number(tRow.spend)) : null }, tRow)
-        : { days: 0, day: today, provisional: true, ads_sampled: false, orders: 0, units: 0, revenue: 0, spend: null, cpc_spend: null, clicks: null, attr_units: null, attr_revenue: null, actual_profit: null, pending_cost_orders: 0, pending_fee_orders: 0, unpriced_orders: 0, roas: null };
-      /* all time = every day to yesterday + the today grain spliced in (never listing_day's today row) */
-      const spliced = tRow ? days.concat([Object.assign({ day: today }, tRow, { spend: Number(tRow.spend) || 0, clicks: Number(tRow.clicks) || 0, attr_units: Number(tRow.attr_units) || 0, attr_revenue: Number(tRow.attr_revenue) || 0 })]) : days;
-      kpis.all = Object.assign(adtWindowSums(spliced, '2000-01-01', today), { includes_today: !!tRow, provisional: !!tRow });
-      /* a caller's own window (contract §1) is answered the same way, and echoed */
-      const w = (p && (p.period || p.from)) ? adtPeriod(p, today) : null;
-      if (w) kpis.window = Object.assign(adtWindowSums(spliced, w.from, w.to), { includes_today: w.includes_today, provisional: w.includes_today });
-      const fresh = await adtFresh(env, 'day'); const freshToday = await adtFresh(env, 'today');
-      /* weekday profile (plain means for Phase 1; shrinkage and p-values arrive with Phase 3); profit is the item's own, under the law */
-      const wd = ADTOOL_DOW.map((n, i) => ({ day: n, dates: 0, units: 0, attr_units: 0, spend: 0, actual_profit: 0, pending_cost_orders: 0, pending_fee_orders: 0, orders: 0 }));
-      for (const r of days) { if (r.day < adtAddDays(today, -30) || r.day > yday) continue; const w = wd[r.weekday]; w.dates++; w.units += r.units; w.attr_units += r.attr_units; w.spend += r.spend; w.actual_profit += Number(r.actual_profit) || 0; w.pending_cost_orders += Number(r.pending_cost_orders) || 0; w.pending_fee_orders += Number(r.pending_fee_orders) || 0; w.orders += r.orders; }
-      for (const w of wd) { w.units_day = w.dates ? round2(w.units / w.dates) : null; w.attr_units_day = w.dates ? round2(w.attr_units / w.dates) : null; w.spend_day = w.dates ? round2(w.spend / w.dates) : null; w.actual_profit = round2(w.actual_profit); w.profit_day = w.dates ? round2(w.actual_profit / w.dates) : null; }
-      /* hour × weekday (28 days, orders) and slots */
-      const heat = []; for (let d = 0; d < 7; d++) heat.push(new Array(24).fill(0));
-      const slots = [0, 1, 2, 3].map(s => ({ slot: s, orders: 0, units: 0, revenue: 0 }));
-      let sampledHours = 0, reconciledHours = 0;
-      for (const h of hours) { const w = adtWeekdayOf(h.day); heat[w][h.hour] += h.units; const sl = slots[adtSlot(h.hour)]; sl.orders += h.orders; sl.units += h.units; sl.revenue += h.revenue; if (h.hourly_status === 'sampled' || h.hourly_status === 'partial') sampledHours++; if (h.hourly_status === 'reconciled') reconciledHours++; }
-      const slotTotal = slots.reduce((t, s) => t + s.orders, 0);
-      for (const s of slots) { s.share = slotTotal ? round2(s.orders / slotTotal) : null; s.orders_day = round2(s.orders / 28); s.revenue_day = round2(s.revenue / 28); s.revenue = round2(s.revenue); }
-      /* dates of the month, all time */
-      const dom = []; for (let d = 1; d <= 31; d++) dom.push({ dom: d, dates: 0, units: 0 });
-      for (const r of days) { const x = dom[r.dom - 1]; if (x) { x.dates++; x.units += r.units; } }
-      for (const x of dom) x.units_day = x.dates ? round2(x.units / x.dates) : null;
-      const camps = JSON.parse(L.campaigns_json || '[]');
-      let where = null; try { where = await adtWhereRows(env, iid); } catch (e) { where = null; }
-      let profile = null; try { profile = await adtListingProfileBundle(env, iid); } catch (e) { profile = null; }
-      /* 28 Oct spec: forecasting left the portal and nothing renders this field, so the two reads behind it are gone. */
-      let forecast = null;
-      let decision = null; try { decision = await env.DB.prepare("SELECT day, batch, decision, rules_json, why, action, confidence, expected_value, outcome_score, COALESCE(outcome_provisional, 0) AS outcome_provisional FROM adtool_decisions WHERE item_id = ?1 ORDER BY day DESC, batch LIMIT 1").bind(iid).first(); } catch (e) { decision = null; }
-      let narrative = null; try { narrative = await env.DB.prepare("SELECT text, model, validated, day FROM adtool_narratives WHERE scope = 'listing' AND scope_id = ?1 ORDER BY day DESC LIMIT 1").bind(iid).first(); } catch (e) { narrative = null; }
-      const age = L.start_time ? Math.floor((Date.now() - new Date(String(L.start_time).replace(' ', 'T') + 'Z').getTime()) / 86400000) : null;
-      /* Phase 4 big update: week-to-week behaviour — one descriptor snapshot per ISO week (the last sampled day of the
-         week), then adtWeekBehaviour says what changed vs the week before, the likely why and the recommended action.
-         The P&L stays the single real-profit figure (kpis/weeks under the law); the yesterday chart data is unchanged. */
-      let weeks_behaviour = [];
-      try {
-        const drows = (await env.DB.prepare('SELECT day, json FROM adtool_descriptors WHERE item_id = ?1 ORDER BY day').bind(iid).all()).results || [];
-        const perWeek = {};
-        for (const r of drows) { let j = {}; try { j = JSON.parse(r.json); } catch (e) {} const wk = adtIsoWeek(r.day); perWeek[wk] = { iso_week: wk, day: r.day, descriptors: { weekday_ratio: j.weekday_ratio, slot_hhi: j.slot_hhi, cv28: j.cv28 != null ? j.cv28 : j.volatility_cv28, ad_dependence28: j.ad_dependence28, spend_elasticity: j.spend_elasticity } }; }
-        const weeksDesc = Object.keys(perWeek).sort().slice(-8).map(w => perWeek[w]);
-        weeks_behaviour = adtWeekBehaviour(weeksDesc);
-      } catch (e) { weeks_behaviour = []; }
-      return {
-        item_id: iid,   /* the whole response is this one listing's: profit keys below are item-level by construction */
-        header: { item_id: iid, account: L.account, title: L.title, image: img && img.image ? String(img.image) : null, category: L.m98m_category, category_source: L.category_source, is_case: !!L.is_case, case_type: L.case_type, ebay_category_path: L.ebay_category_path, price: L.price, margin: L.margin_before_ads, margin_source: L.margin_source, breakeven_roas: L.breakeven_roas, start_time: L.start_time, age_days: age, status: L.status, first_ad_day: L.first_ad_day, first_order_day: L.first_order_day, last_ad_day: L.last_ad_day, stage: null, in_sale: saleField.in_sale, eligible_on: saleField.eligible_on },
-        period: w, kpis, fresh, fresh_today: freshToday, campaigns: camps, where, profile, forecast, decision, narrative, days, hours, weeks, weeks_note: 'the week and month grains hold finished days only — the current ISO week / month run Monday / the 1st to yesterday; today lives on the today grain (kpis.today)', weeks_behaviour, months, weekday: wd, heat, slots, dom, actions,
-        hourly_note: sampledHours + reconciledHours ? ('hourly ad figures are the tool’s own samples from 17 Sep 2026 (' + reconciledHours + ' hours reconciled to the final report, ' + sampledHours + ' still sampled)') : 'no sampled ad hours yet for this listing',
-        profit_label: 'Profit (Sales Analysis law)',
-        computed_at: new Date().toISOString(), source: 'adtool_listing_day / adtool_listing_hour (eBay ads report, orders, Sales Analysis law)', sample_size: days.length,
-      };
+      /* 2 Nov, the owner: "product history page takes a lot of time to get open, make it fast".
+         This was the ONE heavy advertising page with no memo at all, so every open paid for the
+         whole composition and a second look at the same listing paid for it again. It now rides
+         adtKvMemo like every other page, keyed by THE LISTING and the reader's profit class and
+         nothing else, so the key a write has to drop is a key that can be named (adtListingCacheClear).
+         THE GATE IS ABOVE THE CACHE AND MUST STAY THERE: the key carries the caller's profit class,
+         not their role, so a stored answer can never be the thing that decides who may read it.
+         A CALLER THAT ASKS FOR A WINDOW OF ITS OWN IS ANSWERED FRESH (the contract's §1 window): the
+         key names no window, so holding a windowed answer under it would hand the next reader
+         somebody else's window. The page itself never sends one. */
+      if (p && (p.period || p.from)) return adtoolListingCompute(ctx.env, iid, p);
+      return adtKvMemo(ctx.env, 'adtoolListing', adtProfitClass(ctx.user), { item_id: iid }, ADTOOL_KV_TTL_MS.adtoolListing,
+        () => adtoolListingCompute(ctx.env, iid, p),
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
     },
   },
   adtoolActionLog: {
@@ -6289,6 +6401,10 @@ const ADTOOL_ACTIONS = {
       if (!iid || !note) throw new Error('SAY: item id and a note are needed');
       const L = await ctx.env.DB.prepare('SELECT account FROM adtool_listings WHERE item_id = ?1').bind(iid).first();
       await ctx.env.DB.prepare("INSERT INTO adtool_actions (account, item_id, type, note, by_email, at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))").bind(L ? L.account : '', iid, type, note, String((ctx.user || {}).email || '')).run();
+      /* the page reloads itself straight after this, and the answer it reloads is now a memoised
+         one: drop this listing's entry or the note somebody just logged is missing from the log
+         they are looking at for up to two minutes. */
+      await adtListingCacheClear(ctx.env, iid);
       return { ok: true };
     },
   },
@@ -6518,12 +6634,21 @@ async function adtWhereRows(env, iid) {
   await ensureAdtoolPhase2Schema(env);
   const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
   const d7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-  const rows = (await env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.ad_id, ca.bid_pct AS ad_bid, ca.ad_status, ca.synced_at, ca.ad_records, c.ads_synced_at, c.name, c.status AS c_status, c.funding_model, c.budget, c.bid_pct AS c_bid, c.start_date, c.end_date, a.name AS a_name, a.status_last AS a_status, a.funding AS a_funding, a.gone_at, ia.status AS l_status FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = ca.account AND a.campaign_id = ca.campaign_id LEFT JOIN items_api ia ON ia.item_id = ca.listing_id WHERE ca.listing_id = ?1 ORDER BY (c.campaign_id IS NULL), c.status, c.name").bind(iid).all()).results || [];
+  /* 2 Nov: the four reads below are independent of one another and used to wait on one another, four
+     trips to the database for one panel. They go in ONE batch now, in the order the results are read
+     back in. Not one of them is a different query. */
+  const WR = await adtBatchRead(env, [
+    env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.ad_id, ca.bid_pct AS ad_bid, ca.ad_status, ca.synced_at, ca.ad_records, c.ads_synced_at, c.name, c.status AS c_status, c.funding_model, c.budget, c.bid_pct AS c_bid, c.start_date, c.end_date, a.name AS a_name, a.status_last AS a_status, a.funding AS a_funding, a.gone_at, ia.status AS l_status FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = ca.account AND a.campaign_id = ca.campaign_id LEFT JOIN items_api ia ON ia.item_id = ca.listing_id WHERE ca.listing_id = ?1 ORDER BY (c.campaign_id IS NULL), c.status, c.name").bind(iid),
+    env.DB.prepare('SELECT campaign_id, SUM(CASE WHEN day = ?2 THEN spend ELSE 0 END) AS sp_y, SUM(CASE WHEN day = ?2 THEN units ELSE 0 END) AS un_y, SUM(CASE WHEN day = ?2 THEN revenue ELSE 0 END) AS rv_y, SUM(CASE WHEN day >= ?3 THEN spend ELSE 0 END) AS sp_7, SUM(CASE WHEN day >= ?3 THEN revenue ELSE 0 END) AS rv_7, SUM(CASE WHEN day >= ?3 THEN units ELSE 0 END) AS un_7, MAX(day) AS last_day FROM adtool_ads_daily WHERE item_id = ?1 GROUP BY campaign_id').bind(iid, yday, d7),
+    env.DB.prepare('SELECT campaign_id, MAX(seen_at) AS at FROM adtool_campaign_ad_events WHERE item_id = ?1 GROUP BY campaign_id').bind(iid),
+    env.DB.prepare('SELECT e.campaign_id, e.from_status, e.to_status, e.seen_at, e.source, COALESCE(c.name, a.name, e.campaign_id) AS name FROM adtool_campaign_ad_events e LEFT JOIN campaigns c ON c.account = e.account AND c.campaign_id = e.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = e.account AND a.campaign_id = e.campaign_id WHERE e.item_id = ?1 ORDER BY e.seen_at DESC LIMIT 20').bind(iid),
+  ]);
+  const rows = WR[0] || [];
   const spend = {};
-  for (const r of ((await env.DB.prepare('SELECT campaign_id, SUM(CASE WHEN day = ?2 THEN spend ELSE 0 END) AS sp_y, SUM(CASE WHEN day = ?2 THEN units ELSE 0 END) AS un_y, SUM(CASE WHEN day = ?2 THEN revenue ELSE 0 END) AS rv_y, SUM(CASE WHEN day >= ?3 THEN spend ELSE 0 END) AS sp_7, SUM(CASE WHEN day >= ?3 THEN revenue ELSE 0 END) AS rv_7, SUM(CASE WHEN day >= ?3 THEN units ELSE 0 END) AS un_7, MAX(day) AS last_day FROM adtool_ads_daily WHERE item_id = ?1 GROUP BY campaign_id').bind(iid, yday, d7).all()).results || [])) spend[r.campaign_id] = r;
+  for (const r of (WR[1] || [])) spend[r.campaign_id] = r;
   const lastEv = {};
-  for (const r of ((await env.DB.prepare('SELECT campaign_id, MAX(seen_at) AS at FROM adtool_campaign_ad_events WHERE item_id = ?1 GROUP BY campaign_id').bind(iid).all()).results || [])) lastEv[r.campaign_id] = r.at;
-  const history = (await env.DB.prepare('SELECT e.campaign_id, e.from_status, e.to_status, e.seen_at, e.source, COALESCE(c.name, a.name, e.campaign_id) AS name FROM adtool_campaign_ad_events e LEFT JOIN campaigns c ON c.account = e.account AND c.campaign_id = e.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = e.account AND a.campaign_id = e.campaign_id WHERE e.item_id = ?1 ORDER BY e.seen_at DESC LIMIT 20').bind(iid).all()).results || [];
+  for (const r of (WR[2] || [])) lastEv[r.campaign_id] = r.at;
+  const history = WR[3] || [];
   const out = rows.map(r => {
     const resolved = !!r.name; const archived = !resolved && !!r.a_name;
     const funding = resolved ? r.funding_model : (archived ? r.a_funding : '');
@@ -7097,15 +7222,25 @@ async function adtListingProfileBundle(env, iid) {
   /* what the product page adds in Phase 3: stage badge, weekday p-value, hour × weekday shrunk cells, slot profile, descriptors */
   await ensureAdtoolPhase3Schema(env);
   const out = { stage: null, weekday: null, slot: null, hour_weekday: null, descriptors: null, regime: null };
-  const st = await env.DB.prepare('SELECT day, stage, label, confidence, slope28, level28, peak_level, days_in_stage, changepoint_day FROM adtool_stages WHERE item_id = ?1 ORDER BY day DESC LIMIT 1').bind(iid).first();
+  /* 2 Nov: five independent reads, one round trip, in the order they are read back in. A caller
+     already loses the whole bundle if any one of them fails (there is one try around the call and
+     always was), so a batch changes nothing about what a missing table means here. */
+  const PB = await adtBatchRead(env, [
+    env.DB.prepare('SELECT day, stage, label, confidence, slope28, level28, peak_level, days_in_stage, changepoint_day FROM adtool_stages WHERE item_id = ?1 ORDER BY day DESC LIMIT 1').bind(iid),
+    env.DB.prepare('SELECT kind, json, computed_day FROM adtool_profiles WHERE scope = ?1 AND scope_id = ?2 AND computed_day = (SELECT MAX(computed_day) FROM adtool_profiles WHERE scope = ?1 AND scope_id = ?2)').bind('listing', iid),
+    env.DB.prepare('SELECT day, json FROM adtool_descriptors WHERE item_id = ?1 ORDER BY day DESC LIMIT 1').bind(iid),
+    env.DB.prepare('SELECT day, stage, confidence FROM adtool_stages WHERE item_id = ?1 ORDER BY day').bind(iid),
+    /* §7 wants the pattern-change history on this page: what moved and when, not just whether today looks odd.
+       adtool_regimes already holds it with a readable note per detection, and A17 fires off the same rows. */
+    env.DB.prepare("SELECT detected_day, kind, note FROM adtool_regimes WHERE scope = 'listing' AND scope_id = ?1 ORDER BY detected_day DESC, kind").bind(iid),
+  ]);
+  const st = (PB[0] || [])[0];
   if (st) out.stage = st;
-  for (const r of ((await env.DB.prepare('SELECT kind, json, computed_day FROM adtool_profiles WHERE scope = ?1 AND scope_id = ?2 AND computed_day = (SELECT MAX(computed_day) FROM adtool_profiles WHERE scope = ?1 AND scope_id = ?2)').bind('listing', iid).all()).results || [])) { try { out[r.kind === 'hour_weekday' ? 'hour_weekday' : r.kind] = Object.assign(JSON.parse(r.json), { computed_day: r.computed_day }); } catch (e) {} }
-  const d = await env.DB.prepare('SELECT day, json FROM adtool_descriptors WHERE item_id = ?1 ORDER BY day DESC LIMIT 1').bind(iid).first();
+  for (const r of (PB[1] || [])) { try { out[r.kind === 'hour_weekday' ? 'hour_weekday' : r.kind] = Object.assign(JSON.parse(r.json), { computed_day: r.computed_day }); } catch (e) {} }
+  const d = (PB[2] || [])[0];
   if (d) { try { out.descriptors = Object.assign(JSON.parse(d.json), { day: d.day }); } catch (e) {} }
-  out.stage_history = (await env.DB.prepare('SELECT day, stage, confidence FROM adtool_stages WHERE item_id = ?1 ORDER BY day').bind(iid).all()).results || [];
-  /* §7 wants the pattern-change history on this page: what moved and when, not just whether today looks odd.
-     adtool_regimes already holds it with a readable note per detection, and A17 fires off the same rows. */
-  out.regime_history = (await env.DB.prepare("SELECT detected_day, kind, note FROM adtool_regimes WHERE scope = 'listing' AND scope_id = ?1 ORDER BY detected_day DESC, kind").bind(iid).all()).results || [];
+  out.stage_history = PB[3] || [];
+  out.regime_history = PB[4] || [];
   return out;
 }
 /* ADTOOL-P3-ACTIONS-END ============================================================================== */
@@ -9104,6 +9239,9 @@ const ADTOOL_ACTIONS_P7 = {
         const rw = await adtAnalystRewrite(env, tmpl, N, 'listing', id, today);
         const v = adtValidateNarrative(rw.text, N, { extra: adtNumbersIn(tmpl) });
         await env.DB.prepare("INSERT INTO adtool_narratives (scope, scope_id, day, text, inputs_json, model, validated, unsourced_json, made_at) VALUES ('listing', ?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now')) ON CONFLICT(scope, scope_id, day) DO UPDATE SET text = ?3, inputs_json = ?4, model = ?5, validated = ?6, unsourced_json = ?7, made_at = datetime('now')").bind(id, today, rw.text, JSON.stringify(N), rw.model, v.ok ? 1 : 0, JSON.stringify(v.unsourced)).run();
+        /* the second write the product page makes, and the same rule: Product history carries this
+           text, so a memo held over it would show the old notes beside the new ones. */
+        await adtListingCacheClear(env, id);
         return { text: rw.text, model: rw.model, validated: v.ok ? 1 : 0, day: today, cached: false };
       }
       const row = await env.DB.prepare('SELECT text, model, validated, day, made_at, inputs_json FROM adtool_narratives WHERE scope = ?1 AND scope_id = ?2 ORDER BY day DESC LIMIT 1').bind(scope, id).first();
@@ -12572,6 +12710,11 @@ async function adtoolPeakCompute(env, acct) {
       /* a campaign was named and there is no ad on this listing in it any more. Worth its own field:
          without it the row reads as one that switches itself while nothing ever happens to it. */
       campaign_missing: pickC.missing,
+      /* AND THE CAMPAIGNS IT IS IN RIGHT NOW (owner, 2 Nov), off the switchable read already made a
+         few lines up: no second query for a page that lists hundreds of rows. Newest reading first,
+         and the one the hours act on is marked, which is not the same question as the field above:
+         that one says which campaign the row NAMES, these say which campaigns the listing IS IN. */
+      campaigns_now: adPeakCampaignsNow(sw, pickC.chosen),
       hours_parsed: parsed.ranges, hours_text: parsed.ranges ? adPeakHoursText(parsed.ranges) : '', hours_problem: parsed.reason || '',
       auto: auto, switchable: pickC.rows.length > 0,
       next_change: parsed.ranges ? adPeakNextChange(parsed.ranges, nowUk.hour) : '',
@@ -12665,6 +12808,11 @@ async function adtoolPeakCompute(env, acct) {
     periods_windows: ADTOOL_PEAK_PERIOD_KEYS,
     periods_note: 'ad spend and units from ads are eBay’s own advertising report; orders, units and profit are the order book, after eBay fees, product cost, ad spend and returns; today is still filling, so today and all time are marked as still updating and the orders we cannot cost yet are counted apart',
     periods_problem: periodsProblem,
+    /* WHAT `campaigns_now` COVERS, said once for the list rather than guessed at per row: it is the
+       same read the hours are judged on, so it holds the live pay-per-click campaigns the listing is
+       in, and nothing else. A pay-on-sale ad has no state to switch and an archived ad cannot serve,
+       so neither is in it, and a row with an empty list has no live pay-per-click ad at all. */
+    campaigns_now_note: 'the campaigns under each row are the live pay-per-click campaigns the listing is in, read the same way the switch reads them; each ad status is what eBay said when that campaign’s ads were last read, not a live check',
     window: { slots: [slotFrom, yday], hours: [d7from, yday] },
     sources: ['dayparts from the listing’s own sold units', 'sampled hours', 'the day figures for the last 7 finished days', 'the by-hand list', 'the portal’s own record of what it sent', 'the listing’s own day figures and today grain, for the table by period'],
   };
@@ -13239,6 +13387,29 @@ function adPeakCampaignPick(rows, chosen) {
   if (!cid) return { chosen: '', rows: all, missing: false, all_campaigns: true };
   const kept = all.filter(r => String((r && r.campaign_id) || '') === cid);
   return { chosen: cid, rows: kept, missing: kept.length === 0, all_campaigns: false };
+}
+/* WHICH CAMPAIGNS THE LISTING IS IN RIGHT NOW (owner, 2 Nov: "in peak listings also show the
+   current campaign of the item along with the product history"). The rows handed in are the ones
+   adtPeakSwitchable already read for this listing on this page, so there is NO SECOND QUERY: the
+   same read that decides what the hours can switch is the read a reader is shown.
+   One entry per ad record, NEWEST READING FIRST, because the reading is the whole point: an ad
+   status on this portal is what eBay said when it was last asked, which can be an hour or a week
+   ago, so the stamp travels with the status and the page prints both. Ties fall back to the campaign
+   id, so two readings taken in the same second cannot swap places between two opens of the page.
+   `chosen` marks the campaign the row's hours act on, and ONLY when the row names one: a row naming
+   none switches every pay-per-click campaign it is in, so marking one of them would be a lie. */
+function adPeakCampaignsNow(rows, chosen) {
+  const cid = String(chosen == null ? '' : chosen).trim();
+  return (rows || []).filter(Boolean).map(r => ({
+    campaign_id: String(r.campaign_id == null ? '' : r.campaign_id),
+    campaign_name: String(r.name == null ? '' : r.name),
+    funding_model: String(r.funding_model == null ? '' : r.funding_model),
+    campaign_status: String(r.c_status == null ? '' : r.c_status),
+    /* an empty ad status is NOT a state: it is an ad eBay has never stamped, and the page says so */
+    ad_status: String(r.ad_status == null ? '' : r.ad_status),
+    ad_read_at: String(r.ad_synced_at == null ? '' : r.ad_synced_at),
+    chosen: !!cid && String(r.campaign_id == null ? '' : r.campaign_id) === cid,
+  })).sort((a, b) => (a.ad_read_at < b.ad_read_at ? 1 : a.ad_read_at > b.ad_read_at ? -1 : (a.campaign_id < b.campaign_id ? -1 : a.campaign_id > b.campaign_id ? 1 : 0)));
 }
 function adtPeakBelieved(rows, last) {
   /* what the ad is doing now, as best this portal can know. eBay's own answer from the rolling ad
@@ -26773,6 +26944,33 @@ const ROUTES = {
         lists_counted_not_copied: !full,
         read_errors: readErrors,
         sent_to_ebay: false,
+      };
+    },
+  },
+
+  /* HOW LONG PRODUCT HISTORY TAKES TO WORK OUT, measurable from outside the portal (owner, 2 Nov:
+     "product history page takes a lot of time to get open, make it fast"). It runs THE SAME
+     composition the page's own action runs, through the same function, so there is no second
+     implementation to drift: what it times is what a reader waits for.
+     It returns the clock and the sizes and NOTHING ELSE. No money, no profit, no listing text: this
+     is a key-authed route and a key is not a role, so it must never be a way around the profit law
+     or around the page flag. It writes nothing, decides nothing and reaches no eBay endpoint.
+     Deliberately NOT named adtool*, because the router role-gates that prefix before it has a user
+     to judge and a key-authed call has none, and gated exactly as backupDump is.
+     The memo is BYPASSED on purpose: a probe that answered out of the cache would time the cache. */
+  adsListingProbe: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const iid = String((p && p.item_id) || '').replace(/\D/g, '').slice(0, 24);
+      if (!iid) throw new Error('SAY: give an item id');
+      const d = await adtoolListingCompute(ctx.env, iid, null);
+      const hw = d.hours_window || {};
+      return {
+        item_id: iid,
+        /* ms per read group and the total. The groups ran at the same time, so they overlap and must
+           never be added up: reads_ms is the wall clock of the read phase. */
+        timings: d.timings,
+        /* how many rows came back, which is the other half of why a page is slow */
+        rows: { days: (d.days || []).length, hours: (d.hours || []).length, hour_profile: Number(hw.profile_rows) || 0, weeks: (d.weeks || []).length, months: (d.months || []).length, hours_window: [hw.from || '', hw.to || ''], hours_day: hw.hours_day || '' },
       };
     },
   },

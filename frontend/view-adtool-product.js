@@ -315,6 +315,17 @@
     }).catch(function (e) { $('atBody').innerHTML = '<div class="at-panel"><h3>Not available</h3><div class="at-sub">' + esc(e.message || 'This listing could not load.') + '</div></div>'; });
   }
 
+  /* HOW LONG THE ANSWER TOOK TO WORK OUT, beside how long it took to arrive (2 Nov). The engine
+     holds a listing's answer for a short while now, so these two numbers together say which kind of
+     open this was: close together is a fresh working out, and an arrival far quicker than the
+     working out is a stored answer handed straight back. Printed only where the engine sends it, so
+     an engine that has not caught up simply leaves it out rather than showing a nought. */
+  function workedOut(D) {
+    var t = D && D.timings, ms = t ? Number(t.total_ms) : NaN;
+    if (t == null || t.total_ms == null || isNaN(ms)) return '';
+    return ' · worked out in ' + Math.round(ms) + ' ms';
+  }
+
   function kpi(k, v, d, c) { return '<div class="at-kpi"><div class="k">' + esc(k) + '</div><div class="v ' + (c || '') + '">' + v + '</div><div class="d">' + d + '</div></div>'; }
   /* the stage badge's hover, in words. It used to read "confidence 0.82 · 28-day slope 3.1 %/day ·
      level 1.4/day vs peak 2.1", which is notation, not a sentence a seller can act on. */
@@ -456,7 +467,7 @@
       '<div class="at-panel at-actions"><h3>Action log</h3><div class="at-sub">What the team did with this listing, with dates. Notes only. Nothing here reaches eBay.</div>' +
       '<ul class="at-list" id="atActs">' + (D.actions.length ? D.actions.map(function (a) { return '<li>' + esc(a.note) + '<div class="m">' + esc(a.type) + ' · ' + esc(a.by_email) + ' · ' + esc(String(a.at).slice(0, 16)) + '</div></li>'; }).join('') : '<li class="at-empty">No actions logged yet.</li>') + '</ul>' +
       '<textarea id="atNote" placeholder="Add a note (what was changed, where, why)"></textarea><button class="at-btn" id="atNoteBtn">Log note</button></div></div>';
-    h += '<div class="at-note" style="margin-top:4px">Computed ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC · ' + esc(D.source) + ' · ' + D.sample_size + ' listing-days of data · answered in ' + AT.ms + ' ms</div>';
+    h += '<div class="at-note" style="margin-top:4px">Computed ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC · ' + esc(D.source) + ' · ' + D.sample_size + ' listing-days of data · answered in ' + AT.ms + ' ms' + workedOut(D) + '</div>';
     $('atBody').innerHTML = h;
     var tabs = document.querySelectorAll('.at-tabs button');
     for (var i = 0; i < tabs.length; i++) tabs[i].onclick = function () { AT.tab = this.getAttribute('data-tab'); for (var j = 0; j < tabs.length; j++) tabs[j].classList.toggle('on', tabs[j] === this); drawWM(); };

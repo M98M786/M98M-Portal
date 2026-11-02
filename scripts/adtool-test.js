@@ -53,7 +53,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -4059,7 +4059,9 @@ function run(argv) {
         /* and the ceiling it falls back on when there is no listing is the page's own two minutes,
            which is short enough that a memo surviving the clear is a page minutes behind and not a
            page a day behind */
-        /adtoolVideoBoard: 120000 \};/.test(src);
+        /* the entry is pinned to two minutes; it stopped being the LAST entry in the map on 2 Nov,
+           when Product history was given a memo of its own, so the comma is allowed for as well */
+        /adtoolVideoBoard: 120000[,}]/.test(src);
     })(), null);
   t('§4 dating rate: every memo entry of an action shares the prefix its key is built from, so clearing by prefix cannot miss a window or an account somebody opened',
     (() => {
@@ -5534,7 +5536,9 @@ function run(argv) {
   /* ---- and the page: the same table, inside the row's own details block ---- */
   const bpProd = rdFile('frontend/view-adtool-product.js');
   t('peak page: the By period table is drawn INSIDE the listing\'s own details block, before the hour strips, and nowhere else', (() => {
-    const first = /var h = periodsBlock\(r\);\s*\n\s*h \+= '<div class="pkt-sched">' \+ hourStrip\(id, T, 'Today'\)/.test(pkSrc);
+    /* 2 Nov: it now shares a row with the campaigns the listing is in, and that row is still the
+       first thing in the block and still sits above the hour strips. */
+    const first = /var h = '<div class="pkt-perwrap">' \+ periodsBlock\(r\) \+ campaignsNowBlock\(r\) \+ '<\/div>';\s*\n\s*h \+= '<div class="pkt-sched">' \+ hourStrip\(id, T, 'Today'\)/.test(pkSrc);
     /* declared once and called once: the table has one home and it is that block */
     const once = (pkSrc.match(/periodsBlock\(/g) || []).length === 2 && /function periodsBlock\(r\) \{/.test(pkSrc);
     /* and that block is the second row under the listing, the one patternBlock fills */
@@ -5567,6 +5571,182 @@ function run(argv) {
     /* where the money comes from is said ONCE for the list, not under each of five hundred rows */
     const noteOnce = (pkSrc.match(/periodsNote\(\)/g) || []).length === 2 && /PK\.data && PK\.data\.periods_note/.test(pkSrc);
     return mark && prof && unp && nul && noMaths && noteOnce;
+  })(), null);
+
+  /* ══ PRODUCT HISTORY MUST OPEN FAST, AND NO FIGURE ON IT MAY MOVE (owner, 2 Nov) ═══════════════
+     "Product history page takes a lot of time to get open, make it fast." The page was the one heavy
+     advertising action with no memo at all and it ran six and twenty reads one after another. These
+     tests hold the three halves of the fix: the memo and the write that drops it, the hour read
+     bounded to what the page draws with the window named in the answer, and the groups that turned
+     a queue of reads into a handful of trips. The figures themselves are held by the By period
+     equality tests above, which still stand. ══ */
+  const plSrc = src.slice(src.indexOf('async function adtoolListingCompute(env, iid, p) {'), src.indexOf('async function adtListingCacheClear(env, iid) {'));
+  const plRoute = src.slice(src.indexOf('  adtoolListing: {'), src.indexOf('  adtoolActionLog: {'));
+  t('product history: the page’s own open goes through the KV memo, keyed by the listing and the reader’s profit class and nothing else', (() => {
+    const memo = /return adtKvMemo\(ctx\.env, 'adtoolListing', adtProfitClass\(ctx\.user\), \{ item_id: iid \}, ADTOOL_KV_TTL_MS\.adtoolListing,/.test(plRoute) &&
+      /\(\) => adtoolListingCompute\(ctx\.env, iid, p\),/.test(plRoute);
+    /* two minutes, the same ceiling the other listing-level pages state */
+    const ttl = /adtoolListing: 120000 \};/.test(src);
+    /* THE ROLE HALF OF THE GATE IS ABOVE THE CACHE: the key carries a profit class, never a role, so
+       a stored answer must never be the thing that decides who may read the page */
+    const gateFirst = plRoute.indexOf("adtGate(ctx, 'adtool_page_product')") >= 0 &&
+      plRoute.indexOf("adtGate(ctx, 'adtool_page_product')") < plRoute.indexOf('adtKvMemo');
+    /* a caller asking for a window of its own is answered FRESH, because the key names no window */
+    const windowFresh = /if \(p && \(p\.period \|\| p\.from\)\) return adtoolListingCompute\(ctx\.env, iid, p\);/.test(plRoute);
+    /* one key per listing per class, and nothing else in it */
+    const kA = kk('adtoolListing', { item_id: '137675597138' }), kB = kk('adtoolListing', { item_id: '236997583155' });
+    return memo && ttl && gateFirst && windowFresh && kA !== kB &&
+      kA.indexOf(F.adtKvPrefix('adtoolListing')) === 0 &&
+      kA !== F.adtKvKey('adtoolListing', 'np', { item_id: '137675597138' });
+  })(), null);
+  t('product history: the two writes that page makes drop its own memo entry, both profit classes, after the write lands and never fatally', (() => {
+    const log = src.slice(src.indexOf('  adtoolActionLog: {'), src.indexOf('  adtoolHealth: {'));
+    const note = /await adtListingCacheClear\(ctx\.env, iid\);/.test(log) &&
+      log.indexOf('adtListingCacheClear') > log.indexOf('INSERT INTO adtool_actions');
+    const narr = src.indexOf('await adtListingCacheClear(env, id);') > src.indexOf('INSERT INTO adtool_narratives');
+    const clear = src.slice(src.indexOf('async function adtListingCacheClear(env, iid) {'), src.indexOf('const ADTOOL_ACTIONS = {'));
+    const both = /for \(const cls of \['p', 'np'\]\)/.test(clear) && /adtKvKey\('adtoolListing', cls, \{ item_id: id \}\)/.test(clear);
+    /* it never throws, and it never reaches past this one listing */
+    const safe = /catch \(e\) \{ \/\* the read window catches it \*\/ \}/.test(clear) && clear.indexOf('adtKvPrefix') < 0 &&
+      /const id = String\(iid \|\| ''\)\.replace\(\/\\D\/g, ''\);/.test(clear) && /if \(!id\) return;/.test(clear);
+    return note && narr && both && safe;
+  })(), null);
+  t('product history: the hour read is bounded to what the page draws, and the answer says what window the hours cover', (() => {
+    /* the rows that TRAVEL are the one day the hour chart draws: the newest day row at or before
+       yesterday, under the same 28-day floor the window always had, so a listing whose last day is
+       older than that still draws the empty chart it drew before */
+    const drawn = /FROM adtool_listing_hour WHERE item_id = \?1 AND day >= \?2 AND day = \(SELECT MAX\(day\) FROM adtool_listing_day WHERE item_id = \?1 AND day <= \?3\) ORDER BY day, hour/.test(plSrc);
+    /* and the 28-day profile is its own statement, narrowed to the six columns the sums use */
+    const prof = /SELECT day, hour, orders, units, revenue, hourly_status FROM adtool_listing_hour WHERE item_id = \?1 AND day >= \?2 ORDER BY day, hour/.test(plSrc);
+    const floor = /const hourFrom = adtAddDays\(today, -28\);/.test(plSrc);
+    /* THE FIGURES COME OFF THE PROFILE AND NEVER OFF THE ROWS THAT TRAVEL, which is why bounding the
+       payload cannot move the heat map, the time slots or the hourly note */
+    const sums = /for \(const h of hourProfile\) \{ const w2 = adtWeekdayOf\(h\.day\); heat\[w2\]\[h\.hour\] \+= h\.units;/.test(plSrc) &&
+      plSrc.indexOf('for (const h of hours)') < 0;
+    const named = /hours_window: \{ from: hourFrom, to: yday, days: 28, hours_day: hours\.length \? String\(hours\[0\]\.day\) : '', profile_rows: hourProfile\.length,/.test(plSrc);
+    /* and the view asks for exactly that one day, off the last day row it holds */
+    const view = /var hrs = D\.hours\.filter\(function \(x\) \{ return x\.day === yday; \}\);/.test(bpProd) &&
+      /var D = AT\.data; var days = D\.days; var yday = days\.length \? days\[days\.length - 1\]\.day : '';/.test(bpProd) &&
+      (bpProd.match(/D\.hours/g) || []).length === 1;
+    return drawn && prof && floor && sums && named && view;
+  })(), null);
+  t('product history: the independent reads go in groups, one trip each, and the groups run at the same time', (() => {
+    const grouped = /const G = await clock\('reads_ms', \(\) => Promise\.all\(\[/.test(plSrc) &&
+      /clock\('core_ms', \(\) => adtBatchRead\(env, core\)\),/.test(plSrc);
+    /* the core group is ONE batch of eight statements, read back in the order they were sent */
+    const eight = (plSrc.slice(plSrc.indexOf('const core = ['), plSrc.indexOf("const G = await clock('reads_ms'")).match(/env\.DB\.prepare\(/g) || []).length === 8 &&
+      /const cr = G\[0\], tRowRaw = G\[1\], saleRows = G\[2\], where = G\[3\], profile = G\[4\], notes = G\[5\], freshPair = G\[6\];/.test(plSrc);
+    /* the campaign map went from four trips to one, and the pattern bundle from five to one */
+    const wr = (src.slice(src.indexOf('const WR = await adtBatchRead(env, ['), src.indexOf('const rows = WR[0] || [];')).match(/env\.DB\.prepare\(/g) || []).length === 4;
+    const pb = (src.slice(src.indexOf('const PB = await adtBatchRead(env, ['), src.indexOf('const st = (PB[0] || [])[0];')).match(/env\.DB\.prepare\(/g) || []).length === 5;
+    /* THE SCHEMA GUARDS RUN FIRST AND IN THEIR OLD ORDER: two lots of DDL at once is not a saving */
+    const ddl = plSrc.indexOf('ensureAdtoolPhase1Schema(env)') < plSrc.indexOf('ensureAdtoolPhase2Schema(env)') &&
+      plSrc.indexOf('ensureAdtoolPhase2Schema(env)') < plSrc.indexOf('ensureAdtoolPhase3Schema(env)') &&
+      plSrc.indexOf('ensureAdtoolPhase3Schema(env)') < plSrc.indexOf("const G = await clock('reads_ms'");
+    /* and every read that stood behind a guard of its own still does, so one missing table cannot
+       empty a group it was never in: the sale grains are still guarded as the pair they were */
+    const guards = /clock\('where_ms', \(\) => adtWhereRows\(env, iid\)\.catch\(\(\) => null\)\),/.test(plSrc) &&
+      /clock\('profile_ms', \(\) => adtListingProfileBundle\(env, iid\)\.catch\(\(\) => null\)\),/.test(plSrc) &&
+      /\]\)\.catch\(\(\) => null\)\),/.test(plSrc) &&
+      (plSrc.match(/\.catch\(\(\) => null\)/g) || []).length >= 7;
+    return grouped && eight && wr && pb && ddl && guards;
+  })(), null);
+  t('product history: the answer carries its own working-out time and the page prints it beside how long it took to arrive', (() => {
+    const tot = /T\.total_ms = Date\.now\(\) - t0;/.test(plSrc) && /timings: T,/.test(plSrc);
+    const groups = ['schema_ms', 'core_ms', 'today_ms', 'sale_ms', 'where_ms', 'profile_ms', 'notes_ms', 'fresh_ms', 'reads_ms'].every(k => plSrc.indexOf("clock('" + k + "'") >= 0) &&
+      /T\.shape_ms = Date\.now\(\) - t0 - \(T\.schema_ms \|\| 0\) - \(T\.reads_ms \|\| 0\);/.test(plSrc);
+    const page = /' ms' \+ workedOut\(D\)/.test(bpProd) && /return ' · worked out in ' \+ Math\.round\(ms\) \+ ' ms';/.test(bpProd);
+    /* and a nought is never printed where the engine sent no figure */
+    const nul = /if \(t == null \|\| t\.total_ms == null \|\| isNaN\(ms\)\) return '';/.test(bpProd);
+    return tot && groups && page && nul;
+  })(), null);
+  t('product history probe: by key, not adtool-prefixed, out of no sidebar, running the page’s own composition and returning the clock and the sizes and nothing else', (() => {
+    const pr = src.slice(src.indexOf('  adsListingProbe: {'), src.indexOf("  /* §3 of the 31 Oct brief, read-only and by key"));
+    const gated = /auth: 'sync', fn: async \(p, ctx\) => \{/.test(pr);
+    /* THE SAME COMPOSITION, through the same function, with the memo bypassed: a probe that answered
+       out of the cache would be timing the cache */
+    const same = /const d = await adtoolListingCompute\(ctx\.env, iid, null\);/.test(pr) && pr.indexOf('adtKvMemo') < 0;
+    /* the clock and the sizes and nothing else: no money, no profit, no listing text. A key is not a
+       role, so this route must never be a way round the profit law or round the page flag. */
+    const only = /timings: d\.timings,/.test(pr) && /rows: \{ days: \(d\.days \|\| \[\]\)\.length, hours: \(d\.hours \|\| \[\]\)\.length, hour_profile: Number\(hw\.profile_rows\) \|\| 0, weeks: \(d\.weeks \|\| \[\]\)\.length, months: \(d\.months \|\| \[\]\)\.length,/.test(pr) &&
+      !/spend|profit|revenue|actual|price|title|margin/.test(pr.slice(pr.indexOf('return {')));
+    /* it writes nothing and it reaches nothing */
+    const readonly = !/\.run\(\)|INSERT |UPDATE |DELETE /.test(pr) && !/fetch\(/.test(pr);
+    /* the router role-gates the adtool prefix before it has a user to judge, and a key-authed call
+       has none, so the name must not carry that prefix and must not be in the portal's action list */
+    const naming = src.indexOf('adtoolListingProbe') < 0 && shellSrc.indexOf('adsListingProbe') < 0;
+    return gated && same && only && readonly && naming;
+  })(), null);
+
+  /* ══ THE PEAK ROWS SHOW WHICH CAMPAIGNS THE LISTING IS IN NOW (owner, 2 Nov) ══════════════════ */
+  t('peak rows: the campaigns a listing is in now come off the switchable read the page already made, with no second query inside the row loop', (() => {
+    /* `const allAccounts =` appears in an earlier function too, so the end is searched for FROM the
+       start of this one: a slice taken without the offset is empty and every check in it passes. */
+    const ma = src.indexOf('const manual = manualRows.map(r => {');
+    const blk = src.slice(ma, src.indexOf('const allAccounts =', ma));
+    const fromSw = /campaigns_now: adPeakCampaignsNow\(sw, pickC\.chosen\),/.test(blk) && /const sw = switchable\[id\] \|\| \[\];/.test(blk);
+    /* ONE switchable read for the whole page, taken before the rows are built, and it is the same
+       function the switch job itself is judged on */
+    const oneRead = (src.match(/const switchable = await adtPeakSwitchable\(env, manualRows\.map\(r => String\(r\.item_id\)\)\);/g) || []).length === 1 &&
+      src.indexOf('const switchable = await adtPeakSwitchable') < src.indexOf('const manual = manualRows.map(r => {');
+    /* and nothing new is asked of the database inside the loop over the rows */
+    const noQuery = blk.indexOf('env.DB.prepare') < 0;
+    /* the WHOLE list, not the filtered one: which campaigns it IS IN is not the same question as
+       which campaign the row NAMES, and the row carries both */
+    const whole = /campaigns_now: adPeakCampaignsNow\(sw,/.test(blk) && !/campaigns_now: adPeakCampaignsNow\(pickC\.rows/.test(blk) &&
+      /campaign_id: pickC\.chosen,/.test(blk);
+    /* and the answer says once what that list covers, in a sentence carrying no setting */
+    const says = /campaigns_now_note: 'the campaigns under each row are the live pay-per-click campaigns the listing is in/.test(src) &&
+      !/\d/.test(src.slice(src.indexOf("campaigns_now_note: '"), src.indexOf("',", src.indexOf("campaigns_now_note: '"))));
+    return fromSw && oneRead && noQuery && whole && says;
+  })(), null);
+  t('peak rows: newest reading first, the named campaign marked and only where one is named, and an ad eBay never stamped is given no state', (() => {
+    const rows = [
+      { campaign_id: 'C1', name: 'General', funding_model: 'COST_PER_CLICK', c_status: 'RUNNING', ad_status: 'PAUSED', ad_synced_at: '2026-11-01 08:00:00' },
+      { campaign_id: 'C2', name: 'Winners', funding_model: 'COST_PER_CLICK', c_status: 'RUNNING', ad_status: '', ad_synced_at: '2026-11-02 16:00:00' },
+      { campaign_id: 'C3', name: 'Cases', funding_model: 'COST_PER_CLICK', c_status: 'ENDING_SOON', ad_status: 'ACTIVE', ad_synced_at: '2026-11-02 16:00:00' },
+    ];
+    const a = F.adPeakCampaignsNow(rows, 'C1');
+    /* newest reading first, and a tie falls back to the campaign id so two opens of the page cannot
+       put the same two readings in a different order */
+    const order = a.map(x => x.campaign_id).join(',') === 'C2,C3,C1';
+    const marked = a.filter(x => x.chosen).length === 1 && a.filter(x => x.chosen)[0].campaign_id === 'C1';
+    const none = F.adPeakCampaignsNow(rows, '').every(x => x.chosen === false) &&
+      F.adPeakCampaignsNow(rows, null).every(x => x.chosen === false) &&
+      F.adPeakCampaignsNow(rows, 'C9').every(x => x.chosen === false);
+    const blank = a.filter(x => x.campaign_id === 'C2')[0];
+    const shape = blank.ad_status === '' && blank.campaign_name === 'Winners' && blank.funding_model === 'COST_PER_CLICK' &&
+      blank.campaign_status === 'RUNNING' && blank.ad_read_at === '2026-11-02 16:00:00' && blank.chosen === false &&
+      Object.keys(blank).sort().join(',') === 'ad_read_at,ad_status,campaign_id,campaign_name,campaign_status,chosen,funding_model';
+    /* a listing with no switchable ad gets an empty list and never a row of nothings */
+    const empty = F.adPeakCampaignsNow([], 'C1').length === 0 && F.adPeakCampaignsNow(null, '').length === 0 &&
+      F.adPeakCampaignsNow([null, undefined], '').length === 0;
+    /* a row eBay sent with no stamp at all still answers, with empty strings and not undefined */
+    const bare = F.adPeakCampaignsNow([{ campaign_id: 'C4' }], '')[0];
+    const bareOk = bare.campaign_name === '' && bare.funding_model === '' && bare.campaign_status === '' && bare.ad_status === '' && bare.ad_read_at === '';
+    return order && marked && none && shape && empty && bareOk;
+  })(), [F.adPeakCampaignsNow([{ campaign_id: 'C1', ad_synced_at: 'a' }, { campaign_id: 'C2', ad_synced_at: 'b' }], 'C1').map(x => x.campaign_id)]);
+  t('peak page: the campaigns block sits beside the By period table, every campaign is a campaign link, and a listing with no live ad is told so plainly', (() => {
+    const beside = /var h = '<div class="pkt-perwrap">' \+ periodsBlock\(r\) \+ campaignsNowBlock\(r\) \+ '<\/div>';/.test(pkSrc) &&
+      (pkSrc.match(/campaignsNowBlock\(/g) || []).length === 2;
+    /* every campaign is a link, through the shared helper this page already links campaigns with */
+    const link = /campCell\(\{ campaign_id: c && c\.campaign_id, campaign_name: c && c\.campaign_name \}\)/.test(pkSrc) &&
+      /return adtCampaignLink\(r\.campaign_id, name\);/.test(pkSrc);
+    /* its type in plain words, both ways round, and never the raw constant */
+    const type = /if \(v === 'COST_PER_CLICK'\) return 'pay-per-click';/.test(pkSrc) && /if \(v === 'COST_PER_SALE'\) return 'cost per sale';/.test(pkSrc);
+    /* what the ad said AND when that reading was taken, because a status here is a reading */
+    const reading = /var when = whenTxt\(c && c\.ad_read_at\), st = statusWords\(c && c\.campaign_status\);/.test(pkSrc) &&
+      /', read ' \+ esc\(when\) \+ ' UK'/.test(pkSrc) && /and we do not hold when that reading was taken/.test(pkSrc);
+    const mark = /c && c\.chosen \? ' <span class="pkt-tag live">its hours switch this one<\/span>' : ''/.test(pkSrc);
+    const nolive = /This listing has no live ad at all just now, so its hours have nothing to switch\./.test(pkSrc) &&
+      /No live pay-per-click campaign holds an ad for this listing, so its hours have nothing to switch\./.test(pkSrc) &&
+      /This answer does not say which campaigns this listing is in\./.test(pkSrc);
+    /* this file's own prefix throughout, and not one class borrowed from Product history's file */
+    const prefix = /'\.pkt-now\{/.test(pkSrc) && /'\.pkt-nowl\{/.test(pkSrc) && /'\.pkt-perwrap\{/.test(pkSrc) &&
+      !/\.at-tbl/.test(pkSrc) && !/\.at-src/.test(pkSrc) && !/\.at-age/.test(pkSrc);
+    /* and the page invents nothing: no state is put on an ad eBay has never stamped */
+    const honest = /return 'eBay has never stamped this ad, so it is being served';/.test(pkSrc);
+    return beside && link && type && reading && mark && nolive && prefix && honest;
   })(), null);
 
   const passed = results.filter(r => r.ok).length;

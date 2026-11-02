@@ -867,7 +867,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261102-1624';
+var BUILD = '20261102-1710';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -6177,6 +6177,13 @@ window.M98M_ADS_ONLY = true;
     '.pkt-perhead{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;justify-content:space-between;margin:0 0 6px}',
     '.pkt-open{font-size:10.5px;font-weight:800;color:var(--gold-a);text-decoration:underline;text-underline-offset:2px;white-space:nowrap}',
     '.pkt-moving{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:800;color:var(--gold-a);border:1px solid rgba(242,176,53,.4);white-space:nowrap}',
+    /* the two blocks a reader opens the details for, side by side: what the listing earns, and where
+       it is running (2 Nov). They wrap under one another on a narrow screen rather than squeezing. */
+    '.pkt-perwrap{display:flex;gap:9px;align-items:stretch;flex-wrap:wrap;margin:0 0 9px}',
+    '.pkt-perwrap>.pkt-per{flex:1 1 560px;margin:0;min-width:0}',
+    '.pkt-now{flex:1 1 250px;min-width:0;border:1px solid var(--gold-line);border-radius:12px;padding:9px 11px;background:var(--panel-2)}',
+    '.pkt-nowl{list-style:none;padding:0;margin:0}',
+    '.pkt-nowl li{padding:5px 0;border-top:1px solid rgba(255,255,255,.05)}.pkt-nowl li:first-child{border-top:0}',
     '.pkt-sub2{background:rgba(255,255,255,.015)}'
   ].join(''));
 
@@ -6729,6 +6736,64 @@ window.M98M_ADS_ONLY = true;
       (bad ? ' <span class="pkt-bad">' + esc(bad) + '.</span>' : '') + '</div>';
   }
 
+  /* ══ THE CAMPAIGNS THE LISTING IS IN RIGHT NOW (owner, 2 Nov) ═══════════════════════════════
+     "In peak listings also show the current campaign of the item along with the product history."
+     It sits BESIDE the By period table, in the same details block, because those are the pair of
+     questions a reader opens that block with: what is this listing earning, and where is it
+     running. The engine builds the list out of the same read the switch itself is judged on, so the
+     page can never offer a campaign the switch does not see, and there is no second query behind it.
+     EVERY STATUS HERE IS A READING, NOT A LIVE CHECK. The portal re-reads a campaign's ads on a
+     rotation and a campaign that is not running is not re-read at all, so the date of the reading
+     rides under the status on every row. Nothing is worked out here: each line is printed as the
+     answer carries it. ══ */
+  function fundWords(f) {
+    var v = String(f == null ? '' : f).toUpperCase();
+    if (v === 'COST_PER_CLICK') return 'pay-per-click';
+    if (v === 'COST_PER_SALE') return 'cost per sale';
+    return v ? v.toLowerCase().replace(/_/g, ' ') : 'type not recorded';
+  }
+  /* what the ad itself said when it was last read. An empty status is NOT a state: a pay-per-click
+     ad eBay has never stamped is one eBay is serving, which is the rule the switch goes by too. */
+  function adWords(c) {
+    var v = String((c && c.ad_status) || '').toUpperCase();
+    if (v === 'ACTIVE') return 'its ad was running';
+    if (v === 'PAUSED') return 'its ad was paused';
+    if (v === 'ARCHIVED') return 'its ad was archived';
+    if (v) return 'its ad read ' + v.toLowerCase().replace(/_/g, ' ');
+    return 'eBay has never stamped this ad, so it is being served';
+  }
+  function statusWords(v) {
+    var t = String(v == null ? '' : v).trim();
+    return t ? t.toLowerCase().replace(/_/g, ' ') : '';
+  }
+  function campaignsNowBlock(r) {
+    var L = r && r.campaigns_now;
+    var h = '<div class="pkt-now"><div class="pkt-dayk">In these campaigns now</div>';
+    if (!Array.isArray(L)) {
+      return h + '<div class="pkt-sm2">This answer does not say which campaigns this listing is in.</div></div>';
+    }
+    if (!L.length) {
+      return h + '<div class="pkt-sm2">' + (r && r.live_now
+        ? 'No live pay-per-click campaign holds an ad for this listing, so its hours have nothing to switch.'
+        : 'This listing has no live ad at all just now, so its hours have nothing to switch.') + '</div></div>';
+    }
+    return h + '<ul class="pkt-nowl">' + L.map(function (c) {
+      var when = whenTxt(c && c.ad_read_at), st = statusWords(c && c.campaign_status);
+      return '<li>' + campCell({ campaign_id: c && c.campaign_id, campaign_name: c && c.campaign_name }) +
+        (c && c.chosen ? ' <span class="pkt-tag live">its hours switch this one</span>' : '') +
+        '<div class="pkt-sm2">' + esc(fundWords(c && c.funding_model)) + (st ? ' · campaign ' + esc(st) : '') + '</div>' +
+        '<div class="pkt-sm2">' + esc(adWords(c)) +
+        (when ? ', read ' + esc(when) + ' UK' : ', and we do not hold when that reading was taken') + '</div></li>';
+    }).join('') + '</ul></div>';
+  }
+  /* WHAT THAT LIST COVERS, said ONCE for the whole page in the engine's own words, so it cannot
+     drift from what the engine actually read. */
+  function campaignsNowNote() {
+    var t = String((PK.data && PK.data.campaigns_now_note) || '').trim();
+    if (!t) return '';
+    return '<div class="pkt-rules"><b>The campaigns under each row.</b> ' + esc(t) + '.</div>';
+  }
+
   /* THE DATA BEHIND THE DECISION. What the planner wrote, hour by hour, for today and tomorrow, and
      the readings it stands on. Until 31 Oct the readings were not here at all: the peak list's own
      answer carries the planner's conclusion and nothing else, so the panel could only print the
@@ -6804,7 +6869,7 @@ window.M98M_ADS_ONLY = true;
     var days = num(r.profile_days);
     /* the By period table FIRST, beside the product details in the row above it and before the hour
        strips: it is what the listing earns, which is the question a reader opens this block with. */
-    var h = periodsBlock(r);
+    var h = '<div class="pkt-perwrap">' + periodsBlock(r) + campaignsNowBlock(r) + '</div>';
     h += '<div class="pkt-sched">' + hourStrip(id, T, 'Today') + hourStrip(id, M, 'Tomorrow') +
       '<div class="pkt-schedb">' + holdControl(r) + '</div></div>';
     h += '<div class="pkt-sm" style="margin-top:6px">';
@@ -7168,7 +7233,7 @@ window.M98M_ADS_ONLY = true;
     suggested().forEach(function (r) { if (r.item_id) sugg[String(r.item_id)] = r; });
     var h = '<div class="pkt-panel"><h3>Management\'s list' + reg('the peak hours work list', 'how') + '</h3>' +
       '<div class="pkt-sub">The list the team keeps by hand, and the one the system switches. A removal keeps the ' +
-      'row as a record, so the list stays a history of what was decided.</div>' + periodsNote();
+      'row as a record, so the list stays a history of what was decided.</div>' + periodsNote() + campaignsNowNote();
     h += PK.edit === '' || PK.edit == null ? pickerHtml('Add a listing to the list', 'pktAdd', true, true) : '';
     if (!rows.length) {
       return h + '<div class="pkt-empty">Nothing on the list' + (PK.account ? ' for ' + esc(PK.account) : '') +
@@ -7940,6 +8005,17 @@ window.M98M_ADS_ONLY = true;
     }).catch(function (e) { $('atBody').innerHTML = '<div class="at-panel"><h3>Not available</h3><div class="at-sub">' + esc(e.message || 'This listing could not load.') + '</div></div>'; });
   }
 
+  /* HOW LONG THE ANSWER TOOK TO WORK OUT, beside how long it took to arrive (2 Nov). The engine
+     holds a listing's answer for a short while now, so these two numbers together say which kind of
+     open this was: close together is a fresh working out, and an arrival far quicker than the
+     working out is a stored answer handed straight back. Printed only where the engine sends it, so
+     an engine that has not caught up simply leaves it out rather than showing a nought. */
+  function workedOut(D) {
+    var t = D && D.timings, ms = t ? Number(t.total_ms) : NaN;
+    if (t == null || t.total_ms == null || isNaN(ms)) return '';
+    return ' · worked out in ' + Math.round(ms) + ' ms';
+  }
+
   function kpi(k, v, d, c) { return '<div class="at-kpi"><div class="k">' + esc(k) + '</div><div class="v ' + (c || '') + '">' + v + '</div><div class="d">' + d + '</div></div>'; }
   /* the stage badge's hover, in words. It used to read "confidence 0.82 · 28-day slope 3.1 %/day ·
      level 1.4/day vs peak 2.1", which is notation, not a sentence a seller can act on. */
@@ -8081,7 +8157,7 @@ window.M98M_ADS_ONLY = true;
       '<div class="at-panel at-actions"><h3>Action log</h3><div class="at-sub">What the team did with this listing, with dates. Notes only. Nothing here reaches eBay.</div>' +
       '<ul class="at-list" id="atActs">' + (D.actions.length ? D.actions.map(function (a) { return '<li>' + esc(a.note) + '<div class="m">' + esc(a.type) + ' · ' + esc(a.by_email) + ' · ' + esc(String(a.at).slice(0, 16)) + '</div></li>'; }).join('') : '<li class="at-empty">No actions logged yet.</li>') + '</ul>' +
       '<textarea id="atNote" placeholder="Add a note (what was changed, where, why)"></textarea><button class="at-btn" id="atNoteBtn">Log note</button></div></div>';
-    h += '<div class="at-note" style="margin-top:4px">Computed ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC · ' + esc(D.source) + ' · ' + D.sample_size + ' listing-days of data · answered in ' + AT.ms + ' ms</div>';
+    h += '<div class="at-note" style="margin-top:4px">Computed ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC · ' + esc(D.source) + ' · ' + D.sample_size + ' listing-days of data · answered in ' + AT.ms + ' ms' + workedOut(D) + '</div>';
     $('atBody').innerHTML = h;
     var tabs = document.querySelectorAll('.at-tabs button');
     for (var i = 0; i < tabs.length; i++) tabs[i].onclick = function () { AT.tab = this.getAttribute('data-tab'); for (var j = 0; j < tabs.length; j++) tabs[j].classList.toggle('on', tabs[j] === this); drawWM(); };
