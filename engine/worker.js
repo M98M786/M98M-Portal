@@ -5849,6 +5849,13 @@ async function adtGate(ctx, pageFlag) {
      not re-read it, and nothing cached is served to a role the line above refuses */
   if (pageFlag && (await adtFlag(ctx.env, pageFlag)) !== 'on') throw new Error('SAY: this page is not enabled yet');
 }
+/* ADTOOL-WINDOWSUMS-PURE-BEGIN */
+/* THE ONE WINDOW RULE. Product history’s By period table is built from this and nothing else, and
+   from 2 Nov the Peak page prints the same five windows for the same listings. It cannot read the
+   same rows again — that page lists hundreds of listings — so it asks the database for the sums and
+   mirrors this arithmetic column for column in adPeakPeriodAdd / adPeakPeriodFinish. The markers are
+   here so the mirror can be held against this function by a test: if the two could ever disagree
+   about one listing, that test fails. */
 function adtWindowSums(rows, from, to) {
   const s = { days: 0, orders: 0, units: 0, revenue: 0, actual: 0, pending: 0, pending_fee_orders: 0, clicks: 0, spend: 0, attr_units: 0, attr_revenue: 0 };
   for (const r of rows) { if (r.day < from || r.day > to) continue; s.days++; s.orders += r.orders; s.units += r.units; s.revenue += r.revenue; s.actual += Number(r.actual_profit) || 0; s.pending += Number(r.pending_cost_orders) || 0; s.pending_fee_orders += Number(r.pending_fee_orders) || 0; s.clicks += r.clicks; s.spend += r.spend; s.attr_units += r.attr_units; s.attr_revenue += r.attr_revenue; }
@@ -5857,6 +5864,7 @@ function adtWindowSums(rows, from, to) {
   s.actual_profit = s.actual; s.pending_cost_orders = s.pending;
   return s;
 }
+/* ADTOOL-WINDOWSUMS-PURE-END */
 async function adtProductCells(env, rows) {
   /* image + title (+ account) from items_api for item-keyed rows built in JS — one IN (…) query per 90 ids,
      never one per row (D1 allows 100 binds). A row that already carries `image` is left alone. */
@@ -12318,7 +12326,7 @@ async function adtoolPeakCompute(env, acct) {
   const cfg = {};
   for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_peak_%'").all()).results || [])) cfg[String(r.key)] = r.value;
   const rules = adtPeakRules(cfg);
-  const today = ukDate(''), yday = adtAddDays(today, -1);
+  const today = ukDate(''), todayUtc = utcDate(), yday = adtAddDays(today, -1);
   const slotFrom = adtAddDays(today, -rules.window_days);
   const d7from = adtAddDays(today, -7);
   const ab = acct ? [acct] : [];
@@ -12331,7 +12339,7 @@ async function adtoolPeakCompute(env, acct) {
   /* 28 Oct: the by-hand list now carries its own switch, so the page reads it too. Behind a try with
      the old column list after it, in the way every added column in this file is read, so a database
      that has not caught up with the ALTER shows the list rather than an error. */
-  const manualSql = cols => "SELECT p.account, p.item_id, p.hours, p.note, p.added_by, p.added_at" + cols + ", ia.title, ia.image FROM adtool_peak_items p LEFT JOIN items_api ia ON ia.item_id = p.item_id WHERE p.removed_at = ''" + (acct ? ' AND p.account = ?1' : '') + ' ORDER BY p.added_at DESC LIMIT 500';
+  const manualSql = cols => "SELECT p.account, p.item_id, p.hours, p.note, p.added_by, p.added_at" + cols + ", ia.title, ia.image FROM adtool_peak_items p LEFT JOIN items_api ia ON ia.item_id = p.item_id WHERE p.removed_at = ''" + (acct ? ' AND p.account = ?1' : '') + ' ORDER BY p.added_at DESC LIMIT ' + ADTOOL_PEAK_MANUAL_CAP;
   let manualRows = [];
   try { manualRows = (await env.DB.prepare(manualSql(", COALESCE(p.auto, 1) AS auto, COALESCE(p.campaign_id, '') AS campaign_id, COALESCE(p.hold, 'auto') AS hold")).bind(...ab).all()).results || []; }
   catch (e) {
@@ -12459,9 +12467,59 @@ async function adtoolPeakCompute(env, acct) {
   let schedBy = {}, driftBy = {};
   try { schedBy = await adtPeakSchedulesRead(env, manualRows.map(r => String(r.item_id)), [today, tomorrowUk]); } catch (e) { schedBy = {}; }
   try { driftBy = await adtPeakDriftDays(env, manualRows.map(r => String(r.item_id)), today); } catch (e) { driftBy = {}; }
+  /* ── EACH ROW’S OWN BY PERIOD FIGURES (owner, 2 Nov) ──────────────────────────────────────────
+     "In these details of peak time listings, make a bar of product history along with the product
+     details." ONE bounded aggregate over adtool_listing_day for the listings this page is returning
+     — written as a json_each literal the way the cohort reads are, and cut to the same cap the list
+     itself is read under — plus the today grain for today’s own row. Everything after the sums is
+     the arithmetic Product history uses, so the same listing reads the same on both pages.
+     Behind a try, like every read added to this page: a page that cannot get the figures says so
+     against each row, which beats a reader losing their whole list over them. */
+  const periodsBy = {};
+  let periodsProblem = '';
+  try {
+    const perSql = adPeakItemsSql(manualRows.map(r => String(r.item_id || '')), ADTOOL_PEAK_MANUAL_CAP);
+    const d30from = adtAddDays(today, -30);
+    /* days up to yesterday only, exactly as Product history reads them: listing_day’s own today row
+       carries no ad columns (contract §3), so today comes off the today grain and nowhere else. The
+       windows are the same four: yesterday, the last 7 days, the last 30 days, and everything. */
+    const perWin = [['yesterday', 'd.day = ?1'], ['d7', 'd.day >= ?2'], ['d30', 'd.day >= ?3'], ['all', '1 = 1']];
+    const perB = await adtBatchRead(env, [
+      env.DB.prepare('SELECT d.item_id, ' + adPeakPeriodSelect(perWin) + ' FROM adtool_listing_day d JOIN ' + perSql + ' pkc ON pkc.pk_item = d.item_id WHERE d.day <= ?1 GROUP BY d.item_id').bind(yday, d7from, d30from),
+      /* the today grain’s own columns, and only the ones a By period row needs: this page asks for
+         neither the ad-views column (declared and never written) nor the click fee on its own (the
+         spend column already carries it, and adding it again would double a day). */
+      env.DB.prepare('SELECT t.item_id, t.report_day, t.uk_day, t.spend, t.clicks, t.attr_units, t.attr_revenue, t.orders, t.units, t.revenue, t.raw_priced_sum, t.refunds, t.actual_profit, t.pending_cost_orders, t.pending_fee_orders FROM adtool_listing_today t JOIN ' + perSql + ' pkc ON pkc.pk_item = t.item_id WHERE t.uk_day = ?1').bind(today),
+    ]);
+    const perAgg = {}, perToday = {};
+    for (const r of (perB[0] || [])) perAgg[String(r.item_id)] = r;
+    /* the same honesty rule Product history’s own today row goes through: a row still carrying
+       yesterday’s eBay report day is order-only, its ad columns NULL, so neither page can show last
+       night’s whole cumulative spend as today’s loss. */
+    for (const r of (perB[1] || [])) perToday[String(r.item_id)] = adtTodayRowHonest(r, todayUtc);
+    const perIds = {};
+    for (const k of Object.keys(perAgg)) perIds[k] = 1;
+    /* a listing with a today row and no finished day yet is still a listing with figures, so the
+       ids are the union of the two reads and not the aggregate’s alone */
+    for (const k of Object.keys(perToday)) perIds[k] = 1;
+    for (const id of Object.keys(perIds)) {
+      const agg = perAgg[id] || {}, tRow = perToday[id] || null;
+      const all = adPeakPeriodSpliceToday(adPeakPeriodFromAgg(agg, 'all'), tRow);
+      periodsBy[id] = {
+        today: adPeakPeriodToday(tRow),
+        yesterday: adPeakPeriodOrNull(agg, 'yesterday'),
+        d7: adPeakPeriodOrNull(agg, 'd7'),
+        d30: adPeakPeriodOrNull(agg, 'd30'),
+        /* all time: the same aggregate with no lower bound, with today’s grain spliced in, and it
+           says so — `includes_today` is why that row is marked as still moving on the page. */
+        all: all.days > 0 ? adPeakPeriodRow(adPeakPeriodFinish(all), !!tRow) : null,
+      };
+    }
+  } catch (e) { periodsProblem = 'the figures by period could not be read just now'; }
   const manual = manualRows.map(r => {
     const id = String(r.item_id), u = slots[id] || [0, 0, 0, 0];
     const a = String(r.account || '');
+    const per = periodsBy[id] || null;
     const parsed = adPeakHoursParse(r.hours);
     const auto = Number(r.auto == null ? 1 : r.auto) ? 1 : 0;
     const sw = switchable[id] || [];
@@ -12545,7 +12603,16 @@ async function adtoolPeakCompute(env, acct) {
       next_switch: nextSw,
       want_now: wantFor.want_override ? (wantFor.want_override === 'ACTIVE' ? 'ON' : 'OFF') : '',
       want_from: wantFor.from, want_why: wantFor.want_source,
-      spend_7d: spend7[id] === undefined ? 0 : spend7[id], units_28d: u.reduce((a2, b) => a2 + b, 0), already_suggested: !!sugSet[id],
+      /* THE FIVE WINDOWS Product history draws for this listing, for the details block under the
+         row. Each is null where we hold no day in it, because nought is a figure a reader acts on.
+         This is one LISTING’S profit, which is what the law on this portal allows. */
+      periods: per || adPeakPeriodsEmpty(),
+      /* AND THE 7-DAY SPEND IS NOW ONE NUMBER, not two. The column and the table’s own 7-day row
+         are both the sum of adtool_listing_day.spend over the same seven finished days, so the
+         column is taken straight off the table where the table has that window; the separate
+         aggregate stands in only where no day in the window is on record at all. */
+      spend_7d: per && per.d7 && per.d7.spend != null ? per.d7.spend : (spend7[id] === undefined ? 0 : spend7[id]),
+      units_28d: u.reduce((a2, b) => a2 + b, 0), already_suggested: !!sugSet[id],
     };
   });
   const allAccounts = ((await env.DB.prepare("SELECT DISTINCT account FROM adtool_listings WHERE account <> '' ORDER BY account").all()).results || []).map(r => String(r.account));
@@ -12593,8 +12660,13 @@ async function adtoolPeakCompute(env, acct) {
     hours_note: 'the system switches these on at the start of their hours and off at the end, for an account whose live switch is on; for every other account the change is written down and nothing is sent',
     hours_help: ADTOOL_PEAK_HOURS_HELP,
     switch_caps: { per_account_per_day: ADTOOL_PEAK_SWITCH_CAP, runs: 'every quarter hour' },
+    /* the By period table under every row on the by-hand list: the five windows, where each
+       figure comes from, and whether the read behind them worked at all. */
+    periods_windows: ADTOOL_PEAK_PERIOD_KEYS,
+    periods_note: 'ad spend and units from ads are eBay’s own advertising report; orders, units and profit are the order book, after eBay fees, product cost, ad spend and returns; today is still filling, so today and all time are marked as still updating and the orders we cannot cost yet are counted apart',
+    periods_problem: periodsProblem,
     window: { slots: [slotFrom, yday], hours: [d7from, yday] },
-    sources: ['dayparts from the listing’s own sold units', 'sampled hours', 'the day figures for the last 7 finished days', 'the by-hand list', 'the portal’s own record of what it sent'],
+    sources: ['dayparts from the listing’s own sold units', 'sampled hours', 'the day figures for the last 7 finished days', 'the by-hand list', 'the portal’s own record of what it sent', 'the listing’s own day figures and today grain, for the table by period'],
   };
 }
 /* ---- which campaigns a listing’s peak hours could switch ----
@@ -13605,6 +13677,162 @@ function adPeakCohortBeforeJoin(sql, itemCol, dayCol, days) {
   const n = Math.max(1, Math.round(Number(days) || 28));
   return ' JOIN ' + sql + ' pkc ON pkc.pk_item = ' + itemCol +
     ' AND ' + dayCol + ' >= date(pkc.pk_from, \'-' + n + ' day\') AND ' + dayCol + ' < pkc.pk_from';
+}
+
+/* ══ EACH LISTING’S OWN BY PERIOD FIGURES, ON THE PEAK PAGE (owner, 2 Nov) ═══════════════════
+   "In these details of peak time listings, make a bar of product history along with the product
+   details." The table asked for is Product history’s By period table: ad spend, units from ads,
+   ROAS, orders, units, units not from ads and profit, over today so far, yesterday, the last 7 and
+   30 days and all time.
+   THE HARD RULE IS THAT THE TWO PAGES CAN NEVER DISAGREE ABOUT ONE LISTING. Product history builds
+   those windows with adtWindowSums over that listing’s own adtool_listing_day rows, plus the today
+   grain for today and spliced into all time. Reading every day row of hundreds of listings on an
+   open page is not a page, so the Peak page asks the database for the sums instead — ONE bounded
+   aggregate — and everything after the sums is the SAME arithmetic:
+     · the aggregate’s columns are written from ADTOOL_PEAK_PERIOD_FIELDS, which is adtWindowSums’s
+       own column set in its own order, so a query and a sum cannot drift apart;
+     · adPeakPeriodAdd and adPeakPeriodFinish are adtWindowSums’s own two halves, line for line;
+     · a test holds adPeakPeriodSums against adtWindowSums field by field, and a second test feeds
+       the plain sums a database would return through adPeakPeriodFromAgg and asserts the same.
+   Profit here is ONE LISTING’S, which is what this portal allows; no account and no fleet profit. ══ */
+const ADTOOL_PEAK_PERIOD_KEYS = ['today', 'yesterday', 'd7', 'd30', 'all'];
+/* [the window’s own field, the adtool_listing_day column it adds up, whether the column may be NULL].
+   adtWindowSums reads the three nullable ones through Number() || 0 and the rest as they are, and so
+   does adPeakPeriodAdd; the query COALESCEs the same three, which is the same answer for a number and
+   the same answer for a NULL a migration left behind. */
+const ADTOOL_PEAK_PERIOD_FIELDS = [
+  ['orders', 'orders', false], ['units', 'units', false], ['revenue', 'revenue', false],
+  ['actual', 'actual_profit', true], ['pending', 'pending_cost_orders', true], ['pending_fee_orders', 'pending_fee_orders', true],
+  ['clicks', 'clicks', false], ['spend', 'spend', false], ['attr_units', 'attr_units', false], ['attr_revenue', 'attr_revenue', false],
+];
+/* the four money columns adtWindowSums rounds to the penny, and only after the ratio is worked out */
+const ADTOOL_PEAK_PERIOD_MONEY = ['revenue', 'actual', 'spend', 'attr_revenue'];
+function adPeakPeriodZero() {
+  /* adtWindowSums’s own accumulator, key for key */
+  return { days: 0, orders: 0, units: 0, revenue: 0, actual: 0, pending: 0, pending_fee_orders: 0, clicks: 0, spend: 0, attr_units: 0, attr_revenue: 0 };
+}
+function adPeakPeriodAdd(s, r) {
+  /* ONE day row into the running sums, added the way adtWindowSums adds it */
+  if (!s || !r) return s;
+  s.days++;
+  for (const f of ADTOOL_PEAK_PERIOD_FIELDS) s[f[0]] += f[2] ? (Number(r[f[1]]) || 0) : r[f[1]];
+  return s;
+}
+function adPeakPeriodFinish(s) {
+  /* and adtWindowSums’s own tail, in its own order: the ratio off the UNROUNDED sums first, because
+     rounding the two sides of a division before dividing moves the answer; then the four money
+     columns to the penny; then the two names the rest of the tool reads them by. */
+  if (!s) return s;
+  s.roas = s.spend > 0 ? round2(s.attr_revenue / s.spend) : null;
+  for (const k of ADTOOL_PEAK_PERIOD_MONEY) s[k] = round2(s[k]);
+  s.actual_profit = s.actual; s.pending_cost_orders = s.pending;
+  return s;
+}
+function adPeakPeriodSums(rows, from, to) {
+  /* the whole of adtWindowSums, written from the column list the aggregate is written from. THE
+     MIRROR: the route does not call it, the test does, and it holds it against adtWindowSums field
+     by field — a change to one side and not the other fails a test instead of putting two different
+     numbers for one listing on two pages. Its two halves ARE the route’s arithmetic. */
+  const s = adPeakPeriodZero();
+  for (const r of (rows || [])) { if (r.day < from || r.day > to) continue; adPeakPeriodAdd(s, r); }
+  return adPeakPeriodFinish(s);
+}
+function adPeakPeriodFromAgg(row, prefix) {
+  /* one aggregate row’s columns back into those sums, UNFINISHED, so today can still be spliced in */
+  const r = row || {}, p = String(prefix || '');
+  const s = adPeakPeriodZero();
+  s.days = Number(r[p + '_days']) || 0;
+  for (const f of ADTOOL_PEAK_PERIOD_FIELDS) s[f[0]] = Number(r[p + '_' + f[0]]) || 0;
+  return s;
+}
+function adPeakPeriodSelect(windows) {
+  /* the aggregate’s columns: one conditional count of days and one conditional sum per field, for
+     every window. `windows` is [prefix, condition] pairs written by the caller, never by anybody
+     typing. NO ROUND() anywhere in here: the rounding belongs to adPeakPeriodFinish, after the
+     ratio, which is the order adtWindowSums does it in. */
+  const out = [];
+  for (const w of (windows || [])) {
+    const p = String((w && w[0]) || ''), c = String((w && w[1]) || '');
+    if (!/^[a-z][a-z0-9_]*$/.test(p)) continue;
+    out.push('SUM(CASE WHEN ' + c + ' THEN 1 ELSE 0 END) AS ' + p + '_days');
+    for (const f of ADTOOL_PEAK_PERIOD_FIELDS) out.push('SUM(CASE WHEN ' + c + ' THEN COALESCE(d.' + f[1] + ', 0) ELSE 0 END) AS ' + p + '_' + f[0]);
+  }
+  return out.join(', ');
+}
+function adPeakItemsSql(ids, cap) {
+  /* the listings a page is returning, as a joinable one-column table of literals, written the way
+     adPeakCohortSql writes its cohort and for the same reason: ONE json_each() over a JSON literal,
+     because the list runs to hundreds and that is past what a single statement may bind. Every id is
+     matched against a digits pattern first, so nothing anybody typed can reach the query, and the
+     list is cut to `cap` so the read can never be wider than the page it is for.
+     AN EMPTY LIST RETURNS A TABLE WITH NO ROWS, never an empty string: a join that vanished would
+     answer for the whole fleet while the page said it was answering for these listings. */
+  const n = Math.max(1, Math.round(Number(cap) || 0)), out = [], seen = {};
+  for (const x of (ids || [])) {
+    const id = String(x == null ? '' : x).trim();
+    if (!/^[0-9]{1,19}$/.test(id) || seen[id]) continue;
+    seen[id] = 1; out.push({ i: id });
+    if (out.length >= n) break;
+  }
+  if (!out.length) return '(SELECT \'\' AS pk_item WHERE 1 = 0)';
+  return '(SELECT json_extract(value, \'$.i\') AS pk_item FROM json_each(\'' + JSON.stringify(out) + '\'))';
+}
+function adPeakPeriodRow(s, includesToday) {
+  /* one finished window as the page reads it: the By period table’s own columns and nothing else.
+     `units_not_from_ads` is worked out HERE, by the subtraction Product history’s table does, so the
+     two pages cannot each do that subtraction their own way. */
+  if (!s) return null;
+  return {
+    spend: s.spend, attr_units: s.attr_units, roas: s.roas, orders: s.orders, units: s.units,
+    units_not_from_ads: Math.max(0, (Number(s.units) || 0) - (Number(s.attr_units) || 0)),
+    actual_profit: s.actual_profit, pending_cost_orders: s.pending_cost_orders,
+    pending_fee_orders: s.pending_fee_orders, includes_today: !!includesToday,
+  };
+}
+function adPeakPeriodOrNull(agg, prefix) {
+  /* A WINDOW WITH NO DAY ON RECORD IS NULL, never nought. A conditional sum over no rows is 0 in
+     SQL, and nought is a figure a reader acts on: it says this listing spent nothing and sold
+     nothing, where the truth is that we hold no day for it at all. */
+  const s = adPeakPeriodFromAgg(agg, prefix);
+  return s.days > 0 ? adPeakPeriodRow(adPeakPeriodFinish(s), false) : null;
+}
+function adPeakPeriodToday(tRow) {
+  /* TODAY, which does not come off the day grain at all: adtool_listing_day’s own today row carries
+     no ad columns, so Product history reads the today grain for it and so does this. Every figure is
+     passed through as the row carries it — a part day’s ad spend may be NULL, which is nobody having
+     looked yet and not nought — and the ratio is worked out the one way Product history works it
+     out. No row at all is null: "nothing read yet" is not "nothing happened". */
+  if (!tRow) return null;
+  const sp = tRow.spend == null ? null : Number(tRow.spend);
+  const au = tRow.attr_units == null ? null : Number(tRow.attr_units);
+  return {
+    spend: sp, attr_units: au,
+    roas: sp != null && sp > 0 ? round2((Number(tRow.attr_revenue) || 0) / sp) : null,
+    orders: Number(tRow.orders) || 0, units: Number(tRow.units) || 0,
+    units_not_from_ads: Math.max(0, (Number(tRow.units) || 0) - (Number(tRow.attr_units) || 0)),
+    actual_profit: tRow.actual_profit == null ? null : Number(tRow.actual_profit),
+    pending_cost_orders: Number(tRow.pending_cost_orders) || 0,
+    pending_fee_orders: Number(tRow.pending_fee_orders) || 0,
+    includes_today: true,
+  };
+}
+function adPeakPeriodSpliceToday(s, tRow) {
+  /* ALL TIME INCLUDES TODAY, spliced the way Product history splices it: the day grain holds finished
+     days only, so the today grain’s row is added on as one more day with its four ad columns read as
+     nought where no sample has landed yet (a NULL there is nobody having looked, and a sum cannot
+     carry that). The same splice, so the same total. */
+  if (!s || !tRow) return s;
+  return adPeakPeriodAdd(s, Object.assign({}, tRow, {
+    spend: Number(tRow.spend) || 0, clicks: Number(tRow.clicks) || 0,
+    attr_units: Number(tRow.attr_units) || 0, attr_revenue: Number(tRow.attr_revenue) || 0,
+  }));
+}
+function adPeakPeriodsEmpty() {
+  /* what a listing we hold nothing for carries: five nulls, so the page says "not available yet"
+     against each of them rather than printing a row of noughts nobody earned. */
+  const out = {};
+  for (const k of ADTOOL_PEAK_PERIOD_KEYS) out[k] = null;
+  return out;
 }
 function adPeakHoursToday(entries, uk) {
   /* HOURS ON AND OFF TODAY, in listing-hours. For every row set to switch itself whose hours can be

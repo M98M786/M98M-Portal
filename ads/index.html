@@ -867,7 +867,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261102-1617';
+var BUILD = '20261102-1624';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -6029,6 +6029,14 @@ window.M98M_ADS_ONLY = true;
  * the exact fault the Overview's own notes record: a reader picks an account, one half follows and
  * the other goes on answering for the whole fleet with nothing saying so.
  *
+ * 2 Nov: every row on the by-hand list now carries ITS OWN BY PERIOD FIGURES inside its details
+ * block (owner: "in these details of peak time listings, make a bar of product history along with
+ * the product details"). It is the same table Product history draws at the top of a listing's own
+ * page, with the same columns, the same wording and the same order, and the same numbers: the
+ * engine builds the five windows from the arithmetic that page uses, column for column, so the two
+ * can never disagree about one listing. Nothing on this page adds a figure up for itself, and the
+ * heading links through to the full Product history for the listing the reader is looking at.
+ *
  * Engine actions: adtoolPeak, adtoolPeakAdd, adtoolPeakRemove, adtoolPeakCampaigns, and
  * adtoolPlan / adtoolCommand with cohort:'peak' for the section at the top.
  * Own class prefix: .pkt-  (the blocks above carry .ov-, which is their own file's and travels
@@ -6163,6 +6171,12 @@ window.M98M_ADS_ONLY = true;
     '.pkt-htbl td{padding:4px 6px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text-2)}',
     '.pkt-htbl td.hr{color:var(--text);font-weight:700;white-space:nowrap}',
     '.pkt-htbl tr.nowrow td{background:rgba(242,176,53,.08)}',
+    '.pkt-htbl th.r,.pkt-htbl td.r{text-align:right;white-space:nowrap}',
+    /* the listing's own By period table, at the top of its details block (2 Nov) */
+    '.pkt-per{border:1px solid var(--gold-line);border-radius:12px;padding:9px 11px;margin:0 0 9px;background:var(--panel-2)}',
+    '.pkt-perhead{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;justify-content:space-between;margin:0 0 6px}',
+    '.pkt-open{font-size:10.5px;font-weight:800;color:var(--gold-a);text-decoration:underline;text-underline-offset:2px;white-space:nowrap}',
+    '.pkt-moving{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:800;color:var(--gold-a);border:1px solid rgba(242,176,53,.4);white-space:nowrap}',
     '.pkt-sub2{background:rgba(255,255,255,.015)}'
   ].join(''));
 
@@ -6652,6 +6666,69 @@ window.M98M_ADS_ONLY = true;
       }).join('') + '</tbody></table></div>';
   }
 
+  /* ══ THE LISTING'S OWN BY PERIOD FIGURES (owner, 2 Nov) ═══════════════════════════════════
+     "In these details of peak time listings, make a bar of product history along with the product
+     details." This is Product history's By period table, drawn under the row it belongs to: the
+     same columns in the same order, the same wording, and the same numbers. The engine builds the
+     five windows out of the arithmetic that page uses, so nothing here adds anything up: every
+     figure is printed as the answer carries it.
+     Today and all time are marked as still updating, because today's ad spend is a part-day reading
+     and all time has today spliced into it. A window the answer has nothing for says so, rather
+     than printing noughts nobody earned. ══ */
+  var PERIODS = [['today', 'Today so far'], ['yesterday', 'Yesterday'], ['d7', 'Last 7 days'], ['d30', 'Last 30 days'], ['all', 'All time']];
+  /* Product history's own ROAS print, to the same two places, so one listing reads the same on both */
+  function roas(v) { return v == null ? '—' : Number(v).toFixed(2) + '×'; }
+  /* which rows are still moving: today, and any window the engine says today is spliced into */
+  function perMoving(key, p) { return key === 'today' || !!(p && p.includes_today); }
+  function perRow(key, label, p) {
+    var mark = perMoving(key, p) ? ' <span class="pkt-moving">still updating</span>' : '';
+    if (!p || typeof p !== 'object') {
+      return '<tr><td class="hr">' + esc(label) + mark + '</td><td colspan="7"><span class="pkt-sm2">not available yet</span></td></tr>';
+    }
+    /* the orders the profit could not price: the Ali cost not typed in yet, or eBay's fee not landed.
+       Counted beside the figure and never folded into it, which is how the law works everywhere else. */
+    var pc = n0(p.pending_cost_orders), pf = n0(p.pending_fee_orders), un = pc + pf;
+    return '<tr><td class="hr">' + esc(label) + mark + '</td>' +
+      '<td class="r">' + gbp(p.spend) + '</td>' +
+      '<td class="r">' + cnt(p.attr_units) + '</td>' +
+      '<td class="r">' + roas(num(p.roas)) + '</td>' +
+      '<td class="r">' + cnt(p.orders) + '</td>' +
+      '<td class="r">' + cnt(p.units) + '</td>' +
+      '<td class="r">' + cnt(p.units_not_from_ads) + '</td>' +
+      '<td class="r">' + adtProfitCell(p.actual_profit, 0, 0) +
+      (un > 0 ? '<div class="pkt-sm2" title="' + esc(pc + ' without a cost, ' + pf + ' without fees') + '">' +
+        cnt(un) + ' ' + plural(un, 'order', 'orders') + ' not costed yet</div>' : '') + '</td></tr>';
+  }
+  function periodsBlock(r) {
+    var id = String(r.item_id || ''), P = r.periods;
+    var h = '<div class="pkt-per"><div class="pkt-perhead"><span class="pkt-dayk">By period</span>' +
+      (id ? '<a class="pkt-open" href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener"' +
+        ' title="open this listing&#39;s full Product history in a new tab">the full Product history ↗</a>' : '') +
+      '</div>';
+    if (!P || typeof P !== 'object') {
+      return h + '<div class="pkt-sm2">This answer carries no figures by period for this listing, so none is shown.</div></div>';
+    }
+    var any = PERIODS.filter(function (x) { return P[x[0]] && typeof P[x[0]] === 'object'; }).length;
+    if (!any) {
+      return h + '<div class="pkt-sm2">We hold no day and no sales for this listing yet, so there is nothing to show by period.</div></div>';
+    }
+    return h + '<div class="pkt-scroll"><table class="pkt-htbl"><thead><tr><th>Period</th>' +
+      '<th class="r">Ad spend</th><th class="r">Units from ads</th><th class="r">ROAS</th>' +
+      '<th class="r">Orders</th><th class="r">Units</th><th class="r">Units not from ads</th>' +
+      '<th class="r">Profit</th></tr></thead><tbody>' +
+      PERIODS.map(function (x) { return perRow(x[0], x[1], P[x[0]]); }).join('') +
+      '</tbody></table></div></div>';
+  }
+  /* WHERE THOSE FIGURES COME FROM, said ONCE for the whole list and not under each of five hundred
+     rows. The sentence is the engine's, so it cannot drift from what the engine actually read. */
+  function periodsNote() {
+    var t = String((PK.data && PK.data.periods_note) || '').trim();
+    var bad = String((PK.data && PK.data.periods_problem) || '').trim();
+    if (!t && !bad) return '';
+    return '<div class="pkt-rules"><b>The figures by period under each row.</b> ' + (t ? esc(t) + '.' : '') +
+      (bad ? ' <span class="pkt-bad">' + esc(bad) + '.</span>' : '') + '</div>';
+  }
+
   /* THE DATA BEHIND THE DECISION. What the planner wrote, hour by hour, for today and tomorrow, and
      the readings it stands on. Until 31 Oct the readings were not here at all: the peak list's own
      answer carries the planner's conclusion and nothing else, so the panel could only print the
@@ -6725,7 +6802,10 @@ window.M98M_ADS_ONLY = true;
     var T = r.schedule_today, M = r.schedule_tomorrow;
     var src = T ? srcWords(T.source, r.hold) : null;
     var days = num(r.profile_days);
-    var h = '<div class="pkt-sched">' + hourStrip(id, T, 'Today') + hourStrip(id, M, 'Tomorrow') +
+    /* the By period table FIRST, beside the product details in the row above it and before the hour
+       strips: it is what the listing earns, which is the question a reader opens this block with. */
+    var h = periodsBlock(r);
+    h += '<div class="pkt-sched">' + hourStrip(id, T, 'Today') + hourStrip(id, M, 'Tomorrow') +
       '<div class="pkt-schedb">' + holdControl(r) + '</div></div>';
     h += '<div class="pkt-sm" style="margin-top:6px">';
     h += src ? '<b>' + esc(src[0]) + '</b> · ' + esc(src[1]) : (T ? '<b>' + esc(String(T.source || 'not recorded')) + '</b>' : '<b>no schedule written</b> · this listing runs on the hours somebody typed for it');
@@ -7088,7 +7168,7 @@ window.M98M_ADS_ONLY = true;
     suggested().forEach(function (r) { if (r.item_id) sugg[String(r.item_id)] = r; });
     var h = '<div class="pkt-panel"><h3>Management\'s list' + reg('the peak hours work list', 'how') + '</h3>' +
       '<div class="pkt-sub">The list the team keeps by hand, and the one the system switches. A removal keeps the ' +
-      'row as a record, so the list stays a history of what was decided.</div>';
+      'row as a record, so the list stays a history of what was decided.</div>' + periodsNote();
     h += PK.edit === '' || PK.edit == null ? pickerHtml('Add a listing to the list', 'pktAdd', true, true) : '';
     if (!rows.length) {
       return h + '<div class="pkt-empty">Nothing on the list' + (PK.account ? ' for ' + esc(PK.account) : '') +
