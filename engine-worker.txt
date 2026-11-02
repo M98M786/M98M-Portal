@@ -16885,6 +16885,116 @@ function monthBack(ymd) {
   const lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate();
   return y + '-' + String(mo).padStart(2, '0') + '-' + String(Math.min(d, lastDay)).padStart(2, '0');
 }
+/* 2 Nov 2026 (owner: "where is the breakdown of hours? i need hour to hour bars in this page too").
+   ONE reader for the whole hour block, because the page and the key-authed probe must never come to
+   disagree about whether an hour holds anything. There are TWO sources behind THREE series:
+     traffic_hour   the portal's own five-minute clock — impressions and views. It was created on
+                    2 Nov 2026, so it holds nothing before that, and today's row stays empty until
+                    eBay's running daily total first moves (eBay counts the current day hours behind).
+     adtool_orders  every order by the UK hour of its own timestamp, exactly, for the whole of its
+                    history. This is what lets the block show something on a day the clock is empty.
+   Every read is bounded: an hour grouping can only return twenty-four rows, and the list of dates
+   the clock holds is capped. Nothing here writes, and nothing here reaches eBay. */
+const TRAFFIC_HOUR_DAYS_SHOWN = 30;
+async function trafficHourBlock(env, o) {
+  const today = String((o && o.today) || ukDate(''));
+  const day = String((o && o.day) || today);
+  const account = String((o && o.account) || '');
+  const from = String((o && o.from) || day);
+  const to = String((o && o.to) || day);
+  const prevDay = monthBack(day);
+  /* THE SETTLED DAYS OF THE WINDOW. A day eBay is still counting cannot be averaged with finished
+     ones — it would pull every hour's average down by however much of the day is left — so today is
+     out of both averages and out of the day count that divides them. */
+  const yday = ukDate(new Date(Date.parse(today + 'T12:00:00Z') - 86400000).toISOString());
+  const lastSettled = to < today ? to : yday;
+  const spanDays = from <= lastSettled
+    ? Math.round((Date.parse(lastSettled + 'T12:00:00Z') - Date.parse(from + 'T12:00:00Z')) / 86400000) + 1 : 0;
+  /* a read that FAILS must say so rather than answer with an empty list: on this block the
+     difference between "the clock holds nothing" and "I could not look" is the whole question. */
+  const readErrors = [];
+  const q = async (what, sql, binds) => {
+    try {
+      const st = env.DB.prepare(sql);
+      const rs = await ((binds && binds.length) ? st.bind(...binds) : st).all();
+      return (rs && rs.results) || [];
+    } catch (e) { readErrors.push(what + ': ' + String((e && e.message) || e).slice(0, 160)); return []; }
+  };
+  const A = account ? [account] : [];
+  /* the clock, one day at a time */
+  const clockDay = (d) => q('traffic_hour ' + d,
+    'SELECT hour, SUM(impressions) AS impressions, SUM(views) AS views, SUM(transactions) AS transactions, ' +
+    'SUM(samples) AS samples, MAX(updated_at) AS updated_at FROM traffic_hour WHERE date = ?1' +
+    (account ? ' AND account = ?2' : '') + ' GROUP BY hour ORDER BY hour LIMIT 24', [d].concat(A));
+  /* the order book, one day at a time. Cancelled orders are left out, the same rule the rest of the
+     advertising tool reads this table by. */
+  const soldDay = (d) => q('adtool_orders ' + d,
+    'SELECT o.local_hour AS hour, COUNT(*) AS orders, SUM(COALESCE(o.qty, 1)) AS units, ' +
+    'ROUND(SUM(COALESCE(o.sale_price, 0)), 2) AS revenue FROM adtool_orders o ' +
+    "WHERE o.local_date = ?1 AND o.status <> 'CANCELLED'" + (account ? ' AND o.account = ?2' : '') +
+    ' GROUP BY o.local_hour ORDER BY o.local_hour LIMIT 24', [d].concat(A));
+  const hours = await clockDay(day);
+  const hoursPrev = prevDay ? await clockDay(prevDay) : [];
+  const hoursSold = await soldDay(day);
+  const hoursSoldPrev = prevDay ? await soldDay(prevDay) : [];
+  /* THE AVERAGE HOUR PROFILE over the window's settled days. The clock's divisor is the number of
+     days the clock itself HOLDS, because it only started on 2 Nov; the order book's divisor is the
+     number of settled days in the window, because a day with no order is a real nought for sales
+     and leaving it out would print a busier average than the account ever had. */
+  let avgRows = [], avgDays = 0, soldAvgRows = [];
+  if (spanDays > 0) {
+    avgRows = await q('traffic_hour average',
+      'SELECT hour, SUM(impressions) AS impressions, SUM(views) AS views, SUM(transactions) AS transactions, ' +
+      'SUM(samples) AS samples FROM traffic_hour WHERE date >= ?1 AND date <= ?2' +
+      (account ? ' AND account = ?3' : '') + ' GROUP BY hour ORDER BY hour LIMIT 24', [from, lastSettled].concat(A));
+    const dRow = (await q('traffic_hour average days',
+      'SELECT COUNT(DISTINCT date) AS days FROM traffic_hour WHERE date >= ?1 AND date <= ?2' +
+      (account ? ' AND account = ?3' : '') + ' LIMIT 1', [from, lastSettled].concat(A)))[0];
+    avgDays = Number(dRow && dRow.days) || 0;
+    soldAvgRows = await q('adtool_orders average',
+      'SELECT o.local_hour AS hour, COUNT(*) AS orders, SUM(COALESCE(o.qty, 1)) AS units FROM adtool_orders o ' +
+      "WHERE o.local_date >= ?1 AND o.local_date <= ?2 AND o.status <> 'CANCELLED'" +
+      (account ? ' AND o.account = ?3' : '') + ' GROUP BY o.local_hour ORDER BY o.local_hour LIMIT 24',
+      [from, lastSettled].concat(A));
+  }
+  const per = (v, n) => n > 0 ? Math.round((Number(v) || 0) / n * 10) / 10 : null;
+  const hoursAvg = avgDays > 0 ? avgRows.map((r) => ({
+    hour: Number(r.hour) || 0, impressions: per(r.impressions, avgDays), views: per(r.views, avgDays),
+    transactions: per(r.transactions, avgDays), samples: per(r.samples, avgDays),
+  })) : null;
+  const hoursSoldAvg = spanDays > 0 ? soldAvgRows.map((r) => ({
+    hour: Number(r.hour) || 0, orders: per(r.orders, spanDays), units: per(r.units, spanDays),
+  })) : null;
+  /* WHAT THE CLOCK HOLDS, newest first, so the page can offer the days there is anything to show for
+     and say when the clock started instead of implying it has always been there. */
+  const hourDays = await q('traffic_hour dates',
+    'SELECT date, SUM(impressions) AS impressions, SUM(views) AS views, SUM(transactions) AS transactions, ' +
+    'SUM(samples) AS samples FROM traffic_hour' + (account ? ' WHERE account = ?1' : '') +
+    ' GROUP BY date ORDER BY date DESC LIMIT ' + TRAFFIC_HOUR_DAYS_SHOWN, A);
+  /* the first day the clock holds and how many days it holds in all, from one row: the list above
+     is capped, so counting its length would understate the clock the moment it outgrew the cap. */
+  const fromRow = (await q('traffic_hour first date',
+    'SELECT MIN(date) AS d, COUNT(DISTINCT date) AS days FROM traffic_hour' +
+    (account ? ' WHERE account = ?1' : '') + ' LIMIT 1', A))[0];
+  const clockFrom = fromRow && fromRow.d ? String(fromRow.d) : null;
+  const clockDays = fromRow && fromRow.days != null ? Number(fromRow.days) || 0 : null;
+  const sum = (rows, k) => (rows || []).reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  /* "today's clock is still empty while an earlier day has rows" is SAID, never acted on: changing
+     the day under the reader would leave them looking at figures they did not ask for. */
+  const todayEmpty = day === today && !sum(hours, 'impressions') && !sum(hours, 'views') && !sum(hours, 'transactions');
+  const earlierHeld = (hourDays || []).some((r) => String(r.date) < today && (Number(r.impressions) || 0) > 0);
+  return {
+    hour_date: day, hour_prev_date: prevDay || null, today,
+    hours, hours_prev: hoursPrev, hours_sold: hoursSold, hours_sold_prev: hoursSoldPrev,
+    hours_avg: hoursAvg, hours_avg_days: avgDays || null,
+    hours_sold_avg: hoursSoldAvg, hours_sold_avg_days: spanDays || null,
+    hour_samples: hours.length ? sum(hours, 'samples') : null,
+    hour_days: hourDays, hour_clock_from: clockFrom, hour_clock_days: clockDays,
+    hour_clock_empty_today: !!(todayEmpty && earlierHeld),
+    hours_from: from, hours_to: lastSettled,
+    read_errors: readErrors, sent_to_ebay: false, writes: 'none',
+  };
+}
 async function trafficNow(env) {
   await ensureTrafficSchema(env);
   await perAccount(env, 'trafficNow', async (acct) => {
@@ -19809,24 +19919,91 @@ const ROUTES = {
         'SELECT account, date, impressions, views, transactions, ctr, cvr FROM traffic_daily ' +
         'WHERE date >= ?1 AND date <= ?2' + (account ? ' AND account = ?3' : '') + ' ORDER BY date'
       ).bind(...[pFrom, pTo].concat(account ? [account] : [])).all() : { results: [] };
-      /* the 24-hour breakdown of ONE day (today unless asked otherwise), summed across accounts
-         unless one is chosen. These are the portal's own five-minute readings, not an eBay feed. */
+      /* THE HOUR BLOCK (owner, 2 Nov: "where is the breakdown of hours?"). Three series over one
+         day, read through the single function the key-authed probe reads it through, so the screen
+         and the evidence a manager is handed cannot disagree about whether an hour holds anything.
+         The chosen day stays the one that was asked for: where today's clock is still empty and an
+         earlier day has rows, the block SAYS so rather than moving the day underneath the reader. */
       const hourDay = okDate(p.hour_date) ? String(p.hour_date) : ukDate('');
-      const hours = await ctx.env.DB.prepare(
-        'SELECT hour, SUM(impressions) AS impressions, SUM(views) AS views, SUM(transactions) AS transactions, ' +
-        'SUM(samples) AS samples, MAX(updated_at) AS updated_at FROM traffic_hour WHERE date = ?1' +
-        (account ? ' AND account = ?2' : '') + ' GROUP BY hour ORDER BY hour'
-      ).bind(...[hourDay].concat(account ? [account] : [])).all().catch(() => ({ results: [] }));
-      const hoursPrev = await ctx.env.DB.prepare(
-        'SELECT hour, SUM(impressions) AS impressions, SUM(views) AS views, SUM(transactions) AS transactions ' +
-        'FROM traffic_hour WHERE date = ?1' + (account ? ' AND account = ?2' : '') + ' GROUP BY hour ORDER BY hour'
-      ).bind(...[monthBack(hourDay)].concat(account ? [account] : [])).all().catch(() => ({ results: [] }));
+      const HB = await trafficHourBlock(ctx.env, { day: hourDay, account, from: dFrom, to: dTo, today: ukDate('') });
       return { days: days.results || [], listings: listings.results || [], range,
         prev_days: prev.results || [], prev_from: pFrom, prev_to: pTo,
-        hours: hours.results || [], hours_prev: hoursPrev.results || [], hour_date: hourDay, hour_prev_date: monthBack(hourDay),
-        hours_note: 'eBay publishes traffic by DAY and by LISTING — never by hour. This clock is the portal\'s own: the running daily total is read every five minutes and each rise is credited to the hour it was seen in. It therefore shows when eBay REPORTED the traffic, which trails when the buyer actually looked, and it only holds hours since this was switched on (2 Nov 2026).',
+        hours: HB.hours, hours_prev: HB.hours_prev, hour_date: HB.hour_date, hour_prev_date: HB.hour_prev_date,
+        hours_sold: HB.hours_sold, hours_sold_prev: HB.hours_sold_prev,
+        hours_avg: HB.hours_avg, hours_avg_days: HB.hours_avg_days,
+        hours_sold_avg: HB.hours_sold_avg, hours_sold_avg_days: HB.hours_sold_avg_days,
+        hour_samples: HB.hour_samples, hour_days: HB.hour_days,
+        hour_clock_from: HB.hour_clock_from, hour_clock_days: HB.hour_clock_days,
+        hour_clock_empty_today: HB.hour_clock_empty_today, hours_read_errors: HB.read_errors,
+        hours_note: 'eBay publishes traffic by DAY and by LISTING, and never by hour. The impressions and views clock is the portal\'s own: the running daily total is read every five minutes and each rise is credited to the hour it was seen in, so it shows when eBay REPORTED the traffic, which trails when the buyer actually looked, and it holds only the days since it was switched on. The sold bars are not a reading at all: they are the UK hour on each order\'s own timestamp, so they are exact for any day the order book covers.',
         from: dFrom, to: dTo, low_conversion: lows, today: ukDate(''),
         note: 'eBay counts the current day many hours behind, so today is always a part-day here and is kept out of the totals; every earlier day is settled. The portal re-reads the report hourly, and the per-listing table four times a day.' };
+    },
+  },
+
+  /* THE HOUR BLOCK, READABLE WITH THE SYNC KEY ALONE (owner, 2 Nov). The clock that fills these
+     bars was created today and runs from a cron, so "the page shows nothing" and "nothing has been
+     recorded yet" look identical from outside and only one of them is a fault. This answers that
+     from the key: when the clock started, which dates it holds, the three series for the day asked
+     about, the window's averages, and when trafficNow last ran and whether it last refused.
+     Authenticated exactly as backupDump is — auth 'sync', the SYNC_KEY and nothing else — and
+     deliberately NOT named adtool*, because the router role-gates that prefix before it has a user
+     to judge and a key-authed call has none.
+     IT NEVER WRITES, and it makes no schema: the hour block puts every read behind its own try, so
+     a database missing traffic_hour answers with that series empty and names the refusal in
+     read_errors instead of refusing the whole probe. Nothing here reaches eBay. */
+  adsTrafficProbe: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const env = ctx.env;
+      const okDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+      const today = ukDate('');
+      const day = okDate(p && p.date) ? String(p.date) : today;
+      const account = String((p && p.account) || '').trim().slice(0, 60);
+      /* the window the averages are taken over: the same thirty-one days the page's longest window
+         offers, so the figures here are the figures that page would draw. */
+      const from = ukDate(new Date(Date.now() - 30 * 86400000).toISOString());
+      const HB = await trafficHourBlock(env, { day, account, from, to: today, today });
+      const readErrors = (HB.read_errors || []).slice();
+      const q = async (what, sql, binds) => {
+        try {
+          const st = env.DB.prepare(sql);
+          const rs = await ((binds && binds.length) ? st.bind(...binds) : st).all();
+          return (rs && rs.results) || [];
+        } catch (e) { readErrors.push(what + ': ' + String((e && e.message) || e).slice(0, 160)); return []; }
+      };
+      const nowRow = (await q('db now', "SELECT datetime('now') AS now LIMIT 1"))[0];
+      /* WHO FILLS IT. trafficNow writes one row per account per cron tick, and perAccount records
+         its refusals in sync_state.last_error — a rate limit there is the single likeliest reason a
+         clock that is switched on holds nothing, and it is invisible on the page. */
+      const runs = await q('sync_state trafficNow',
+        "SELECT account, cursor, last_ok, last_error FROM sync_state WHERE job = 'trafficNow' ORDER BY account LIMIT 20");
+      const lastOk = runs.reduce((a, r) => (String(r.last_ok || '') > a ? String(r.last_ok || '') : a), '');
+      const sum = (rows, k) => (rows || []).reduce((a, r) => a + (Number(r[k]) || 0), 0);
+      return {
+        date: day, account: account || null, today, db_now: nowRow ? nowRow.now : null,
+        hour_clock_from: HB.hour_clock_from, hour_clock_days: HB.hour_clock_days,
+        hour_clock_empty_today: HB.hour_clock_empty_today,
+        hour_days: (HB.hour_days || []).slice(0, 14),
+        hour_days_held: (HB.hour_days || []).length,
+        day_series: {
+          impressions_views: HB.hours, sold: HB.hours_sold,
+          impressions_total: HB.hours.length ? sum(HB.hours, 'impressions') : null,
+          views_total: HB.hours.length ? sum(HB.hours, 'views') : null,
+          units_total: HB.hours_sold.length ? sum(HB.hours_sold, 'units') : null,
+          orders_total: HB.hours_sold.length ? sum(HB.hours_sold, 'orders') : null,
+          samples: HB.hour_samples,
+        },
+        month_back: { date: HB.hour_prev_date, impressions_views: HB.hours_prev, sold: HB.hours_sold_prev },
+        window: {
+          from: HB.hours_from, to: HB.hours_to,
+          hours_avg: HB.hours_avg, hours_avg_days: HB.hours_avg_days,
+          hours_sold_avg: HB.hours_sold_avg, hours_sold_avg_days: HB.hours_sold_avg_days,
+        },
+        traffic_now: { accounts: runs, last_ok: lastOk || null, refusals: runs.filter((r) => String(r.last_error || '') !== '') },
+        where_to_look: 'Account traffic, under By hour',
+        sent_to_ebay: false, writes: 'none', read_errors: readErrors,
+        computed_at: new Date().toISOString(),
+      };
     },
   },
 

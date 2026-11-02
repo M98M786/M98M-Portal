@@ -4845,6 +4845,225 @@ function run(argv) {
   t('roll-up engine: nothing in any of it reaches eBay — the whole slot reads the engine’s own tables and writes the engine’s own tables',
     !/api\.ebay\.com/.test(rbSrc) && !/apiz?\.ebay/.test(rbSrc) && !/fetch\(/.test(rbSrc) && /sent_to_ebay: false/.test(rbSrc), null);
 
+  /* ───────────────────────────────────────────────────────────────────────────────────────────────
+     (10) 2 NOV, ACCOUNT TRAFFIC. The owner asked for the comparison bars on views as well as
+     impressions, and for hour-to-hour bars that actually show something. The arithmetic behind the
+     drawing is sliced out of the page and CALLED, not matched: a bar of the wrong height, and a
+     month-back marker standing above the top of its own bar, are wrong figures shown to a manager
+     and neither is visible to a regex over the source.
+     ─────────────────────────────────────────────────────────────────────────────────────────────── */
+  const trSrc = rdFile('frontend/view-traffic.js');
+  const trPure = trSrc.slice(trSrc.indexOf('/* TRAFFIC-PURE-BEGIN'), trSrc.indexOf('/* TRAFFIC-PURE-END */'));
+  let TRF = null, trFail = null;
+  try { TRF = new Function(trPure + '\n return { trBarMax, trBarH, trMarkAt, trHourMerge };')(); }
+  catch (e) { trFail = String((e && e.message) || e); }
+  t('traffic: the page\u2019s own bar arithmetic is a block on its own that parses and can be called, with nothing of the document in it',
+    !trFail && TRF && typeof TRF.trBarMax === 'function' && typeof TRF.trBarH === 'function' &&
+    typeof TRF.trMarkAt === 'function' && typeof TRF.trHourMerge === 'function' &&
+    trPure.length > 1500 && !/document\.|\besc\(|VIEW_CSS|\$\(/.test(trPure), trFail || trPure.length);
+
+  const trRows = [{ date: '2026-11-01', impressions: 100, views: 10 }, { date: '2026-11-02', impressions: 50, views: 30 }];
+  const trCmp = (r) => (r.date === '2026-11-01' ? { impressions: 400, views: 5 } : null);
+  t('traffic: the scale covers the month-back level as well as the day, and each row takes its OWN maximum \u2014 one scale for both would press the views row flat against the floor',
+    TRF.trBarMax(trRows, 'impressions', trCmp) === 400 && TRF.trBarMax(trRows, 'views', trCmp) === 30 &&
+    TRF.trBarMax(trRows, 'impressions', null) === 100,
+    [TRF.trBarMax(trRows, 'impressions', trCmp), TRF.trBarMax(trRows, 'views', trCmp)]);
+  t('traffic: an empty window still scales to one, so no bar is ever a division by nought',
+    TRF.trBarMax([], 'impressions', trCmp) === 1 && TRF.trBarMax(null, 'views', null) === 1 &&
+    TRF.trBarMax([{ date: 'x' }], 'impressions', () => null) === 1, null);
+  t('traffic: a bar is its share of the chart, floored so a thin day is still something to point at and never drawn past the top',
+    TRF.trBarH(400, 400) === 100 && TRF.trBarH(200, 400) === 50 && TRF.trBarH(1, 400) === 4 &&
+    TRF.trBarH(0, 400) === 4 && TRF.trBarH(0, 400, 2) === 2 && TRF.trBarH(900, 400) === 100 &&
+    TRF.trBarH(null, 400) === 4,
+    [TRF.trBarH(1, 400), TRF.trBarH(0, 400, 2), TRF.trBarH(900, 400)]);
+  /* THE BUG THIS EXISTS FOR. The marker belongs at (month back / max) of the CHART, but it is drawn
+     inside a bar that is only trBarH of that chart. Done as then/now it overshoots the chart every
+     time the floor kicks in, and the dashed line lands above the top of the column it belongs to. */
+  t('traffic: the month-back marker is placed against the CHART and then converted into the bar\u2019s own frame, so the height floor cannot push it off the top',
+    TRF.trMarkAt(200, 400, 50) === 100 && TRF.trMarkAt(100, 400, 25) === 100 && TRF.trMarkAt(100, 400, 4) === 625 &&
+    TRF.trMarkAt(0, 400, 50) === 0 && TRF.trMarkAt(500, 400, 0) === 0 && TRF.trMarkAt(1e9, 1, 1) === 10000,
+    [TRF.trMarkAt(100, 400, 4), TRF.trMarkAt(1e9, 1, 1)]);
+  t('traffic: wherever the marker ends up, its height measured against the CHART is the month-back figure\u2019s own share of the chart',
+    (() => {
+      for (const pair of [[3, 37], [1, 400], [400, 1], [250, 250], [0, 90]]) {
+        const max = 400, h = TRF.trBarH(pair[0], max), at = TRF.trMarkAt(pair[1], max, h);
+        if (Math.abs(h * at / 100 - pair[1] / max * 100) > 0.6) return false;
+      }
+      return true;
+    })(), null);
+
+  /* THE THREE HOUR SERIES. traffic_hour was created on 2 Nov and holds nothing earlier; the order
+     book holds every hour of its whole history. A source with nothing for the day must leave ITS
+     series missing in all twenty-four slots, because a nought is a reading and "we have none" is
+     not one, and drawing them as the same bar is what made the owner's page look broken. */
+  const trClock = [{ hour: 8, impressions: 90, views: 9, samples: 3 }, { hour: 9, impressions: 110, views: 11, samples: 4 }];
+  const trSold = [{ hour: 8, orders: 2, units: 3 }, { hour: 20, orders: 1, units: 1 }];
+  const trM = TRF.trHourMerge(trClock, trSold, { upto: 23 });
+  t('traffic: the three hour series merge into twenty-four slots in clock order, each hour carrying all three',
+    trM.slots.length === 24 && trM.slots.every((s, i) => s.hour === i) &&
+    trM.slots[8].impressions === 90 && trM.slots[8].views === 9 && trM.slots[8].sold === 3 && trM.slots[8].orders === 2 &&
+    trM.slots[9].impressions === 110 && trM.slots[20].sold === 1,
+    [trM.slots.length, trM.slots[8], trM.slots[20]]);
+  t('traffic: inside a day the source DOES hold, an hour with no row is a real nought \u2014 both sources record every unit of their series against an hour',
+    trM.slots[0].impressions === 0 && trM.slots[0].views === 0 && trM.slots[0].sold === 0 && trM.slots[0].orders === 0 &&
+    trM.totals.impressions === 200 && trM.totals.sold === 4 && trM.totals.samples === 7, [trM.slots[0], trM.totals]);
+  t('traffic: a source holding NOTHING for the day leaves its own series missing in every slot, and missing is never nought',
+    (() => {
+      const noClock = TRF.trHourMerge([], trSold, { upto: 23 });
+      const noSold = TRF.trHourMerge(trClock, null, { upto: 23 });
+      return noClock.slots.every(s => s.impressions === null && s.views === null && s.samples === null) &&
+        noClock.has.impressions === false && noClock.has.views === false && noClock.totals.impressions === null &&
+        noClock.totals.views === null && noClock.slots[20].sold === 1 && noClock.has.sold === true &&
+        noSold.slots.every(s => s.sold === null && s.orders === null) && noSold.has.sold === false &&
+        noSold.totals.sold === null && noSold.slots[8].impressions === 90;
+    })(), null);
+  t('traffic: an hour that has not come round yet holds no reading either, and a row the source really HAS is shown whatever the viewer\u2019s clock says',
+    (() => {
+      const T = TRF.trHourMerge(trClock, trSold, { upto: 9 });
+      return T.slots[10].impressions === null && T.slots[10].sold === null &&
+        T.slots[9].impressions === 110 && T.slots[0].impressions === 0 &&
+        /* the 20:00 order is an order at 20:00 even on a machine that thinks it is nine in the morning */
+        T.slots[20].sold === 1 && T.slots[20].orders === 1 && T.slots[20].impressions === null;
+    })(), null);
+  t('traffic: twenty-four hours is the whole of it \u2014 an hour outside the clock is dropped rather than drawn as a twenty-fifth bar',
+    (() => {
+      const odd = TRF.trHourMerge([{ hour: 24, impressions: 9 }, { hour: -1, impressions: 9 }], null, {});
+      const dflt = TRF.trHourMerge(trClock, trSold);
+      return odd.slots.length === 24 && odd.has.impressions === false && odd.totals.impressions === null &&
+        dflt.slots.length === 24 && dflt.slots[23].impressions === 0;
+    })(), null);
+
+  /* the engine half: the reads behind those series */
+  const trHB = src.slice(src.indexOf('async function trafficHourBlock(env, o) {'), src.indexOf('async function trafficNow(env) {'));
+  const trBoard = src.slice(src.indexOf('  trafficBoard: {'), src.indexOf('  /* THE HOUR BLOCK, READABLE WITH THE SYNC KEY ALONE'));
+  /* the probe WITH the note above it: the reason it is authenticated the way it is, and the reason
+     it is not named adtool*, are written there and are the part a reader needs. */
+  const trProbe = src.slice(src.indexOf('  /* THE HOUR BLOCK, READABLE WITH THE SYNC KEY ALONE'), src.indexOf("  /* THE ORDERS BOARD (Hasib's item 2"));
+  t('traffic engine: every hour read is BOUNDED \u2014 an hour grouping can only answer twenty-four rows, the day list is capped, and the two single-figure reads ask for one',
+    (trHB.match(/LIMIT 24/g) || []).length === 4 && (trHB.match(/LIMIT 1/g) || []).length === 2 &&
+    /LIMIT ' \+ TRAFFIC_HOUR_DAYS_SHOWN/.test(trHB) && /const TRAFFIC_HOUR_DAYS_SHOWN = 30;/.test(src) &&
+    !/SELECT \* FROM/.test(trHB),
+    [(trHB.match(/LIMIT 24/g) || []).length, (trHB.match(/LIMIT 1/g) || []).length]);
+  t('traffic engine: the hour block writes nothing, makes no schema and reaches nothing outside the database, and every read goes through the one helper that records a refusal',
+    (trHB.match(/env\.DB\.prepare\(/g) || []).length === 1 && /readErrors\.push\(what \+ ': '/.test(trHB) &&
+    !/\b(INSERT|UPDATE|DELETE|CREATE|ALTER)\b/.test(trHB) && !/fetch\(/.test(trHB) &&
+    !/ensureTrafficSchema/.test(trHB) && /sent_to_ebay: false/.test(trHB), null);
+  t('traffic engine: the sold series comes from the order book\u2019s own hour and its own column names, through the aliased read the SQL checker can judge',
+    /SELECT o\.local_hour AS hour, COUNT\(\*\) AS orders, SUM\(COALESCE\(o\.qty, 1\)\) AS units/.test(trHB) &&
+    /FROM adtool_orders o /.test(trHB) && /o\.status <> 'CANCELLED'/.test(trHB) &&
+    /ROUND\(SUM\(COALESCE\(o\.sale_price, 0\)\), 2\) AS revenue/.test(trHB) && !/o\.sold\b/.test(trHB), null);
+  t('traffic engine: a day eBay is still counting is kept out of BOTH averages and out of the day count that divides them, or every hour\u2019s average would be dragged down by the part of today still to come',
+    /const lastSettled = to < today \? to : yday;/.test(trHB) &&
+    /date >= \?1 AND date <= \?2/.test(trHB) && /o\.local_date >= \?1 AND o\.local_date <= \?2/.test(trHB) &&
+    /const spanDays = from <= lastSettled/.test(trHB), null);
+  t('traffic engine: the clock\u2019s average is divided by the days the CLOCK holds and the order book\u2019s by the settled days of the window, and an average with no days behind it is null rather than nought',
+    /const per = \(v, n\) => n > 0 \? Math\.round\(\(Number\(v\) \|\| 0\) \/ n \* 10\) \/ 10 : null;/.test(trHB) &&
+    /const hoursAvg = avgDays > 0 \?/.test(trHB) && /const hoursSoldAvg = spanDays > 0 \?/.test(trHB) &&
+    /: null;/.test(trHB) && /hours_avg_days: avgDays \|\| null/.test(trHB) &&
+    /hour_samples: hours\.length \? sum\(hours, 'samples'\) : null/.test(trHB), null);
+  t('traffic engine: an empty clock today is SAID, not acted on \u2014 moving the day under the reader would leave them looking at figures they never asked for',
+    /hour_clock_empty_today: !!\(todayEmpty && earlierHeld\)/.test(trHB) &&
+    /const todayEmpty = day === today &&/.test(trHB) && /const earlierHeld = /.test(trHB) &&
+    /const hourDay = okDate\(p\.hour_date\) \? String\(p\.hour_date\) : ukDate\(''\);/.test(trBoard), null);
+  t('traffic: the page and the key-authed probe read the hour block through ONE function, so the screen and the evidence a manager is handed cannot disagree about whether an hour holds anything',
+    (src.match(/async function trafficHourBlock\(/g) || []).length === 1 &&
+    (src.match(/await trafficHourBlock\(/g) || []).length === 2 &&
+    /const HB = await trafficHourBlock\(ctx\.env, \{ day: hourDay, account, from: dFrom, to: dTo, today: ukDate\(''\) \}\);/.test(trBoard) &&
+    /const HB = await trafficHourBlock\(env, \{ day, account, from, to: today, today \}\);/.test(trProbe) &&
+    !/FROM traffic_hour/.test(trBoard) && !/FROM traffic_hour/.test(trProbe), null);
+  /* THE RECONCILIATION. The engine half and the page half of this change were built in one file
+     each and each reads green on its own. A name the engine does not send renders as an empty cell,
+     which a reader takes for a nought, so every field is held from BOTH sides: the engine really
+     sends it, and the page really reads it. */
+  t('traffic board: the three new series, the two averages and what the clock holds all reach the page under the names the page really reads them by',
+    ['hours_sold: HB.hours_sold', 'hours_sold_prev: HB.hours_sold_prev', 'hours_avg: HB.hours_avg',
+     'hours_avg_days: HB.hours_avg_days', 'hours_sold_avg: HB.hours_sold_avg',
+     'hours_sold_avg_days: HB.hours_sold_avg_days', 'hour_days: HB.hour_days',
+     'hour_clock_from: HB.hour_clock_from', 'hour_clock_days: HB.hour_clock_days',
+     'hour_samples: HB.hour_samples', 'hour_clock_empty_today: HB.hour_clock_empty_today']
+      .every(k => trBoard.indexOf(k) > 0) &&
+    ['d.hours_sold', 'd.hours_sold_prev', 'd.hours_avg', 'd.hours_avg_days', 'd.hours_sold_avg',
+     'd.hours_sold_avg_days', 'd.hour_clock_from', 'd.hour_clock_days', 'd.hour_samples',
+     'd.hour_clock_empty_today', 'd.hour_prev_date', 'd.hour_date']
+      .every(k => trSrc.indexOf(k) > 0),
+    ['hours_sold: HB.hours_sold', 'hour_clock_days: HB.hour_clock_days'].filter(k => trBoard.indexOf(k) < 0)
+      .concat(['d.hours_sold_avg_days', 'd.hour_clock_days'].filter(k => trSrc.indexOf(k) < 0)));
+  t('traffic probe: the sync key and nothing else, never named adtool* because the router role-gates that prefix before it has a user to judge',
+    /\n  adsTrafficProbe: \{\n    auth: 'sync', fn: async \(p, ctx\) => \{/.test(src) &&
+    !/\n  adtoolTraffic/.test(src) && /gate like backupDump|Authenticated exactly as backupDump is/.test(trProbe) &&
+    /auth: 'sync', fn: async \(p, ctx\) => \{/.test(src.slice(src.indexOf('  backupDump: {'), src.indexOf('  backupDump: {') + 80)), null);
+  t('traffic probe: it writes nothing, makes no schema, reaches nothing outside the database, and says so in the answer',
+    !/\b(INSERT|UPDATE|DELETE|CREATE|ALTER)\b/.test(trProbe) && !/fetch\(/.test(trProbe) &&
+    !/ensureTrafficSchema/.test(trProbe) && /sent_to_ebay: false, writes: 'none', read_errors: readErrors/.test(trProbe), null);
+  t('traffic probe: it answers the only questions worth asking from outside \u2014 when the clock started, which dates it holds, the day\u2019s three series, the window\u2019s averages, and whether the job that fills it last refused',
+    /hour_clock_from: HB\.hour_clock_from/.test(trProbe) && /\(HB\.hour_days \|\| \[\]\)\.slice\(0, 14\)/.test(trProbe) &&
+    /day_series: \{/.test(trProbe) && /impressions_views: HB\.hours, sold: HB\.hours_sold/.test(trProbe) &&
+    /month_back: \{ date: HB\.hour_prev_date/.test(trProbe) && /hours_avg: HB\.hours_avg/.test(trProbe) &&
+    /hours_sold_avg: HB\.hours_sold_avg/.test(trProbe) &&
+    /WHERE job = 'trafficNow' ORDER BY account LIMIT 20/.test(trProbe) &&
+    /refusals: runs\.filter\(\(r\) => String\(r\.last_error \|\| ''\) !== ''\)/.test(trProbe) &&
+    /db_now: nowRow \? nowRow\.now : null/.test(trProbe), null);
+
+  /* the page half */
+  t('traffic page: BOTH bar rows are drawn, off ONE helper, after the tiles and the so-far-today line \u2014 the owner asked for the comparison bars of views as well as impressions',
+    (trSrc.match(/trBarRow\(/g) || []).length === 3 &&
+    /trBarRow\('Impressions by day', 'impressions', 'imp', chartDays, cmpOf, today\)/.test(trSrc) &&
+    /trBarRow\('Views by day', 'views', 'views', chartDays, cmpOf, today\)/.test(trSrc) &&
+    trSrc.indexOf('So far today (') < trSrc.indexOf("trBarRow('Impressions by day'") &&
+    trSrc.indexOf("trBarRow('Impressions by day'") < trSrc.indexOf("trBarRow('Views by day'") &&
+    /* and the row's own arithmetic is gone from the paint, so there is one implementation of it */
+    !/var max = Math\.max\.apply/.test(trSrc), (trSrc.match(/trBarRow\(/g) || []).length);
+  t('traffic page: both rows carry the dashed month-back marker and the same tooltip shape, and neither prints a percentage against a day eBay is still counting',
+    (() => {
+      const row = trSrc.slice(trSrc.indexOf('  function trBarRow('), trSrc.indexOf('\n  }', trSrc.indexOf('  function trBarRow(')));
+      return /var max = trBarMax\(rows, key, function \(r\) \{ return cmpOf\(r\.date\); \}\);/.test(row) &&
+        /var hPct = trBarH\(r\[key\], max\);/.test(row) &&
+        /trMarkAt\(c\[key\], max, hPct\)/.test(row) &&
+        /var pct = \(c && c\[key\] && !isPart\) \?/.test(row) &&
+        /pct === null \? '' :/.test(row) && /isPart \? ' tr-part' : ''/.test(row) &&
+        /trN\(c\[key\]\) \+ ' ' \+ word/.test(row);
+    })(), null);
+  t('traffic page: the hour block opens on Sold while the traffic clock has nothing for the day and on Impressions once it has, so it is never the empty box the owner was shown',
+    /var ser = TR\.hour_series \|\| \(CUR\.totals\.impressions \? 'impressions' : 'sold'\);/.test(trSrc) &&
+    /if \(!CUR\.has\[ser\]\) \{ ser = CUR\.has\.impressions \? 'impressions' : 'sold'; \}/.test(trSrc) &&
+    /trHourMerge\(d\.hours, d\.hours_sold,/.test(trSrc) &&
+    /trHourMerge\(d\.hours_prev, d\.hours_sold_prev,/.test(trSrc) &&
+    /trHourMerge\(d\.hours_avg, d\.hours_sold_avg,/.test(trSrc) &&
+    /* the old page refused to draw anything at all unless the clock held impressions */
+    !/var hAny = hrs\.some/.test(trSrc), null);
+  t('traffic page: the picker above the bars offers the day, yesterday and the window\u2019s average, and only a change of DAY asks the engine again',
+    /data-tr-hp="/.test(trSrc) && /\['today', 'Today'\], \['yesterday', 'Yesterday'\], \['avg', 'Average over the window'\]/.test(trSrc) &&
+    /if \(want === String\(\(TR\.data \|\| \{\}\)\.hour_date \|\| ''\)\) \{ trPaint\(\); \} else \{ trLoad\(\); \}/.test(trSrc) &&
+    /payload\.hour_date = TR\.hour_pick === 'yesterday' \? trShift\(ukToday\(\), -1\) : ukToday\(\);/.test(trSrc) &&
+    /data-tr-hs="/.test(trSrc) && /TR\.hour_series = String\(this\.getAttribute\('data-tr-hs'\) \|\| ''\);\n        trPaint\(\);/.test(trSrc), null);
+  t('traffic page: an hour with no reading behind it is hatched and says so in words, never drawn or written as a nought',
+    /class="tr-hb' \+ \(miss \? ' tr-none' : ''\)/.test(trSrc) &&
+    /var v = s\[ser\], miss = \(v === null\);/.test(trSrc) &&
+    /x === null \|\| x === undefined \? 'not recorded'/.test(trSrc) &&
+    /\.tr-hb\.tr-none\{background:repeating-linear-gradient/.test(trSrc), null);
+  t('traffic page: the line under the bars says what each series is off the engine\u2019s own sentence and takes every figure beside it from the answer, so no date and no count is typed into the copy',
+    (() => {
+      const line = trSrc.slice(trSrc.indexOf('h += \'<div class="tr-src">\''), trSrc.indexOf('/* review 3: account-to-account'));
+      const note = src.slice(src.indexOf("hours_note: 'eBay publishes"), src.indexOf("\n", src.indexOf("hours_note: 'eBay publishes")));
+      return /esc\(String\(d\.hours_note \|\| ''\)\)/.test(line) && /d\.hour_clock_from/.test(line) &&
+        /d\.hour_samples == null \? 'not recorded'/.test(line) && !/\d/.test(line) &&
+        /* and the engine's sentence no longer names the day the clock was switched on, because the
+           answer now carries that date and a literal would go stale the moment it moved */
+        note.length > 300 && !/\u2014/.test(note) && !/\d/.test(note) && /and never by hour/.test(note);
+    })(), null);
+  t('traffic page: every listing row still goes through the portal\u2019s standard listing cell, so the History link is on all of them',
+    (trSrc.match(/adtProductCell\(r\)/g) || []).length === 2 && !/<td>' \+ esc\(r\.title/.test(trSrc), null);
+  t('traffic page: this file is spliced into BOTH portals, so every selector it adds carries its own tr- prefix and nothing is borrowed from another file',
+    (() => {
+      const css = trSrc.slice(trSrc.indexOf('VIEW_CSS.push('), trSrc.indexOf('function trN('));
+      const sels = css.match(/'\.[a-zA-Z][a-zA-Z0-9-]*/g) || [];
+      return sels.length > 14 && sels.every(s => s.indexOf("'.tr-") === 0);
+    })(), (trSrc.slice(trSrc.indexOf('VIEW_CSS.push('), trSrc.indexOf('function trN(')).match(/'\.[a-zA-Z][a-zA-Z0-9-]*/g) || []).filter(s => s.indexOf("'.tr-") !== 0));
+  t('traffic page: the paint is a step of its own, so a reader flicking between the three series costs no engine call and the two-minute refresh still goes through the quiet path',
+    /function trPaint\(\) \{/.test(trSrc) && /TR\.data = d \|\| \{\};/.test(trSrc) &&
+    (trSrc.match(/trPaint\(\)/g) || []).length >= 4 && /function trWire\(box\) \{/.test(trSrc) &&
+    /trWire\(box\);/.test(trSrc) && /adtPoll\('trBody', 120000, function \(\) \{ return trLoad\(true\); \}\)/.test(trSrc), null);
+
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
   return lines.join('\n') + '\n' + (passed === results.length ? 'PASS ' : 'FAIL ') + passed + '/' + results.length;
