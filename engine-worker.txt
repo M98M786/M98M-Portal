@@ -28397,6 +28397,10 @@ const ROUTES = {
            CPC-only listing as unpromoted and put 27 ABRT listings into the General campaign too —
            the red-line duplicate (and double billing). Removing a General ad restores CPC-only. */
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_delete_ads_by_listing_id$/,
+        /* 3 Nov (owner): "move them to dynamic with 15% cap" — the campaign-level settings updates
+           (update_ad_rate_strategy sets dynamicAdRatePreferences.adRateCapPercent). Config only;
+           an update_* subpath can change a campaign's own settings, never another seller's data. */
+        /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/update_[a-z_]+$/,
         /^\/sell\/marketing\/v1\/ad_campaign\/find_campaign_by_ad_reference(\?|$)/,
         /* 31 Oct (owner, §4): ONE video read, so the upload day behind a product video can be looked
            up by hand the same way the sweep looks it up. READ ONLY and GET only, enforced below.
