@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261104-1310';
+var BUILD = '20261104-1313';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -27007,6 +27007,10 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       .catch(function (e) { var b = $('o2Extras'); if (b) { b.innerHTML = '<div class="empty">These headline numbers could not load: ' + esc((e && e.message) || 'no answer') + '</div>'; } });
     api('fundsSummary', {}).then(function (d) { O.funds = d || {}; oPaintMoney(); })
       .catch(function () { O.funds = { accounts: [] }; oPaintMoney(); });
+    /* 4 Nov: register reads queue one at a time per tab (shell truthPage). The chosen-range read
+       feeds the Collective block, highest on the page, so it goes into the lane FIRST — month
+       (VAT card) and yesterday (profit strip) follow. */
+    oPaintKpis(oRange());
     /* 4 Nov: the ratings strip reads accountHealth — it used to wait on the month register read
        and vanished with it ("Loading…" for ever). It loads on its own now. */
     oPaintRatings();
@@ -27223,12 +27227,27 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
        rows coverage. Ads-family tiles keep the old path until the ads module flips (Phase 4). */
     var tKey = 't:' + r.from + '|' + r.to + '|' + O.acct;
     if (O.truthRangeKey !== tKey) {
-      O.truthRangeKey = tKey; O.truthRange = null;
-      truthPage(oAcctParam({ from: r.from, to: r.to })).then(function (d) {
-        if (O.truthRangeKey !== tKey) { return; }
-        O.truthRange = d;
-        oPaintKpis(r);
-      }).catch(function () {});
+      /* 4 Nov: the register is the headline and the ONLY path until it has genuinely failed
+         twice. The old code fired the P&L brain's two heavy scans at the same moment as the
+         register read, which tipped D1 into "overloaded", and a failed register read was never
+         asked again — the block then sat on an error for the rest of the visit. */
+      O.truthRangeKey = tKey; O.truthRange = null; O.truthRangeFailed = '';
+      O.pnlKey = ''; O.pnlCur = null; O.pnlPrev = null;
+      box.innerHTML = '<div class="empty">Reading the money register for ' + esc(r.label) + '…</div>';
+      var askRegister = function (attempt) {
+        truthPage(oAcctParam({ from: r.from, to: r.to })).then(function (d) {
+          if (O.truthRangeKey !== tKey) { return; }
+          O.truthRange = d;
+          oPaintKpis(r);
+        }).catch(function () {
+          if (O.truthRangeKey !== tKey) { return; }
+          if (!attempt) { setTimeout(function () { askRegister(1); }, 10000); return; }
+          O.truthRangeFailed = tKey;   // the P&L brain takes over below
+          oPaintKpis(r);
+        });
+      };
+      askRegister(0);
+      return;
     }
     if (O.truthRange && O.truthRange.metrics) {
       var M = O.truthRange.metrics;
@@ -27290,30 +27309,25 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       }
       return;
     }
-    /* old path renders until the register answers · the key carries the account so switching
-       accounts re-computes rather than showing the previous scope's P&L */
+    /* the register has not answered yet (or its retry is pending): keep the placeholder */
+    if (O.truthRangeFailed !== tKey) { return; }
+    /* fallback path — the P&L brain — only once the register has failed twice · the key carries
+       the account so switching accounts re-computes rather than showing the previous scope's P&L */
     var key = r.from + '|' + r.to + '|' + O.acct;
     if (O.pnlKey !== key) {
       O.pnlKey = key; O.pnlCur = null; O.pnlPrev = null;
-      box.innerHTML = '<div class="empty">Computing with the P&L brain…</div>';
+      box.innerHTML = '<div class="empty">The money register did not answer — computing with the P&L brain…</div>';
       var span0 = Math.round((new Date(r.to + 'T12:00:00Z') - new Date(r.from + 'T12:00:00Z')) / 86400000) + 1;
-      /* 4 Nov: the register (pageMetrics) is the headline and usually answers within ~10 s; the
-         P&L brain is only the fallback. Firing its two heavy scans in the SAME ten seconds as the
-         register and every other feed is what tipped D1 into "overloaded" and emptied three cards
-         — so the fallback now waits, and never runs at all once the register has answered. */
-      setTimeout(function () {
-        if (O.pnlKey !== key || (O.truthRange && O.truthRange.metrics)) { return; }
-        api('itemPnl', oAcctParam({ from: r.from, to: r.to })).then(function (d) {
-          if (O.pnlKey !== key) { return; }
-          O.pnlCur = (d && d.total) || {};
-          oPaintKpis(r);
-        }).catch(function (e) { if (O.pnlKey === key && !(O.truthRange && O.truthRange.metrics)) { oFeedFailed('o2Kpis', 'the P&L brain', e); } });
-        api('itemPnl', oAcctParam({ from: dShift(r.from, -span0), to: dShift(r.from, -1) })).then(function (d) {
-          if (O.pnlKey !== key) { return; }
-          O.pnlPrev = (d && d.total) || {};
-          oPaintKpis(r);
-        }).catch(function () {});
-      }, 12000);
+      api('itemPnl', oAcctParam({ from: r.from, to: r.to })).then(function (d) {
+        if (O.pnlKey !== key) { return; }
+        O.pnlCur = (d && d.total) || {};
+        oPaintKpis(r);
+      }).catch(function (e) { if (O.pnlKey === key && !(O.truthRange && O.truthRange.metrics)) { oFeedFailed('o2Kpis', 'the P&L brain', e); } });
+      api('itemPnl', oAcctParam({ from: dShift(r.from, -span0), to: dShift(r.from, -1) })).then(function (d) {
+        if (O.pnlKey !== key) { return; }
+        O.pnlPrev = (d && d.total) || {};
+        oPaintKpis(r);
+      }).catch(function () {});
       return;
     }
     var cur = O.pnlCur;
