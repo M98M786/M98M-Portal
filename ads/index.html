@@ -436,12 +436,19 @@ function fillAccountSelect(sel, current, onchange){
    truthPage() and render metric values; the chip shows the verifier's latest verdict. */
 var TRUTH_FLAGS = { money: 'live', orders: 'live', ads: 'live', catalogue: 'live', standards: 'live', tasks: 'live', inbox: 'live', hunting: 'live' };
 var TRUTH_CACHE = {};
+/* 4 Nov (owner: ratings "Loading…", VAT "filling…", yesterday's profit "did not answer"): the
+   Business overview fired THREE register reads at once (month, yesterday, the chosen range) on
+   top of its other feeds; each is an 8-second D1 scan, and together they tipped D1 into
+   "overloaded", so all three failed and three cards stayed empty. One lane per tab: register
+   reads queue behind each other, the engine's 30-second route cache answers repeats. */
+var TRUTH_LANE = Promise.resolve();
 function truthPage(scope){
   scope = scope || {};
   var key = JSON.stringify(scope);
   var hit = TRUTH_CACHE[key];
   if (hit && Date.now() - hit.at < 45000) { return hit.p; }
-  var p = api('pageMetrics', scope);
+  var p = TRUTH_LANE.then(function(){ return api('pageMetrics', scope); });
+  TRUTH_LANE = p.catch(function(){});
   TRUTH_CACHE[key] = { at: Date.now(), p: p };
   p.catch(function(){ delete TRUTH_CACHE[key]; });
   return p;
@@ -867,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261104-1227';
+var BUILD = '20261104-1301';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives

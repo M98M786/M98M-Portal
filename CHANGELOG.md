@@ -17,6 +17,12 @@ doesn't reflect any result." The chips only ever re-computed two sections far be
   guarded so a slow reply never paints over a newer click, and an engine build without window
   support says so instead of showing today's count under a 7-day heading.
 - Sections that stay pinned say so in their hint: "Right now" (live today), "Today & yesterday".
+- Same day, second pass (owner: ratings "Loading…", VAT "filling…", five funds rows "—"): the overview
+  fired three `pageMetrics` register reads at once (8 s D1 scans each) and tipped D1 into "overloaded";
+  `fundsSummary` then froze five refusals in KV for ten minutes. Shell `truthPage` now runs register
+  reads one at a time per tab; the overview loads ratings on their own, retries each register read
+  once and says what failed; `fundsSummary` keeps good rows, re-asks refused accounts within a minute
+  (one retry on a D1 overload) and shows the last good figure marked stale instead of a dash.
 
 ## 2026-10-03 - TRACKING FETCH: a not-mine mark no longer hides the order from its owner
 

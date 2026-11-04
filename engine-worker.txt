@@ -26724,27 +26724,50 @@ const ROUTES = {
      HOT so the overview never hammers eBay; force:true refetches. */
   fundsSummary: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      if (!p.force) {
-        const hit = await ctx.env.HOT.get('funds:summary', 'json');
-        if (hit && Date.now() - hit.at < 600000) return hit;
-      }
-      const out = { at: Date.now(), accounts: [] };
+      /* 4 Nov (owner: five accounts showing "—" on Money): one evening the Business overview's
+         burst of reads tipped D1 into "overloaded" exactly while this ran, five accounts came
+         back as errors, and that answer was then served from KV for ten minutes — a refusal
+         frozen as if it were a figure. Now: a good row is kept and reused for the full ten
+         minutes; a refused account is re-asked (after one short retry on a D1 overload) on the
+         next read a minute later; and an account that still refuses keeps its LAST GOOD figure,
+         marked stale, rather than a dash. */
+      const hit = p.force ? null : await ctx.env.HOT.get('funds:summary', 'json');
+      const prevBy = {};
+      for (const a of ((hit && hit.accounts) || [])) prevBy[a.account] = a;
+      const age = hit ? Date.now() - Number(hit.at || 0) : Infinity;
+      const fresh = hit && age < (hit.partial ? 60000 : 600000);
+      if (fresh && !hit.partial) return hit;
+      const out = { at: Date.now(), accounts: [], partial: false };
+      const g = (x) => (x && x.value != null ? Math.round(Number(x.value) * 100) / 100 : 0);
+      const readOne = async (acct) => {
+        const tok = await ebayAccessToken(ctx.env, acct);
+        const r = await ebaySignedFetch(ctx.env, 'https://apiz.ebay.com/sell/finances/v1/seller_funds_summary', tok, {});
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        return { account: acct,
+          currency: (j.availableFunds && j.availableFunds.currency) || (j.totalFunds && j.totalFunds.currency) || 'GBP',
+          available: g(j.availableFunds), processing: g(j.processingFunds),
+          on_hold: g(j.fundsOnHold), total: g(j.totalFunds), as_of: new Date().toISOString() };
+      };
       for (const acct of await apiAccounts(ctx.env)) {
-        try {
-          const tok = await ebayAccessToken(ctx.env, acct);
-          const r = await ebaySignedFetch(ctx.env, 'https://apiz.ebay.com/sell/finances/v1/seller_funds_summary', tok, {});
-          if (!r.ok) { out.accounts.push({ account: acct, error: 'HTTP ' + r.status }); continue; }
-          const j = await r.json();
-          const g = (x) => (x && x.value != null ? Math.round(Number(x.value) * 100) / 100 : 0);
-          out.accounts.push({
-            account: acct,
-            currency: (j.availableFunds && j.availableFunds.currency) || (j.totalFunds && j.totalFunds.currency) || 'GBP',
-            available: g(j.availableFunds), processing: g(j.processingFunds),
-            on_hold: g(j.fundsOnHold), total: g(j.totalFunds),
-          });
-        } catch (e) { out.accounts.push({ account: acct, error: String(e && e.message || e).slice(0, 120) }); }
+        const prev = prevBy[acct];
+        if (fresh && prev && !prev.error && !prev.stale) { out.accounts.push(prev); continue; }
+        let row = null, err = '';
+        for (let attempt = 0; attempt < 2 && !row; attempt++) {
+          try { row = await readOne(acct); }
+          catch (e) {
+            err = String(e && e.message || e).slice(0, 120);
+            if (attempt === 0 && /overloaded|too many/i.test(err)) await new Promise((res) => setTimeout(res, 1500));
+            else break;
+          }
+        }
+        if (row) { out.accounts.push(row); continue; }
+        out.partial = true;
+        const lastGood = prev && !prev.error && prev.total != null ? prev : null;
+        if (lastGood) out.accounts.push(Object.assign({}, lastGood, { stale: true, stale_reason: err }));
+        else out.accounts.push({ account: acct, error: err });
       }
-      await ctx.env.HOT.put('funds:summary', JSON.stringify(out), { expirationTtl: 3600 });
+      await ctx.env.HOT.put('funds:summary', JSON.stringify(out), { expirationTtl: 86400 });
       return out;
     },
   },

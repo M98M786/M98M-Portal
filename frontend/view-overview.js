@@ -232,22 +232,41 @@
       .catch(function (e) { var b = $('o2Extras'); if (b) { b.innerHTML = '<div class="empty">These headline numbers could not load: ' + esc((e && e.message) || 'no answer') + '</div>'; } });
     api('fundsSummary', {}).then(function (d) { O.funds = d || {}; oPaintMoney(); })
       .catch(function () { O.funds = { accounts: [] }; oPaintMoney(); });
-    truthPage(oAcctParam({ from: pkDayStr(0).slice(0, 8) + '01', to: pkDayStr(0) }))
-      .then(function (d) { O.truth = d || null; oPaintMoney(); oPaintKpis(oRange()); oPaintRatings(); })
-      .catch(function () { O.truth = null; oPaintMoney(); });
+    /* 4 Nov: the ratings strip reads accountHealth — it used to wait on the month register read
+       and vanished with it ("Loading…" for ever). It loads on its own now. */
+    oPaintRatings();
+    oTruthMonth(0);
     /* Owner (18 Oct, both screenshots side by side): "yesterday's profit per account is showing a
        wrong number — fix it, take it from Sales analysis." One day, the same scope, the SAME
        truthPage call Sales analysis makes for its Yesterday chip; oPaintToday sums it exactly the
        way sxAcctAgg does. The month-wide call above is not reused for this: on the 1st of a month
        it does not contain yesterday at all. */
-    var ydY = dShift(ukToday(), -1);
-    truthPage(oAcctParam({ from: ydY, to: ydY }))
-      .then(function (d) { O.truthY = d || { failed: true }; oPaintToday(); })
-      .catch(function () { O.truthY = { failed: true }; oPaintToday(); });
+    oTruthYday(0);
     api('teamPerformance', { period: 'week' }).then(oPaintStaff).catch(function () {
       var b = $('o2Staff');
       if (b) { b.innerHTML = '<div class="o-card"><div class="empty">The staff ledger did not answer just now — <a href="#" data-o2-nav="team" style="font-weight:800">Team performance</a> has the full desk.</div></div>'; }
     });
+  }
+
+  /* 4 Nov: the two register reads the page depends on, each with ONE retry a few seconds later
+     (the shell now queues register reads, so a retry lands on a quieter database) and an honest
+     message on the card when the retry fails too — never a "filling…" that fills nothing. */
+  function oTruthMonth(attempt) {
+    truthPage(oAcctParam({ from: pkDayStr(0).slice(0, 8) + '01', to: pkDayStr(0) }))
+      .then(function (d) { O.truth = d || null; O.truthErr = ''; oPaintMoney(); oPaintKpis(oRange()); })
+      .catch(function (e) {
+        if (!attempt) { setTimeout(function () { oTruthMonth(1); }, 7000); return; }
+        O.truth = null; O.truthErr = String((e && e.message) || 'no answer from the Engine'); oPaintMoney();
+      });
+  }
+  function oTruthYday(attempt) {
+    var ydY = dShift(ukToday(), -1);
+    truthPage(oAcctParam({ from: ydY, to: ydY }))
+      .then(function (d) { O.truthY = d || { failed: true }; oPaintToday(); })
+      .catch(function () {
+        if (!attempt) { setTimeout(function () { oTruthYday(1); }, 9000); return; }
+        O.truthY = { failed: true }; oPaintToday();
+      });
   }
 
   /* 30 Aug (owner): "show the amount currently in the account — your funds" + "VAT I need to
@@ -302,9 +321,11 @@
           '<div class="mini-rows">' + fa.map(function (a) {
             return '<div class="mini-row"><span class="n">' + esc(oS(a.account)) + '</span>' +
               '<span class="b"><i style="width:' + (tTot ? Math.round(oN(a.total) / tTot * 100) : 0) + '%"></i></span>' +
-              '<span class="v">' + (a.error ? '<span style="color:var(--text-3)" title="' + esc(oS(a.error)) + '">—</span>' : oGBP0(a.total)) + '</span></div>';
+              '<span class="v">' + (a.error ? '<span style="color:var(--text-3)" title="' + esc(oS(a.error)).replace(/"/g, '&quot;') + '">—</span>'
+                : oGBP0(a.total) + (a.stale ? ' <span style="color:var(--warn);font-size:10px" title="eBay refused the latest read (' + esc(oS(a.stale_reason)).replace(/"/g, '&quot;') + ') — this is the last good figure' + (a.as_of ? ', from ' + esc(String(a.as_of).slice(0, 16).replace('T', ' ')) + ' UTC' : '') + '">⏳</span>' : '')) + '</span></div>';
           }).join('') + '</div>'
-        : '<div class="empty" style="padding:14px 0">' + (fa.length ? 'eBay\u2019s Finances API refused every account just now — it retries on the next refresh.' : 'Loading…') + '</div>') +
+        : '<div class="empty" style="padding:14px 0">' + (fa.length ? 'eBay\u2019s Finances API refused every account just now (' + esc(oS((fa[0] || {}).error)) + ') — it retries within a minute.' : 'Loading…') + '</div>') +
+      (okF.some(function (a) { return a.stale; }) ? '<div class="kpi-s" style="margin-top:8px">⏳ = eBay refused the latest read for that account; its last good figure is shown and it is re-asked within a minute.</div>' : '') +
       '</div>';
     /* TRUTH v2 WO-03 (money LIVE): VAT to pay = Σ the day tabs' own 'VAT to HMRC' column,
        month to date, per account — the calculator writes it, the portal reads it. */
@@ -323,7 +344,7 @@
               '<span class="v">' + oGBP0(byA[a].vat) + '</span></div>';
           }).join('') + '</div>' +
           '<div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">rows written this month: ' + vaNames.reduce(function (t2, a) { return t2 + oN(byA[a].rows); }, 0) + ' — a missing row is missing VAT, not zero VAT.</div>'
-        : '<div class="empty" style="padding:14px 0">The books mirror is filling…</div>') +
+        : '<div class="empty" style="padding:14px 0">' + (O.truthErr ? 'The books register did not answer: ' + esc(O.truthErr) + ' — press Refresh.' : 'The books mirror is filling…') + '</div>') +
       '</div>';
     box.innerHTML = h;
   }
