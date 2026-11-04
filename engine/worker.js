@@ -21463,6 +21463,43 @@ const ROUTES = {
   ordersPulse: {
     auth: 'any', fn: async (p, ctx) => {
       if (['Management', 'Ops Head', 'Team Lead', 'Sales Operations'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      /* 4 Nov (owner: "Yesterday / 7 days / 30 days clicking doesn't reflect any result"): the
+         Business overview's date chips now drive this clock too. A window (UK trading days,
+         from..to) counts the orders that CAME on those days and how many of them have been
+         bought since, by the same cost-AND-order-number rule. Today stays the live minute clock
+         with its backlog pile and yesterday line; a window has neither (they are today's work). */
+      const okDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+      const todayUk = ukDate('');
+      let rFrom = okDay(p.from) ? String(p.from) : todayUk, rTo = okDay(p.to) ? String(p.to) : rFrom;
+      if (rTo < rFrom) { const x = rFrom; rFrom = rTo; rTo = x; }
+      if (rTo > todayUk) rTo = todayUk;
+      if (rFrom > rTo) rFrom = rTo;
+      const spanDays = Math.round((Date.parse(rTo + 'T12:00:00Z') - Date.parse(rFrom + 'T12:00:00Z')) / 86400000) + 1;
+      if (spanDays > 92) rFrom = new Date(Date.parse(rTo + 'T12:00:00Z') - 91 * 86400000).toISOString().slice(0, 10);
+      if (!(rFrom === todayUk && rTo === todayUk)) {
+        return memo('ordersPulse:' + rFrom + '|' + rTo, 55000, async () => {
+          const startIso = ukDayStartIsoFor(rFrom);
+          const endIso = ukDayStartIsoFor(new Date(Date.parse(rTo + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10));
+          const PROCESSED = "(COALESCE(o.cost, 0) > 0 AND COALESCE(o.ali_order, '') != '')";
+          const rows = (await ctx.env.DB.prepare(
+            'SELECT o.account, COUNT(*) AS came, ' +
+            'SUM(CASE WHEN ' + PROCESSED + ' THEN 1 ELSE 0 END) AS processed, ' +
+            "SUM(CASE WHEN o.status = 'FULFILLED' OR o.fh_count > 0 THEN 1 ELSE 0 END) AS ebay_dispatched, " +
+            "SUM(CASE WHEN COALESCE(o.cost, 0) > 0 AND COALESCE(o.ali_order, '') = '' THEN 1 ELSE 0 END) AS half_done " +
+            "FROM orders o WHERE o.created_at >= ?1 AND o.created_at < ?2 AND o.status NOT IN ('CANCELLED', 'NOT_FOUND') " +
+            'GROUP BY o.account ORDER BY came DESC'
+          ).bind(startIso, endIso).all()).results || [];
+          const accounts = rows.map((r) => {
+            const came = Number(r.came) || 0, processed = Number(r.processed) || 0;
+            return { account: String(r.account || ''), came, processed, remaining: Math.max(0, came - processed),
+              dispatched: Number(r.ebay_dispatched) || 0, half_done: Number(r.half_done) || 0, backlog: 0 };
+          });
+          const tot = { came: 0, processed: 0, remaining: 0, dispatched: 0, half_done: 0, backlog: 0 };
+          for (const a of accounts) { tot.came += a.came; tot.processed += a.processed; tot.remaining += a.remaining; tot.dispatched += a.dispatched; tot.half_done += a.half_done; }
+          return { day: rTo, from: rFrom, to: rTo, as_of: new Date().toISOString(), totals: tot, accounts,
+            note: 'Orders that came in on the UK trading days ' + rFrom + ' \u2192 ' + rTo + '. Processed = the AliExpress cost AND the AliExpress order number are both on the order (owner, 12 Oct). "Started" counts orders carrying a cost but no order number yet. Cancelled and not-found orders are outside every count.' };
+        });
+      }
       return memo('ordersPulse', 55000, async () => {
         const dayStart = ukDayStartIso();
         /* 12 Oct (owner): "we can consider an order as dispatched when that order has received

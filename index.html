@@ -867,7 +867,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261102-2222';
+var BUILD = '20261104-1227';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -26973,6 +26973,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       });
       oPaintDated();
       oPaintToday();          // the ad-spend · ROAS card reads these book rows — repaint once they land
+      oPaintAds();            // 4 Nov: the advertising card sums the books over the chosen range
     })
       .catch(function (e) { O.days = []; oPaintDated(); oFeedFailed('o2Kpis', 'the daily book', e); });
     api('mgmtOverview', {}).then(function (d) {
@@ -27176,10 +27177,13 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   }
 
   // ---------- date-driven block: KPIs + profitability ----------
+  /* 4 Nov: everything the chips drive, in one place — the dated block (KPIs + profitability), the
+     dispatch clock (its own engine read) and the advertising card (the books, client-side). */
+  function oRangeChanged() { oPaintDated(); oDispatchLoad(); oPaintAds(); }
   function oPaintDated() {
     var r = oRange();
     var lbl = $('o2RangeLbl');
-    if (lbl) { lbl.innerHTML = 'Showing <b>' + esc(r.label) + '</b> · ' + esc(r.from) + ' → ' + esc(r.to) + ' · UK business days'; }
+    if (lbl) { lbl.innerHTML = 'Showing <b>' + esc(r.label) + '</b> · ' + esc(r.from) + ' → ' + esc(r.to) + ' · UK business days · drives the dispatch clock, Collective, Profitability and Advertising'; }
     oPaintKpis(r); oPaintProfit(r);
   }
 
@@ -27570,7 +27574,29 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function oPaintAds() {
     var box = $('o2Ads');
     if (!box || !O.ov) { return; }
-    var ads = oAcctRows(O.ov.ads_yesterday || []);
+    /* 4 Nov (owner): the card follows the date chips. Yesterday keeps the engine's own
+       ads_yesterday rows (unchanged). Any other window sums the day books per account over the
+       range — spend = ads_daily both families, revenue = that account's sold on those days —
+       the SAME blended definition the engine uses for yesterday's ROAS. Today's row carries the
+       intraday spend overlay, so a window reaching today is live on spend. */
+    var r = oRange(), yd = dShift(ukToday(), -1);
+    var isYday = r.from === yd && r.to === yd;
+    var winLabel = isYday ? 'Yesterday' : r.label;
+    var ads;
+    if (isYday) {
+      ads = oAcctRows(O.ov.ads_yesterday || []);
+    } else {
+      if (O.days === null) { box.innerHTML = '<div class="empty">Loading…</div>'; return; }
+      var by = {};
+      oRows(r.from, r.to).forEach(function (d0) {
+        var a = (by[oS(d0.account)] = by[oS(d0.account)] || { account: oS(d0.account), spend: 0, revenue: 0 });
+        a.spend += oN(d0.ads); a.revenue += oN(d0.sold);
+      });
+      ads = Object.keys(by).map(function (k) { return by[k]; })
+        .filter(function (a) { return a.spend > 0.005; })
+        .sort(function (a, b) { return b.spend - a.spend; });
+      ads.forEach(function (a) { a.spend = Math.round(a.spend * 100) / 100; a.roas = a.spend > 0 ? Math.round(a.revenue / a.spend * 100) / 100 : null; });
+    }
     var spend = 0, rev = 0;
     ads.forEach(function (a) { spend += oN(a.spend); rev += oN(a.revenue); });
     var roas = spend > 0 ? rev / spend : null;
@@ -27598,10 +27624,11 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<div class="kpi-s" style="margin-top:8px">promoted = eBay-attributed ad revenue; organic is the rest' +
           (sp.basis ? ' \u00b7 ' + esc(String(sp.basis)) : '') + '</div></div>';
     }
-    box.innerHTML = '<div class="split"><div class="o-card"><span class="card-t">Yesterday per account · real spend</span>' +
-      '<div class="mini-rows">' + (rows || '<div class="empty">No spend recorded yesterday — two accounts still need the marketing re-consent.</div>') + '</div></div>' +
+    box.innerHTML = '<div class="split"><div class="o-card"><span class="card-t">' + esc(winLabel) + ' per account · real spend</span>' +
+      '<div class="mini-rows">' + (rows || '<div class="empty">No spend recorded ' + (isYday ? 'yesterday' : 'in this window') + (isYday ? ' — two accounts still need the marketing re-consent.' : '.') + '</div>') + '</div>' +
+      (!isYday && r.to >= ukToday() ? '<div class="kpi-s" style="margin-top:8px">today\u2019s spend is the intraday figure; its revenue settles with the nightly books</div>' : '') + '</div>' +
       '<div class="o-card"><div class="gauge-wrap">' + oGauge(roas) +
-      '<div class="g-side"><b>Blended ROAS yesterday</b><span>' + (roas === null ? '—' : roas.toFixed(1)) + '</span>' +
+      '<div class="g-side"><b>Blended ROAS · ' + esc(winLabel.toLowerCase()) + '</b><span>' + (roas === null ? '—' : roas.toFixed(1)) + '</span>' +
       '<b style="margin-top:8px">SOP target</b><span>≥ 5</span></div></div>' +
       '<div class="kpi-s" style="margin-top:10px">revenue ÷ real ad spend · per-item attribution lands with the fee feed</div></div></div>' + splitCard;
   }
@@ -27667,12 +27694,32 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
      Until that engine build is live, the SAME card derives its numbers from ordersBoard — came
      from its today block, remaining from the needs_processing rows — so the clock works either
      way and upgrades itself the moment the engine ships. */
+  function oDispatchIsToday(r) { var t = ukToday(); return r.from === t && r.to === t; }
   function oDispatchLoad() {
     if (!$('o2Dispatch')) { return; }
-    engineCall('ordersPulse', {}, 20000).then(function (d) { oDispatchPaint(d, false); }).catch(function (e) {
-      if (!/unknown action/i.test(String((e && e.message) || ''))) { oDispatchErr(e); return; }
+    /* 4 Nov (owner: "Yesterday / 7 days / 30 days clicking doesn't reflect any result"): the
+       date chips drive this clock too. Today is the live minute clock exactly as before; any
+       other window asks the engine for the orders that came on those UK days and how many of
+       them have been bought. The key guards a slow answer from painting over a newer click. */
+    var r = oRange(), today = oDispatchIsToday(r);
+    var key = r.from + '|' + r.to;
+    O.dispKey = key;
+    var h = $('o2DispH');
+    if (h) { h.textContent = today ? 'Today\u2019s orders \u2014 the dispatch clock' : 'Orders \u2014 ' + r.label + ' \u2014 the dispatch clock'; }
+    engineCall('ordersPulse', today ? {} : { from: r.from, to: r.to }, 20000).then(function (d) {
+      if (O.dispKey !== key) { return; }
+      if (!today && !(d && d.from)) {
+        /* an engine build from before this window support answers today's numbers whatever
+           was asked — say so rather than show today's count under a 7-day heading */
+        oDispatchErr(new Error('the engine update that counts a date window is still rolling out (a few minutes) \u2014 Today works now'));
+        return;
+      }
+      oDispatchPaint(d, false, r);
+    }).catch(function (e) {
+      if (O.dispKey !== key) { return; }
+      if (!today || !/unknown action/i.test(String((e && e.message) || ''))) { oDispatchErr(e); return; }
       engineCall('ordersBoard', { bucket: 'needs_processing' }, 25000)
-        .then(function (d) { oDispatchPaint(oDispatchFromBoard(d), true); })
+        .then(function (d) { if (O.dispKey === key) { oDispatchPaint(oDispatchFromBoard(d), true, r); } })
         .catch(oDispatchErr);
     });
   }
@@ -27717,14 +27764,17 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     box.innerHTML = '<div class="empty">The dispatch clock did not answer — ' + esc(oS((e && e.message) || 'try Refresh')) + '</div>';
   }
 
-  function oDispatchPaint(d, approx) {
+  function oDispatchPaint(d, approx, r) {
     var box = $('o2Dispatch');
     if (!box || !d) { return; }
+    r = r || oRange();
+    var today = oDispatchIsToday(r);
+    var win = today ? 'today' : r.label.toLowerCase();
     var t = d.totals || {};
     var pct = t.came ? Math.round((t.processed / t.came) * 100) : 0;
     var h = '<div class="o2d">' +
-      '<div class="o2d-t"><span class="k">Orders came today</span><b>' + (t.came || 0) + '</b><span class="s">UK trading day · all accounts</span></div>' +
-      '<div class="o2d-t ok"><span class="k">Processed &amp; bought</span><b>' + (t.processed || 0) + '</b><span class="s">' + pct + '% of today · AliExpress cost + order number' +
+      '<div class="o2d-t"><span class="k">Orders came ' + esc(win) + '</span><b>' + (t.came || 0) + '</b><span class="s">' + (today ? 'UK trading day' : esc(r.from + ' \u2192 ' + r.to) + ' · UK trading days') + ' · all accounts</span></div>' +
+      '<div class="o2d-t ok"><span class="k">Processed &amp; bought</span><b>' + (t.processed || 0) + '</b><span class="s">' + pct + '% of ' + esc(win) + ' · AliExpress cost + order number' +
         (t.half_done ? ' · ' + t.half_done + ' started (cost, no order no.)' : '') + '</span></div>' +
       '<div class="o2d-t' + (t.remaining ? ' warn' : ' ok') + '"><span class="k">Remaining to buy</span><b>' + (t.remaining || 0) + '</b><span class="s">not yet bought on AliExpress</span></div>' +
       (t.backlog ? '<div class="o2d-t bad"><span class="k">Older &amp; unprocessed</span><b>' + t.backlog + '</b><span class="s">from before today — dispatch these first</span></div>' : '') +
@@ -27732,15 +27782,17 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var accts = (d.accounts || []).filter(function (a) { return a.came || a.backlog; });
     if (accts.length) {
       h += '<div class="scroll"><table class="o2d-tbl"><thead><tr><th>Account</th><th>Came</th><th>Processed</th><th>Remaining</th>' +
-        '<th>Older unprocessed</th><th style="text-align:left;padding-left:16px">Progress</th></tr></thead><tbody>' +
+        (today ? '<th>Older unprocessed</th>' : '') + '<th style="text-align:left;padding-left:16px">Progress</th></tr></thead><tbody>' +
         accts.map(function (a) {
           var p = a.came ? Math.round((a.processed / a.came) * 100) : 100;
           return '<tr><td>' + esc(a.account || '(none)') + '</td><td' + (a.came ? '' : ' class="o2d-zero"') + '>' + a.came + '</td>' +
             '<td>' + a.processed + '</td>' +
             '<td class="' + (a.remaining ? 'o2d-rem' : 'o2d-zero') + '">' + a.remaining + '</td>' +
-            '<td class="' + (a.backlog ? 'o2d-rem' : 'o2d-zero') + '">' + (a.backlog || 0) + '</td>' +
+            (today ? '<td class="' + (a.backlog ? 'o2d-rem' : 'o2d-zero') + '">' + (a.backlog || 0) + '</td>' : '') +
             '<td style="text-align:left;padding-left:16px"><div class="o2d-bar" title="' + p + '% processed"><i style="width:' + p + '%"></i></div></td></tr>';
         }).join('') + '</tbody></table></div>';
+    } else if (!today) {
+      h += '<div class="empty" style="padding:12px 0 0">No orders came in on ' + esc(r.from === r.to ? r.from : r.from + ' \u2192 ' + r.to) + '.</div>';
     }
     /* 12 Oct: cost and the AliExpress order number are read from each account's ORDER BOOK, so a
        purchase that has not been written into today's tab yet still counts as remaining. Showing
@@ -27756,7 +27808,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var st = $('o2DispStamp');
     if (st) {
       var at = d.as_of ? new Date(d.as_of) : new Date();
-      st.textContent = 'updated ' + at.toTimeString().slice(0, 8) + ' · refreshes every minute' + (approx ? ' · interim' : '');
+      st.textContent = 'updated ' + at.toTimeString().slice(0, 8) + ' · refreshes every minute' + (today ? '' : ' · ' + r.label + ' · pick Today for the live clock and backlog') + (approx ? ' · interim' : '');
     }
   }
 
@@ -27782,19 +27834,19 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<button class="btn-p" id="o2Apply">Apply</button></div>' +
           '<div class="range-label" id="o2RangeLbl"></div></div>' +
         '<div class="alerts enter d1" id="o2Alerts" style="display:none"></div>' +
-        '<div class="sec enter d1"><div class="sec-h"><h2>Today\u2019s orders — the dispatch clock</h2>' +
+        '<div class="sec enter d1"><div class="sec-h"><h2 id="o2DispH">Today\u2019s orders — the dispatch clock</h2>' +
           '<span class="hint" id="o2DispStamp">came in · processed · remaining — refreshes every minute</span></div>' +
           '<div id="o2Dispatch"><div class="empty">Loading…</div></div></div>' +
-        '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
+        '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">live today, whatever the date range · one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>This month at a glance</h2><span class="hint">the plain headline numbers — traffic, adverts, customer service and returns · click a tile to open its board</span></div><div id="o2Extras"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2 id="o2CollH">Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Account ratings</h2><span class="hint">eBay\u2019s own seller standards · defect rate · late shipment · cases without seller resolution</span></div><div class="tiles-mini" id="o2Ratings" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Money — funds &amp; VAT</h2><span class="hint">your funds live from eBay\u2019s own Finances · VAT by the calculator\u2019s HMRC line, month to date</span></div><div class="today" id="o2Money"><div class="empty">Loading…</div></div></div>' +
-        '<div class="sec enter d2"><div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint" id="o2Stamp">live pulse per account</span></div><div class="today" id="o2Today"><div class="empty">Loading…</div></div></div>' +
+        '<div class="sec enter d2"><div class="sec-h"><h2>Today &amp; yesterday</h2><span class="hint" id="o2Stamp">live pulse per account · these two days, whatever the date range</span></div><div class="today" id="o2Today"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL\'S PRIMARY PURPOSE</span><span class="hint">profit · price · AliExpress cost · per-item ads — role-scoped server-side</span></div><div id="o2LL"></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Profitability</h2><span class="hint">computed from the daily books over the chosen range</span>' +
           '<div class="tools"><div class="mode" id="o2Mode"><button data-o2-pmode="all" class="on">All accounts</button><button data-o2-pmode="acct">Account to account</button></div></div></div><div id="o2Profit"></div></div>' +
-        '<div class="sec enter d3"><div class="sec-h"><h2>Advertising dashboard</h2><span class="hint">judged against the SOP main target — ROAS ≥ 5</span></div><div id="o2Ads"><div class="empty">Loading…</div></div></div>' +
+        '<div class="sec enter d3"><div class="sec-h"><h2>Advertising dashboard</h2><span class="hint">the chosen range · judged against the SOP main target — ROAS ≥ 5</span></div><div id="o2Ads"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Returns, refunds &amp; cases</h2><span class="hint">live from eBay via the Engine</span></div><div id="o2Cases"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Account health</h2><span class="hint">live Engine numbers · loss items red · quiet accounts amber</span></div><div id="o2Health"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Staff performance</h2><span class="hint">this week · from the portal\'s own activity ledger · management excluded</span></div><div id="o2Staff"><div class="empty">Loading…</div></div></div>' +
@@ -27834,7 +27886,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
             O.mode = seg.getAttribute('data-o2-mode');
             var bs = document.querySelectorAll('#o2Seg button');
             for (var i = 0; i < bs.length; i++) { bs[i].classList.toggle('on', bs[i] === seg); }
-            oPaintDated(); return;
+            oRangeChanged(); return;
           }
           var pm = t && t.closest ? t.closest('[data-o2-pmode]') : null;
           if (pm) {
@@ -27858,7 +27910,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
             O.mode = 'custom'; O.from = f.value; O.to = t2.value;
             var bs = document.querySelectorAll('#o2Seg button');
             for (var i = 0; i < bs.length; i++) { bs[i].classList.remove('on'); }
-            oPaintDated();
+            oRangeChanged();
           } else { toast('Pick both dates first.'); }
         };
       }

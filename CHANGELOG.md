@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 2026-11-04 - BUSINESS OVERVIEW: the date chips drive the page
+
+Owner: "Business overview page only shows data for today - Yesterday, 7 days, 30 days clicking
+doesn't reflect any result." The chips only ever re-computed two sections far below the fold
+(Collective KPIs, Profitability); everything on the first screen was pinned to today.
+
+- Engine `ordersPulse` accepts `from`/`to` (UK trading days, capped at 92): the orders that came on
+  those days and how many have been bought since, by the same cost-AND-order-number rule. Today is
+  unchanged (live minute clock, backlog pile, yesterday line); a window has no backlog and no
+  yesterday line. Memoised per window for 55 s like today.
+- Overview: one `oRangeChanged()` for every chip/Apply click - the dispatch clock re-reads for the
+  window and renames itself ("Orders - Last 7 days - the dispatch clock"), the Advertising card sums
+  the day books per account over the window (Yesterday keeps the engine's own `ads_yesterday`
+  rows), and the KPI/Profitability block repaints as before. A clock answer for an older window is
+  guarded so a slow reply never paints over a newer click, and an engine build without window
+  support says so instead of showing today's count under a 7-day heading.
+- Sections that stay pinned say so in their hint: "Right now" (live today), "Today & yesterday".
+
 ## 2026-10-03 - TRACKING FETCH: a not-mine mark no longer hides the order from its owner
 
 Two-day shadow test finding. Each AliExpress order is visible to exactly one of the four buyer
