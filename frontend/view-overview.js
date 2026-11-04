@@ -255,7 +255,7 @@
     truthPage(oAcctParam({ from: pkDayStr(0).slice(0, 8) + '01', to: pkDayStr(0) }))
       .then(function (d) { O.truth = d || null; O.truthErr = ''; oPaintMoney(); oPaintKpis(oRange()); })
       .catch(function (e) {
-        if (!attempt) { setTimeout(function () { oTruthMonth(1); }, 7000); return; }
+        if (!attempt) { setTimeout(function () { oTruthMonth(1); }, 12000); return; }
         O.truth = null; O.truthErr = String((e && e.message) || 'no answer from the Engine'); oPaintMoney();
       });
   }
@@ -264,7 +264,7 @@
     truthPage(oAcctParam({ from: ydY, to: ydY }))
       .then(function (d) { O.truthY = d || { failed: true }; oPaintToday(); })
       .catch(function () {
-        if (!attempt) { setTimeout(function () { oTruthYday(1); }, 9000); return; }
+        if (!attempt) { setTimeout(function () { oTruthYday(1); }, 15000); return; }
         O.truthY = { failed: true }; oPaintToday();
       });
   }
@@ -522,16 +522,23 @@
       O.pnlKey = key; O.pnlCur = null; O.pnlPrev = null;
       box.innerHTML = '<div class="empty">Computing with the P&L brain…</div>';
       var span0 = Math.round((new Date(r.to + 'T12:00:00Z') - new Date(r.from + 'T12:00:00Z')) / 86400000) + 1;
-      api('itemPnl', oAcctParam({ from: r.from, to: r.to })).then(function (d) {
-        if (O.pnlKey !== key) { return; }
-        O.pnlCur = (d && d.total) || {};
-        oPaintKpis(r);
-      }).catch(function (e) { if (O.pnlKey === key) { oFeedFailed('o2Kpis', 'the P&L brain', e); } });
-      api('itemPnl', oAcctParam({ from: dShift(r.from, -span0), to: dShift(r.from, -1) })).then(function (d) {
-        if (O.pnlKey !== key) { return; }
-        O.pnlPrev = (d && d.total) || {};
-        oPaintKpis(r);
-      }).catch(function () {});
+      /* 4 Nov: the register (pageMetrics) is the headline and usually answers within ~10 s; the
+         P&L brain is only the fallback. Firing its two heavy scans in the SAME ten seconds as the
+         register and every other feed is what tipped D1 into "overloaded" and emptied three cards
+         — so the fallback now waits, and never runs at all once the register has answered. */
+      setTimeout(function () {
+        if (O.pnlKey !== key || (O.truthRange && O.truthRange.metrics)) { return; }
+        api('itemPnl', oAcctParam({ from: r.from, to: r.to })).then(function (d) {
+          if (O.pnlKey !== key) { return; }
+          O.pnlCur = (d && d.total) || {};
+          oPaintKpis(r);
+        }).catch(function (e) { if (O.pnlKey === key && !(O.truthRange && O.truthRange.metrics)) { oFeedFailed('o2Kpis', 'the P&L brain', e); } });
+        api('itemPnl', oAcctParam({ from: dShift(r.from, -span0), to: dShift(r.from, -1) })).then(function (d) {
+          if (O.pnlKey !== key) { return; }
+          O.pnlPrev = (d && d.total) || {};
+          oPaintKpis(r);
+        }).catch(function () {});
+      }, 12000);
       return;
     }
     var cur = O.pnlCur;

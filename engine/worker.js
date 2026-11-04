@@ -308,11 +308,23 @@ export default {
       /* the advertising KV cache is keyed by profit class, not role, and a hit never runs the action (so never its
          adtGate): the role half of the gate runs HERE first, or a Lister's session would read the pre-warmed payloads */
       if (action.indexOf('adtool') === 0 && !adtRoleAllowed(ctx2.user)) throw new AuthError('auth');
-      const data = !rcTtl
-        ? await route.fn(body.payload || {}, ctx2)
+      const runRoute = () => !rcTtl
+        ? route.fn(body.payload || {}, ctx2)
         : action.indexOf('adtool') === 0
-          ? await adtKvMemo(env, action, adtProfitClass(ctx2.user), body.payload || {}, rcTtl, () => route.fn(body.payload || {}, ctx2), ctx2.waitUntil)
-          : await memo('rt:' + action + ':' + String((ctx2.user && ctx2.user.role) || '') + ':' + JSON.stringify(body.payload || {}), rcTtl, () => route.fn(body.payload || {}, ctx2));
+          ? adtKvMemo(env, action, adtProfitClass(ctx2.user), body.payload || {}, rcTtl, () => route.fn(body.payload || {}, ctx2), ctx2.waitUntil)
+          : memo('rt:' + action + ':' + String((ctx2.user && ctx2.user.role) || '') + ':' + JSON.stringify(body.payload || {}), rcTtl, () => route.fn(body.payload || {}, ctx2));
+      let data;
+      try { data = await runRoute(); }
+      catch (e) {
+        /* 4 Nov (owner: ratings / VAT / yesterday's profit empty on the Business overview): a
+           page opening fires a dozen reads inside ten seconds, and D1 answers the heaviest of
+           them "overloaded" — a transient refusal that reached the screen as a dead card. These
+           pure READS are re-run once after a short pause; nothing that writes is on the list. */
+        if (D1_RETRY_READS.has(action) && /overloaded|too many resources/i.test(String(e && e.message || e))) {
+          await new Promise((res) => setTimeout(res, 1500));
+          data = await runRoute();
+        } else throw e;
+      }
       console.log('t', action, Date.now() - t0, 'ms');       // §9: server time per action, in the CF log
       /* Field evidence for "the pages are slow": any advertising action over 1.5 s server-side
          writes its worst time into sync_state, which the key-authed backupDump can read — so the
@@ -405,6 +417,10 @@ class AuthError extends Error {}
    carry a per-minute cache). Best-effort by design: a fresh isolate simply misses. Only used for
    responses that are identical for every caller who passes the route's gate. */
 const HOTMEM = new Map();
+/* the read-only routes the request handler re-runs once when D1 reports "overloaded" (4 Nov) */
+const D1_RETRY_READS = new Set(['pageMetrics', 'itemPnl', 'dailyReport', 'mgmtOverview', 'accountHealth', 'bizExtras',
+  'truthBoard', 'adsTruth', 'vatBoard', 'profitBoard', 'ordersPulse', 'mgmtPulse', 'csDesk', 'activeListings',
+  'ordersBoard', 'adsBoard', 'trafficBoard', 'accountDay', 'itemRisk', 'sheetItems', 'teamPerformanceEngine', 'campaignWatch']);
 async function memo(key, ttlMs, fn) {
   const hit = HOTMEM.get(key);
   if (hit && Date.now() - hit.at < ttlMs) return hit.v;
