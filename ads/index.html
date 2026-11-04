@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261104-1317';
+var BUILD = '20261104-1955';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -11364,8 +11364,10 @@ VIEW_CSS.push(
     '.tr-vs{font-size:10px;font-weight:800;margin-top:4px;color:var(--text-3);white-space:nowrap}' +
     '.tr-vs.up{color:var(--ok)}.tr-vs.dn{color:var(--bad)}' +
     /* the month-ago level, drawn INSIDE the same bar — the owner asked for the comparison merged with the data, not beside it */
-    '.tr-cmp{position:absolute;left:-2px;right:-2px;border-top:2px dashed rgba(255,255,255,.6);pointer-events:none}' +
-    '.tr-cmp.tr-under{border-top-color:rgba(240,96,90,.85)}' +
+    /* 4 Nov (owner): the dashed month-back marker inside each bar is gone — "makes no sense". The
+       same dates a month back are now their OWN block below, drawn exactly like the one above. */
+    '.tr-sec{margin:22px 0 12px;padding-top:16px;border-top:1px solid var(--gold-line);font-size:12px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--gold-a)}' +
+    '.tr-sec span{color:var(--text-3);font-weight:700;text-transform:none;letter-spacing:0;margin-left:8px}' +
     '.tr-hbars{display:flex;align-items:flex-end;gap:2px;height:104px;padding:8px 0 4px;box-sizing:border-box}' +
     '.tr-hb{flex:1;background:linear-gradient(180deg,var(--gold-a,#d4af37),rgba(212,175,55,.45));border-radius:3px 3px 0 0;min-width:4px;position:relative}' +
     '.tr-hb.now{outline:1px solid var(--gold-a)}' +
@@ -11509,25 +11511,26 @@ VIEW_CSS.push(
      frame, the hatched part-day, and NO percentage against a day that is still filling — holding
      half a day against a whole one a month back prints a collapse every morning and a recovery
      every night, which is the misreading this page already exists to prevent. */
-  function trBarRow(label, key, word, rows, cmpOf, today) {
-    var max = trBarMax(rows, key, function (r) { return cmpOf(r.date); });
+  /* 4 Nov (owner): "red dotted line makes no sense, remove that — I want the same presentation
+     duplicated with last month's same-date stats". No marker inside the bar any more. The row
+     takes a SHARED scale (`opt.max`, the larger of this block and the month-back block) so the
+     two blocks read against each other by eye; `opt.vsOf(date)` names the matching day in the
+     other block for the tooltip only. */
+  function trBarRow(label, key, word, rows, opt) {
+    opt = opt || {};
+    var max = opt.max || trBarMax(rows, key, null);
+    var today = opt.today || '';
     return '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:12px 0 2px">' +
-      esc(label) + (TR.mode === 'today' ? ' \u00b7 the week behind today' : '') +
-      ' \u00b7 <span style="color:var(--text-2)">dashed line = the same date a month back</span></div>' +
+      esc(label) + (opt.note ? ' \u00b7 <span style="color:var(--text-2)">' + esc(opt.note) + '</span>' : '') + '</div>' +
       '<div class="tr-bars">' + rows.map(function (r) {
         var isPart = r.date === today;
-        var c = cmpOf(r.date);
         var hPct = trBarH(r[key], max);
-        var mark = '';
-        if (c) {
-          mark = '<i class="tr-cmp' + (c[key] > r[key] ? ' tr-under' : '') +
-            '" style="bottom:' + trMarkAt(c[key], max, hPct) + '%"></i>';
-        }
-        var pct = (c && c[key] && !isPart) ? ((r[key] - c[key]) / c[key] * 100) : null;
-        return '<div class="tr-bar' + (isPart ? ' tr-part' : '') + '" style="height:' + hPct + '%">' + mark +
+        var v = opt.vsOf ? opt.vsOf(r.date) : null;     // { date, value, part } of the matching day in the other block
+        var pct = (v && v.value && !isPart && !v.part) ? ((r[key] - v.value) / v.value * 100) : null;
+        return '<div class="tr-bar' + (isPart ? ' tr-part' : '') + '" style="height:' + hPct + '%">' +
           '<span>' + esc(r.date.slice(5)) + ' \u00b7 ' + trN(r.impressions) + ' imp \u00b7 ' + trN(r.views) + ' views \u00b7 ' + r.transactions + ' sold' +
-          (c ? ' \u00b7 vs ' + esc(trMonthBack(r.date).slice(5)) + ': ' + trN(c[key]) + ' ' + word +
-               (pct === null ? '' : ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)') : '') +
+          (v ? ' \u00b7 vs ' + esc(String(v.date).slice(5)) + ': ' + trN(v.value) + ' ' + word +
+               (pct === null ? '' : ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)') + (v.part ? ' (still counting)' : '') : '') +
           (isPart ? ' \u00b7 still counting' : '') + '</span></div>';
       }).join('') + '</div>';
   }
@@ -11672,8 +11675,37 @@ VIEW_CSS.push(
        drift apart on the scale, the marker or the words in the tooltip. Each row keeps its OWN
        maximum: views are a small fraction of impressions and a shared scale would press the views
        row flat against the floor, which is a true chart that tells a reader nothing. */
-    h += trBarRow('Impressions by day', 'impressions', 'imp', chartDays, cmpOf, today) +
-      trBarRow('Views by day', 'views', 'views', chartDays, cmpOf, today);
+    /* the same dates a month back, as their own rows, keyed both ways for the tooltips */
+    var prevDays = [], prevToCur = {};
+    chartDays.forEach(function (r) { var c = cmpOf(r.date); if (c) { prevDays.push(c); prevToCur[c.date] = r; } });
+    var maxImp = Math.max(trBarMax(chartDays, 'impressions', null), trBarMax(prevDays, 'impressions', null));
+    var maxViews = Math.max(trBarMax(chartDays, 'views', null), trBarMax(prevDays, 'views', null));
+    var backOf = function (key) { return function (dt) { var c = cmpOf(dt); return c ? { date: c.date, value: c[key] } : null; }; };
+    var nowOf = function (key) { return function (dt) { var r = prevToCur[dt]; return r ? { date: r.date, value: r[key], part: r.date === today } : null; }; };
+    var weekNote = TR.mode === 'today' ? 'the week behind today' : '';
+    h += trBarRow('Impressions by day', 'impressions', 'imp', chartDays, { today: today, max: maxImp, vsOf: backOf('impressions'), note: weekNote }) +
+      trBarRow('Views by day', 'views', 'views', chartDays, { today: today, max: maxViews, vsOf: backOf('views'), note: weekNote });
+
+    /* 4 Nov (owner): THE SAME PRESENTATION AGAIN, FOR THE SAME DATES A MONTH BACK — the tiles over
+       exactly the dates the tiles above cover, then the two day rows on the same scale as the
+       rows above. Where nothing is stored a month back the block says so instead of drawing air. */
+    var backWin = pDays ? cmpLbl : '';
+    var backLbl = showing.length && showing[0] && showing.length === 1 ? 'same date a month back' : 'same dates a month back';
+    h += '<div class="tr-sec">' + esc(backLbl) + (backWin ? '<span>' + esc(backWin) + ' \u00b7 the presentation above, one calendar month earlier</span>' : '') + '</div>';
+    if (!pDays && !prevDays.length) {
+      h += '<div class="tr-sofar"><span>Nothing is stored for these dates a month back yet \u2014 eBay\u2019s traffic report is kept from the day the portal started reading it.</span></div>';
+    } else {
+      var nowLine = function (val, isPct) { return '<div class="tr-vs">the window above: ' + (isPct ? (Number(val) || 0).toFixed(2) + '%' : trN(val)) + '</div>'; };
+      h += '<div class="tr-tiles">' +
+        '<div class="tr-tile"><div class="k">Impressions · a month back</div><div class="v">' + trN(pTot.impressions) + '</div>' + nowLine(tot.impressions) + '</div>' +
+        '<div class="tr-tile"><div class="k">Listing views</div><div class="v">' + trN(pTot.views) + '</div>' + nowLine(tot.views) + '</div>' +
+        '<div class="tr-tile"><div class="k">Transactions</div><div class="v">' + trN(pTot.transactions) + '</div>' + nowLine(tot.transactions) + '</div>' +
+        '<div class="tr-tile"><div class="k">CTR</div><div class="v">' + pCtr.toFixed(2) + '%</div>' + nowLine(ctr, true) + '</div>' +
+        '<div class="tr-tile"><div class="k">Conversion</div><div class="v">' + pCvr.toFixed(2) + '%</div>' + nowLine(cvr, true) + '</div>' +
+      '</div>' +
+      trBarRow('Impressions by day · a month back', 'impressions', 'imp', prevDays, { max: maxImp, vsOf: nowOf('impressions'), note: 'same scale as the row above' }) +
+      trBarRow('Views by day · a month back', 'views', 'views', prevDays, { max: maxViews, vsOf: nowOf('views'), note: 'same scale as the row above' });
+    }
 
     /* THE HOUR BLOCK (owner, 2 Nov: "where is the breakdown of hours? i need hour to hour bars in
        this page too"). THREE series over one day, from TWO sources:
@@ -11720,40 +11752,44 @@ VIEW_CSS.push(
         ? '<span style="color:var(--text-2)">average of ' + (avgDays == null ? 'not recorded' : avgDays + ' settled day' + (Number(avgDays) === 1 ? '' : 's')) + '</span>'
         : esc(hourDate) + (CUR.totals[ser] == null ? ' \u00b7 <span style="color:var(--text-2)">not recorded</span>'
             : ' \u00b7 <span style="color:var(--text-2)">' + trN(CUR.totals[ser]) + ' ' + serWord + ' across the day</span>')) +
-      (!isAvg && d.hour_prev_date && PRV && PRV.totals[ser] != null
-        ? ' \u00b7 <span style="color:var(--text-2)">dashed = ' + esc(String(d.hour_prev_date)) + '</span>' : '') + '</div>';
+      '</div>';
     if (!isAvg && d.hour_clock_empty_today) {
       h += '<div class="tr-warn">eBay has not moved today\'s running total yet, so the impressions and views clock has nothing for today. The <b>Sold</b> bars below are the real order times and are exact. Pick <b>Yesterday</b> or <b>Average over the window</b> for the clock\'s own hours.</div>';
     }
     if (!CUR.has[ser]) {
       h += '<div class="tr-warn">Nothing is recorded for ' + esc(isAvg ? 'this window' : hourDate) + ' on any of the three series yet.</div>';
     } else {
-      var prvAt = PRV ? function (s) { return PRV.slots[s.hour] || null; } : null;
+      /* 4 Nov (owner): no dashed month-back marker inside the hour bars either — the same date a
+         month back is drawn as ITS OWN row of hours underneath, on the same scale as this one. */
+      var hasPrv = !!(PRV && PRV.totals[ser] != null && !isAvg);
+      var prvAt = hasPrv ? function (s) { return PRV.slots[s.hour] || null; } : null;
       var hMax = trBarMax(CUR.slots, ser, prvAt);
-      var cells = CUR.slots.map(function (s) {
-        var v = s[ser], miss = (v === null);
-        var ch = trBarH(miss ? 0 : v, hMax, 2);
-        var prv = PRV ? (PRV.slots[s.hour] || null) : null;
-        var pv = prv ? prv[ser] : null;
-        var hmark = '';
-        /* twenty-four markers sitting on the baseline would read as a dashed axis, so a dead hour
-           with nothing on either side of the comparison is left plain. The figure is still named in
-           the tooltip, so nothing is hidden. */
-        if (!miss && pv !== null && pv !== undefined && (pv || v)) {
-          hmark = '<i class="tr-cmp' + (pv > v ? ' tr-under' : '') + '" style="bottom:' + trMarkAt(pv, hMax, ch) + '%"></i>';
-        }
-        var fig = function (x, w) { return x === null || x === undefined ? 'not recorded' : trN(x) + ' ' + w; };
-        return '<div class="tr-hb' + (miss ? ' tr-none' : '') +
-          ((!isAvg && s.hour === nowHour && hourDate === today) ? ' now' : '') +
-          '" style="height:' + ch + '%">' + hmark +
-          '<span>' + String(s.hour).padStart(2, '0') + ':00 \u00b7 ' + fig(s.impressions, 'imp') + ' \u00b7 ' + fig(s.views, 'views') + ' \u00b7 ' + fig(s.sold, 'sold') +
-          (s.orders === null ? '' : ' (' + s.orders + ' order' + (s.orders === 1 ? '' : 's') + ')') +
-          (pv === null || pv === undefined ? '' : ' \u00b7 vs a month back ' + trN(pv) + ' ' + serWord) + '</span></div>';
-      });
-      h += '<div class="tr-hbars">' + cells.join('') + '</div><div class="tr-hx">' +
+      var fig = function (x, w) { return x === null || x === undefined ? 'not recorded' : trN(x) + ' ' + w; };
+      var hourAxis = '<div class="tr-hx">' +
         [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23].map(function (q) {
           return '<span>' + (q % 3 === 0 ? String(q).padStart(2, '0') : '') + '</span>';
         }).join('') + '</div>';
+      var hourCells = function (slots, other, otherLbl, markNow) {
+        return slots.map(function (s) {
+          var v = s[ser], miss = (v === null);
+          var ch = trBarH(miss ? 0 : v, hMax, 2);
+          var o = other ? (other.slots[s.hour] || null) : null;
+          var ov = o ? o[ser] : null;
+          return '<div class="tr-hb' + (miss ? ' tr-none' : '') +
+            ((markNow && s.hour === nowHour && hourDate === today) ? ' now' : '') +
+            '" style="height:' + ch + '%">' +
+            '<span>' + String(s.hour).padStart(2, '0') + ':00 \u00b7 ' + fig(s.impressions, 'imp') + ' \u00b7 ' + fig(s.views, 'views') + ' \u00b7 ' + fig(s.sold, 'sold') +
+            (s.orders === null || s.orders === undefined ? '' : ' (' + s.orders + ' order' + (s.orders === 1 ? '' : 's') + ')') +
+            (ov === null || ov === undefined ? '' : ' \u00b7 vs ' + otherLbl + ' ' + trN(ov) + ' ' + serWord) + '</span></div>';
+        }).join('');
+      };
+      h += '<div class="tr-hbars">' + hourCells(CUR.slots, hasPrv ? PRV : null, 'a month back', true) + '</div>' + hourAxis;
+      if (hasPrv) {
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:10px 0 2px">' +
+          esc(SER.reduce(function (a, s) { return s[0] === ser ? s[1] : a; }, 'Sold')) + ' by hour \u00b7 a month back \u00b7 ' + esc(String(d.hour_prev_date || '')) +
+          ' \u00b7 <span style="color:var(--text-2)">' + trN(PRV.totals[ser]) + ' ' + serWord + ' across that day \u00b7 same scale as the row above</span></div>' +
+          '<div class="tr-hbars">' + hourCells(PRV.slots, CUR, esc(hourDate), false) + '</div>' + hourAxis;
+      }
     }
     /* ONE PLAIN LINE under the bars: what each series is and where it comes from. The sentence
        about the mechanism is the engine's own, printed rather than written again here, so the page

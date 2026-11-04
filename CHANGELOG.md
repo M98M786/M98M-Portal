@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2026-11-04 - ACCOUNT TRAFFIC: the month-back comparison is its own block, not a dashed line
+
+Owner: "red dotted line makes no sense, remove that - I want the same presentation duplicated with
+last month's same-date stats." The dashed month-back marker inside every day bar and hour bar is
+gone. Under the day rows a second block draws the same tiles (impressions, views, transactions, CTR,
+conversion) over exactly the dates the tiles above cover, one calendar month earlier, and the same
+two day rows on a SHARED scale with the rows above; the hour chart gets a second row of hours for
+the same date a month back on the same scale. Tooltips still name the matching day/hour in the
+other block. `trBarRow(label, key, word, rows, opt)` - opt.max / opt.vsOf / opt.today / opt.note.
+
 ## 2026-11-04 - BUSINESS OVERVIEW: the date chips drive the page
 
 Owner: "Business overview page only shows data for today - Yesterday, 7 days, 30 days clicking
