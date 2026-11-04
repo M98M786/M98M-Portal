@@ -23,6 +23,11 @@ doesn't reflect any result." The chips only ever re-computed two sections far be
   reads one at a time per tab; the overview loads ratings on their own, retries each register read
   once and says what failed; `fundsSummary` keeps good rows, re-asks refused accounts within a minute
   (one retry on a D1 overload) and shows the last good figure marked stale instead of a dash.
+- Third pass: err_log shows D1 "overloaded" refusals on every page at the engine's cron ticks (:00/:05/:15
+  stack three slots). The request handler re-runs a pure read once after 1.5 s on that refusal
+  (`D1_RETRY_READS`); every overview feed goes through `oFeed()` — staggered first load, ONE more try
+  15 s later before a card says "did not answer"; the Collective block reads the register only (retry
+  once) and falls back to the P&L brain only after that fails; the dispatch clock retries in 15 s.
 
 ## 2026-10-03 - TRACKING FETCH: a not-mine mark no longer hides the order from its owner
 

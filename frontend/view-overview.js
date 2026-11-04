@@ -180,12 +180,36 @@
   }
 
   // ---------- fetches (each section paints as its feed lands) ----------
+  /* 4 Nov (owner: cards reading "did not answer" / "Loading…" after a page open): one feed
+     reader for this page. A refused read — D1 says "overloaded" at a cron tick, a cold worker —
+     gets ONE more try 15 s later before its card says so, so the page heals itself within half
+     a minute instead of waiting for the 5-minute tick. `delayMs` staggers the first-load burst
+     so a dozen reads do not land on the database inside the same ten seconds. The generation
+     guard stops a late answer painting over a newer Refresh or account change. */
+  O.fetchGen = 0;
+  function oFeed(action, payload, delayMs) {
+    var gen = O.fetchGen;
+    var alive = function () { return gen === O.fetchGen; };
+    return new Promise(function (resolve, reject) {
+      setTimeout(function () {
+        if (!alive()) { return; }
+        api(action, payload).then(function (d) { if (alive()) { resolve(d); } }, function () {
+          if (!alive()) { return; }
+          setTimeout(function () {
+            if (!alive()) { return; }
+            api(action, payload).then(function (d) { if (alive()) { resolve(d); } }, function (e2) { if (alive()) { reject(e2); } });
+          }, 15000);
+        });
+      }, delayMs || 0);
+    });
+  }
   function oFetchAll() {
     /* Every feed here used to end in an empty catch, so a failure left its panel spinning on
        "Loading…" for ever — indistinguishable from a slow network, and the reason this screen
        looked dead rather than broken. A feed that fails now says so, in its own panel, with a
        way back. */
-    api('dailyReport', {}).then(function (d) {
+    O.fetchGen = (O.fetchGen || 0) + 1;
+    oFeed('dailyReport', {}, 0).then(function (d) {
       O.days = (d && d.rows) || [];
       /* Night-list fix ("wrong stats"): the nightly book knows nothing of today — merge the
          server's LIVE overlay in: real revenue/cost from orders, INTRADAY ad spend, and order
@@ -208,7 +232,7 @@
       oPaintAds();            // 4 Nov: the advertising card sums the books over the chosen range
     })
       .catch(function (e) { O.days = []; oPaintDated(); oFeedFailed('o2Kpis', 'the daily book', e); });
-    api('mgmtOverview', {}).then(function (d) {
+    oFeed('mgmtOverview', {}, 1500).then(function (d) {
       O.ov = d || {};
       /* R8 Wave 3: the delay Hasib saw was invisible, which made it feel broken. Now every
          refresh stamps when these numbers were built, and says what lags and why. */
@@ -222,15 +246,15 @@
       oPaintAlerts(); oPaintToday(); oPaintAds(); oPaintHealth();
       oPaintDated();          // the live "today" tile rides on this feed, not on dailyReport
     }).catch(function (e) { oFeedFailed('o2Today', 'today\u2019s live figures', e); });
-    api('activeListings', oAcctParam({})).then(function (d) { O.listings = (d && d.rows) || []; oPaintListings(); })
+    oFeed('activeListings', oAcctParam({}), 4000).then(function (d) { O.listings = (d && d.rows) || []; oPaintListings(); })
       .catch(function (e) { oFeedFailed('o2LL', 'the live listings', e); });
-    api('csDesk', {}).then(function (d) { O.cs = d || {}; oPaintCases(); })
+    oFeed('csDesk', {}, 5500).then(function (d) { O.cs = d || {}; oPaintCases(); })
       .catch(function (e) { oFeedFailed('o2Cases', 'returns and cases', e); });
     /* the plain headline numbers (traffic, advertised count, CS load, returns) — one Engine read,
        account-scoped when a single account is chosen */
-    api('bizExtras', oAcctParam({})).then(function (d) { O.extras = d || null; oPaintExtras(); })
+    oFeed('bizExtras', oAcctParam({}), 2500).then(function (d) { O.extras = d || null; oPaintExtras(); })
       .catch(function (e) { var b = $('o2Extras'); if (b) { b.innerHTML = '<div class="empty">These headline numbers could not load: ' + esc((e && e.message) || 'no answer') + '</div>'; } });
-    api('fundsSummary', {}).then(function (d) { O.funds = d || {}; oPaintMoney(); })
+    oFeed('fundsSummary', {}, 3000).then(function (d) { O.funds = d || {}; oPaintMoney(); })
       .catch(function () { O.funds = { accounts: [] }; oPaintMoney(); });
     /* 4 Nov: register reads queue one at a time per tab (shell truthPage). The chosen-range read
        feeds the Collective block, highest on the page, so it goes into the lane FIRST — month
@@ -246,7 +270,7 @@
        way sxAcctAgg does. The month-wide call above is not reused for this: on the 1st of a month
        it does not contain yesterday at all. */
     oTruthYday(0);
-    api('teamPerformance', { period: 'week' }).then(oPaintStaff).catch(function () {
+    oFeed('teamPerformance', { period: 'week' }, 7000).then(oPaintStaff).catch(function () {
       var b = $('o2Staff');
       if (b) { b.innerHTML = '<div class="o-card"><div class="empty">The staff ledger did not answer just now — <a href="#" data-o2-nav="team" style="font-weight:800">Team performance</a> has the full desk.</div></div>'; }
     });
@@ -357,7 +381,7 @@
   function oPaintRatings() {
     var host = $('o2Ratings');
     if (!host) { return; }
-    api('accountHealth', {}).then(function (d) {
+    oFeed('accountHealth', {}, 2000).then(function (d) {
       var stds = oAcctRows((d && d.standards) || []);   // scope to the chosen account when one is set
       if (!stds.length) { host.innerHTML = '<div class="empty">' + (O.acct ? 'No standards row for ' + esc(O.acct) + ' yet.' : 'The standards sync has not landed yet.') + '</div>'; return; }
       host.innerHTML = stds.map(function (r) {
@@ -379,7 +403,7 @@
           (p.cycle && p.cycle.evaluationDate ? '<div style="font-size:9.5px;color:var(--text-3);margin-top:3px">evaluated ' + esc(String(p.cycle.evaluationDate).slice(0, 10)) + '</div>' : '') +
           '</div>';
       }).join('');
-    }).catch(function () { host.innerHTML = '<div class="empty">Standards feed did not answer.</div>'; });
+    }).catch(function () { host.innerHTML = '<div class="empty">Standards feed did not answer twice — press Refresh.</div>'; });
   }
 
   /* The reference's staff section, fed by the portal's own activity ledger (teamPerformance —
@@ -1035,7 +1059,12 @@
       if (st) { st.textContent = 'last update failed (' + oS((e && e.message) || 'no answer') + ') — showing the previous minute; retrying'; }
       return;   // keep the last good numbers on screen rather than blanking the card
     }
-    box.innerHTML = '<div class="empty">The dispatch clock did not answer — ' + esc(oS((e && e.message) || 'try Refresh')) + '</div>';
+    var again = O.dispRetried !== O.dispKey;
+    if (again) {
+      O.dispRetried = O.dispKey;
+      setTimeout(function () { var b2 = $('o2Dispatch'); if (b2 && !b2.querySelector('.o2d')) { oDispatchLoad(); } }, 15000);
+    }
+    box.innerHTML = '<div class="empty">The dispatch clock did not answer — ' + esc(oS((e && e.message) || 'try Refresh')) + (again ? ' · trying again in 15 s' : ' · it tries again every minute') + '</div>';
   }
 
   function oDispatchPaint(d, approx, r) {
@@ -1217,7 +1246,7 @@
   function oPulse() {
     var box = $('o2Pulse');
     if (!box) { return; }
-    api('mgmtPulse', {}).then(function (d) {
+    oFeed('mgmtPulse', {}, 500).then(function (d) {
       d = d || {};
       var gbp = function (v) { return '£' + (Number(v) || 0).toFixed(2); };
       var t = function (view, label, val, sub, bad) {
