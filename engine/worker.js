@@ -26735,8 +26735,9 @@ const ROUTES = {
       const prevBy = {};
       for (const a of ((hit && hit.accounts) || [])) prevBy[a.account] = a;
       const age = hit ? Date.now() - Number(hit.at || 0) : Infinity;
-      const fresh = hit && age < (hit.partial ? 60000 : 600000);
-      if (fresh && !hit.partial) return hit;
+      const partial = !!(hit && (hit.partial || (hit.accounts || []).some((a) => a.error)));   // a pre-4-Nov cache carried refusals without the flag
+      const fresh = hit && age < (partial ? 60000 : 600000);
+      if (fresh && !partial) return hit;
       const out = { at: Date.now(), accounts: [], partial: false };
       const g = (x) => (x && x.value != null ? Math.round(Number(x.value) * 100) / 100 : 0);
       const readOne = async (acct) => {
