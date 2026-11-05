@@ -5381,7 +5381,7 @@ function run(argv) {
   t('traffic page (5 Nov): impressions and views are ONE grouped row per block, red and green side by side, off ONE helper, after the tiles and the so-far-today line, and the month-back block is drawn the same way on the same scales',
     (trSrc.match(/trBarPair\(/g) || []).length === 3 &&
     /trBarPair\('Impressions and views by day', chartDays, \{ today: today, maxImp: maxImp, maxViews: maxViews, vsOf: backOf, note: weekNote \}\)/.test(trSrc) &&
-    /trBarPair\('Impressions and views by day \u00b7 a month back', prevDays, \{ maxImp: maxImp, maxViews: maxViews, vsOf: nowOf, note: 'same scales as the row above' \}\)/.test(trSrc) &&
+    /trBarPair\('Impressions and views by day \u00b7 a month back', prevDays, \{ maxImp: maxImp, maxViews: maxViews, vsOf: nowOf, vsWord: 'the window above', note: 'same scales as the row above' \}\)/.test(trSrc) &&
     trSrc.indexOf('So far today (') < trSrc.indexOf("trBarPair('Impressions and views by day', chartDays") &&
     trSrc.indexOf("trBarPair('Impressions and views by day', chartDays") < trSrc.indexOf("trBarPair('Impressions and views by day \u00b7 a month back'") &&
     !/trBarRow\(/.test(trSrc) && !/var max = Math\.max\.apply/.test(trSrc) &&
@@ -5389,16 +5389,32 @@ function run(argv) {
     /\.tr-bar\.tr-imp\{background:linear-gradient\(180deg,#e5484d/.test(trSrc) && /\.tr-bar\.tr-vw\{background:linear-gradient\(180deg,#3fb950/.test(trSrc) &&
     /<i class="tr-imp"><\/i>Impressions/.test(trSrc) && /<i class="tr-vw"><\/i>Views/.test(trSrc),
     (trSrc.match(/trBarPair\(/g) || []).length);
-  t('traffic page (5 Nov): the pair keeps each series on its OWN scale, both bars of a day carry the same tooltip, the day eBay is still counting is faded and never given a percentage, and the month-back figures are named for both series',
+  t('traffic page (5 Nov): the pair keeps each series on its OWN scale, every pair carries its figures as data for the one hover card, the date sits under each pair, and a day still counting is faded and given no percentage',
     (() => {
       const row = trSrc.slice(trSrc.indexOf('  function trBarPair('), trSrc.indexOf('\n  }', trSrc.indexOf('  function trBarPair(')));
       return /var maxImp = opt\.maxImp \|\| trBarMax\(rows, 'impressions', null\);/.test(row) &&
         /var maxViews = opt\.maxViews \|\| trBarMax\(rows, 'views', null\);/.test(row) &&
         /trBarH\(r\.impressions, maxImp\)/.test(row) && /trBarH\(r\.views, maxViews\)/.test(row) &&
-        /var t = '<span>' \+ tip\(r, v\) \+ '<\/span>';/.test(row) && (row.match(/' \+ t \+ '<\/div>'/g) || []).length === 2 &&
-        /var hold = isPart \|\| !!v\.part;/.test(row) && /if \(hold \|\| !then\) \{ return ''; \}/.test(row) &&
-        /isPart \? ' tr-part' : ''/.test(row) && /each series on its own scale/.test(row) &&
-        /trN\(v\.impressions\) \+ ' imp'/.test(row) && /trN\(v\.views\) \+ ' views'/.test(row);
+        /'<div class="tr-grp"' \+ trTipData\(card\(r, v\)\) \+ '>'/.test(row) && !/<span>' \+ tip\(/.test(row) &&
+        /var isPart = r\.date === today, hold = isPart \|\| !!\(v && v\.part\);/.test(row) &&
+        /d: hold \? null : trDelta\(r\.impressions, v\.impressions\), hold: hold/.test(row) &&
+        /\{ c: '#e5484d', k: 'Impressions', v: trN\(r\.impressions\) \}/.test(row) && /\{ c: '#3fb950', k: 'Views', v: trN\(r\.views\) \}/.test(row) &&
+        /\{ k: 'CTR', v: ctr\.toFixed\(2\) \+ '%' \}/.test(row) &&
+        /'<div class="tr-dx">' \+ rows\.map\(function \(r\) \{ return '<span>' \+ esc\(axisLbl\(r\)\) \+ '<\/span>'; \}\)\.join\(''\) \+ '<\/div>'/.test(row) &&
+        /isPart \? ' tr-part' : ''/.test(row) && /each series on its own scale/.test(row);
+    })(), null);
+  t('traffic page (5 Nov): ONE hover card serves every bar on the page, built from the bar\u2019s own data, keyed by series colour, with a signed difference that is withheld in words while a day is still counting, placed by the cursor and kept inside the window',
+    (() => {
+      const wire = trSrc.slice(trSrc.indexOf('  function trWire(box) {'), trSrc.indexOf('\n  }', trSrc.indexOf('  function trWire(box) {')));
+      return /function trTipHtml\(o\) \{/.test(trSrc) && /function trTipMove\(ev\) \{/.test(trSrc) && /function trTipData\(o\) \{ return ' data-tr-tip="' \+ esc\(JSON\.stringify\(o\)\) \+ '"'; \}/.test(trSrc) &&
+        /if \(r\.hold\) \{ dl = '<span class="tr-dl na">still counting<\/span>'; \}/.test(trSrc) &&
+        /\(r\.d >= 0 \? 'up' : 'dn'\)/.test(trSrc) && /Math\.abs\(r\.d\)\.toFixed\(1\) \+ '%<\/span>'/.test(trSrc) &&
+        /if \(x \+ w > window\.innerWidth - 8\) \{ x = ev\.clientX - w - 16; \}/.test(trSrc) && /if \(y < 8\) \{ y = ev\.clientY \+ 18; \}/.test(trSrc) &&
+        /box\.querySelectorAll\('\[data-tr-tip\]'\)\.forEach/.test(wire) && /tipEl\.innerHTML = trTipHtml\(o\); tipEl\.classList\.add\('on'\); trTipMove\(ev\);/.test(wire) &&
+        /b\.onmouseleave = function \(\) \{ tipEl\.classList\.remove\('on'\); \};/.test(wire) &&
+        /* the hour bars carry the same card, and the old in-bar spans are gone from both charts */
+        /'"' \+ trTipData\(card\) \+ ' style="height:' \+ ch \+ '%"><\/div>'/.test(trSrc) && !/\.tr-hb span\{/.test(trSrc) && !/\.tr-bar span\{/.test(trSrc) &&
+        /\.tr-tip\{position:fixed;z-index:9999;pointer-events:none/.test(trSrc);
     })(), null);
   t('traffic page: the hour block opens on Sold while the traffic clock has nothing for the day and on Impressions once it has, so it is never the empty box the owner was shown',
     /var ser = TR\.hour_series \|\| \(CUR\.totals\.impressions \? 'impressions' : 'sold'\);/.test(trSrc) &&
