@@ -151,7 +151,13 @@ function cronMap() {
        and 10ms CPU — a packed slot kills its own tail ("Too many subrequests", all five
        accounts, 08:31). Watchers and syncs now ride SEPARATE invocations, each with its own
        fresh budget; watcher fan-outs are capped inside the watchers themselves. */
-    '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, nightlyCatchup, standardsSync],
+    /* 5 Nov: ten jobs in one invocation and only the first three ever ran. alertAckWatch through
+       nightlyCatchup had not run since 3 November: the invocation spends its budget on the jobs
+       above them and anything queued after that silently never runs, which is this file's own
+       documented trap and the reason half the watches were dead. Split across three minutes. */
+    '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, standardsSync],
+    '31 * * * *': [alertAckWatch, uncampaignedDigest, darkAccountWatch],
+    '32 * * * *': [supplierLinkFill, noSupplierScan, nightlyCatchup],
     /* Workers Paid (24 Aug): real slots are back — the 5-trigger cap and the 50-subrequest
        budget died with the upgrade. Each heavy family still keeps its own invocation. */
     '40 * * * *': [listingSync, trafficSync],
@@ -27734,6 +27740,49 @@ const ROUTES = {
      IT WRITES NOTHING AND IT SENDS NOTHING. Four reads of the portal's own tables, no eBay call of
      any kind, and no statement that changes a row: the runs are grouped out of the ticks the sampler
      already left behind, and the A23 state is read from the alert table as the alerts job wrote it. */
+  adsJobHealthProbe: {
+    /* READ-ONLY, sync key: every job the cron map carries, with the slot it rides, how often that
+       slot fires, when the job last finished and whether that is overdue. Written on 5 Nov after two
+       jobs in a row turned out to have been silently dead for days: a job queued behind heavier ones
+       in the same invocation never runs, and nothing on any page said so. */
+    auth: 'sync',
+    fn: async (p, ctx) => {
+      const map = cronMap();
+      const slotMin = (cron) => {
+        const f = String(cron).trim().split(/\s+/)[0];
+        if (/^\*\/(\d+)$/.test(f)) return Number(f.split('/')[1]);
+        if (/^\d+-\d+\/(\d+)$/.test(f)) return Number(f.split('/')[1]);
+        if (/^\d+$/.test(f)) return String(cron).trim().split(/\s+/)[1] === '*' ? 60 : 1440;
+        return 60;
+      };
+      const where = {};
+      for (const cron of Object.keys(map)) {
+        const list = map[cron] || [];
+        for (let i = 0; i < list.length; i++) {
+          const n = (list[i] && list[i].name) || '';
+          if (n) where[n] = { slot: cron, every_min: slotMin(cron), position: i + 1, of: list.length };
+        }
+      }
+      const rows = (await ctx.env.DB.prepare("SELECT job, last_ok, last_error FROM sync_state WHERE account = '' LIMIT 400").all()).results || [];
+      const seen = {}; for (const r of rows) seen[String(r.job)] = r;
+      const now = await ctx.env.DB.prepare("SELECT datetime('now') AS now").first().catch(() => null);
+      const nowMs = now && now.now ? Date.parse(String(now.now).replace(' ', 'T') + 'Z') : Date.now();
+      const out = [];
+      for (const n of Object.keys(where).sort()) {
+        const r = seen[n] || {};
+        const at = r.last_ok ? Date.parse(String(r.last_ok).replace(' ', 'T') + 'Z') : null;
+        const lateMin = at ? Math.round((nowMs - at) / 60000) : null;
+        const due = where[n].every_min;
+        out.push(Object.assign({ job: n, last_ok: r.last_ok || null, late_min: lateMin,
+          overdue: at ? lateMin > Math.max(due * 3, due + 30) : true,
+          last_error: (r.last_error || '').slice(0, 120) }, where[n]));
+      }
+      const late = out.filter(x => x.overdue);
+      return { db_now: now ? now.now : null, jobs: out, overdue: late,
+        overdue_n: late.length, slots: Object.keys(map).length, sent_to_ebay: false, writes: 'none' };
+    },
+  },
+
   adsJobsProbe: {
     /* READ-ONLY, sync key: the engine's own job trail (adtool_jobs) for one job, newest first, with the
        database clock beside it, so a job that starts and never finishes can be seen without a session
