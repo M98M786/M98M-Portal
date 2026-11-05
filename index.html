@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261105-1333';
+var BUILD = '20261105-1358';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -40191,6 +40191,20 @@ function saveSchedule() {
        own box can never clip it. */
     '.tr-dx{display:flex;gap:3px;font-size:9.5px;color:var(--text-3);font-weight:700;margin-top:4px}' +
     '.tr-dx span{flex:1;text-align:center;white-space:nowrap;overflow:hidden}' +
+    /* 5 Nov (owner): the card's figures FIXED under every pair, one column per date, so nothing has to
+       be hovered to be read. Impressions and views carry their colour key and the month-back difference
+       beside them; sold, CTR and conversion follow; the compared day's own figures close the column. On a
+       long window the column keeps only its two coloured lines, so thirty-one of them still fit. */
+    '.tr-dt{display:flex;gap:3px;margin-top:4px}' +
+    '.tr-dc{flex:1;min-width:0;font-size:10px;line-height:1.5;color:var(--text-2);font-variant-numeric:tabular-nums;border-top:1px solid var(--gold-line);padding:4px 2px 0;overflow:hidden}' +
+    '.tr-dc.tr-dc-part{opacity:.72}' +
+    '.tr-dc.tr-dc-tight{font-size:9px}' +
+    '.tr-dd{display:flex;align-items:baseline;gap:4px;white-space:nowrap;font-weight:800;color:#fff}' +
+    '.tr-dd i{display:inline-block;width:7px;height:7px;border-radius:2px;flex:none;position:relative;top:-1px}' +
+    '.tr-dd i.tr-imp{background:#e5484d}.tr-dd i.tr-vw{background:#3fb950}' +
+    '.tr-dd span{color:var(--text-3);font-weight:700;font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;min-width:26px}' +
+    '.tr-dd em{font-style:normal;font-size:9px;font-weight:800;margin-left:2px}.tr-dd em.up{color:var(--ok)}.tr-dd em.dn{color:var(--bad)}' +
+    '.tr-dv{color:var(--text-3);font-size:9px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;border-top:1px dashed var(--gold-line);padding-top:2px}' +
     '.tr-tip{position:fixed;z-index:9999;pointer-events:none;display:none;min-width:220px;max-width:320px;background:#15151a;border:1px solid var(--gold-line);border-radius:10px;padding:10px 13px;box-shadow:0 10px 28px rgba(0,0,0,.5);font-size:11.5px;color:var(--text-2);line-height:1.5}' +
     '.tr-tip.on{display:block}' +
     '.tr-tip .tr-th{font-weight:800;color:#fff;font-size:12px;margin-bottom:5px}' +
@@ -40439,6 +40453,29 @@ function saveSchedule() {
       }
       return o;
     };
+    /* the column under a pair: the same figures the card carries, fixed on the page. The month-back
+       difference sits beside impressions and views, withheld while either day is still counting. */
+    var compact = n > 12;
+    var cell = function (r, v) {
+      var isPart = r.date === today, hold = isPart || !!(v && v.part);
+      var ctr = r.impressions ? r.views / r.impressions * 100 : 0, cvr = r.views ? r.transactions / r.views * 100 : 0;
+      var dl = function (now, then) {
+        var dd = (hold || !v) ? null : trDelta(now, then);
+        return dd === null ? '' : '<em class="' + (dd >= 0 ? 'up' : 'dn') + '">' + (dd >= 0 ? '\u25b2' : '\u25bc') + Math.abs(dd).toFixed(1) + '%</em>';
+      };
+      return '<div class="tr-dc' + (isPart ? ' tr-dc-part' : '') + (n > 24 ? ' tr-dc-tight' : '') + '">' +
+        '<div class="tr-dd"><i class="tr-imp"></i>' + trN(r.impressions) + dl(r.impressions, v && v.impressions) + '</div>' +
+        '<div class="tr-dd"><i class="tr-vw"></i>' + trN(r.views) + dl(r.views, v && v.views) + '</div>' +
+        (compact ? '' :
+          '<div class="tr-dd"><span>Sold</span>' + esc(String(r.transactions)) + '</div>' +
+          '<div class="tr-dd"><span>CTR</span>' + ctr.toFixed(2) + '%</div>' +
+          '<div class="tr-dd"><span>Conv</span>' + cvr.toFixed(2) + '%</div>' +
+          (v ? '<div class="tr-dv" title="' + esc(trDateWords(v.date, true) + ' \u00b7 ' + (opt.vsWord || 'a month back')) + '">' +
+                esc(trDateWords(v.date, false)) + ': ' + trN(v.impressions) + ' \u00b7 ' + trN(v.views) + ' \u00b7 ' + esc(String(v.transactions == null ? '' : v.transactions)) +
+                (hold ? ' \u00b7 still counting' : '') + '</div>' : '') +
+          (isPart ? '<div class="tr-dv">today \u00b7 still counting</div>' : '')) +
+        '</div>';
+    };
     return '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:12px 0 2px">' +
       esc(label) + (opt.note ? ' \u00b7 <span style="color:var(--text-2)">' + esc(opt.note) + '</span>' : '') + '</div>' +
       '<div class="tr-leg"><span><i class="tr-imp"></i>Impressions</span><span><i class="tr-vw"></i>Views</span>' +
@@ -40451,7 +40488,8 @@ function saveSchedule() {
           '<div class="tr-bar tr-vw' + (isPart ? ' tr-part' : '') + '" style="height:' + trBarH(r.views, maxViews) + '%"></div>' +
           '</div>';
       }).join('') + '</div>' +
-      '<div class="tr-dx">' + rows.map(function (r) { return '<span>' + esc(axisLbl(r)) + '</span>'; }).join('') + '</div>';
+      '<div class="tr-dx">' + rows.map(function (r) { return '<span>' + esc(axisLbl(r)) + '</span>'; }).join('') + '</div>' +
+      '<div class="tr-dt">' + rows.map(function (r) { return cell(r, opt.vsOf ? opt.vsOf(r.date) : null); }).join('') + '</div>';
   }
 
   /* 23 Sept (owner: "traffic page not working, it's stale"). Nothing was stale — trafficSync had
@@ -40601,8 +40639,8 @@ function saveSchedule() {
     chartDays.forEach(function (r) { var c = cmpOf(r.date); if (c) { prevDays.push(c); prevToCur[c.date] = r; } });
     var maxImp = Math.max(trBarMax(chartDays, 'impressions', null), trBarMax(prevDays, 'impressions', null));
     var maxViews = Math.max(trBarMax(chartDays, 'views', null), trBarMax(prevDays, 'views', null));
-    var backOf = function (dt) { var c = cmpOf(dt); return c ? { date: c.date, impressions: c.impressions, views: c.views } : null; };
-    var nowOf = function (dt) { var r = prevToCur[dt]; return r ? { date: r.date, impressions: r.impressions, views: r.views, part: r.date === today } : null; };
+    var backOf = function (dt) { var c = cmpOf(dt); return c ? { date: c.date, impressions: c.impressions, views: c.views, transactions: c.transactions } : null; };
+    var nowOf = function (dt) { var r = prevToCur[dt]; return r ? { date: r.date, impressions: r.impressions, views: r.views, transactions: r.transactions, part: r.date === today } : null; };
     var weekNote = TR.mode === 'today' ? 'the week behind today' : '';
     /* 5 Nov (owner): ONE row, impressions and views side by side per day, red and green */
     h += trBarPair('Impressions and views by day', chartDays, { today: today, maxImp: maxImp, maxViews: maxViews, vsOf: backOf, note: weekNote });
