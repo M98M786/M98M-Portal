@@ -155,7 +155,9 @@ function cronMap() {
        nightlyCatchup had not run since 3 November: the invocation spends its budget on the jobs
        above them and anything queued after that silently never runs, which is this file's own
        documented trap and the reason half the watches were dead. Split across three minutes. */
-    '30 * * * *': [processWatch, zeroSaleScan, cpcRevisionWatch, standardsSync],
+    /* cheap D1 work first, the API job last: on 5 Nov zeroSaleScan and cpcRevisionWatch had run only
+       at 00:31 for days, because processWatch ahead of them spends the invocation in the daytime. */
+    '30 * * * *': [zeroSaleScan, cpcRevisionWatch, standardsSync, processWatch],
     '31 * * * *': [alertAckWatch, uncampaignedDigest, darkAccountWatch],
     '32 * * * *': [supplierLinkFill, noSupplierScan, nightlyCatchup],
     /* Workers Paid (24 Aug): real slots are back — the 5-trigger cap and the 50-subrequest
