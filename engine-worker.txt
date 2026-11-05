@@ -5211,6 +5211,18 @@ const ADTOOL_ROLLUP_COST_MARGIN = 1.25;
    eBay's report for it lands and every hour of it is rewritten) must be budgeted at its dear price,
    or it is begun on its dear day and killed. Erring the other way only costs a step one hour's wait. */
 const ADTOOL_ROLLUP_COST_DECAY = 0.8;
+/* A STEP THAT NEVER FITS MUST EVENTUALLY RUN ANYWAY (5 Nov). The gate asks whether a step fits in
+   what is left of the budget, and a step that is estimated dearer than that is left for the next
+   hour. Where the estimate is a GUESS rather than a measurement, that is a trap with no way out:
+   yesterday was budgeted at the cost of rebuilding a whole day from nothing (117 s with the margin)
+   while an ordinary run had about 110 s left after today, so it was left for the next hour, every
+   hour, from 2 November to 5 November. It never ran, so it was never measured, so the guess stood,
+   so it never ran. Every money figure in the portal stopped with it.
+   Now a step counts how many runs in a row have left it, and once it reaches this many it runs
+   whatever the estimate says: a run that overshoots its budget costs one slow invocation, while a
+   step that is never run costs every number on every page. The count is cleared the moment it runs,
+   and what it really took replaces the guess. */
+const ADTOOL_ROLLUP_FORCE_AFTER = 2;
 /* with no finish written after this long, a run is dead and its row is closed as 'killed' */
 const ADTOOL_ROLLUP_DEAD_MIN = 20;
 /* ONE WHOLE DAY, in rows: the 31 Oct 07:20 run wrote 53,365 of them for three days, so this is what
@@ -5315,6 +5327,25 @@ function adtRollupStepBlend(prev, measured, decay) {
   if (!pok) return Math.round(m);
   if (!mok) return Math.round(p);
   return Math.round(Math.max(m, p * d));
+}
+function adtRollupForced(skips, name, after) {
+  /* HAS THIS STEP WAITED LONG ENOUGH TO GO FIRST ANYWAY? `skips` is the count of runs in a row that
+     left it, held per step. Pure, so the rule can be read and tested on its own. */
+  const n = Math.max(1, Math.round(Number(after) || ADTOOL_ROLLUP_FORCE_AFTER));
+  let m = skips;
+  if (typeof m === 'string') { try { m = JSON.parse(m); } catch (e) { m = null; } }
+  const v = Number(m && m[String(name)]);
+  return isFinite(v) && v >= n;
+}
+function adtRollupSkipsAfter(skips, name, ran) {
+  /* the count after this run: cleared where the step ran, one more where it was left again. */
+  let m = skips;
+  if (typeof m === 'string') { try { m = JSON.parse(m); } catch (e) { m = null; } }
+  const out = {};
+  for (const k of Object.keys(m || {})) { const v = Number(m[k]); if (isFinite(v) && v > 0) out[k] = Math.round(v); }
+  const k = String(name);
+  if (ran) { delete out[k]; } else { out[k] = (Number(out[k]) || 0) + 1; }
+  return out;
 }
 function adtRollupStepCosts(stored, defaults, margin) {
   /* WHAT EACH STEP IS EXPECTED TO COST: what it actually took last time where that has been
@@ -5492,6 +5523,8 @@ async function adtoolRollups(env) {
     const storedRaw = await adtFlag(env, 'adtool_rollup_step_ms');
     let storedMs = null; try { storedMs = JSON.parse(storedRaw); } catch (e) { storedMs = null; }
     const cost = adtRollupStepCosts(storedRaw, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_COST_MARGIN);
+    let skips = await adtFlag(env, 'adtool_rollup_step_skips');
+    const forcedSteps = [];
     const took = {}, ran = [], leftOver = [], notDue = [], extra = [], ownedDays = [];
     const st = { held: 0, written: 0 };
     let cutAt = null;
@@ -5519,14 +5552,20 @@ async function adtoolRollups(env) {
     const step = async (name, words, due, dueNote, fn) => {
       if (due === false) { notDue.push({ step: name, words: words, reason: dueNote || 'not due this run' }); return false; }
       const pl = adtRollupPlan({ now_ms: Date.now(), t0: t0, budget_ms: BUDGET_MS, steps: [{ name: name, words: words, cost_ms: cost[name] }] });
-      if (cutAt || !pl.run.length) {
+      /* the one way out of the trap: a step left this many runs in a row runs now, whatever the
+         estimate says, and what it really takes replaces the guess that was keeping it out */
+      const forced = !cutAt && !pl.run.length && adtRollupForced(skips, name, ADTOOL_ROLLUP_FORCE_AFTER);
+      if (forced) { forcedSteps.push(words); }
+      if (!forced && (cutAt || !pl.run.length)) {
         leftOver.push({ step: name, words: words, reason: cutAt ? 'left for the next hour: the budget ran out at ' + cutAt : (((pl.skipped || [])[0] || {}).reason || 'left for the next hour') });
         if (!cutAt) cutAt = words;
+        skips = adtRollupSkipsAfter(skips, name, false);
         return false;
       }
       const s0 = Date.now();
       await fn();
       took[name] = Date.now() - s0;
+      skips = adtRollupSkipsAfter(skips, name, true);
       cost[name] = Math.min(BUDGET_MS, Math.round(took[name] * ADTOOL_ROLLUP_COST_MARGIN));
       ran.push({ step: name, words: words, ms: took[name] });
       return true;
@@ -5681,6 +5720,7 @@ async function adtoolRollups(env) {
       /* the figures before the loose notes: what the run wrote and how much of its budget it used is
          the measurement, and the note is cut at four hundred characters where it is stored */
       + ' · ' + rows + ' rows in ' + Math.round((Date.now() - t0) / 1000) + ' s of a ' + Math.round(BUDGET_MS / 1000) + ' s budget'
+      + (forcedSteps.length ? ' · ran anyway after waiting: ' + forcedSteps.join(', ') : '')
       + (extra.length ? ' · ' + extra.join(' · ') : '');
     note = noteNow();
     await adtJobEnd(env, 'adtoolRollups', t, rows, coreCut ? 'cut' : 'ok', note);
@@ -5738,6 +5778,7 @@ async function adtoolRollups(env) {
     const blended = {};
     for (const k of Object.keys(ADTOOL_ROLLUP_STEP_MS)) { const b = adtRollupStepBlend(storedMs && storedMs[k], took[k], ADTOOL_ROLLUP_COST_DECAY); if (b != null) blended[k] = b; }
     await commit('adtool_rollup_step_ms', JSON.stringify(blended));
+    await commit('adtool_rollup_step_skips', JSON.stringify(skips || {}));
     note = noteNow();
     await adtJobEnd(env, 'adtoolRollups', t, rows, coreCut ? 'cut' : 'ok', note);
   } catch (e) {
