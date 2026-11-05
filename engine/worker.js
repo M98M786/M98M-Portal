@@ -1052,9 +1052,9 @@ function pvTokens(s) {
    every DDL statement in the file, which is wider than these families on purpose: a CREATE put
    anywhere is a reason to look. That is deliberate: a marker that could go stale by accident is a
    column that never lands. */
-const ADTOOL_SCHEMA_VERSION = '2026-11-02.1';
+const ADTOOL_SCHEMA_VERSION = '2026-11-05.1';
 /* the fingerprint of every DDL statement in engine/worker.js, held to this value by the suite */
-const ADTOOL_SCHEMA_DDL_HASH = '195-b1518cd2';
+const ADTOOL_SCHEMA_DDL_HASH = '199-4f19ee92';
 const ADTOOL_SCHEMA_KEY = 'adtool_schema_version';
 let ADTOOL_SCHEMA_MARK = null;      /* the one marker read per isolate */
 let ADTOOL_SCHEMA_SETTLE = null;    /* the one apply pass per isolate, and the proof DDL ran here */
@@ -5213,7 +5213,15 @@ async function adtoolRollupPeriods(env, fromDay, toDay) {
     for (const x of (rs.results || [])) stmts2.push(env.DB.prepare('INSERT INTO adtool_listing_week (account, item_id, iso_week, days, orders, units, revenue, actual_profit, clicks, spend, attr_units, attr_revenue, ad_profit, pending_cost_orders, pending_fee_orders) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15) ON CONFLICT(account, item_id, iso_week) DO UPDATE SET days = ?4, orders = ?5, units = ?6, revenue = ?7, actual_profit = ?8, clicks = ?9, spend = ?10, attr_units = ?11, attr_revenue = ?12, ad_profit = ?13, pending_cost_orders = ?14, pending_fee_orders = ?15').bind(x.account, x.item_id, w, x.days, x.o, x.u, round2(x.r), round2(x.ap), x.c, round2(x.s), x.au, round2(x.ar), round2(x.adp), Number(x.pc) || 0, Number(x.pf) || 0));
   }
   for (const m of months) {
-    const rs = await env.DB.prepare("SELECT account, item_id, COUNT(*) AS days, SUM(orders) AS o, SUM(units) AS u, SUM(revenue) AS r, SUM(actual_profit) AS ap, SUM(clicks) AS c, SUM(spend) AS s, SUM(attr_units) AS au, SUM(attr_revenue) AS ar, SUM(ad_profit) AS adp, SUM(pending_cost_orders) AS pc, SUM(COALESCE(pending_fee_orders, 0)) AS pf FROM adtool_listing_day WHERE substr(day, 1, 7) = ?1 AND day < ?2 GROUP BY account, item_id").bind(m, todayUk).all();
+    /* THE MONTH AS A DAY RANGE AND NOT A substr (5 Nov). Matching the first seven characters of the
+       day against the month is a function of the column, so no index can answer it: this read
+       walked all 71,000 rows of adtool_listing_day
+       every time the week-and-month step ran, which is every hour the roll-up reaches it, for a
+       month that holds a few thousand. A day is 'YYYY-MM-DD' throughout this table — it is written
+       by adtAddDays and read by the same lexical comparisons everywhere else in this file — so
+       `day >= m + '-01' AND day <= m + '-31'` is the SAME SET OF ROWS, and the planner can take it
+       off idx_adtld_day. The month written is still `m`, and nothing about the sums moves. */
+    const rs = await env.DB.prepare("SELECT account, item_id, COUNT(*) AS days, SUM(orders) AS o, SUM(units) AS u, SUM(revenue) AS r, SUM(actual_profit) AS ap, SUM(clicks) AS c, SUM(spend) AS s, SUM(attr_units) AS au, SUM(attr_revenue) AS ar, SUM(ad_profit) AS adp, SUM(pending_cost_orders) AS pc, SUM(COALESCE(pending_fee_orders, 0)) AS pf FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND day < ?3 GROUP BY account, item_id").bind(m + '-01', m + '-31', todayUk).all();
     for (const x of (rs.results || [])) stmts2.push(env.DB.prepare('INSERT INTO adtool_listing_month (account, item_id, month, days, orders, units, revenue, actual_profit, clicks, spend, attr_units, attr_revenue, ad_profit, pending_cost_orders, pending_fee_orders) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15) ON CONFLICT(account, item_id, month) DO UPDATE SET days = ?4, orders = ?5, units = ?6, revenue = ?7, actual_profit = ?8, clicks = ?9, spend = ?10, attr_units = ?11, attr_revenue = ?12, ad_profit = ?13, pending_cost_orders = ?14, pending_fee_orders = ?15').bind(x.account, x.item_id, m, x.days, x.o, x.u, round2(x.r), round2(x.ap), x.c, round2(x.s), x.au, round2(x.ar), round2(x.adp), Number(x.pc) || 0, Number(x.pf) || 0));
   }
   written += await adtBatch(env, stmts2);
@@ -7245,6 +7253,11 @@ async function ensureAdtoolPhase2Schema(env) {
     "CREATE TABLE IF NOT EXISTS adtool_campaign_ad_events (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, campaign_id TEXT, item_id TEXT, from_status TEXT DEFAULT '', to_status TEXT DEFAULT '', seen_at TEXT, source TEXT DEFAULT 'sync')",
     'CREATE INDEX IF NOT EXISTS idx_adtcae_item ON adtool_campaign_ad_events(item_id, seen_at)',
     'CREATE INDEX IF NOT EXISTS idx_adtcae_camp ON adtool_campaign_ad_events(account, campaign_id, seen_at)',
+    /* 5 Nov: the stop-start archive is read BY TIME ALONE in two places — the hour buckets on
+       Stopped yesterday / Activated today (adtoolChangeDay) and the ad-status bullet in the daily
+       report — and neither of the two indexes above leads with seen_at, so both walked all 61,000
+       events for one UK day's worth. A day is about 700 of them. Named after those two reads. */
+    'CREATE INDEX IF NOT EXISTS idx_adtcae_seen ON adtool_campaign_ad_events(seen_at)',
     "CREATE TABLE IF NOT EXISTS adtool_campaign_archive (account TEXT, campaign_id TEXT, name TEXT DEFAULT '', status_last TEXT DEFAULT '', funding TEXT DEFAULT '', budget TEXT DEFAULT '', gone_at TEXT, PRIMARY KEY (account, campaign_id))",
     "CREATE TABLE IF NOT EXISTS adtool_ads_daily (account TEXT, item_id TEXT, campaign_id TEXT, day TEXT, family TEXT, spend REAL DEFAULT 0, clicks INTEGER DEFAULT 0, units INTEGER DEFAULT 0, revenue REAL DEFAULT 0, impressions INTEGER DEFAULT 0, pulled_at TEXT, pulls INTEGER DEFAULT 1, PRIMARY KEY (account, item_id, campaign_id, day, family))",
     'CREATE INDEX IF NOT EXISTS idx_adtad_camp_day ON adtool_ads_daily(account, campaign_id, day)',
@@ -13104,45 +13117,61 @@ async function adPeakOverviewExtras(env, opts) {
      minutes and the difference booked to the hour it arrived in. The first reading of a day is a
      total since midnight and belongs to no hour of trading, so it is dropped the same way here. */
   const d7from = adtAddDays(today, -7);
-  /* `tp` is where today's own figure's placeholder lands: the two windows bind a different number
-     of dates, and a statement handed a parameter it never names is a statement that fails. */
-  const hourSel = tp => 'SELECT item_id, hour, ROUND(SUM(COALESCE(spend_r, spend_s)), 2) AS spend, ' +
-    'ROUND(SUM(CASE WHEN day = ?' + tp + ' THEN COALESCE(spend_r, spend_s) ELSE 0 END), 2) AS spend_today FROM adtool_listing_hour';
-  const daySel = 'SELECT item_id, COUNT(DISTINCT day) AS days FROM adtool_listing_hour';
-  /* TODAY'S OWN DAY COUNT, asked for separately. Without it, a listing with readings over the week
-     but none yet for today would have its today figure printed as nothing spent, and a nought
-     standing in for a reading we have not taken is the one thing this section must never print. */
-  const daySelNow = 'SELECT item_id, COUNT(DISTINCT day) AS days, COUNT(DISTINCT CASE WHEN day = ?4 THEN day END) AS days_today FROM adtool_listing_hour';
+  /* ONE READ A WINDOW, NOT TWO (5 Nov, the billions-of-rows work). This panel asked each window
+     TWICE over the identical rows: the same cohort join, the same guard, the same dates, once at
+     the (listing, hour) grain for the money and once at the listing's grain for the day counts. At
+     the list's cap that is 336,000 hour rows read a second time for nothing.
+     The hours now ride at the LISTING's grain as twenty four conditional sums, so each window is
+     one pass. THE ARITHMETIC IS UNCHANGED: every column is still ROUND(SUM(...), 2) over exactly
+     one (listing, hour) of the same rows, and an hour the table holds nothing for sums to nought,
+     which adds the same as the missing row it used to be. `tp` is where today's own figure's
+     placeholder lands: the two windows bind a different number of dates, and a statement handed a
+     parameter it never names is a statement that fails; `tp` falsy is the window that has no today
+     in it and asks for neither the today columns nor a placeholder for them.
+     TODAY'S OWN DAY COUNT travels with them. Without it, a listing with readings over the week but
+     none yet for today would have its today figure printed as nothing spent, and a nought standing
+     in for a reading we have not taken is the one thing this section must never print. */
+  const hourSpend = 'COALESCE(spend_r, spend_s)';
+  const hourSel = tp => {
+    const cols = [];
+    for (let h = 0; h < 24; h++) cols.push('ROUND(SUM(CASE WHEN hour = ' + h + ' THEN ' + hourSpend + ' ELSE 0 END), 2) AS h' + h);
+    if (tp) for (let h = 0; h < 24; h++) cols.push('ROUND(SUM(CASE WHEN hour = ' + h + ' AND day = ?' + tp + ' THEN ' + hourSpend + ' ELSE 0 END), 2) AS t' + h);
+    return 'SELECT item_id, COUNT(DISTINCT day) AS days' +
+      (tp ? ', COUNT(DISTINCT CASE WHEN day = ?' + tp + ' THEN day END) AS days_today' : '') +
+      ', ' + cols.join(', ') + ' FROM adtool_listing_hour';
+  };
   const guard = ' WHERE samples > 0 AND NOT (day < ?1 AND hour = 8)';
   const nowJoin = adPeakCohortJoin(CO.sql, 'item_id', 'day');
   const befJoin = adPeakCohortBeforeJoin(CO.sql, 'item_id', 'day', 28);
-  let H = [[], [], [], []];
+  let H = [[], []];
   try {
     const B = await env2.DB.batch([
-      env2.DB.prepare(hourSel(4) + nowJoin + guard + ' AND day >= ?2 AND day <= ?3 GROUP BY item_id, hour').bind(ADTOOL_CARRY_FIX_DAY, d7from, today, today),
-      env2.DB.prepare(daySelNow + nowJoin + guard + ' AND day >= ?2 AND day <= ?3 GROUP BY item_id').bind(ADTOOL_CARRY_FIX_DAY, d7from, today, today),
-      env2.DB.prepare(hourSel(2) + befJoin + guard + ' GROUP BY item_id, hour').bind(ADTOOL_CARRY_FIX_DAY, today),
-      env2.DB.prepare(daySel + befJoin + guard + ' GROUP BY item_id').bind(ADTOOL_CARRY_FIX_DAY),
+      env2.DB.prepare(hourSel(4) + nowJoin + guard + ' AND day >= ?2 AND day <= ?3 GROUP BY item_id').bind(ADTOOL_CARRY_FIX_DAY, d7from, today, today),
+      env2.DB.prepare(hourSel(0) + befJoin + guard + ' GROUP BY item_id').bind(ADTOOL_CARRY_FIX_DAY),
     ]);
     H = B.map(x => (x && x.results) || []);
-  } catch (e) { H = [[], [], [], []]; }
+  } catch (e) { H = [[], []]; }
   const rangeOf = {};
   for (const e of entries) rangeOf[String(e.item_id)] = (e.ranges || []);
   const offNow = {}, offToday = {}, onToday = {}, offBefore = {}, daysNow = {}, daysToday = {}, daysBefore = {};
   for (const r of H[0]) {
-    const id = String(r.item_id), h = Number(r.hour);
+    const id = String(r.item_id);
+    /* the day counts are kept for every listing the window holds a reading for, hours readable or
+       not, exactly as the separate count read kept them */
+    daysNow[id] = Number(r.days) || 0; daysToday[id] = Number(r.days_today) || 0;
     const rs = rangeOf[id]; if (!rs || !rs.length) continue;
-    const inside = adInPeakRanges(h, rs);
-    if (!inside) { offNow[id] = (offNow[id] || 0) + (Number(r.spend) || 0); offToday[id] = (offToday[id] || 0) + (Number(r.spend_today) || 0); }
-    else { onToday[id] = (onToday[id] || 0) + (Number(r.spend_today) || 0); }
+    for (let h = 0; h < 24; h++) {
+      const sp = Number(r['h' + h]) || 0, spT = Number(r['t' + h]) || 0;
+      if (!adInPeakRanges(h, rs)) { offNow[id] = (offNow[id] || 0) + sp; offToday[id] = (offToday[id] || 0) + spT; }
+      else { onToday[id] = (onToday[id] || 0) + spT; }
+    }
   }
-  for (const r of H[1]) { daysNow[String(r.item_id)] = Number(r.days) || 0; daysToday[String(r.item_id)] = Number(r.days_today) || 0; }
-  for (const r of H[2]) {
-    const id = String(r.item_id), h = Number(r.hour);
+  for (const r of H[1]) {
+    const id = String(r.item_id);
+    daysBefore[id] = Number(r.days) || 0;
     const rs = rangeOf[id]; if (!rs || !rs.length) continue;
-    if (!adInPeakRanges(h, rs)) offBefore[id] = (offBefore[id] || 0) + (Number(r.spend) || 0);
+    for (let h = 0; h < 24; h++) if (!adInPeakRanges(h, rs)) offBefore[id] = (offBefore[id] || 0) + (Number(r['h' + h]) || 0);
   }
-  for (const r of H[3]) daysBefore[String(r.item_id)] = Number(r.days) || 0;
   const perListing = [];
   for (const e of entries) {
     const id = String(e.item_id);
@@ -20298,6 +20327,40 @@ async function ensureTruthSchema(env) {
     "CREATE INDEX IF NOT EXISTS idx_tfi_tracking ON tracking_inbox(tracking)",
     "CREATE TABLE IF NOT EXISTS tracking_pulls (ali_order TEXT PRIMARY KEY, last_checked_at TEXT, checks INTEGER DEFAULT 0, last_result TEXT DEFAULT '', not_mine TEXT DEFAULT '', updated_at TEXT)",
     "CREATE INDEX IF NOT EXISTS idx_orders_ali ON orders(ali_order)",
+    /* ---- THE THREE INDEXES THE ORDER BOOK WAS BEING READ WITHOUT (5 Nov) --------------------
+       Measured from Cloudflare's own D1 figures: the database read between 1.5 and 3.9 BILLION
+       rows a day, the roll-up was being killed with "D1 DB is overloaded", and reads are billed.
+       `orders` carried an index on (account, created_at) and one on ali_order and nothing else, so
+       every read that named a LISTING, or a date window without an account, walked all 36,000 rows.
+       Each index is named after the query it is for, and every one of them was verified against the
+       engine's own plans on a copy of the live row counts.
+         idx_orders_item   — ladderSales (the listing ladder's sales windows), which is called ONCE
+           PER ROW in ladderWatch's 40-row sweep every quarter hour and THREE TIMES PER ROW over the
+           100 rows of ladderFinalQueue and the 120 of ladderQueue 'r20'. 300 whole-table walks for
+           one page of 100 listings; with this index each call reads that listing's own orders (26
+           on average) and the page reads only the listings it prints. It is (item_id, created_at)
+           and not (item_id) alone so priceItemDetail's 180-day window, syncFacts' variation-cost
+           probe and the peak panel's own IN-chunks get their date leg from the index too. Note
+           ladderSales wraps created_at in substr(replace(...)) — unindexable by construction, which
+           is exactly why the item_id leg has to carry the read.
+         idx_orders_created — the fifty-six reads that bound themselves by created_at with no
+           account: adtoolTodayRebuild's fingerprint and its order read on every five-minute tick,
+           the Overview's and the Peak panel's own hour charts, adtoolOrdersRoll, statusRefresh (which
+           also wanted the ORDER BY it had to sort 36,000 rows for), openSync, the listing facts and
+           every management strip. A "today" window is ~160 rows, not 36,000.
+         idx_ads_daily_date — THE ROLL-UP'S OWN per-day ads read (ads_daily has a primary key of
+           (account, item_id, date), so a bare date reached nothing and every day rolled walked all
+           71,000 rows for the 630 it wanted), plus the audit's day totals and the two span reads.
+           It is the roll-up this is for: that job is the one being killed inside a ten-second
+           window, and this is the biggest single read inside it.
+           ONE READ IS SLOWER FOR IT, and it is worth saying: Potential CPC asks for a 180-day
+           window, ads_daily holds 84 days, so that window is the whole table and the planner now
+           pays a row lookup for each where the primary key had covered it. One page behind a
+           two-minute cache, against a cron read cut fifty-six fold; and it rights itself the day
+           the table outgrows the window. */
+    "CREATE INDEX IF NOT EXISTS idx_orders_item ON orders(item_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_ads_daily_date ON ads_daily(date)",
   ];
   /* 12 Sept (owner: "make these things fast"): this pass ran ~70 sequential D1 statements on the
      FIRST request of every fresh isolate — ~5 s added to whichever staff click happened to land

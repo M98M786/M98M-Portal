@@ -6153,6 +6153,122 @@ function run(argv) {
     return named && honest && byKey && clean;
   })(), null);
 
+  /* ══ THE DATABASE WAS READING BILLIONS OF ROWS A DAY (5 Nov) ═════════════════════════════════
+     Cloudflare's own D1 figures: 1.5 to 3.9 BILLION rows read a day against 2.2 million written,
+     the roll-up killed with "D1 DB is overloaded", and reads are billed. The cause was four reads
+     with no index to stand on and two that asked for the same rows twice.
+     EVERY TEST IN THIS BLOCK IS A REGEX ON THE SQL SHAPE, and that is deliberate and stated here
+     once: the harness has no database, so an EXPLAIN plan cannot be asserted. What CAN be held is
+     the shape the plan was measured against — the index exists in a guarded family, the version
+     and the hash moved with it, and the query still names the columns that index leads with. A
+     plan is only as good as the query that earns it, so the queries are pinned too. The plans
+     themselves were measured on a local SQLite built from this file's own 199 DDL statements at
+     the live row counts (adsAuditProbe check=counts, 5 Nov). ══ */
+  t('billions of rows: the four indexes the reads were measured without are all in a guarded DDL family, named after the query each is for (regex on the DDL text — the harness has no database to EXPLAIN against)', (() => {
+    /* each one inside a family the settle pass runs, so a marked database is given it */
+    const truth = src.slice(src.indexOf('async function ensureTruthSchema(env) {'), src.indexOf("let tag = 'schema:'"));
+    const p2 = src.slice(src.indexOf('async function ensureAdtoolPhase2Schema(env) {'), src.indexOf('const ADTOOL_REGISTER_P2 = ['));
+    const want = [
+      /* ladderSales, called once per row by ladderWatch and three times per row by the two ladder
+         desks: 300 whole-table walks of `orders` for one page of 100 listings */
+      ["CREATE INDEX IF NOT EXISTS idx_orders_item ON orders(item_id, created_at)", truth],
+      /* the fifty-six reads that bound themselves by created_at with no account, five of them on
+         every five-minute tick */
+      ["CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at)", truth],
+      /* Potential CPC's last-click-fee read: ads_daily is keyed (account, item_id, date), so a bare
+         date window had nothing to stand on */
+      ["CREATE INDEX IF NOT EXISTS idx_ads_daily_date ON ads_daily(date)", truth],
+      /* the stop-start archive read by time alone, on Stopped yesterday and in the daily report */
+      ["CREATE INDEX IF NOT EXISTS idx_adtcae_seen ON adtool_campaign_ad_events(seen_at)", p2],
+    ];
+    const placed = want.every(w => w[1].indexOf(w[0]) >= 0);
+    /* and each is named after the query it is for, in a comment beside it */
+    const named = /ladderSales \(the listing ladder's sales windows\)/.test(src) &&
+      /idx_orders_created — the fifty-six reads/.test(src) &&
+      /idx_ads_daily_date — THE ROLL-UP'S OWN per-day ads read/.test(src) &&
+      /the stop-start archive is read BY TIME ALONE in two places/.test(src);
+    return placed && named;
+  })(), null);
+  t('billions of rows: the schema version and the DDL hash both moved with those four CREATE INDEX statements, or a database already marked would never be given them', (() => {
+    /* the hash test above proves the fingerprint matches the file; this one proves the file is not
+       still carrying the version the 2 Nov marker was written under, which is the one way four new
+       indexes could be in the source and on no live database at all */
+    const v = (src.match(/const ADTOOL_SCHEMA_VERSION = '([^']+)';/) || [])[1] || '';
+    const h = (src.match(/const ADTOOL_SCHEMA_DDL_HASH = '([^']+)';/) || [])[1] || '';
+    const moved = v !== '2026-11-02.1' && h !== '195-b1518cd2';
+    /* the count in the hash is the DDL statement count, and it has grown by exactly these four */
+    const grew = h.indexOf('199-') === 0;
+    return moved && grew && /^\d{4}-\d{2}-\d{2}\.\d+$/.test(v);
+  })(), null);
+  t('billions of rows: the queries those indexes were measured against still lead with the indexed column (regex on the SQL shape, not an EXPLAIN)', (() => {
+    /* ladderSales: item_id equality is the only leg an index can take, because created_at is
+       wrapped in substr(replace(...)) and no index can answer a function of a column */
+    const ladder = /SELECT COALESCE\(SUM\(qty\), 0\) AS n FROM orders WHERE item_id = \?1 AND status NOT IN \('CANCELLED','NOT_FOUND'\) /.test(src) &&
+      (src.match(/await ladderSales\(/g) || []).length >= 8;
+    /* the five-minute tick's two order reads and the two hour charts, all bounded by created_at */
+    const created = /FROM orders WHERE created_at >= \?1"\)\.bind\(start\)/.test(src) &&
+      /SELECT created_at, qty FROM orders WHERE created_at >= \?1 AND status <> 'CANCELLED'"/.test(src) &&
+      /SELECT created_at, item_id, qty FROM orders WHERE created_at >= \?1 AND status <> 'CANCELLED'"/.test(src);
+    /* ads_daily by date, and the archive by seen_at */
+    const ads = /FROM ads_daily ad JOIN items_api ia ON ia\.item_id = ad\.item_id WHERE ad\.cpc_spend > 0 AND ad\.date >= \?1/.test(src);
+    const seen = (src.match(/FROM adtool_campaign_ad_events WHERE seen_at >= \?1 AND seen_at < \?2/g) || []).length === 2;
+    return ladder && created && ads && seen;
+  })(), null);
+  t('billions of rows: the month sum asks for a day RANGE and never substr(day, 1, 7), which no index can answer', (() => {
+    /* substr(day, 1, 7) = ?1 walked all 71,145 rows of adtool_listing_day for a month holding a
+       few thousand, every hour the week-and-month step ran. A day is 'YYYY-MM-DD' throughout this
+       table, so the range is the same set of rows and the planner can take it off idx_adtld_day. */
+    const ranged = /FROM adtool_listing_day WHERE day >= \?1 AND day <= \?2 AND day < \?3 GROUP BY account, item_id"\)\.bind\(m \+ '-01', m \+ '-31', todayUk\)/.test(src);
+    /* and the substr form is gone from the engine entirely, not merely from this one read */
+    const gone = src.indexOf('substr(day, 1, 7) = ?1') < 0;
+    /* the week sum was already a range and stays one, bound by its own first and last day */
+    const week = /FROM adtool_listing_day WHERE day >= \?1 AND day <= \?2 AND day < \?3 GROUP BY account, item_id"\)\.bind\(days\[0\], days\[days\.length - 1\], todayUk\)/.test(src);
+    /* the month written is still the month, so nothing a page reads moves */
+    const sameKey = /INSERT INTO adtool_listing_month \(account, item_id, month, days, orders/.test(src) &&
+      /\.bind\(x\.account, x\.item_id, m, x\.days,/.test(src);
+    return ranged && gone && week && sameKey;
+  })(), null);
+  t('billions of rows: the peak panel reads each hour window ONCE — the day counts ride with the hour sums instead of a second pass over the same rows', (() => {
+    const pk = src.slice(src.indexOf('async function adPeakOverviewExtras(env, opts) {'), src.indexOf('const perListing = [];'));
+    /* one statement a window, and the two that read the same rows twice are gone */
+    const two = (pk.match(/env2\.DB\.prepare\(hourSel\(/g) || []).length === 2 &&
+      pk.indexOf('daySelNow') < 0 && pk.indexOf('const daySel =') < 0 &&
+      /let H = \[\[\], \[\]\];/.test(pk) && /\} catch \(e\) \{ H = \[\[\], \[\]\]; \}/.test(pk);
+    /* THE ARITHMETIC IS THE SAME ARITHMETIC: every column is still ROUND(SUM(...), 2) over exactly
+       one (listing, hour) of exactly the same rows, so an hour reads to the penny it read before */
+    const shape = /ROUND\(SUM\(CASE WHEN hour = ' \+ h \+ ' THEN ' \+ hourSpend \+ ' ELSE 0 END\), 2\) AS h' \+ h/.test(pk) &&
+      /ROUND\(SUM\(CASE WHEN hour = ' \+ h \+ ' AND day = \?' \+ tp \+ ' THEN ' \+ hourSpend \+ ' ELSE 0 END\), 2\) AS t' \+ h/.test(pk) &&
+      /const hourSpend = 'COALESCE\(spend_r, spend_s\)';/.test(pk);
+    /* the day counts travel on the same row, today's own kept apart so a listing with no reading
+       yet today still prints nothing rather than nought */
+    const days = /COUNT\(DISTINCT day\) AS days/.test(pk) &&
+      /COUNT\(DISTINCT CASE WHEN day = \?' \+ tp \+ ' THEN day END\) AS days_today/.test(pk) &&
+      /daysNow\[id\] = Number\(r\.days\) \|\| 0; daysToday\[id\] = Number\(r\.days_today\) \|\| 0;/.test(pk) &&
+      /daysBefore\[id\] = Number\(r\.days\) \|\| 0;/.test(pk);
+    /* the window that has no today in it asks for neither the today columns nor a placeholder for
+       them: a statement handed a parameter it never names is a statement that fails */
+    const noTp = /env2\.DB\.prepare\(hourSel\(0\) \+ befJoin \+ guard \+ ' GROUP BY item_id'\)\.bind\(ADTOOL_CARRY_FIX_DAY\)/.test(pk) &&
+      /\(tp \? ', COUNT\(DISTINCT CASE WHEN day = \?' \+ tp \+ ' THEN day END\) AS days_today' : ''\)/.test(pk);
+    /* both windows group at the listing's own grain now, so neither carries an hour column */
+    const grain = (pk.match(/GROUP BY item_id'\)\.bind\(ADTOOL_CARRY_FIX_DAY/g) || []).length === 2 &&
+      pk.indexOf('GROUP BY item_id, hour') < 0;
+    /* the cohort join and the guard are untouched: the same rows, read once */
+    const same = /const guard = ' WHERE samples > 0 AND NOT \(day < \?1 AND hour = 8\)';/.test(pk) &&
+      /const nowJoin = adPeakCohortJoin\(CO\.sql, 'item_id', 'day'\);/.test(pk) &&
+      /const befJoin = adPeakCohortBeforeJoin\(CO\.sql, 'item_id', 'day', 28\);/.test(pk);
+    return two && shape && days && noTp && grain && same;
+  })(), null);
+  t('billions of rows: the roll-up’s forced-after-two-skips way out is still there, so no step can be budgeted out for ever', (() => {
+    /* the one thing this work must not break: a step whose estimate can never fit is what froze
+       the roll-up on 2 November, and the force is the only thing that gets it a turn */
+    const force = /function adtRollupForced\(skips, name, after\) \{/.test(src) &&
+      /const n = Math\.max\(1, Math\.round\(Number\(after\) \|\| ADTOOL_ROLLUP_FORCE_AFTER\)\);/.test(src) &&
+      F.adtRollupForced({ periods: 2 }, 'periods', 2) === true;
+    /* and it is still wired into the run, not merely declared */
+    const used = (src.match(/adtRollupForced\(/g) || []).length >= 2;
+    return force && used;
+  })(), null);
+
   /* ================= THE ROLL-UP'S STARVATION (owner, 5 Nov: "the whole system is stuck") =========
      yesterday was estimated at the cost of building a whole day from nothing and never fitted what an
      ordinary run had left, so it was left for the next hour every hour from 2 to 5 November, was never
