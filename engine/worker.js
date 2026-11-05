@@ -158,7 +158,9 @@ function cronMap() {
     /* cheap D1 work first, the API job last: on 5 Nov zeroSaleScan and cpcRevisionWatch had run only
        at 00:31 for days, because processWatch ahead of them spends the invocation in the daytime. */
     '30 * * * *': [zeroSaleScan, cpcRevisionWatch, standardsSync, processWatch],
-    '31 * * * *': [alertAckWatch, uncampaignedDigest, darkAccountWatch],
+    /* :31 was registered on 5 Nov and never fired a single job, while :32 fired at once; the minute
+       is shared with the peak switch and the database was refusing work there. Moved to a quiet one. */
+    '33 * * * *': [alertAckWatch, uncampaignedDigest, darkAccountWatch],
     '32 * * * *': [supplierLinkFill, noSupplierScan, nightlyCatchup],
     /* Workers Paid (24 Aug): real slots are back — the 5-trigger cap and the 50-subrequest
        budget died with the upgrade. Each heavy family still keeps its own invocation. */
@@ -404,6 +406,15 @@ export default {
         if (event.cron !== '*/5 * * * *') {
           try { await env.HOT.put('cron:beat', JSON.stringify({ cron: event.cron, at: new Date().toISOString() })); } catch (e) {}
         }
+        /* 5 Nov: one shared key cannot say WHICH slot stopped firing. Three watches sat dead for two
+           days and the only honest answer to "did that minute fire at all?" was "nobody knows". One
+           row per slot, written before any job of it runs, so a slot that never fires is visible. */
+        try {
+          await env.DB.prepare(
+            "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('cronBeat', ?1, ?2, datetime('now'), '') " +
+            "ON CONFLICT(job, account) DO UPDATE SET cursor = ?2, last_ok = datetime('now')"
+          ).bind(String(event.cron), String((jobs[event.cron] || []).length) + ' jobs').run();
+        } catch (e) {}
         /* Sequential ON PURPOSE: under Promise.all a budget blow-up killed every job mid-flight
            at once; run one after another, the early jobs land whole and only the tail starves. */
         for (const fn of fns) { await runJob(env, fn); }
@@ -21726,8 +21737,10 @@ const ROUTES = {
            never exists yet, and reading it painted "0 impressions today" every morning. The
            strip shows the LATEST completed day and says which day it is. */
         const traffic = (await ctx.env.DB.prepare(
-          'SELECT date, SUM(impressions) AS impressions, SUM(views) AS views FROM traffic_daily GROUP BY date ORDER BY date DESC LIMIT 1'
-        ).first()) || {};
+          /* eBay hands back a row for a day that has not happened in UK terms (its own clock is behind
+             ours), and the latest row was then that one: the strip read 0 impressions today. */
+          "SELECT date, SUM(impressions) AS impressions, SUM(views) AS views FROM traffic_daily WHERE date <= ?1 GROUP BY date ORDER BY date DESC LIMIT 1"
+        ).bind(ukDate('')).first()) || {};
         const listings = await one("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE'");
         return { day: today,
           orders_today: Number(money.orders_n) || 0, revenue_today: Number(money.revenue) || 0,
@@ -27762,7 +27775,12 @@ const ROUTES = {
         const list = map[cron] || [];
         for (let i = 0; i < list.length; i++) {
           const n = (list[i] && list[i].name) || '';
-          if (n) where[n] = { slot: cron, every_min: slotMin(cron), position: i + 1, of: list.length };
+          if (!n) continue;
+          const e = { slot: cron, every_min: slotMin(cron), position: i + 1, of: list.length };
+          /* a job can ride several slots; it is overdue against the FASTEST of them, or a job on an
+             hourly slot and a nightly one could be a day dead and still read as on time */
+          if (!where[n] || e.every_min < where[n].every_min) { where[n] = e; }
+          else if (where[n].also) { where[n].also.push(cron); } else { where[n].also = [cron]; }
         }
       }
       const rows = (await ctx.env.DB.prepare("SELECT job, last_ok, last_error FROM sync_state WHERE account = '' LIMIT 400").all()).results || [];
@@ -27886,6 +27904,241 @@ const ROUTES = {
         read_errors: readErrors,
         computed_at: now.toISOString(),
       };
+    },
+  },
+
+  /* THE NUMBER AUDIT'S OWN READER (5 Nov, the owner: "the whole system is stuck, check all the
+     portal's numbers properly again"). The portal's derived tables are role-gated on every page, so
+     from outside a session there was no way to set a day row beside the eBay report row it is made
+     of — which is how a roll-up that stopped on 2 November went four days without anybody being able
+     to prove it from a key.
+     READ-ONLY and sync-key gated, EXACTLY as backupDump is: auth 'sync', the SYNC_KEY and nothing
+     else. It writes nothing, creates no schema, decides nothing and reaches no eBay endpoint.
+     Deliberately NOT named adtool*, because the router role-gates that prefix before it has a user
+     to judge and a key-authed call has none.
+     Every answer is a named check with its own bounded query, so one call can never page the fleet:
+     `check` picks it, `from`/`to` bound the days (14 at most), `limit`/`offset` page the rows.
+     A read that FAILS says so in read_errors rather than answering with an empty list. */
+  adsAuditProbe: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const env = ctx.env, errs = [];
+      const q = async (what, sql, binds) => {
+        try {
+          const st = env.DB.prepare(sql);
+          const rs = await ((binds && binds.length) ? st.bind(...binds) : st).all();
+          return (rs && rs.results) || [];
+        } catch (e) { errs.push(what + ': ' + String((e && e.message) || e).slice(0, 200)); return null; }
+      };
+      const ymd = (v, dflt) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : dflt);
+      const today = adtUkParts(Date.now()).date;
+      const to = ymd(p && p.to, today);
+      let from = ymd(p && p.from, adtAddDays(to, -13));
+      if (from > to) from = to;
+      /* fourteen days at most: the window the owner's brief asks about, and a ceiling a caller
+         cannot lift into a full-table scan. */
+      if (adtAddDays(from, 60) < to) from = adtAddDays(to, -13);
+      const limit = Math.max(1, Math.min(4000, Number((p && p.limit)) || 1500));
+      const offset = Math.max(0, Number((p && p.offset)) || 0);
+      const check = String((p && p.check) || 'counts').trim();
+      const out = { check, from, to, uk_today: today, limit, offset, sent_to_ebay: false, writes: 'none' };
+      const nowRow = await q('db clock', "SELECT datetime('now') AS now");
+      out.db_now = (nowRow && nowRow[0] && nowRow[0].now) || null;
+
+      if (check === 'counts') {
+        /* WHAT EACH DERIVED TABLE ACTUALLY HOLDS, newest key first: the one answer that tells a
+           frozen table from a quiet week without opening a page. */
+        out.tables = {};
+        const span = async (name, col, where) => {
+          const r = await q(name, 'SELECT COUNT(*) AS n, MIN(' + col + ') AS lo, MAX(' + col + ') AS hi FROM ' + name + (where ? ' WHERE ' + where : ''));
+          out.tables[name] = (r && r[0]) ? { rows: Number(r[0].n) || 0, first: r[0].lo, last: r[0].hi, key: col } : null;
+        };
+        await span('adtool_listing_day', 'day');
+        await span('adtool_listing_hour', 'day');
+        await span('adtool_listing_slot', 'day');
+        await span('adtool_listing_week', 'iso_week');
+        await span('adtool_listing_month', 'month');
+        await span('adtool_scope_day', 'day');
+        await span('adtool_scope_hour', 'day');
+        await span('adtool_orders', 'local_date');
+        await span('adtool_listing_today', 'uk_day');
+        await span('adtool_reports', 'day');
+        await span('adtool_roas', 'day');
+        await span('adtool_profiles', 'computed_day');
+        await span('adtool_stages', 'day');
+        await span('adtool_price_day', 'day');
+        await span('adtool_sale_membership_day', 'day');
+        await span('adtool_decisions', 'day');
+        await span('adtool_ads_daily', 'day');
+        await span('ads_daily', 'date');
+        await span('ads_today', 'day');
+        await span('traffic_daily', 'date');
+        await span('orders', 'created_at');
+        /* THE BLACK-BOX RECORDER the scheduled handler writes before any job runs, and the error
+           it writes if a whole slot threw. Nothing in this file has ever read them, which is why a
+           cron slot that stopped being invoked and a cron slot whose first job throws have looked
+           identical from outside. */
+        try { out.cron_beat = JSON.parse((await ctx.env.HOT.get('cron:beat')) || 'null'); } catch (e) { errs.push('cron:beat: ' + String((e && e.message) || e).slice(0, 120)); }
+        try { out.cron_err = JSON.parse((await ctx.env.HOT.get('cron:err')) || 'null'); } catch (e) { errs.push('cron:err: ' + String((e && e.message) || e).slice(0, 120)); }
+        out.rollup_runs = await q('rollup runs', "SELECT job, started_at, finished_at, rows_written, status, substr(note, 1, 400) AS note FROM adtool_jobs WHERE job LIKE '%ollup%' ORDER BY started_at DESC LIMIT 12");
+        out.jobs_recent = await q('jobs', 'SELECT job, MAX(started_at) AS last_start, MAX(finished_at) AS last_finish FROM adtool_jobs GROUP BY job ORDER BY job');
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'ads_vs_day') {
+        /* THE PORTAL'S DAY ROW AGAINST EBAY'S OWN REPORT ROW, per listing per day, joined in the
+           database so nothing is summed twice on the way out. The portal's `spend` is the standard
+           line plus the click line (spend + cpc_spend) and its `clicks` likewise; that is the
+           roll-up's own arithmetic, read here and not re-invented. Only the rows that DISAGREE come
+           back, with the totals beside them so a reader can see how much of the day it is. */
+        const sql =
+          'SELECT a.account, a.item_id, a.day, ' +
+          'ROUND(a.spend, 2) AS ebay_spend, ROUND(a.cpc_spend, 2) AS ebay_cpc_spend, a.clicks AS ebay_clicks, a.attr_units AS ebay_attr_units, ROUND(a.attr_revenue, 2) AS ebay_attr_revenue, ' +
+          'ROUND(d.spend, 2) AS day_spend, ROUND(d.cpc_spend, 2) AS day_cpc_spend, d.clicks AS day_clicks, d.attr_units AS day_attr_units, ROUND(d.attr_revenue, 2) AS day_attr_revenue, ' +
+          'd.orders AS day_orders ' +
+          'FROM (SELECT account, item_id, date AS day, SUM(COALESCE(spend,0) + COALESCE(cpc_spend,0)) AS spend, SUM(COALESCE(cpc_spend,0)) AS cpc_spend, ' +
+          'SUM(COALESCE(clicks,0) + COALESCE(cpc_clicks,0)) AS clicks, SUM(COALESCE(sales,0) + COALESCE(cpc_sales,0)) AS attr_units, ' +
+          'SUM(COALESCE(sale_amount,0) + COALESCE(cpc_sale_amount,0)) AS attr_revenue FROM ads_daily WHERE date >= ?1 AND date <= ?2 GROUP BY account, item_id, date) a ' +
+          'LEFT JOIN adtool_listing_day d ON d.account = a.account AND d.item_id = a.item_id AND d.day = a.day ' +
+          'WHERE d.item_id IS NULL OR ABS(COALESCE(d.spend,0) - a.spend) > 0.005 OR ABS(COALESCE(d.cpc_spend,0) - a.cpc_spend) > 0.005 ' +
+          'OR COALESCE(d.clicks,0) <> a.clicks OR COALESCE(d.attr_units,0) <> a.attr_units OR ABS(COALESCE(d.attr_revenue,0) - a.attr_revenue) > 0.005 ' +
+          'ORDER BY a.day DESC, ABS(COALESCE(d.spend,0) - a.spend) DESC LIMIT ?3 OFFSET ?4';
+        out.mismatches = await q('ads vs day', sql, [from, to, limit, offset]);
+        out.ebay_day_totals = await q('ebay totals', 'SELECT date AS day, COUNT(*) AS rows, COUNT(DISTINCT item_id) AS listings, COUNT(DISTINCT account) AS accounts, ROUND(SUM(COALESCE(spend,0) + COALESCE(cpc_spend,0)), 2) AS spend, ROUND(SUM(COALESCE(cpc_spend,0)), 2) AS cpc_spend, SUM(COALESCE(clicks,0) + COALESCE(cpc_clicks,0)) AS clicks, SUM(COALESCE(sales,0) + COALESCE(cpc_sales,0)) AS attr_units, ROUND(SUM(COALESCE(sale_amount,0) + COALESCE(cpc_sale_amount,0)), 2) AS attr_revenue FROM ads_daily WHERE date >= ?1 AND date <= ?2 GROUP BY date ORDER BY date', [from, to]);
+        out.portal_day_totals = await q('portal totals', 'SELECT day, COUNT(*) AS rows, COUNT(DISTINCT item_id) AS listings, COUNT(DISTINCT account) AS accounts, ROUND(SUM(spend), 2) AS spend, ROUND(SUM(cpc_spend), 2) AS cpc_spend, SUM(clicks) AS clicks, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue, ROUND(SUM(actual_profit), 2) AS actual_profit FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 GROUP BY day ORDER BY day', [from, to]);
+        /* the other direction: a day row the portal holds for which eBay's report has no row at all */
+        out.day_without_ads = await q('day without ads', 'SELECT d.account, d.item_id, d.day, ROUND(d.spend, 2) AS day_spend, d.clicks AS day_clicks, d.orders AS day_orders FROM adtool_listing_day d LEFT JOIN (SELECT account, item_id, date FROM ads_daily WHERE date >= ?1 AND date <= ?2 GROUP BY account, item_id, date) a ON a.account = d.account AND a.item_id = d.item_id AND a.date = d.day WHERE d.day >= ?1 AND d.day <= ?2 AND a.item_id IS NULL AND (d.spend > 0 OR d.clicks > 0 OR d.attr_units > 0) ORDER BY d.day DESC, d.spend DESC LIMIT 300', [from, to]);
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'day_rows') {
+        out.rows = await q('day rows', 'SELECT account, item_id, day, orders, units, ROUND(revenue, 2) AS revenue, actual_profit, pending_cost_orders, pending_fee_orders, ROUND(refunds, 2) AS refunds, clicks, ROUND(spend, 2) AS spend, ROUND(cpc_spend, 2) AS cpc_spend, attr_units, ROUND(attr_revenue, 2) AS attr_revenue, ad_active_campaigns, ad_paused_campaigns FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 ORDER BY day, account, item_id LIMIT ?3 OFFSET ?4', [from, to, limit, offset]);
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'orders_rows') {
+        out.rows = await q('adtool orders', 'SELECT account, order_id, item_id, created_utc, local_date, local_hour, qty, sale_price, status, refunded, ali_cost, ebay_fees, cost_pending FROM adtool_orders WHERE local_date >= ?1 AND local_date <= ?2 ORDER BY local_date, account, order_id LIMIT ?3 OFFSET ?4', [from, to, limit, offset]);
+        out.by_day = await q('adtool orders by day', "SELECT local_date AS day, account, COUNT(*) AS orders_all, SUM(CASE WHEN status <> 'CANCELLED' THEN 1 ELSE 0 END) AS orders, SUM(CASE WHEN status <> 'CANCELLED' THEN qty ELSE 0 END) AS units, ROUND(SUM(CASE WHEN status <> 'CANCELLED' THEN sale_price ELSE 0 END), 2) AS revenue FROM adtool_orders WHERE local_date >= ?1 AND local_date <= ?2 GROUP BY local_date, account ORDER BY local_date, account", [from, to]);
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'hour_vs_day') {
+        /* ORDERS AND UNITS BY HOUR AGAINST THE DAY ROW. These come from the one roll-up out of the
+           one order table, so they must add up exactly and a difference is a fault. Spend cannot and
+           is not judged here: see the engine's own reconcile note on adsPeakPlanProbe. */
+        out.mismatches = await q('hour vs day', 'SELECT d.account, d.item_id, d.day, d.orders AS day_orders, d.units AS day_units, ROUND(d.revenue, 2) AS day_revenue, COALESCE(h.orders, 0) AS hour_orders, COALESCE(h.units, 0) AS hour_units, ROUND(COALESCE(h.revenue, 0), 2) AS hour_revenue, COALESCE(h.hours, 0) AS hour_rows FROM adtool_listing_day d LEFT JOIN (SELECT account, item_id, day, COUNT(*) AS hours, SUM(orders) AS orders, SUM(units) AS units, SUM(revenue) AS revenue FROM adtool_listing_hour WHERE day >= ?1 AND day <= ?2 GROUP BY account, item_id, day) h ON h.account = d.account AND h.item_id = d.item_id AND h.day = d.day WHERE d.day >= ?1 AND d.day <= ?2 AND (d.orders <> COALESCE(h.orders, 0) OR d.units <> COALESCE(h.units, 0) OR ABS(d.revenue - COALESCE(h.revenue, 0)) > 0.005) ORDER BY d.day DESC, ABS(d.orders - COALESCE(h.orders, 0)) DESC LIMIT ?3 OFFSET ?4', [from, to, limit, offset]);
+        out.totals = await q('hour totals', 'SELECT day, COUNT(*) AS rows, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue, ROUND(SUM(spend_s), 2) AS spend_s, SUM(clicks_s) AS clicks_s FROM adtool_listing_hour WHERE day >= ?1 AND day <= ?2 GROUP BY day ORDER BY day', [from, to]);
+        out.slot_mismatches = await q('slot vs day', 'SELECT d.account, d.item_id, d.day, d.orders AS day_orders, d.units AS day_units, COALESCE(s.orders, 0) AS slot_orders, COALESCE(s.units, 0) AS slot_units FROM adtool_listing_day d LEFT JOIN (SELECT account, item_id, day, SUM(orders) AS orders, SUM(units) AS units FROM adtool_listing_slot WHERE day >= ?1 AND day <= ?2 GROUP BY account, item_id, day) s ON s.account = d.account AND s.item_id = d.item_id AND s.day = d.day WHERE d.day >= ?1 AND d.day <= ?2 AND (d.orders <> COALESCE(s.orders, 0) OR d.units <> COALESCE(s.units, 0)) ORDER BY d.day DESC LIMIT 300', [from, to]);
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'scope_vs_day') {
+        out.account_scope = await q('account scope', "SELECT s.day, s.scope_id AS account, s.listings, s.orders, s.units, ROUND(s.revenue, 2) AS revenue, ROUND(s.actual_profit, 2) AS actual_profit, s.clicks, ROUND(s.spend, 2) AS spend, s.attr_units, ROUND(s.attr_revenue, 2) AS attr_revenue, d.orders AS d_orders, d.units AS d_units, ROUND(d.revenue, 2) AS d_revenue, ROUND(d.actual_profit, 2) AS d_actual_profit, d.clicks AS d_clicks, ROUND(d.spend, 2) AS d_spend, d.attr_units AS d_attr_units, ROUND(d.attr_revenue, 2) AS d_attr_revenue FROM adtool_scope_day s LEFT JOIN (SELECT account, day, SUM(orders) AS orders, SUM(units) AS units, SUM(revenue) AS revenue, SUM(actual_profit) AS actual_profit, SUM(clicks) AS clicks, SUM(spend) AS spend, SUM(attr_units) AS attr_units, SUM(attr_revenue) AS attr_revenue FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 GROUP BY account, day) d ON d.account = s.scope_id AND d.day = s.day WHERE s.scope = 'account' AND s.day >= ?1 AND s.day <= ?2 ORDER BY s.day, s.scope_id", [from, to]);
+        out.fleet_scope = await q('fleet scope', "SELECT s.day, s.listings, s.orders, s.units, ROUND(s.revenue, 2) AS revenue, ROUND(s.actual_profit, 2) AS actual_profit, s.clicks, ROUND(s.spend, 2) AS spend, ROUND(s.zero_sale_spend, 2) AS zero_sale_spend, s.losers FROM adtool_scope_day s WHERE s.scope = 'fleet' AND s.day >= ?1 AND s.day <= ?2 ORDER BY s.day", [from, to]);
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'periods') {
+        /* THE WEEK AND MONTH SUMS AGAINST THE DAYS THEY ARE MADE OF. The caller names the days of
+           one week (or month) because ISO weeks are not a thing SQLite can work out, and the same
+           helper the roll-up uses lives in the engine rather than in a query. */
+        const key = String((p && p.key) || '').slice(0, 10);
+        const days = (Array.isArray(p && p.days) ? p.days : []).map(x => ymd(x, '')).filter(Boolean).slice(0, 40);
+        if (!key || !days.length) throw new Error('SAY: give key (iso_week or month) and days[]');
+        const tbl = key.indexOf('W') >= 0 ? 'adtool_listing_week' : 'adtool_listing_month';
+        const col = key.indexOf('W') >= 0 ? 'iso_week' : 'month';
+        out.key = key; out.table = tbl; out.days = days;
+        out.period_rows = await q('period rows', 'SELECT account, item_id, days, orders, units, ROUND(revenue, 2) AS revenue, actual_profit, clicks, ROUND(spend, 2) AS spend, attr_units, ROUND(attr_revenue, 2) AS attr_revenue, pending_cost_orders, pending_fee_orders FROM ' + tbl + ' WHERE ' + col + ' = ?1 ORDER BY account, item_id LIMIT ?2 OFFSET ?3', [key, limit, offset]);
+        out.day_sums = await q('day sums', 'SELECT account, item_id, COUNT(*) AS days, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue, ROUND(SUM(actual_profit), 2) AS actual_profit, SUM(clicks) AS clicks, ROUND(SUM(spend), 2) AS spend, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue, SUM(pending_cost_orders) AS pending_cost_orders, SUM(pending_fee_orders) AS pending_fee_orders FROM adtool_listing_day WHERE day IN ' + adtInList(days, 2) + ' GROUP BY account, item_id ORDER BY account, item_id LIMIT ?' + (days.length + 3) + ' OFFSET ?' + (days.length + 4), [limit, offset].concat(days, [limit, offset]));
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'report') {
+        const d = ymd(p && p.day, adtAddDays(today, -1));
+        out.day = d;
+        const r = await q('report', 'SELECT day, generated_at, LENGTH(json) AS json_len, json FROM adtool_reports WHERE day = ?1', [d]);
+        out.report = (r && r[0]) || null;
+        out.report_days = await q('report days', 'SELECT day, generated_at, LENGTH(json) AS json_len FROM adtool_reports ORDER BY day DESC LIMIT 14');
+        out.day_totals_for_report = await q('report day totals', 'SELECT COUNT(*) AS rows, COUNT(DISTINCT item_id) AS listings, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue, ROUND(SUM(actual_profit), 2) AS actual_profit, SUM(clicks) AS clicks, ROUND(SUM(spend), 2) AS spend, ROUND(SUM(cpc_spend), 2) AS cpc_spend, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue FROM adtool_listing_day WHERE day = ?1', [d]);
+        out.roas_rows = await q('roas', 'SELECT day, computed_at, LENGTH(json) AS json_len FROM adtool_roas ORDER BY day DESC LIMIT 10');
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'today') {
+        out.rows = await q('today rows', 'SELECT account, item_id, report_day, uk_day, ROUND(spend, 2) AS spend, ROUND(cpc_spend, 2) AS cpc_spend, clicks, impressions, attr_units, ROUND(attr_revenue, 2) AS attr_revenue, orders, units, ROUND(revenue, 2) AS revenue, actual_profit, pending_cost_orders, pending_fee_orders, sampled_at, orders_at, unpriced_orders FROM adtool_listing_today ORDER BY account, item_id LIMIT ?1 OFFSET ?2', [limit, offset]);
+        out.totals = await q('today totals', 'SELECT uk_day, report_day, COUNT(*) AS rows, ROUND(SUM(spend), 2) AS spend, ROUND(SUM(cpc_spend), 2) AS cpc_spend, SUM(clicks) AS clicks, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue, ROUND(SUM(actual_profit), 2) AS actual_profit, MIN(sampled_at) AS first_sample, MAX(sampled_at) AS last_sample FROM adtool_listing_today GROUP BY uk_day, report_day ORDER BY uk_day DESC');
+        out.intraday_latest = await q('intraday latest', 'SELECT report_day, family, COUNT(*) AS rows, ROUND(SUM(cum_spend), 2) AS cum_spend, SUM(cum_clicks) AS cum_clicks, SUM(cum_units) AS cum_units, MAX(sampled_at) AS last_sample FROM adtool_intraday_latest GROUP BY report_day, family ORDER BY report_day DESC LIMIT 12');
+        out.ads_today = await q('ads_today', 'SELECT day, COUNT(*) AS rows, ROUND(SUM(COALESCE(spend,0) + COALESCE(cpc_spend,0)), 2) AS spend, SUM(COALESCE(clicks,0) + COALESCE(cpc_clicks,0)) AS clicks, SUM(COALESCE(sales,0) + COALESCE(cpc_sales,0)) AS units, MAX(updated_at) AS last FROM ads_today GROUP BY day ORDER BY day DESC LIMIT 8');
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'traffic') {
+        /* THE HOUR CLOCK's own table, which is not dumpable, and the newest day the day table holds —
+           the one read that tells a clock that stopped at eleven from a quiet afternoon. */
+        out.hours = await q('traffic hours', 'SELECT date, hour, SUM(impressions) AS impressions, SUM(views) AS views, SUM(transactions) AS transactions, SUM(samples) AS samples, MAX(updated_at) AS last FROM traffic_hour WHERE date >= ?1 GROUP BY date, hour ORDER BY date DESC, hour', [adtAddDays(today, -13)]);
+        out.hour_spans = await q('traffic hour spans', 'SELECT account, date, COUNT(*) AS hours, MIN(hour) AS first_hour, MAX(hour) AS last_hour, SUM(samples) AS samples, MAX(updated_at) AS last FROM traffic_hour GROUP BY account, date ORDER BY date DESC, account LIMIT 200');
+        out.newest_day_rows = await q('newest traffic day', 'SELECT date, SUM(impressions) AS impressions, SUM(views) AS views, COUNT(*) AS rows FROM traffic_daily GROUP BY date ORDER BY date DESC LIMIT 4');
+        out.listing_board = await q('traffic listing board', 'SELECT range_days, COUNT(*) AS rows, MAX(updated_at) AS last FROM traffic_listing GROUP BY range_days');
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'campaign') {
+        /* THE CAMPAIGN-DIMENSION COPY against eBay's own listing-dimension report, per day: the
+           campaign pages print their money out of adtool_ads_daily, and nothing else on the tool
+           reads that table, so a drift there shows up on no other page. */
+        out.campaign_totals = await q('campaign totals', 'SELECT day, COUNT(*) AS rows, COUNT(DISTINCT item_id) AS listings, COUNT(DISTINCT campaign_id) AS campaigns, ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue, MAX(pulled_at) AS last_pull FROM adtool_ads_daily WHERE day >= ?1 AND day <= ?2 GROUP BY day ORDER BY day', [from, to]);
+        out.ebay_totals = await q('ebay totals', 'SELECT date AS day, ROUND(SUM(COALESCE(spend,0) + COALESCE(cpc_spend,0)), 2) AS spend, SUM(COALESCE(clicks,0) + COALESCE(cpc_clicks,0)) AS clicks, SUM(COALESCE(sales,0) + COALESCE(cpc_sales,0)) AS units, ROUND(SUM(COALESCE(sale_amount,0) + COALESCE(cpc_sale_amount,0)), 2) AS revenue FROM ads_daily WHERE date >= ?1 AND date <= ?2 GROUP BY date ORDER BY date', [from, to]);
+        out.worst_keys = await q('campaign vs listing', 'SELECT c.account, c.item_id, c.day, ROUND(c.spend, 2) AS campaign_spend, c.clicks AS campaign_clicks, ROUND(d.spend, 2) AS day_spend, d.clicks AS day_clicks FROM (SELECT account, item_id, day, SUM(spend) AS spend, SUM(clicks) AS clicks FROM adtool_ads_daily WHERE day >= ?1 AND day <= ?2 GROUP BY account, item_id, day) c LEFT JOIN adtool_listing_day d ON d.account = c.account AND d.item_id = c.item_id AND d.day = c.day WHERE d.item_id IS NULL OR ABS(COALESCE(d.spend, 0) - c.spend) > 0.005 ORDER BY ABS(COALESCE(d.spend, 0) - c.spend) DESC LIMIT 200', [from, to]);
+        out.vintages = await q('vintages', 'SELECT day, COUNT(*) AS rows, COUNT(DISTINCT pulled_at) AS pulls, MIN(pulled_at) AS first_pull, MAX(pulled_at) AS last_pull FROM adtool_ads_daily_vintage WHERE day >= ?1 AND day <= ?2 GROUP BY day ORDER BY day', [from, to]);
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'vintage') {
+        /* EVERY VINTAGE EBAY HAS GIVEN US FOR ONE LISTING-DAY, oldest first, beside what the day
+           table now holds for it. This is the read that tells "eBay restated the day" from "the
+           portal lost the figure": the vintage trail is eBay's own answers with the moment each
+           arrived, and it is written by the report pull and by nothing else. */
+        const iid = String((p && p.item_id) || '').replace(/\D/g, '').slice(0, 24);
+        const vday = ymd(p && p.day, '');
+        if (!iid || !vday) throw new Error('SAY: give item_id and day');
+        out.item_id = iid; out.day = vday;
+        out.vintages = await q('vintage trail', 'SELECT account, campaign_id, family, pulled_at, ROUND(spend, 2) AS spend, clicks, units, ROUND(revenue, 2) AS revenue FROM adtool_ads_daily_vintage WHERE item_id = ?1 AND day = ?2 ORDER BY pulled_at, campaign_id, family', [iid, vday]);
+        out.ads_daily_now = await q('ads_daily now', 'SELECT account, item_id, date, ROUND(spend, 2) AS spend, clicks, sales, ROUND(sale_amount, 2) AS sale_amount, ROUND(cpc_spend, 2) AS cpc_spend, cpc_clicks, cpc_sales, ROUND(cpc_sale_amount, 2) AS cpc_sale_amount FROM ads_daily WHERE item_id = ?1 AND date = ?2', [iid, vday]);
+        out.day_row_now = await q('day row now', 'SELECT account, item_id, day, orders, units, ROUND(revenue, 2) AS revenue, actual_profit, clicks, ROUND(spend, 2) AS spend, ROUND(cpc_spend, 2) AS cpc_spend, attr_units, ROUND(attr_revenue, 2) AS attr_revenue FROM adtool_listing_day WHERE item_id = ?1 AND day = ?2', [iid, vday]);
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'coverage') {
+        /* HOW MUCH OF THE FLEET EACH PER-LISTING PASS ACTUALLY REACHED TODAY. Several of these
+           passes carry a cursor and resume where they stopped, so a pass that never finishes leaves
+           part of the fleet on yesterday's figure while its job row still reads ok — the same shape
+           of fault as the roll-up's, one table further down. */
+        const live = ((await q('live listings', "SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE'")) || [{}])[0] || {};
+        out.active_listings = Number(live.n) || 0;
+        out.advertised_today = ((await q('day rows today', 'SELECT COUNT(*) AS n FROM adtool_listing_day WHERE day = ?1', [today])) || [{}])[0] || null;
+        out.today_grain = ((await q('today grain', 'SELECT COUNT(*) AS n, MAX(sampled_at) AS last FROM adtool_listing_today')) || [{}])[0] || null;
+        out.profiles = await q('profiles', 'SELECT computed_day, kind, COUNT(DISTINCT scope_id) AS listings FROM adtool_profiles WHERE computed_day >= ?1 GROUP BY computed_day, kind ORDER BY computed_day DESC, kind', [adtAddDays(today, -3)]);
+        out.stages = await q('stages', 'SELECT day, COUNT(*) AS rows FROM adtool_stages WHERE day >= ?1 GROUP BY day ORDER BY day DESC', [adtAddDays(today, -3)]);
+        out.forecast = await q('forecast', 'SELECT made_day, COUNT(DISTINCT item_id) AS listings, COUNT(*) AS rows FROM adtool_forecast WHERE made_day >= ?1 GROUP BY made_day ORDER BY made_day DESC', [adtAddDays(today, -3)]);
+        out.descriptors = await q('descriptors', 'SELECT day, COUNT(*) AS rows FROM adtool_descriptors WHERE day >= ?1 GROUP BY day ORDER BY day DESC', [adtAddDays(today, -3)]);
+        out.price_day = await q('price day', 'SELECT day, COUNT(*) AS rows FROM adtool_price_day WHERE day >= ?1 GROUP BY day ORDER BY day DESC', [adtAddDays(today, -3)]);
+        out.sale_membership = await q('sale membership', 'SELECT day, COUNT(*) AS rows FROM adtool_sale_membership_day WHERE day >= ?1 GROUP BY day ORDER BY day DESC', [adtAddDays(today, -3)]);
+        out.decisions = await q('decisions', 'SELECT day, batch, COUNT(*) AS rows, COUNT(DISTINCT item_id) AS listings FROM adtool_decisions WHERE day >= ?1 GROUP BY day, batch ORDER BY day DESC, batch', [adtAddDays(today, -3)]);
+        out.listings_facts = ((await q('listing facts', 'SELECT COUNT(*) AS n, MIN(synced_at) AS oldest, MAX(synced_at) AS newest FROM adtool_listings')) || [{}])[0] || null;
+        out.cursors = await q('cursors', "SELECT key, value, updated_at FROM portal_config WHERE key IN ('adtool_profiles_cursor', 'adtool_forecast_cursor', 'adtool_rollup_cursor', 'adtool_rollup_tail_day', 'adtool_tail_reroll_day', 'adtool_rollup_yday') ORDER BY key");
+        /* THE LADDER AS THE PAGE DRAWS IT, which is the newest day the table holds, beside the same
+           count on the last day the pass reached the whole fleet: a mix taken off a part-finished day
+           is a different mix, and the page has no way of saying so. */
+        out.stage_mix = await q('stage mix', 'SELECT day, stage, COUNT(*) AS n FROM adtool_stages WHERE day >= ?1 GROUP BY day, stage ORDER BY day DESC, stage', [adtAddDays(today, -3)]);
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      if (check === 'config') {
+        out.config = await q('config', "SELECT key, substr(value, 1, 200) AS value, updated_at FROM portal_config WHERE key LIKE 'adtool%' ORDER BY key");
+        out.register = await q('register', 'SELECT metric_id, name, substr(formula, 1, 160) AS formula, source_tables, recompute, phase FROM adtool_number_register ORDER BY metric_id LIMIT 400');
+        return Object.assign(out, { read_errors: errs });
+      }
+
+      throw new Error('SAY: unknown check — counts, ads_vs_day, day_rows, orders_rows, hour_vs_day, scope_vs_day, periods, report, today, traffic, campaign, vintage, coverage, config');
     },
   },
 
