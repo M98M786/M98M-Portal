@@ -67,7 +67,10 @@
     '.tr-tbl th:first-child{text-align:left}' +
     '.tr-tbl td{padding:7px 10px;border-bottom:1px solid var(--gold-line);text-align:right;font-variant-numeric:tabular-nums}' +
     '.tr-tbl td:first-child{text-align:left;min-width:240px;white-space:normal}' +
-    '.tr-vs{font-size:10px;font-weight:800;margin-top:4px;color:var(--text-3);white-space:nowrap}' +
+    /* 5 Nov (owner): the caption wraps inside its tile. Set not to wrap, the part-day caption ran out of
+       its tile and across the next four, which read as a thin line through the whole row. */
+    '.tr-vs{font-size:10px;font-weight:800;margin-top:4px;color:var(--text-3);line-height:1.45;overflow-wrap:anywhere}' +
+    '.tr-vs small{display:block;font-size:9.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-top:1px}' +
     '.tr-vs.up{color:var(--ok)}.tr-vs.dn{color:var(--bad)}' +
     /* the month-ago level, drawn INSIDE the same bar — the owner asked for the comparison merged with the data, not beside it */
     /* 4 Nov (owner): the dashed month-back marker inside each bar is gone — "makes no sense". The
@@ -439,8 +442,8 @@
     var vs = function (now, then, isPct) {
       if (!pDays) { return '<div class="tr-vs">nothing stored a month back</div>'; }
       if (partialWindow) {
-        return '<div class="tr-vs">that date a month back: ' + (isPct ? (Number(then) || 0).toFixed(2) + '%' : trN(then)) +
-          ' <span style="color:var(--text-3)">(a whole day \u2014 today is still counting)</span></div>';
+        return '<div class="tr-vs">a month back: ' + (isPct ? (Number(then) || 0).toFixed(2) + '%' : trN(then)) +
+          '<small>whole day \u00b7 today still counting</small></div>';
       }
       return trVs(now, then, isPct);
     };
