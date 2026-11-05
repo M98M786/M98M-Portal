@@ -53,7 +53,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -5060,23 +5060,31 @@ function run(argv) {
     F.trfReserveCalls(null, null) === null && F.trfReserveCalls(0, null) === null &&
     F.trfReserveCalls(-5, null) === null,
     [F.trfReserveCalls(1000, null), F.trfReserveCalls(1000, 50), F.trfReserveCalls(null, null)]);
-  t('traffic quota: the CADENCE falls out of the quota — what is left after the reserve, spread over a day, divided between the accounts',
-    /* 1000 a day, a fifth held back, eight accounts: 800 / 8 = 100 reads each, one every 14.4 min */
-    F.trfSampleIntervalMin(1000, 20, 8) === 14.4 &&
+  t('traffic quota: the CADENCE falls out of the quota — what is left after the reserve and the once-a-day per-listing reads, spread over a day, divided between the accounts',
+    /* 1000 a day, a fifth held back, sixteen for the per-listing reads, eight accounts: 784 / 8 = 98 reads each, one every 14.7 min */
+    F.trfSampleIntervalMin(1000, 20, 8) === 14.7 &&
     /* halve the limit and the wait doubles; take more reserve and it stretches */
-    F.trfSampleIntervalMin(500, 20, 8) === 28.8 && F.trfSampleIntervalMin(1000, 50, 8) === 23.1 &&
+    F.trfSampleIntervalMin(500, 20, 8) === 30 && F.trfSampleIntervalMin(1000, 50, 8) === 23.9 &&
     /* fewer accounts share it out further */
-    F.trfSampleIntervalMin(1000, 20, 4) === 7.2 &&
+    F.trfSampleIntervalMin(1000, 20, 4) === 7.3 &&
     /* and the rounding is always UP: rounding an interval down is spending calls the quota has not got */
-    F.trfSampleIntervalMin(999, 20, 8) === 14.5,
+    F.trfSampleIntervalMin(999, 20, 8) === 14.8 &&
+    /* 5 Nov, THE FIGURE THAT MATTERS: eBay's published hundred a day, five per cent held back, sixteen
+       for the per-listing reads, eight accounts = 79 reads for the sampler, one per account every 145.9 min */
+    F.TRAFFIC_DOC_LIMIT_PER_DAY === 100 && F.TRAFFIC_LISTING_CALLS_PER_DAY === 2 && F.TRAFFIC_QUOTA_RESERVE_PCT === 5 &&
+    F.trfSampleIntervalMin(F.TRAFFIC_DOC_LIMIT_PER_DAY, null, 8) === 145.9,
     [F.trfSampleIntervalMin(1000, 20, 8), F.trfSampleIntervalMin(500, 20, 8), F.trfSampleIntervalMin(1000, 50, 8), F.trfSampleIntervalMin(999, 20, 8)]);
-  t('traffic quota: nothing known about the limit is NOT an interval of nought — it is null, and the cadence in force then is the backoff ladder’s own first rung',
+  t('traffic quota: nothing known about the limit is NOT an interval of nought — it is null, and the cadence in force then falls out of eBay’s PUBLISHED limit, never the ladder’s fifteen minutes',
     F.trfSampleIntervalMin(null, 20, 8) === null && F.trfSampleIntervalMin(0, 20, 8) === null &&
     F.trfSampleIntervalMin(1000, 20, 0) === null && F.trfSampleIntervalMin(1000, 20, null) === null &&
     /* a limit smaller than its own reserve leaves nothing to spend, which is null and never a divide by nought */
     F.trfSampleIntervalMin(1, 99, 8) === null &&
-    F.trfCadenceMin(null, 20, 8) === F.TRAFFIC_BACKOFF_FIRST_MIN &&
-    F.trfCadenceMin(1000, 20, 8) === 14.4,
+    /* 5 Nov: fifteen minutes spent the day's hundred calls by half past eleven every morning; the
+       published figure stands in until eBay's own answer can be read, and the ladder's rung is
+       only ever the answer when there are no accounts to share it between */
+    F.trfCadenceMin(null, 20, 8) === F.trfSampleIntervalMin(F.TRAFFIC_DOC_LIMIT_PER_DAY, 20, 8) &&
+    F.trfCadenceMin(null, null, 8) === 145.9 && F.trfCadenceMin(null, 20, 0) === F.TRAFFIC_BACKOFF_FIRST_MIN &&
+    F.trfCadenceMin(1000, 20, 8) === 14.7,
     [F.trfSampleIntervalMin(null, 20, 8), F.trfCadenceMin(null, 20, 8)]);
   t('traffic quota: the accounts are STAGGERED across the ticks of one cycle, so a tick is one or two eBay calls and never eight, and every account gets exactly one turn per cycle',
     (() => {
@@ -5135,7 +5143,7 @@ function run(argv) {
         exact.call === true && other.call === false && other.reason === 'turn' && other.note === '' &&
         early.call === false && early.reason === 'early' && unknown.call === true;
     })(), null);
-  t('traffic sampler: THE BASELINE RULE — a day’s first reading credits no hour, the second credits the difference, and a restatement downwards credits nothing and does not lower the mark',
+  t('traffic sampler: THE BASELINE RULE — a day’s first reading is credited IN FULL (the record began at nought at midnight Pacific; the caller spreads it), the second credits the difference, and a restatement downwards credits nothing and does not lower the mark',
     (() => {
       const first = F.trfClockCredit(null, { impressions: 40000, views: 900, transactions: 12 });
       const second = F.trfClockCredit(first.store, { impressions: 40250, views: 912, transactions: 12 });
@@ -5143,7 +5151,9 @@ function run(argv) {
       const down = F.trfClockCredit(second.store, { impressions: 39000, views: 900, transactions: 11 });
       const backUp = F.trfClockCredit(down.store, { impressions: 40250, views: 912, transactions: 12 });
       const past = F.trfClockCredit(backUp.store, { impressions: 40300, views: 912, transactions: 12 });
-      return first.baseline === true && first.credit === null && first.store.impressions === 40000 &&
+      return first.baseline === true && first.credit && first.credit.impressions === 40000 && first.credit.views === 900 && first.store.impressions === 40000 &&
+        /* a first reading of nought is a baseline with nothing to credit */
+        F.trfClockCredit(null, { impressions: 0, views: 0, transactions: 0 }).credit === null &&
         second.baseline === false && second.credit.impressions === 250 && second.credit.views === 12 &&
         second.credit.transactions === 0 && second.store.impressions === 40250 &&
         /* nothing moved is null, never a credit of nought written into the hour */
@@ -5152,6 +5162,34 @@ function run(argv) {
         down.credit === null && down.store.impressions === 40250 && backUp.credit === null &&
         past.credit.impressions === 50;
     })(), null);
+  t('traffic sampler: THE SPREAD — a rise is shared over the UK hours between the last reading and this one in proportion to the minutes each hour contributed, whole units with the remainder on the last hour, and a span of nothing is the hour it was seen in',
+    (() => {
+      const from = Date.parse('2026-11-05T08:30:00Z'), to = Date.parse('2026-11-05T10:54:00Z');
+      const s = F.trfSpreadCredit(from, to, { impressions: 1440, views: 10, transactions: 1 });
+      const sum = (k) => s.reduce((a, r) => a + r[k], 0);
+      const one = F.trfSpreadCredit(to, to, { impressions: 7, views: 0, transactions: 0 });
+      const back = F.trfSpreadCredit(to, from, { impressions: 7, views: 0, transactions: 0 });
+      const night = F.trfSpreadCredit(Date.parse('2026-07-04T22:30:00Z'), Date.parse('2026-07-05T00:10:00Z'), { impressions: 100, views: 0, transactions: 0 });
+      return s.length === 3 && s[0].hour === 8 && s[0].impressions === 300 && s[1].hour === 9 && s[1].impressions === 600 && s[2].hour === 10 && s[2].impressions === 540 &&
+        sum('impressions') === 1440 && sum('views') === 10 && sum('transactions') === 1 && s[2].transactions === 1 &&
+        s.every((r) => r.date === '2026-11-05') &&
+        one.length === 1 && one[0].hour === 10 && one[0].impressions === 7 &&
+        back.length === 1 && back[0].hour === 8 && back[0].impressions === 7 &&
+        F.trfSpreadCredit(from, to, { impressions: 0, views: 0, transactions: 0 }).length === 0 &&
+        F.trfSpreadCredit(NaN, NaN, { impressions: 5 }).length === 0 &&
+        /* a span over UK midnight in summer lands on the UK dates and hours, not the UTC ones */
+        night.length === 3 && night[0].date === '2026-07-04' && night[0].hour === 23 && night[1].date === '2026-07-05' && night[1].hour === 0 && night[2].hour === 1 &&
+        night[0].impressions === 30 && night[1].impressions === 60 && night[2].impressions === 10;
+    })(), null);
+  t('traffic sampler: EBAY’S DAY is a Pacific day — it begins at 08:00 UK in winter and 07:00 UTC in summer, the clock-change days included, and the date step never leaves the calendar',
+    new Date(F.trfPtDayStartMs('2026-11-05')).toISOString() === '2026-11-05T08:00:00.000Z' &&
+    new Date(F.trfPtDayStartMs('2026-07-05')).toISOString() === '2026-07-05T07:00:00.000Z' &&
+    new Date(F.trfPtDayStartMs('2026-11-01')).toISOString() === '2026-11-01T07:00:00.000Z' &&
+    new Date(F.trfPtDayStartMs('2026-03-08')).toISOString() === '2026-03-08T08:00:00.000Z' &&
+    F.trfPtDayStartMs('rubbish') === null &&
+    F.trfPtDate(Date.parse('2026-11-05T07:59:00Z')) === '2026-11-04' && F.trfPtDate(Date.parse('2026-11-05T08:00:00Z')) === '2026-11-05' &&
+    F.trfPtShift('2026-11-05', -89) === '2026-08-08' && F.trfPtShift('2026-03-01', -1) === '2026-02-28',
+    [F.trfPtDate(Date.parse('2026-11-05T07:59:00Z')), F.trfPtShift('2026-11-05', -89)]);
   t('traffic quota: eBay’s own answer is read and not interpreted, and an answer that names no traffic-report limit gives null rather than a limit of nought',
     (() => {
       const body = JSON.stringify({ rateLimits: [
@@ -5167,6 +5205,11 @@ function run(argv) {
       return q && q.limit === 1000 && q.remaining === 812 && q.window_sec === 86400 &&
         q.reset_at === '2026-11-03T07:00:00.000Z' && JSON.stringify(q) === JSON.stringify(qObj) &&
         none === null && nought === null && F.trfQuotaFromRateLimits('not json') === null &&
+        /* 5 Nov: the resource is matched by meaning, however eBay spells it, and what eBay DID name is
+           handed back in words when nothing matched */
+        F.trfQuotaFromRateLimits({ rateLimits: [{ apiName: 'Analytics', resources: [{ name: 'sell.analytics.traffic_report', rates: [{ limit: 100, remaining: 7 }] }] }] }).limit === 100 &&
+        F.trfQuotaResourcesSeen({ rateLimits: [{ apiName: 'Analytics', resources: [{ name: 'a' }, { name: 'b' }] }] }) === 'Analytics.a, Analytics.b' &&
+        F.trfQuotaResourcesSeen('not json') === '' &&
         F.trfQuotaFromRateLimits(null) === null &&
         /* eBay stating a limit but not the remainder is "does not say", not nought left */
         silent && silent.remaining === null && silent.window_sec === null;
@@ -5234,15 +5277,27 @@ function run(argv) {
     (src.match(/INTO traffic_clock_baseline|UPDATE traffic_clock_baseline/g) || []).length === 2 &&
     trSync.indexOf('traffic_clock_baseline') < 0 && trSync.indexOf('traffic_hour') < 0 &&
     /* the credit now comes from the baseline row, never from the traffic_daily row the :40 pass rewrites */
-    /trfClockCredit\(plan\.base\[acct\] \|\| null, \{ impressions: imp, views: vie, transactions: tr \}\)/.test(trNow) &&
+    /const prev = plan\.base\[acct\] \|\| null;\n        const cc = trfClockCredit\(prev, \{ impressions: imp, views: vie, transactions: tr \}\)/.test(trNow) &&
     !/Math\.max\(0, imp - Number\(\(o \|\| \{\}\)\.impressions \|\| 0\)\)/.test(trNow),
     (src.match(/INTO traffic_clock_baseline|UPDATE traffic_clock_baseline/g) || []).length);
-  t('traffic sampler (real source): the day’s FIRST reading credits no hour and is written race-safe, so two ticks meeting at a day’s start cannot tip a day’s traffic into one bar twice',
+  t('traffic sampler (real source): the day’s FIRST reading is written race-safe and credited back to the day’s Pacific start, every rise is SPREAD over the hours since the last reading through the one pure function, and the window is eBay’s own ninety Pacific days',
     /if \(cc\.baseline\) \{/.test(trNow) &&
     /ON CONFLICT\(account, date\) DO NOTHING/.test(trNow) &&
-    /* the hour credit lives on the OTHER branch, so a baseline reading cannot reach traffic_hour */
-    trNow.indexOf('if (cc.credit) stmts.push(env.DB.prepare(') > trNow.indexOf('} else {') &&
-    trNow.indexOf('INSERT INTO traffic_hour') > trNow.indexOf('} else {') &&
+    /* 5 Nov: the credit comes AFTER both branches and is shared out by trfSpreadCredit, from the last
+       reading (or the day's Pacific start) to now, each slot under its own UK date and hour */
+    trNow.indexOf('for (const slot of trfSpreadCredit(fromMs, seenMs, cc.credit))') > trNow.indexOf('} else {') &&
+    trNow.indexOf('INSERT INTO traffic_hour') > trNow.indexOf('for (const slot of trfSpreadCredit(') &&
+    /const dayStart = trfPtDayStartMs\(date\);/.test(trNow) && /const fromMs = Math\.max\(floorMs, lastMs == null \? floorMs : lastMs\);/.test(trNow) &&
+    /\.bind\(acct, slot\.date, slot\.hour, slot\.impressions, slot\.views, slot\.transactions\)/.test(trNow) &&
+    /* the window is eBay's own ninety Pacific days, never a UK date eBay has not begun, and the plan
+       follows the same day */
+    /const ptTo = plan\.today, ptFrom = trfPtShift\(ptTo, -89\);/.test(trNow) && !/ukDate\(/.test(trNow) &&
+    /if \(date === plan\.today && date === trfPtDate\(\)\) \{/.test(trNow) &&
+    /const today = trfPtDate\(\);/.test(trPlan) && /transactions, last_at FROM traffic_clock_baseline WHERE date = \?1/.test(trPlan) &&
+    /* and the hourly history pass is gone: trafficSync spends its two per-listing reads once a day,
+       in the first hour after eBay's window resets, and nothing else */
+    !/dimension=DAY/.test(trSync) && /const listingPass = ptHour === 0;/.test(trSync) && /if \(!listingPass\) return;/.test(trSync) &&
+    trSync.indexOf('if (!listingPass) return;') < trSync.indexOf('ebayAccessToken(') &&
     /baseline_hour, readings, first_at, last_at/.test(trNow) &&
     /* and the stamp that means eBay was actually reached rides in the same transaction */
     /INSERT INTO traffic_quota \(account, last_call_at\)/.test(trNow) &&
@@ -5323,23 +5378,27 @@ function run(argv) {
     /adtoolRollups, adtoolTruth, adtoolVideoSweep, trafficQuota,/.test(src), null);
 
   /* the page half */
-  t('traffic page: BOTH bar rows are drawn, off ONE helper, after the tiles and the so-far-today line \u2014 the owner asked for the comparison bars of views as well as impressions',
-    (trSrc.match(/trBarRow\(/g) || []).length === 3 &&
-    /trBarRow\('Impressions by day', 'impressions', 'imp', chartDays, cmpOf, today\)/.test(trSrc) &&
-    /trBarRow\('Views by day', 'views', 'views', chartDays, cmpOf, today\)/.test(trSrc) &&
-    trSrc.indexOf('So far today (') < trSrc.indexOf("trBarRow('Impressions by day'") &&
-    trSrc.indexOf("trBarRow('Impressions by day'") < trSrc.indexOf("trBarRow('Views by day'") &&
-    /* and the row's own arithmetic is gone from the paint, so there is one implementation of it */
-    !/var max = Math\.max\.apply/.test(trSrc), (trSrc.match(/trBarRow\(/g) || []).length);
-  t('traffic page: both rows carry the dashed month-back marker and the same tooltip shape, and neither prints a percentage against a day eBay is still counting',
+  t('traffic page (5 Nov): impressions and views are ONE grouped row per block, red and green side by side, off ONE helper, after the tiles and the so-far-today line, and the month-back block is drawn the same way on the same scales',
+    (trSrc.match(/trBarPair\(/g) || []).length === 3 &&
+    /trBarPair\('Impressions and views by day', chartDays, \{ today: today, maxImp: maxImp, maxViews: maxViews, vsOf: backOf, note: weekNote \}\)/.test(trSrc) &&
+    /trBarPair\('Impressions and views by day \u00b7 a month back', prevDays, \{ maxImp: maxImp, maxViews: maxViews, vsOf: nowOf, note: 'same scales as the row above' \}\)/.test(trSrc) &&
+    trSrc.indexOf('So far today (') < trSrc.indexOf("trBarPair('Impressions and views by day', chartDays") &&
+    trSrc.indexOf("trBarPair('Impressions and views by day', chartDays") < trSrc.indexOf("trBarPair('Impressions and views by day \u00b7 a month back'") &&
+    !/trBarRow\(/.test(trSrc) && !/var max = Math\.max\.apply/.test(trSrc) &&
+    /* red for impressions, green for views, and the legend carries the same two classes */
+    /\.tr-bar\.tr-imp\{background:linear-gradient\(180deg,#e5484d/.test(trSrc) && /\.tr-bar\.tr-vw\{background:linear-gradient\(180deg,#3fb950/.test(trSrc) &&
+    /<i class="tr-imp"><\/i>Impressions/.test(trSrc) && /<i class="tr-vw"><\/i>Views/.test(trSrc),
+    (trSrc.match(/trBarPair\(/g) || []).length);
+  t('traffic page (5 Nov): the pair keeps each series on its OWN scale, both bars of a day carry the same tooltip, the day eBay is still counting is faded and never given a percentage, and the month-back figures are named for both series',
     (() => {
-      const row = trSrc.slice(trSrc.indexOf('  function trBarRow('), trSrc.indexOf('\n  }', trSrc.indexOf('  function trBarRow(')));
-      return /var max = trBarMax\(rows, key, function \(r\) \{ return cmpOf\(r\.date\); \}\);/.test(row) &&
-        /var hPct = trBarH\(r\[key\], max\);/.test(row) &&
-        /trMarkAt\(c\[key\], max, hPct\)/.test(row) &&
-        /var pct = \(c && c\[key\] && !isPart\) \?/.test(row) &&
-        /pct === null \? '' :/.test(row) && /isPart \? ' tr-part' : ''/.test(row) &&
-        /trN\(c\[key\]\) \+ ' ' \+ word/.test(row);
+      const row = trSrc.slice(trSrc.indexOf('  function trBarPair('), trSrc.indexOf('\n  }', trSrc.indexOf('  function trBarPair(')));
+      return /var maxImp = opt\.maxImp \|\| trBarMax\(rows, 'impressions', null\);/.test(row) &&
+        /var maxViews = opt\.maxViews \|\| trBarMax\(rows, 'views', null\);/.test(row) &&
+        /trBarH\(r\.impressions, maxImp\)/.test(row) && /trBarH\(r\.views, maxViews\)/.test(row) &&
+        /var t = '<span>' \+ tip\(r, v\) \+ '<\/span>';/.test(row) && (row.match(/' \+ t \+ '<\/div>'/g) || []).length === 2 &&
+        /var hold = isPart \|\| !!v\.part;/.test(row) && /if \(hold \|\| !then\) \{ return ''; \}/.test(row) &&
+        /isPart \? ' tr-part' : ''/.test(row) && /each series on its own scale/.test(row) &&
+        /trN\(v\.impressions\) \+ ' imp'/.test(row) && /trN\(v\.views\) \+ ' views'/.test(row);
     })(), null);
   t('traffic page: the hour block opens on Sold while the traffic clock has nothing for the day and on Impressions once it has, so it is never the empty box the owner was shown',
     /var ser = TR\.hour_series \|\| \(CUR\.totals\.impressions \? 'impressions' : 'sold'\);/.test(trSrc) &&

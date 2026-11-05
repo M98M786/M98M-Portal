@@ -19,7 +19,15 @@
     '.tr-bar{flex:1;background:linear-gradient(180deg,var(--blue,#4f7cd9),var(--blue-2,#33549c));border-radius:3px 3px 0 0;min-width:6px;position:relative}' +
     '.tr-bar:hover{opacity:.85}' +
     '.tr-bar span{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);font-size:9px;color:var(--text-3);font-weight:700;white-space:nowrap;display:none}' +
-    '.tr-bar.tr-part{background:repeating-linear-gradient(135deg,rgba(233,169,60,.42),rgba(233,169,60,.42) 5px,transparent 5px,transparent 10px);border:1px dashed rgba(233,169,60,.6)}' +
+    /* 5 Nov (owner): impressions and views side by side in ONE row, red and green. The day eBay is still
+       counting keeps its colour and is faded with a dashed edge, so red stays red and green stays green. */
+    '.tr-bar.tr-part{opacity:.5;outline:1px dashed rgba(255,255,255,.6);outline-offset:-1px}' +
+    '.tr-grp{flex:1;display:flex;align-items:flex-end;gap:2px;height:100%;min-width:12px}' +
+    '.tr-bar.tr-imp{background:linear-gradient(180deg,#e5484d,#9b2226)}' +
+    '.tr-bar.tr-vw{background:linear-gradient(180deg,#3fb950,#1f6f2e)}' +
+    '.tr-leg{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:10.5px;font-weight:700;color:var(--text-2);margin:2px 0 4px}' +
+    '.tr-leg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}' +
+    '.tr-leg .tr-imp{background:#e5484d}.tr-leg .tr-vw{background:#3fb950}' +
     '.tr-warn{margin:0 0 12px;padding:10px 13px;border-radius:10px;border:1px solid rgba(255,159,67,.45);background:var(--warn-soft);font-size:12.5px;font-weight:600;color:var(--text-2);line-height:1.55}' +
     '.tr-warn b{color:var(--warn)}' +
     '.tr-sofar{display:flex;gap:9px;flex-wrap:wrap;align-items:baseline;margin:-6px 0 14px;font-size:12px;font-weight:700;color:var(--text-3)}' +
@@ -174,33 +182,48 @@
   }
   /* TRAFFIC-PURE-END */
 
-  /* ONE BAR ROW. Label, the field this row is about, the word the tooltip calls it, the days, the
-     month-back lookup and the day eBay has not finished counting. Every rule the single impressions
-     row used to carry lives here once: the floor, the marker offset converted into the bar's own
-     frame, the hatched part-day, and NO percentage against a day that is still filling — holding
-     half a day against a whole one a month back prints a collapse every morning and a recovery
-     every night, which is the misreading this page already exists to prevent. */
-  /* 4 Nov (owner): "red dotted line makes no sense, remove that — I want the same presentation
-     duplicated with last month's same-date stats". No marker inside the bar any more. The row
-     takes a SHARED scale (`opt.max`, the larger of this block and the month-back block) so the
-     two blocks read against each other by eye; `opt.vsOf(date)` names the matching day in the
-     other block for the tooltip only. */
-  function trBarRow(label, key, word, rows, opt) {
+  /* ONE GROUPED ROW (owner, 5 Nov: "combine the weekly impression and view bar charts, parallel together,
+     red for impressions and green for views", and the same for the month-back block). Each day is a
+     PAIR of bars side by side. Each series keeps its OWN scale (opt.maxImp, opt.maxViews): views are a
+     few per cent of impressions, and on one scale the green bars would lie flat on the floor, which is a
+     true chart that tells a reader nothing; the legend says so. The scales are shared with the month-back
+     block so the two blocks read against each other by eye. The day eBay is still counting is drawn
+     faded with a dashed edge, and NO percentage is printed against it: half a day against a whole one a
+     month back prints a collapse every morning and a recovery every night, which is the misreading this
+     page already exists to prevent. `opt.vsOf(date)` names the matching day in the other block for the
+     tooltip only, and the same tooltip sits on both bars of a pair. */
+  function trBarPair(label, rows, opt) {
     opt = opt || {};
-    var max = opt.max || trBarMax(rows, key, null);
+    var maxImp = opt.maxImp || trBarMax(rows, 'impressions', null);
+    var maxViews = opt.maxViews || trBarMax(rows, 'views', null);
     var today = opt.today || '';
+    var pctOf = function (now, then, hold) {
+      if (hold || !then) { return ''; }
+      var p = (now - then) / then * 100;
+      return ' (' + (p >= 0 ? '+' : '') + p.toFixed(1) + '%)';
+    };
+    var tip = function (r, v) {
+      var isPart = r.date === today;
+      var s = esc(r.date.slice(5)) + ' \u00b7 ' + trN(r.impressions) + ' imp \u00b7 ' + trN(r.views) + ' views \u00b7 ' + r.transactions + ' sold';
+      if (v) {
+        var hold = isPart || !!v.part;
+        s += ' \u00b7 vs ' + esc(String(v.date).slice(5)) + ': ' + trN(v.impressions) + ' imp' + pctOf(r.impressions, v.impressions, hold) +
+          ', ' + trN(v.views) + ' views' + pctOf(r.views, v.views, hold) + (v.part ? ' (still counting)' : '');
+      }
+      return s + (isPart ? ' \u00b7 still counting' : '');
+    };
     return '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:12px 0 2px">' +
       esc(label) + (opt.note ? ' \u00b7 <span style="color:var(--text-2)">' + esc(opt.note) + '</span>' : '') + '</div>' +
+      '<div class="tr-leg"><span><i class="tr-imp"></i>Impressions</span><span><i class="tr-vw"></i>Views</span>' +
+        '<span style="color:var(--text-3);font-weight:600">each series on its own scale, so the pair can be read side by side</span></div>' +
       '<div class="tr-bars">' + rows.map(function (r) {
         var isPart = r.date === today;
-        var hPct = trBarH(r[key], max);
-        var v = opt.vsOf ? opt.vsOf(r.date) : null;     // { date, value, part } of the matching day in the other block
-        var pct = (v && v.value && !isPart && !v.part) ? ((r[key] - v.value) / v.value * 100) : null;
-        return '<div class="tr-bar' + (isPart ? ' tr-part' : '') + '" style="height:' + hPct + '%">' +
-          '<span>' + esc(r.date.slice(5)) + ' \u00b7 ' + trN(r.impressions) + ' imp \u00b7 ' + trN(r.views) + ' views \u00b7 ' + r.transactions + ' sold' +
-          (v ? ' \u00b7 vs ' + esc(String(v.date).slice(5)) + ': ' + trN(v.value) + ' ' + word +
-               (pct === null ? '' : ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)') + (v.part ? ' (still counting)' : '') : '') +
-          (isPart ? ' \u00b7 still counting' : '') + '</span></div>';
+        var v = opt.vsOf ? opt.vsOf(r.date) : null;     // { date, impressions, views, part } of the matching day in the other block
+        var t = '<span>' + tip(r, v) + '</span>';
+        return '<div class="tr-grp">' +
+          '<div class="tr-bar tr-imp' + (isPart ? ' tr-part' : '') + '" style="height:' + trBarH(r.impressions, maxImp) + '%">' + t + '</div>' +
+          '<div class="tr-bar tr-vw' + (isPart ? ' tr-part' : '') + '" style="height:' + trBarH(r.views, maxViews) + '%">' + t + '</div>' +
+          '</div>';
       }).join('') + '</div>';
   }
 
@@ -317,10 +340,12 @@
 
     var h = '';
     if (TR.mode === 'today') {
-      h += '<div class="tr-warn"><b>eBay has not finished reporting today.</b> These figures keep rising through the evening, so this is not a finished day and does not compare with the days below.' +
+      /* 5 Nov: eBay's traffic day is a US Pacific day, 08:00 to 08:00 UK (its own documentation for this
+         date format), which is why "today" always looked hours behind: it had only just begun. */
+      h += '<div class="tr-warn"><b>eBay has not finished today.</b> eBay\'s traffic day runs 08:00 to 08:00 UK (midnight to midnight US Pacific), so these figures keep rising until tomorrow morning; this is not a finished day and does not compare with the days below.' +
         (lastFull ? ' The last full day, ' + esc(lastFull.date.slice(5)) + ', finished on <b>' + trN(lastFull.impressions) + '</b> impressions, ' + trN(lastFull.views) + ' views and ' + lastFull.transactions + ' sold.' : '') + '</div>';
     } else if (partial) {
-      h += '<div class="tr-warn">Today is still being counted by eBay, so it is left out of the totals below and drawn hatched in the chart.</div>';
+      h += '<div class="tr-warn">Today (eBay\'s day runs 08:00 to 08:00 UK) is still being counted, so it is left out of the totals below and drawn faded in the chart.</div>';
     }
     h += '<div class="tr-tiles">' +
       '<div class="tr-tile"><div class="k">Impressions · ' + esc(winLbl) + '</div><div class="v">' + trN(tot.impressions) + '</div>' + vs(tot.impressions, pTot.impressions) + '</div>' +
@@ -349,11 +374,11 @@
     chartDays.forEach(function (r) { var c = cmpOf(r.date); if (c) { prevDays.push(c); prevToCur[c.date] = r; } });
     var maxImp = Math.max(trBarMax(chartDays, 'impressions', null), trBarMax(prevDays, 'impressions', null));
     var maxViews = Math.max(trBarMax(chartDays, 'views', null), trBarMax(prevDays, 'views', null));
-    var backOf = function (key) { return function (dt) { var c = cmpOf(dt); return c ? { date: c.date, value: c[key] } : null; }; };
-    var nowOf = function (key) { return function (dt) { var r = prevToCur[dt]; return r ? { date: r.date, value: r[key], part: r.date === today } : null; }; };
+    var backOf = function (dt) { var c = cmpOf(dt); return c ? { date: c.date, impressions: c.impressions, views: c.views } : null; };
+    var nowOf = function (dt) { var r = prevToCur[dt]; return r ? { date: r.date, impressions: r.impressions, views: r.views, part: r.date === today } : null; };
     var weekNote = TR.mode === 'today' ? 'the week behind today' : '';
-    h += trBarRow('Impressions by day', 'impressions', 'imp', chartDays, { today: today, max: maxImp, vsOf: backOf('impressions'), note: weekNote }) +
-      trBarRow('Views by day', 'views', 'views', chartDays, { today: today, max: maxViews, vsOf: backOf('views'), note: weekNote });
+    /* 5 Nov (owner): ONE row, impressions and views side by side per day, red and green */
+    h += trBarPair('Impressions and views by day', chartDays, { today: today, maxImp: maxImp, maxViews: maxViews, vsOf: backOf, note: weekNote });
 
     /* 4 Nov (owner): THE SAME PRESENTATION AGAIN, FOR THE SAME DATES A MONTH BACK — the tiles over
        exactly the dates the tiles above cover, then the two day rows on the same scale as the
@@ -372,18 +397,18 @@
         '<div class="tr-tile"><div class="k">CTR</div><div class="v">' + pCtr.toFixed(2) + '%</div>' + nowLine(ctr, true) + '</div>' +
         '<div class="tr-tile"><div class="k">Conversion</div><div class="v">' + pCvr.toFixed(2) + '%</div>' + nowLine(cvr, true) + '</div>' +
       '</div>' +
-      trBarRow('Impressions by day · a month back', 'impressions', 'imp', prevDays, { max: maxImp, vsOf: nowOf('impressions'), note: 'same scale as the row above' }) +
-      trBarRow('Views by day · a month back', 'views', 'views', prevDays, { max: maxViews, vsOf: nowOf('views'), note: 'same scale as the row above' });
+      trBarPair('Impressions and views by day · a month back', prevDays, { maxImp: maxImp, maxViews: maxViews, vsOf: nowOf, note: 'same scales as the row above' });
     }
 
     /* THE HOUR BLOCK (owner, 2 Nov: "where is the breakdown of hours? i need hour to hour bars in
        this page too"). THREE series over one day, from TWO sources:
          Impressions and Views  the portal's own clock. eBay's traffic report has a day dimension and
                                 a listing dimension and no hourly one, so there is nothing to ask for:
-                                the running daily total is read every five minutes and each rise is
-                                credited to the hour it was seen in. That clock was created on 2 Nov,
-                                so it holds nothing earlier, and today's row stays empty until eBay's
-                                daily total first moves — which is why the owner saw no hours at all.
+                                the running daily total is read as often as eBay's hundred-calls-a-day
+                                allowance permits (5 Nov: about every two and a half hours per account,
+                                staggered) and each rise is spread over the UK hours since that
+                                account was last read. That clock was created on 2 Nov, so it holds
+                                nothing earlier.
          Sold                   the UK hour on each order's own timestamp. Exact, for every day the
                                 order book covers, which is all of them.
        So the block opens on Sold whenever the clock has nothing for the day and on Impressions
@@ -468,7 +493,9 @@
     h += '<div class="tr-src">' + esc(String(d.hours_note || '')) +
       ' Clock starts: <b>' + esc(d.hour_clock_from ? String(d.hour_clock_from) : 'not recorded') + '</b>.' +
       ' Days it holds: <b>' + (d.hour_clock_days ? String(d.hour_clock_days) : 'not recorded') + '</b>.' +
-      (isAvg ? '' : ' Five-minute readings behind this day: <b>' + (d.hour_samples == null ? 'not recorded' : String(d.hour_samples)) + '</b>.') +
+      (isAvg ? '' : ' Readings behind this day: <b>' + (d.hour_samples == null ? 'not recorded' : String(d.hour_samples)) + '</b>.') +
+      (d.hour_clock_state && d.hour_clock_state.sampling_every_min ? ' Each account is read about every <b>' + esc(String(Math.round(d.hour_clock_state.sampling_every_min))) + ' minutes</b>' +
+        (d.hour_clock_state.accounts ? ', the accounts staggered so the fleet is read about every <b>' + esc(String(Math.round(d.hour_clock_state.sampling_every_min / d.hour_clock_state.accounts))) + ' minutes</b>' : '') + '.' : '') +
       ' An hour with nothing recorded behind it is drawn hatched and says so, never as a bar of nought.</div>';
 
     /* review 3: account-to-account, day by day */
