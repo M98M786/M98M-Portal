@@ -181,6 +181,23 @@ function cronMap() {
        endpoint is what the five-minute sampler's whole cadence is worked out from, so it must not be
        the job that loses a budget fight. No new slot was needed for it. */
     '20 * * * *': [adtoolRollups, trafficQuota],
+    /* 5 Nov: THE CATCH-UP HALF OF THE ROLL-UP, ON AN INVOCATION OF ITS OWN. The roll-up's steps are
+       a list in priority order and the slot above spends its clock on today first, so everything
+       from the week and month sums downward was asked whether it fitted in what today had left and
+       almost always did not: over 150 runs `yesterday` ran 6 times and was left 36, and the eleven
+       steps behind it were reached only by luck. Today and yesterday keep the slot above; the week
+       and month sums, the listing facts, the days the sources say are wrong, the day before
+       yesterday, the tail round, the history rebuild and the morning outputs ride here, with a
+       budget of their own that nothing has spent before they start.
+       :43 is a minute NO other entry in this map occupies — the five-minute slots sit on minutes
+       ending 0 or 5, 2 or 7 and 4 or 9, the quarter-hour slots on 0/15, 1/16, 5/20 and 8/23, and the
+       hourly jobs at :20 :25 :30 :32 :33 :40 :50. Nothing shares the minute, which is what matters:
+       a shared minute is a shared invocation and a shared subrequest budget, and the database was
+       already refusing work at :31 ("D1 DB is overloaded") when a slot of this weight was put on a
+       busy one. Every free minute in this map has a five-minute slot a minute away on each side, so
+       :43 is as clear as a minute here can be, and the test below proves it is still free.
+       One lease covers both halves, so the two can never roll the same finished day at once. */
+    '43 * * * *': [adtoolRollupsCatchup],
     /* adtoolVideoSweep rides LAST here (31 Oct, §4). This slot already carries one light D1-only job,
        and this file's own law is that the cheap reads go ahead of anything that fetches: the sweep is
        the only job in the slot that calls eBay, so last is where it cannot eat the budget of the job
@@ -4997,8 +5014,13 @@ async function adtoolListingsRefresh(env) {
 }
 
 /* ---- job: orders → adtool_orders (UK-localised, Brain v17 per order) ---- */
-async function adtoolOrdersRoll(env, sinceIso) {
-  const rs = await env.DB.prepare('SELECT order_id, account, item_id, sold, cost, ebay_fees, refunded, status, created_at, qty FROM orders WHERE created_at >= ?1').bind(sinceIso).all();
+async function adtoolOrdersRoll(env, sinceIso, untilIso) {
+  /* `untilIso` (5 Nov) bounds the roll at the top as well as the bottom, so a single finished day
+     being re-rolled costs that day's orders and not every order since it. Left out, the roll runs to
+     the newest order exactly as it always has. */
+  const rs = untilIso
+    ? await env.DB.prepare('SELECT order_id, account, item_id, sold, cost, ebay_fees, refunded, status, created_at, qty FROM orders WHERE created_at >= ?1 AND created_at < ?2').bind(sinceIso, untilIso).all()
+    : await env.DB.prepare('SELECT order_id, account, item_id, sold, cost, ebay_fees, refunded, status, created_at, qty FROM orders WHERE created_at >= ?1').bind(sinceIso).all();
   const stmts = [];
   for (const o of (rs.results || [])) {
     const ms = new Date(String(o.created_at)).getTime();
@@ -5252,12 +5274,18 @@ const ADTOOL_ROLLUP_DAY_ROWS = Math.round(53365 / 3);
    evidence it comes from cannot drift apart; the rest come from the same two runs, which did three
    full days, the listing facts and a four-day order roll inside 330 to 350 s. */
 const ADTOOL_ROLLUP_WHOLE_DAY_MS = adtRollupCostMs(ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_ROWS_PER_S);
-const ADTOOL_ROLLUP_STEP_MS = { orders: 20000, today: 70000, listings: 20000, yesterday: ADTOOL_ROLLUP_WHOLE_DAY_MS, day2: ADTOOL_ROLLUP_WHOLE_DAY_MS, tail: ADTOOL_ROLLUP_WHOLE_DAY_MS, periods: 12000, catchup: ADTOOL_ROLLUP_WHOLE_DAY_MS, ordersall: 90000, boundary: 15000, report: 20000, roas: 8000, profiles: 30000, forecast: 20000, truth: 20000, warm: 45000 };
+const ADTOOL_ROLLUP_STEP_MS = { orders: 20000, today: 70000, listings: 20000, yesterday: ADTOOL_ROLLUP_WHOLE_DAY_MS, day2: ADTOOL_ROLLUP_WHOLE_DAY_MS, tail: ADTOOL_ROLLUP_WHOLE_DAY_MS, owed: ADTOOL_ROLLUP_WHOLE_DAY_MS, periods: 12000, catchup: ADTOOL_ROLLUP_WHOLE_DAY_MS, ordersall: 90000, boundary: 15000, report: 20000, roas: 8000, profiles: 30000, forecast: 20000, truth: 20000, warm: 45000 };
 /* the steps of a steady-state run, in the order the pages need them. Named here so the order is one
    list a reader can check against the brief rather than a shape to be inferred from the code.
    `yesterday` sits above `listings` because on the one run a day where eBay's report for yesterday
-   lands it rewrites every hour of it, and that is the step that must have the room. */
-const ADTOOL_ROLLUP_ORDER = ['orders', 'today', 'yesterday', 'periods', 'listings', 'day2', 'tail', 'boundary', 'report', 'roas', 'profiles', 'forecast', 'truth', 'warm'];
+   lands it rewrites every hour of it, and that is the step that must have the room.
+   `owed` (5 Nov) is the one addition, and it sits above the two fixed re-rolls below it: a day the
+   sources say is WRONG is worth more than the day before yesterday rolled for the second time this
+   morning. Nothing else moved. THE LIST IS THE ORDER THE STEPS ARE CALLED IN, step for step, and a
+   reader can hold the two side by side; a list that said one thing while the code did another would
+   be worse than no list. What changed instead is the budget the catch-up half is given, which is
+   worked out below from the costs the engine has measured. */
+const ADTOOL_ROLLUP_ORDER = ['orders', 'today', 'yesterday', 'periods', 'listings', 'owed', 'day2', 'tail', 'boundary', 'report', 'roas', 'profiles', 'forecast', 'truth', 'warm'];
 function adtRollupCostMs(rows, rowsPerS) {
   /* what a step of this size should cost at the measured rate. NULL where the size cannot be read,
      because a step whose cost nobody can work out must be judged on its measured time or its first
@@ -5462,6 +5490,207 @@ function adtRollupAgeWords(mins) {
   const d = Math.round(h / 24);
   return d <= 1 ? 'a day' : d + ' days';
 }
+/* ---- 5 NOV: THE CATCH-UP GETS AN INVOCATION OF ITS OWN (item 1) -------------------------------
+   The gate above stopped the roll-up being killed. It did not make the work happen. Over 150 runs
+   `yesterday` ran 6 times and was left 36, and everything behind it in the order was reached only
+   by luck: a step late in the list is asked whether it fits in what is left of a budget that today
+   has already spent, so the answer is almost always no. The money the owner reads came from days
+   that were never re-rolled.
+   So the list is SPLIT ACROSS TWO INVOCATIONS. Today and yesterday are what "every hour" means and
+   they keep the hourly slot. Everything else is catch-up work: it answers to a slot and a budget of
+   its own, where nothing has spent the clock before it starts. One job, one lease, so the two can
+   never roll the same day at the same moment.
+   The order roll is in BOTH lists on purpose. It is the prerequisite each slot's own days are built
+   from rather than a step with an output of its own, and it is first in both. */
+const ADTOOL_ROLLUP_HOURLY_STEPS = ['orders', 'today', 'yesterday'];
+/* the rebuild's two prerequisite steps are named here and not in ADTOOL_ROLLUP_ORDER, which is the
+   order of a STEADY run: a history rebuild is catch-up work by definition. */
+const ADTOOL_ROLLUP_CATCHUP_STEPS = ['orders', 'ordersall', 'catchup'].concat(ADTOOL_ROLLUP_ORDER.filter(n => ADTOOL_ROLLUP_HOURLY_STEPS.indexOf(n) < 0));
+/* THE CATCH-UP SLOT'S OWN BUDGET, and it is WORKED OUT rather than picked. Dearer than the hourly
+   one because it is not racing today's figures and a whole finished day is the smallest useful piece
+   of its work.
+   THE ARITHMETIC THAT DECIDES IT, on the costs the engine itself had measured at 14:22 on 5
+   November with the quarter margin on top: the week and month sums 45 s, the listing facts 20 s, a
+   day that is behind 94 s at its first guess, the day before yesterday 85 s, a tail day 44 s, the
+   order roll 9 s, yesterday's report 9 s and the ROAS target 2 s come to 309 s, and the pattern
+   pass needs a 43 s batch on top of that before it is reached at all. A budget that could not reach
+   the pass would be the 2-to-5-November freeze over again, one slot down, which is the one thing
+   this must not be. So the budget is a hundred seconds clear of that, which is three of the pass's
+   batches once a day that is behind has been measured at what it really takes, and a test below
+   plans the whole list against those measured costs and proves the pass is reached. Still well
+   inside the invocation's allowance: the page warm on this same code was gated at 810 s before. */
+const ADTOOL_ROLLUP_CATCHUP_BUDGET_MS = 420000;
+/* how long the family's lease is held past the budget, so a run the platform stopped cannot keep
+   the other slot out for more than its own run plus this */
+const ADTOOL_ROLLUP_LEASE_MARGIN_MS = 60000;
+/* the sync_state job the family's one lease lives under. Not either job's own name: runJob already
+   leases per job, and what has to be prevented here is the OTHER job rolling the same day. */
+const ADTOOL_ROLLUP_LOCK_JOB = 'adtoolRollupFamily';
+/* HOW MANY CALLS OF A RESUMABLE PER-LISTING PASS ONE RUN MAY MAKE (item 4). The pattern pass does
+   600 listings a call against a fleet of 1,647 and the forecasts 300 against 1,200, so one call a
+   run could never finish a day: on 4 and 5 November both stopped at their first batch and the pages
+   drew that part-day as the whole fleet. Four calls covers either pass with room for a fleet half
+   again as big, and every call still passes the budget gate on its own, so the ceiling is a guard
+   against one step eating a slot rather than the thing that decides how far the pass gets. */
+const ADTOOL_ROLLUP_PASS_CALLS = 4;
+function adtRollupMine(part, name) {
+  /* WHOSE SLOT IS THIS STEP? Anything not on this slot's list is not skipped and not left for the
+     next hour: it is simply not this slot's business, and the trail must not report it as either.
+     A part nobody recognises is the hourly one, which is the slot that must never stop doing today.
+     A step on NEITHER list cannot run at all, and the way out of that is not a runtime fallback
+     that would hide it: a test reads every step name out of the real function and proves each one
+     appears on exactly one of the two lists. */
+  const n = String(name || '');
+  const list = String(part) === 'catchup' ? ADTOOL_ROLLUP_CATCHUP_STEPS : ADTOOL_ROLLUP_HOURLY_STEPS;
+  return list.indexOf(n) >= 0;
+}
+function adtRollupClaimVerdict(stored, who, nowMs) {
+  /* MAY THIS RUN TAKE THE FAMILY'S LEASE? The lease row holds 'expiry|who'. It is read, judged here
+     and written back, which is not atomic, but the window is milliseconds against an hourly cadence
+     and the cost of losing the race is a finished day rolled twice, not a figure that is wrong.
+     THREE WAYS OUT, because a lease nobody can clear is the same trap as a step that never fits:
+       · an expired lease is free, whoever left it;
+       · a lease THIS job left is free, so a run the platform stopped before it could release does
+         not lock its own next tick out for the rest of the lease;
+       · a row nobody can read at all is free, because an unreadable lease is not evidence of a run.
+     Pure, so each of the three is a test rather than a hope. */
+  const now = Number(nowMs);
+  const t = isFinite(now) ? now : 0;
+  const m = /^(\d{1,15})(?:\|(.*))?$/.exec(String(stored == null ? '' : stored).trim());
+  const until = m ? Number(m[1]) : NaN;
+  const by = (m && m[2]) ? String(m[2]).slice(0, 60) : '';
+  if (!m || !isFinite(until) || until <= 0) return { may: true, held_by: null, until_ms: null, reason: 'no run of the roll-up holds the lease' };
+  if (until <= t) return { may: true, held_by: by || null, until_ms: until, reason: 'the lease ' + (by ? by + ' left' : 'left behind') + ' has expired' };
+  if (by && who && by === String(who)) return { may: true, held_by: by, until_ms: until, reason: 'the lease is this run’s own, left by a run that was stopped before it could release it' };
+  return {
+    may: false, held_by: by || 'another run of the roll-up', until_ms: until,
+    reason: (by || 'another run of the roll-up') + ' is rolling now, for up to another ' + Math.max(1, Math.round((until - t) / 1000)) + ' s',
+  };
+}
+function adtRollupTailNext(cursor, from, to) {
+  /* WHICH DAY OF THE TAIL ROUND COMES NEXT (item 3). The round re-rolls the days from today-9 to
+     today-3 one a run, so it is nearly always part way through, and the cursor used to hold only
+     the day it had reached. That cannot tell "part way through THIS window" from "part way through
+     the window of a day that has gone": the window slides forward at every midnight, and a day
+     reached in yesterday's window lands INSIDE today's, so the round was resumed from it and the
+     earliest days of the new window were never rolled at all. Worst of all, a cursor sitting one
+     day short of the new window's end made the round roll that one day, declare itself complete and
+     stamp the day, which skipped six days of the window and did so again every day after.
+     The cursor now carries the window it belongs to, 'from|reached'. A cursor for any other window
+     is not a resume: the round begins at the EARLIEST day of the window in force. A bare day left
+     by the old code reads the same way, so nothing has to be migrated.
+     NULL where there is no window to read, never a day: a round with no window is not a round. */
+  const isDay = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+  const f = String(from || ''), t = String(to || '');
+  if (!isDay(f) || !isDay(t) || f > t) return { next: null, resumed: false, done: false, window_from: null, source: 'there is no tail window to roll' };
+  const m = /^(\d{4}-\d{2}-\d{2})\|(\d{4}-\d{2}-\d{2})$/.exec(String(cursor == null ? '' : cursor).trim());
+  if (m && m[1] === f) {
+    const reached = m[2];
+    if (reached >= t) return { next: null, resumed: true, done: true, window_from: f, source: 'this window’s round is finished, up to and including ' + t };
+    if (reached >= f) { const nx = adtAddDays(reached, 1); return { next: nx, resumed: true, done: false, window_from: f, source: 'the round for this window reached ' + reached + ', so ' + nx + ' comes next' }; }
+  }
+  return {
+    next: f, resumed: false, done: false, window_from: f,
+    source: m ? 'the cursor belongs to the round that began ' + m[1] + ', which is not this window, so the round starts again at its earliest day'
+      : 'no round is part way through this window, so it starts at its earliest day',
+  };
+}
+/* the fields a finished day's stored figures are judged on, with the words a reader needs and
+   whether the figure is money (judged to the penny) or a count (judged exactly) */
+const ADTOOL_OWED_FIELDS = [
+  ['spend', 'what eBay billed for the ads', 1],
+  ['clicks', 'the clicks', 0],
+  ['attr_units', 'the units eBay credits to the ads', 0],
+  ['attr_revenue', 'the sales eBay credits to the ads', 1],
+  ['orders', 'the orders', 0],
+  ['pending_cost_orders', 'the orders still waiting for an Ali cost', 0],
+];
+function adtRollupBehind(stored, live, pennies) {
+  /* IS THIS FINISHED DAY'S STORED FIGURE STILL THE ONE ITS SOURCES GIVE? (item 2)
+     A day row is built from eBay's ads report and from the order book, and BOTH are rewritten long
+     after the day has closed: eBay restates a day for a fortnight, Ali costs are typed days late,
+     an order is cancelled days later still. The row was not. That is the whole of 2 November's
+     missing £217: the row still counted 65 orders as waiting for an Ali cost where the book had
+     3 of them left, and still counted an order that has since been cancelled.
+     So the row is compared with what the sources hold NOW, field by field, and a day that disagrees
+     is owed a re-roll. A MISSING SIDE IS NOT NOUGHT: two empty sides agree, which is simply a quiet
+     day and not a fault, while a figure on one side and nothing on the other is a disagreement and
+     is said as one. */
+  const pv = Number(pennies);
+  const tol = isFinite(pv) && pv > 0 ? pv : 0.005;
+  const got = v => !(v === null || v === undefined || v === '') && isFinite(Number(v));   // Number(null) is 0
+  const A = stored || null, B = live || null;
+  const fields = [], words = [];
+  const say = (v, money) => money ? String(Math.round(Number(v) * 100) / 100) : String(Math.round(Number(v)));
+  for (const f of ADTOOL_OWED_FIELDS) {
+    const k = f[0], what = f[1], money = f[2];
+    const a = A ? A[k] : null, b = B ? B[k] : null;
+    const ga = got(a), gb = got(b);
+    if (!ga && !gb) continue;
+    if (ga && gb) {
+      const x = Number(a), y = Number(b);
+      if (money ? Math.abs(x - y) > tol : Math.round(x) !== Math.round(y)) { fields.push(k); words.push(what + ' is stored as ' + say(x, money) + ' where its source now says ' + say(y, money)); }
+      continue;
+    }
+    fields.push(k);
+    words.push(ga ? what + ' is stored as ' + say(a, money) + ' where its source now holds none at all'
+      : what + ' is not stored at all, and its source holds ' + say(b, money));
+  }
+  return { behind: fields.length > 0, fields: fields, why: words.length ? words.join('; ') : null };
+}
+/* the queue holds at most this many days: wider than the comparison's own window, so a window
+   entirely behind its sources can be queued whole and nothing is silently dropped. The cap is here
+   only so a fault somewhere else cannot grow a config row without end. */
+const ADTOOL_OWED_CAP = 90;
+/* HOW FAR BACK THE NIGHTLY COMPARISON LOOKS, and the reason it is this wide. Two months of finished
+   days: the span the month sums are built from, and wide enough that a day cannot rot out of the
+   window before anything notices it. That is not a hypothetical. On 5 November the stale eBay
+   vintage ran over SEVENTEEN days worth £221.90 of spend the portal counted and eBay did not, and
+   two of them were 27 and 28 September, thirty-nine and forty days back: a month-wide window would
+   have left £34.86 of it uncorrectable for ever, which is the same shape of fault as the tail
+   window the days fell out of in the first place. */
+const ADTOOL_OWED_SCAN_DAYS = 60;
+function adtRollupOwedDays(stored, add, cap) {
+  /* THE QUEUE OF FINISHED DAYS OWED A RE-ROLL, newest first. Newest first because the newest wrong
+     day is the one on a page the owner has open, and because draining that way keeps the span the
+     week and month sums are asked to re-sum growing a day at a time instead of jumping to a month.
+     Over the cap the OLDEST are the ones dropped, and the count dropped is returned rather than
+     swallowed. */
+  const cv = Number(cap);
+  const lim = isFinite(cv) && cv > 0 ? Math.round(cv) : ADTOOL_OWED_CAP;
+  const seen = {}, all = [];
+  const take = v => { const s = String(v == null ? '' : v).trim(); if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || seen[s]) return; seen[s] = 1; all.push(s); };
+  const split = v => Array.isArray(v) ? v : String(v == null ? '' : v).split(/[,\s]+/);
+  for (const s of split(stored)) take(s);
+  for (const s of split(add)) take(s);
+  all.sort(); all.reverse();
+  const kept = all.slice(0, lim);
+  return { days: kept, text: kept.join(','), owed: kept.length, dropped: all.length - kept.length };
+}
+function adtRollupOwedNext(stored) {
+  /* THE ONE DAY THIS RUN RE-ROLLS, and the queue that is left after it. A day a run: a finished day
+     is a whole day's rows and the slot has other work behind it.
+     NULL where nothing is owed, never a day the caller would then roll for no reason at all. */
+  const q = adtRollupOwedDays(stored, null, ADTOOL_OWED_CAP);
+  if (!q.days.length) return { day: null, rest: '', left: 0, owed: 0, source: 'no finished day is owed a re-roll' };
+  const rest = q.days.slice(1);
+  return {
+    day: q.days[0], rest: rest.join(','), left: rest.length, owed: q.days.length,
+    source: rest.length ? 'the newest of ' + q.days.length + ' days owed a re-roll' : 'the last day owed a re-roll',
+  };
+}
+/* THE LAST DAY A PER-LISTING PASS ACTUALLY FINISHED, as a scalar a query can cap itself with (item
+   4). The pages read the newest day their table holds, and these passes write their rows a batch at
+   a time, so from the moment the morning chain starts until the pass finishes the newest day is a
+   PART of the fleet being drawn as the whole of it. On 5 November the owner's ladder read
+   Dead 136 / Declining 16 / Dormant 188 / Growth 12 / Launch 30 / Plateau 218 against 3 November's
+   374 / 24 / 369 / 23 / 200 / 657, because 600 listings of 1,647 had been reached.
+   Each pass now stamps the day it COMPLETED, and every one of those reads is capped at the stamp.
+   The fallback is a date no day can reach, so a database where the stamp has not been written yet
+   answers exactly as it did before: a cap with no way out would empty every page it sits on, which
+   is a worse fault than the one being fixed. */
+const ADTOOL_PROFILES_DAY_SQL = "COALESCE((SELECT value FROM portal_config WHERE key = 'adtool_profiles_day'), '9999-12-31')";
+const ADTOOL_FORECAST_DAY_SQL = "COALESCE((SELECT value FROM portal_config WHERE key = 'adtool_forecast_day'), '9999-12-31')";
 /* ADTOOL-P17-PURE-END */
 async function adtRollupWatchdog(env, job, deadMin) {
   /* ITEM 4: a run the platform stopped leaves its row reading 'running' for ever, and a trail that
@@ -5517,14 +5746,84 @@ async function adtRollupFresh(env) {
   }, adtFreshStamp(at));
 }
 
+async function adtRollupClaim(env, who, holdMs) {
+  /* ONE LEASE FOR THE WHOLE ROLL-UP FAMILY (item 1). The hourly slot and the catch-up slot are two
+     invocations now, and runJob's own lease is per job name, so nothing in it would stop the two
+     rolling the same finished day in the same minute. They share this one instead.
+     IF THE LEASE CANNOT BE WRITTEN THE RUN GOES AHEAD AND SAYS SO. Two runs rolling one day write
+     the same figures twice over, which costs a slot; a run that refuses to start because a lease
+     could not be taken is the work never happening, which is the fault being fixed. */
+  const hv = Number(holdMs);
+  const hold = isFinite(hv) && hv > 0 ? Math.round(hv) : ADTOOL_ROLLUP_BUDGET_MS + ADTOOL_ROLLUP_LEASE_MARGIN_MS;
+  const row = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = ?1 AND account = '@lock'").bind(ADTOOL_ROLLUP_LOCK_JOB).first().catch(() => null);
+  const v = adtRollupClaimVerdict(row ? row.cursor : null, who, Date.now());
+  if (!v.may) return { got: false, note: v.reason, held_by: v.held_by };
+  let written = true;
+  await env.DB.prepare(
+    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES (?1, '@lock', ?2, '', '') " +
+    'ON CONFLICT(job, account) DO UPDATE SET cursor = ?2'
+  ).bind(ADTOOL_ROLLUP_LOCK_JOB, String(Date.now() + hold) + '|' + String(who)).run().catch(() => { written = false; });
+  return { got: true, note: written ? null : 'the roll-up family’s lease could not be written, so this run went ahead unleased', held_by: null };
+}
+async function adtRollupLeaseFree(env) {
+  /* released the moment the run ends, so the other slot never waits out a lease for a run that is
+     already over. A release that cannot be written is left to expire on its own. */
+  await env.DB.prepare("UPDATE sync_state SET cursor = '0' WHERE job = ?1 AND account = '@lock'").bind(ADTOOL_ROLLUP_LOCK_JOB).run().catch(() => {});
+}
+async function adtRollupOwedScan(env, fromDay, toDay) {
+  /* THE CHEAP NIGHTLY COMPARISON THAT FEEDS THE QUEUE (item 2). Three grouped reads over a month of
+     finished days and no per-listing work at all: the day totals the roll-up stored, the ads
+     report's own totals and the order book's.
+     THE ADS SIDE IS SUMMED THE WAY THE ROLL STORES IT — rounded per listing first, then added up —
+     or the comparison would be a thousand roundings against one and every day in the window would
+     read as behind by pennies for ever.
+     A read that fails judges NOTHING. A day queued on half an answer is a day re-rolled for no
+     reason, and the queue would never empty. */
+  const q = async (sql, binds) => { try { const r = await env.DB.prepare(sql).bind(...binds).all(); return (r && r.results) || []; } catch (e) { return null; } };
+  const dayRows = await q('SELECT day, ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue, SUM(orders) AS orders, SUM(COALESCE(pending_cost_orders, 0)) AS pending_cost_orders FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 GROUP BY day', [fromDay, toDay]);
+  const adRows = await q(
+    'SELECT day, ROUND(SUM(sp), 2) AS spend, SUM(ck) AS clicks, SUM(au) AS attr_units, ROUND(SUM(ar), 2) AS attr_revenue FROM (' +
+    'SELECT date AS day, ROUND(SUM(COALESCE(spend, 0) + COALESCE(cpc_spend, 0)), 2) AS sp, SUM(COALESCE(clicks, 0) + COALESCE(cpc_clicks, 0)) AS ck, ' +
+    'SUM(COALESCE(sales, 0) + COALESCE(cpc_sales, 0)) AS au, ROUND(SUM(COALESCE(sale_amount, 0) + COALESCE(cpc_sale_amount, 0)), 2) AS ar ' +
+    'FROM ads_daily WHERE date >= ?1 AND date <= ?2 GROUP BY account, item_id, date) GROUP BY day', [fromDay, toDay]);
+  const bookRows = await q("SELECT local_date AS day, COUNT(*) AS orders, SUM(CASE WHEN COALESCE(ali_cost, 0) > 0 THEN 0 ELSE 1 END) AS pending_cost_orders FROM adtool_orders WHERE local_date >= ?1 AND local_date <= ?2 AND status <> 'CANCELLED' GROUP BY local_date", [fromDay, toDay]);
+  if (dayRows === null || adRows === null || bookRows === null) return { days: [], read: false, why: 'one of the three reads could not be made, so no day was judged on half an answer' };
+  const by = {};
+  const slot = d => (by[d] = by[d] || { stored: null, live: {} });
+  for (const r of dayRows) slot(String(r.day)).stored = { spend: r.spend, clicks: r.clicks, attr_units: r.attr_units, attr_revenue: r.attr_revenue, orders: r.orders, pending_cost_orders: r.pending_cost_orders };
+  for (const r of adRows) { const s = slot(String(r.day)); s.live.spend = r.spend; s.live.clicks = r.clicks; s.live.attr_units = r.attr_units; s.live.attr_revenue = r.attr_revenue; }
+  for (const r of bookRows) { const s = slot(String(r.day)); s.live.orders = r.orders; s.live.pending_cost_orders = r.pending_cost_orders; }
+  const days = [], why = [];
+  for (const d of Object.keys(by).sort().reverse()) {
+    const v = adtRollupBehind(by[d].stored, by[d].live);
+    if (!v.behind) continue;
+    days.push(d);
+    if (why.length < 3) why.push(d + ': ' + v.why);
+  }
+  return { days: days, read: true, scanned: Object.keys(by).length, why: why.length ? why.join(' · ') : null };
+}
+
 /* ---- job: rollups driver (hourly slot; flag adtool_rollups) ---- */
 const ADTOOL_HISTORY_START = '2026-08-13';   // first day with an eBay ad report in the engine
-async function adtoolRollups(env) {
+/* THE HOURLY SLOT: today and yesterday, and nothing that could be behind them (item 1). */
+async function adtoolRollups(env) { return adtoolRollupRun(env, 'hourly'); }
+/* THE CATCH-UP SLOT, ITS OWN INVOCATION AND ITS OWN BUDGET: the week and month sums, the listing
+   facts, the days that are behind, the day before yesterday, the tail round, the history rebuild and
+   the morning outputs. None of it is ever asked to fit in what today has left over. */
+async function adtoolRollupsCatchup(env) { return adtoolRollupRun(env, 'catchup'); }
+async function adtoolRollupRun(env, part) {
   if ((await adtFlag(env, 'adtool_rollups')) !== 'on') return;
+  const PART = String(part) === 'catchup' ? 'catchup' : 'hourly';
+  const JOB = PART === 'catchup' ? 'adtoolRollupsCatchup' : 'adtoolRollups';
+  const BUDGET_MS = PART === 'catchup' ? ADTOOL_ROLLUP_CATCHUP_BUDGET_MS : ADTOOL_ROLLUP_BUDGET_MS;
   await ensureAdtoolPhase1Schema(env);
   /* ITEM 4, AND BEFORE THIS RUN HAS A ROW OF ITS OWN SO IT CANNOT CATCH ITSELF */
-  const dead = await adtRollupWatchdog(env, 'adtoolRollups', ADTOOL_ROLLUP_DEAD_MIN);
-  const t = await adtJobStart(env, 'adtoolRollups');
+  const dead = await adtRollupWatchdog(env, JOB, ADTOOL_ROLLUP_DEAD_MIN);
+  /* the family's one lease, taken before the job row is opened: a run that cannot have it has
+     nothing to report and leaves no row at all */
+  const lease = await adtRollupClaim(env, JOB, BUDGET_MS + ADTOOL_ROLLUP_LEASE_MARGIN_MS);
+  if (!lease.got) { await ctx_setSync(env, JOB, '@waited', 'stood down at ' + new Date().toISOString() + ': ' + lease.note); return; }
+  const t = await adtJobStart(env, JOB);
   const t0 = Date.now();
   let rows = 0, note = '';
   try {
@@ -5538,13 +5837,12 @@ async function adtoolRollups(env) {
         "SELECT item_id, ?1, price FROM items_api WHERE status = 'ACTIVE' AND price > 0"
       ).bind(today).run();
     } catch (e) { /* never let a snapshot stop the rollups */ }
-    const BUDGET_MS = ADTOOL_ROLLUP_BUDGET_MS;
     const storedRaw = await adtFlag(env, 'adtool_rollup_step_ms');
     let storedMs = null; try { storedMs = JSON.parse(storedRaw); } catch (e) { storedMs = null; }
     const cost = adtRollupStepCosts(storedRaw, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_COST_MARGIN);
     let skips = await adtFlag(env, 'adtool_rollup_step_skips');
     const forcedSteps = [];
-    const took = {}, ran = [], leftOver = [], notDue = [], extra = [], ownedDays = [];
+    const took = {}, ran = [], leftOver = [], notDue = [], extra = [], ownedDays = [], otherSlot = [];
     const st = { held: 0, written: 0 };
     let cutAt = null;
     const cfgPut = (k, v) => env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')").bind(k, String(v));
@@ -5569,6 +5867,11 @@ async function adtoolRollups(env) {
        drawn up front cannot: fold the MEASURED time of each step into the gate the next one meets,
        so a step that overran is paid for by the step below it and not by the invocation. */
     const step = async (name, words, due, dueNote, fn) => {
+      /* WHOSE SLOT IS THIS? (item 1) A step belonging to the other slot is not "left for the next
+         hour" and not "not due": it is not this run's work at all, and the trail must not report it
+         as this run failing to reach it. That distinction is the whole point of the split: the
+         hourly row used to read 'cut' because the page cache had not been warmed. */
+      if (!adtRollupMine(PART, name)) { otherSlot.push(words); return false; }
       if (due === false) { notDue.push({ step: name, words: words, reason: dueNote || 'not due this run' }); return false; }
       const pl = adtRollupPlan({ now_ms: Date.now(), t0: t0, budget_ms: BUDGET_MS, steps: [{ name: name, words: words, cost_ms: cost[name] }] });
       /* the one way out of the trap: a step left this many runs in a row runs now, whatever the
@@ -5618,9 +5921,17 @@ async function adtoolRollups(env) {
         await commit('adtool_rollup_rebuild_prep', 'done');
       });
     };
-    if (cursor === 'off' || cursor < ADTOOL_HISTORY_START) {
+    /* THE DAY THE HISTORY HAS TO HAVE REACHED for the steady state to be the truth. A REBUILD IS
+       CATCH-UP WORK (item 1): it resets the day cursor and rebuilds a day a run, and the hourly slot
+       must never take that branch, because its own `today` step commits the cursor AT today and
+       would declare a half-finished rebuild complete. */
+    const histWanted = adtAddDays(today, -1);
+    if (PART !== 'catchup') {
+      /* the hourly slot does today and yesterday whatever the history is doing: they are the figures
+         the owner is watching every hour and neither of them waits on the rebuild. */
+    } else if (cursor === 'off' || cursor < ADTOOL_HISTORY_START) {
       /* first build (also the resume path of a rebuild cut off before its first chunk): everything from the first
-         ad day, A DAY PER CHUNK while the budget lasts, self-continuing on the next hourly slot. It builds under
+         ad day, A DAY PER CHUNK while the budget lasts, self-continuing on the next catch-up slot. It builds under
          the current law, so it carries the marker too. */
       mode = 'first build';
       rows += await adtoolRegisterSeed(env);
@@ -5641,9 +5952,9 @@ async function adtoolRollups(env) {
        A six-day chunk costs about ten minutes and could never finish inside any budget worth having,
        while the cursor is committed per chunk, so the smaller chunk is simply the one that keeps the
        progress. Each day is asked whether it fits before it is begun and the loop stops the moment
-       one does not: the next hourly run picks up at the cursor. A full history rebuild therefore
-       takes days of hourly slots rather than hours, which is the honest price of never being killed. */
-    while (cursor < adtAddDays(today, -1)) {
+       one does not: the next catch-up run picks up at the cursor. A full history rebuild therefore
+       takes days of slots rather than hours, which is the honest price of never being killed. */
+    while (PART === 'catchup' && cursor < histWanted) {
       const dayN = adtAddDays(cursor, 1);
       const went = await step('catchup', 'the history day ' + dayN, true, '', async () => {
         if (chunks > 0 || mode === 'steady') rows += await adtoolOrdersRoll(env, new Date(new Date(dayN + 'T00:00:00Z').getTime() - 2 * 86400000).toISOString());
@@ -5670,16 +5981,26 @@ async function adtoolRollups(env) {
       /* the tail, A DAY PER RUN: today-9..today-3 re-rolled once a day because Ali costs are typed
          late, fees land hourly and refunds arrive days after the order. Seven days at once never fit
          a budget, so the round is carried on its own cursor and the day stamp is set only when the
-         round completes, which is what keeps the partial progress. */
+         round completes, which is what keeps the partial progress. The cursor carries the WINDOW it
+         belongs to now (item 3), so a round left part way through yesterday's window cannot be read
+         as a round part way through today's and skip today's earliest days.
+         Read on the catch-up slot only: the tail is that slot's step, and the hourly slot has no
+         business spending reads on a day it will not roll. */
       const tailFrom = adtAddDays(today, -9), tailTo = adtAddDays(today, -3);
-      const tailCur = await adtFlag(env, 'adtool_rollup_tail_day');
-      const tailMid = tailCur >= tailFrom && tailCur < tailTo;
-      const tailNext = tailMid ? adtAddDays(tailCur, 1) : tailFrom;
-      const tailDue = new Date().getUTCHours() >= 3 && (await adtFlag(env, 'adtool_tail_reroll_day')) !== today;
+      const tail = PART === 'catchup'
+        ? adtRollupTailNext(await adtFlag(env, 'adtool_rollup_tail_day'), tailFrom, tailTo)
+        : { next: null, resumed: false, done: false, window_from: null, source: 'the tail round belongs to the catch-up slot' };
+      const tailDue = PART === 'catchup' && !!tail.next && new Date().getUTCHours() >= 3 && (await adtFlag(env, 'adtool_tail_reroll_day')) !== today;
+      /* THE DAYS THE SOURCES SAY ARE WRONG (item 2), read on the catch-up slot only. The nightly
+         comparison is three grouped reads and feeds the queue; the drain takes one day a run. */
+      const owedScanDue = PART === 'catchup' && new Date().getUTCHours() >= 3 && (await adtFlag(env, 'adtool_rollup_owed_scan_day')) !== today;
+      let owedText = PART === 'catchup' ? adtRollupOwedDays(await adtFlag(env, 'adtool_rollup_owed_days'), null, ADTOOL_OWED_CAP).text : '';
       /* (0) the orders every day row is built from: ten days when a tail round is starting, four
-         otherwise. A prerequisite rather than a step in its own right, so it goes first. */
+         otherwise. A prerequisite rather than a step in its own right, so it goes first, and it is
+         the one step both slots run: each builds its own days from it. */
+      const backDays = (tailDue && !tail.resumed) ? 10 : 4;
       await step('orders', 'the order roll', true, '', async () => {
-        rows += await adtoolOrdersRoll(env, new Date(Date.now() - ((tailDue && !tailMid) ? 10 : 4) * 86400000).toISOString());
+        rows += await adtoolOrdersRoll(env, new Date(Date.now() - backDays * 86400000).toISOString());
       });
       /* (a) TODAY, AND NOTHING ELSE UNTIL IT IS COMMITTED. This is what every "every hour" figure on
          the tool is waiting for, so it is first and it is committed on its own. Only the hours from
@@ -5687,7 +6008,13 @@ async function adtoolRollups(env) {
          moved, and that is what took the whole-day rebuild off this slot. */
       await step('today', 'today', true, '', async () => {
         rows += await adtoolRollupDays(env, today, today, { hours_from: hc.from, hours_from_day: today, periods: false, stats: st });
-        await adtBatch(env, [cfgPut('adtool_rollup_cursor', today), cfgPut('adtool_rollup_hour_cursor', hc.next)]);
+        /* THE DAY CURSOR IS THE LAST FULLY BUILT DAY, and while a rebuild is part way through it is
+           the rebuild's own place in the history. Moving it to today from here would declare that
+           history finished and leave every day it had not reached under the old law, so it is
+           written only where it is already the truth. The HOUR cursor is today's own and always is. */
+        const puts = [cfgPut('adtool_rollup_hour_cursor', hc.next)];
+        if (cursor >= histWanted) puts.push(cfgPut('adtool_rollup_cursor', today));
+        await adtBatch(env, puts);
         extra.push('today from ' + hc.from + ':00');
         /* the today-grain freshness verdict is cheap, belongs on the hourly slot too rather than only
            at 05:20, and is timed inside this step so it is never unbudgeted work */
@@ -5704,19 +6031,49 @@ async function adtoolRollups(env) {
       await doPeriods();
       /* (d) the listing facts, which every day row reads its margins from */
       await step('listings', 'the listing facts', true, '', async () => { rows += await adtoolListingsRefresh(env); });
-      /* (e) the day before yesterday, and the tail round, only while there is time left */
+      /* (e) A FINISHED DAY THAT IS BEHIND ITS OWN SOURCES (item 2), above the two fixed re-rolls
+         below it: a day the sources say is WRONG is worth more than the day before yesterday rolled
+         for the second time this morning. The nightly comparison and the drain of one day share this
+         step, so the comparison is inside the budget that was measured rather than beside it. */
+      await step('owed', 'a finished day that is behind', owedScanDue || !!adtRollupOwedNext(owedText).day, 'no finished day is behind its own sources', async () => {
+        if (owedScanDue) {
+          const found = await adtRollupOwedScan(env, adtAddDays(today, -ADTOOL_OWED_SCAN_DAYS), adtAddDays(today, -2));
+          const q = adtRollupOwedDays(owedText, found.days, ADTOOL_OWED_CAP);
+          owedText = q.text;
+          await adtBatch(env, [cfgPut('adtool_rollup_owed_days', q.text), cfgPut('adtool_rollup_owed_scan_day', today)]);
+          extra.push(found.read
+            ? (found.days.length ? found.days.length + ' finished day' + (found.days.length === 1 ? '' : 's') + ' behind their own sources' : 'every finished day matches its own sources')
+            : 'the days could not be compared this run');
+        }
+        const take = adtRollupOwedNext(owedText);
+        if (!take.day) return;
+        /* the order book for THAT DAY ONLY, bounded both ends: an Ali cost or a cancellation typed
+           after the day closed is half of why the day is behind, and rolling every order since it
+           would cost more than the day itself. */
+        const a0 = adtUkMidnightUtcMs(take.day), a1 = adtUkMidnightUtcMs(adtAddDays(take.day, 1));
+        if (isFinite(a0) && isFinite(a1)) rows += await adtoolOrdersRoll(env, new Date(a0).toISOString(), new Date(a1).toISOString());
+        rows += await adtoolRollupDays(env, take.day, take.day, { hours_from: 24, hours_from_day: take.day, periods: false, stats: st });
+        ownedDays.push(take.day);
+        owedText = take.rest;
+        await adtBatch(env, [cfgPut('adtool_rollup_owed_days', take.rest), cfgPut('adtool_rollup_periods_owed', await oweText())]);
+        extra.push('re-rolled ' + take.day + (take.left ? ', ' + take.left + ' owed behind it' : ', the last day owed'));
+      });
+      /* (f) the day before yesterday, and the tail round, only while there is time left */
       await step('day2', 'the day before yesterday', true, '', async () => {
         rows += await adtoolRollupDays(env, day2, day2, { hours_from: 24, hours_from_day: day2, periods: false, stats: st });
         ownedDays.push(day2);
         await commit('adtool_rollup_periods_owed', await oweText());
       });
-      await step('tail', 'the tail day ' + tailNext, tailDue, 'the tail round for today is already done', async () => {
-        rows += await adtoolRollupDays(env, tailNext, tailNext, { hours_from: 24, hours_from_day: tailNext, periods: false, stats: st });
-        ownedDays.push(tailNext);
+      await step('tail', 'the tail day ' + tail.next, tailDue, tail.done ? 'the tail round for this window is already done' : 'the tail round for today is already done', async () => {
+        rows += await adtoolRollupDays(env, tail.next, tail.next, { hours_from: 24, hours_from_day: tail.next, periods: false, stats: st });
+        ownedDays.push(tail.next);
         const puts = [cfgPut('adtool_rollup_periods_owed', await oweText())];
-        if (tailNext >= tailTo) { puts.push(cfgPut('adtool_tail_reroll_day', today)); puts.push(cfgPut('adtool_rollup_tail_day', 'off')); }
-        else puts.push(cfgPut('adtool_rollup_tail_day', tailNext));
+        /* the cursor carries the window, so the day stamp and the cursor say the same thing and a
+           round that outlives its window can never be resumed into the next one */
+        if (tail.next >= tailTo) { puts.push(cfgPut('adtool_tail_reroll_day', today)); puts.push(cfgPut('adtool_rollup_tail_day', 'off')); }
+        else puts.push(cfgPut('adtool_rollup_tail_day', tailFrom + '|' + tail.next));
         await adtBatch(env, puts);
+        extra.push(tail.resumed ? 'the tail round resumed at ' + tail.next : 'the tail round began at ' + tail.next);
       });
     }
     /* only a rebuild that was started is promoted: a bare 'off' with the cursor at today means the history was never
@@ -5732,7 +6089,8 @@ async function adtoolRollups(env) {
        It is written now and again after the catch-ups: whatever happens in them the row is already
        true, and the second write only adds what they did. */
     const coreCut = leftOver.length > 0;
-    const noteNow = () => (mode === 'steady' ? '' : mode + ' · ')
+    const noteNow = () => (PART === 'catchup' ? 'catch-up slot · ' : '')
+      + (mode === 'steady' ? '' : mode + ' · ')
       + adtRollupStepNote({ run_steps: ran, skipped: leftOver.concat(notDue) })
       + (st.held ? ' · ' + st.held + ' settled hours needed no write' : '')
       + (dead.killed ? ' · closed ' + dead.killed + ' earlier run' + (dead.killed === 1 ? '' : 's') + ' the platform had stopped' : '')
@@ -5740,57 +6098,94 @@ async function adtoolRollups(env) {
          the measurement, and the note is cut at four hundred characters where it is stored */
       + ' · ' + rows + ' rows in ' + Math.round((Date.now() - t0) / 1000) + ' s of a ' + Math.round(BUDGET_MS / 1000) + ' s budget'
       + (forcedSteps.length ? ' · ran anyway after waiting: ' + forcedSteps.join(', ') : '')
-      + (extra.length ? ' · ' + extra.join(' · ') : '');
+      + (lease.note ? ' · ' + lease.note : '')
+      + (extra.length ? ' · ' + extra.join(' · ') : '')
+      /* LAST, because it never changes and the note is cut: the steps the other slot owns are not
+         this run's work and must not read as steps it failed to reach */
+      + (otherSlot.length ? ' · ' + otherSlot.length + ' step' + (otherSlot.length === 1 ? '' : 's') + ' belong to the other slot' : '');
     note = noteNow();
-    await adtJobEnd(env, 'adtoolRollups', t, rows, coreCut ? 'cut' : 'ok', note);
-    /* ---- THE CATCH-UPS THAT RIDE ON THIS SLOT, each only while there is time left ----------------
+    await adtJobEnd(env, JOB, t, rows, coreCut ? 'cut' : 'ok', note);
+    /* ---- THE MORNING OUTPUTS THIS SLOT CATCHES UP, each only while there is time left ------------
        Every one of these has a cron slot and a job row of its own; what they do here is finish work a
        morning run was cut short of. They were gated on the invocation's cap (up to 810 s for the page
        warm) rather than on the roll-up's budget, which is how one long run took the whole hourly slot
-       down with it for thirty hours. They now answer to the same gate as every step above. */
-    const histOk = cursor >= adtAddDays(today, -1);
-    /* a boundary batch that was missed (a deploy in that minute, a cron that did not fire) is still
-       worth having while the report day is young — it is the weekday work for the day just started */
-    let bdDue = histOk && (await adtFlag(env, 'adtool_decisions')) === 'on' && adtUkParts(Date.now()).hour < 5;
-    if (bdDue) { const b = await env.DB.prepare("SELECT COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 AND batch = 'boundary'").bind(today).first(); bdDue = !b || !Number(b.n); }
-    await step('boundary', 'the boundary batch', bdDue, 'the boundary batch is not owed', async () => {
-      try { await adtoolDecisionsBoundary(env); } catch (e) { /* recorded by the job */ }
-    });
-    /* the morning outputs catch up the same way (each is a no-op once it has today's row) */
-    await step('report', 'yesterday’s report', histOk && (await adtFlag(env, 'adtool_report')) === 'on', 'the report is off, or the history is not complete yet', async () => {
-      try { await adtoolReport(env); } catch (e) { /* recorded */ }
-    });
-    await step('roas', 'the ROAS target', histOk && (await adtFlag(env, 'adtool_roas')) === 'on', 'the ROAS target is off, or the history is not complete yet', async () => {
-      try { await adtoolRoas(env); } catch (e) { /* recorded */ }
-    });
-    /* profiles for today are built in the morning chain; if that run was cut short (or the flag went
-       on mid-day) the hourly slot finishes them a batch at a time, once the history is complete */
-    const profOn = histOk && (await adtFlag(env, 'adtool_profiles')) === 'on';
-    await step('profiles', 'the pattern profiles', profOn && String(await adtFlag(env, 'adtool_profiles_cursor') || '') !== today + '|done', histOk ? 'the profiles for today are already complete, or they are switched off' : 'the history is not complete yet', async () => {
-      try { await adtoolProfiles(env); } catch (e) { /* recorded by the job */ }
-    });
-    /* forecasts follow the same catch-up once today's profiles are complete. Called whether or not
-       the cursor says done: when it is done the job returns almost at once, but it evaluates the
-       acceptance on the way out, and that is the only thing that lets a verdict written early in the
-       morning be corrected the same day rather than standing until tomorrow. The cursor is read HERE
-       and not before the profiles step, so a profiles run that has just completed counts. */
-    const fcOn = histOk && (await adtFlag(env, 'adtool_forecast')) === 'on' && String(await adtFlag(env, 'adtool_profiles_cursor') || '') === today + '|done';
-    await step('forecast', 'the forecasts', fcOn, histOk ? 'today’s profiles are not complete, so there is nothing to forecast from' : 'the history is not complete yet', async () => {
-      try { await adtoolForecast(env); } catch (e) { /* recorded by the job */ }
-    });
-    /* once the history is complete the truth check runs right away if a fixture is loaded and no
-       parity run exists for today — the 05:20 UTC slot then only repeats it */
-    let truthDue = histOk;
-    if (truthDue) { const r2 = await env.DB.prepare("SELECT COUNT(*) AS n FROM validation_runs WHERE metric_id = 'ADTOOL_PARITY_FLEET' AND substr(ran_at, 1, 10) = ?1").bind(new Date().toISOString().slice(0, 10)).first(); truthDue = !r2 || !Number(r2.n); }
-    await step('truth', 'the truth check', truthDue, 'the truth check has already run today', async () => {
-      try { await adtoolTruth(env); } catch (e) { /* recorded by adtoolTruth itself */ }
-    });
-    /* warm the KV page cache for the heavy first-open pages, so the owner's first open after the
-       roll-up is a KV read and not a 7-10 s compute. adtWarmHourly is itself time-budgeted and
-       records its own sync_state row, and it is last because it makes nothing true, only quick. */
-    await step('warm', 'the page cache', histOk, 'the history is not complete yet', async () => {
-      try { await adtWarmHourly(env); } catch (e) { /* recorded by its own sync_state row */ }
-    });
+       down with it for thirty hours. They now answer to the same gate as every step above, on the
+       catch-up slot, where nothing has spent the clock on today before they are reached. */
+    if (PART === 'catchup') {
+      const histOk = cursor >= adtAddDays(today, -1);
+      /* a boundary batch that was missed (a deploy in that minute, a cron that did not fire) is still
+         worth having while the report day is young — it is the weekday work for the day just started */
+      let bdDue = histOk && (await adtFlag(env, 'adtool_decisions')) === 'on' && adtUkParts(Date.now()).hour < 5;
+      if (bdDue) { const b = await env.DB.prepare("SELECT COUNT(*) AS n FROM adtool_decisions WHERE day = ?1 AND batch = 'boundary'").bind(today).first(); bdDue = !b || !Number(b.n); }
+      await step('boundary', 'the boundary batch', bdDue, 'the boundary batch is not owed', async () => {
+        try { await adtoolDecisionsBoundary(env); } catch (e) { /* recorded by the job */ }
+      });
+      /* the morning outputs catch up the same way (each is a no-op once it has today's row) */
+      await step('report', 'yesterday’s report', histOk && (await adtFlag(env, 'adtool_report')) === 'on', 'the report is off, or the history is not complete yet', async () => {
+        try { await adtoolReport(env); } catch (e) { /* recorded */ }
+      });
+      await step('roas', 'the ROAS target', histOk && (await adtFlag(env, 'adtool_roas')) === 'on', 'the ROAS target is off, or the history is not complete yet', async () => {
+        try { await adtoolRoas(env); } catch (e) { /* recorded */ }
+      });
+      /* THE PROFILES ARE RUN UNTIL THEIR CURSOR SAYS DONE (item 4). The pass does 600 listings a call
+         and the fleet is 1,647, so one call a run was never going to finish a day: on 4 and 5 November
+         it reached 600 of them and stopped, the pages drew that part-day as the whole fleet, and the
+         forecasts behind it were gated on a completion that could never arrive.
+         It is a LOOP OF BUDGETED CALLS, not one long one: each batch is asked whether it fits before it
+         starts, so the slot still cannot be killed, and the loop ends the moment one does not fit or
+         the cursor says the day is complete. What a batch TOOK is what is remembered, which is the
+         figure the gate wants, because the gate is deciding about one batch and not about the day.
+         The ceiling is there so a fleet that has grown cannot let this one step spend a whole slot and
+         starve the forecasts that are waiting on it. */
+      const profOn = histOk && (await adtFlag(env, 'adtool_profiles')) === 'on';
+      let profDone = !profOn || String(await adtFlag(env, 'adtool_profiles_cursor') || '') === today + '|done';
+      let profBatches = 0;
+      while (!profDone && profBatches < ADTOOL_ROLLUP_PASS_CALLS) {
+        const went = await step('profiles', 'the pattern profiles' + (profBatches ? ' again' : ''), true, '', async () => {
+          try { await adtoolProfiles(env); } catch (e) { /* recorded by the job */ }
+        });
+        if (!went) break;
+        profBatches++;
+        profDone = String(await adtFlag(env, 'adtool_profiles_cursor') || '') === today + '|done';
+      }
+      if (profBatches) extra.push(profDone ? 'the profiles are complete for today, in ' + profBatches + ' batch' + (profBatches === 1 ? '' : 'es') : 'the profiles reached ' + profBatches + ' batch' + (profBatches === 1 ? '' : 'es') + ' and continue next run');
+      if (!profBatches && profOn && profDone) notDue.push({ step: 'profiles', words: 'the pattern profiles', reason: 'the profiles for today are already complete' });
+      if (!profOn) notDue.push({ step: 'profiles', words: 'the pattern profiles', reason: histOk ? 'the profiles are switched off' : 'the history is not complete yet' });
+      /* forecasts follow the same catch-up once today's profiles are complete. Called whether or not
+         the cursor says done: when it is done the job returns almost at once, but it evaluates the
+         acceptance on the way out, and that is the only thing that lets a verdict written early in the
+         morning be corrected the same day rather than standing until tomorrow. The cursor is read HERE
+         and not before the profiles step, so a profiles run that has just completed counts. */
+      const fcOn = histOk && (await adtFlag(env, 'adtool_forecast')) === 'on' && String(await adtFlag(env, 'adtool_profiles_cursor') || '') === today + '|done';
+      /* and run to completion the same way, for the same reason: 300 listings a call against 1,200
+         was four calls the slot never made, so the forecast page drew a quarter of the fleet. The
+         first call is made whether or not the cursor says done, because the job scores yesterday's
+         acceptance on its way out and that is what corrects a verdict written at dawn. */
+      let fcBatches = 0, fcDone = false;
+      while (fcOn && fcBatches < ADTOOL_ROLLUP_PASS_CALLS && !fcDone) {
+        const went = await step('forecast', 'the forecasts' + (fcBatches ? ' again' : ''), true, '', async () => {
+          try { await adtoolForecast(env); } catch (e) { /* recorded by the job */ }
+        });
+        if (!went) break;
+        fcBatches++;
+        fcDone = String(await adtFlag(env, 'adtool_forecast_cursor') || '') === today + '|done';
+      }
+      if (fcBatches) extra.push(fcDone ? 'the forecasts are complete for today, in ' + fcBatches + ' batch' + (fcBatches === 1 ? '' : 'es') : 'the forecasts reached ' + fcBatches + ' batch' + (fcBatches === 1 ? '' : 'es') + ' and continue next run');
+      if (!fcOn) notDue.push({ step: 'forecast', words: 'the forecasts', reason: histOk ? 'today’s profiles are not complete, so there is nothing to forecast from' : 'the history is not complete yet' });
+      /* once the history is complete the truth check runs right away if a fixture is loaded and no
+         parity run exists for today — the 05:20 UTC slot then only repeats it */
+      let truthDue = histOk;
+      if (truthDue) { const r2 = await env.DB.prepare("SELECT COUNT(*) AS n FROM validation_runs WHERE metric_id = 'ADTOOL_PARITY_FLEET' AND substr(ran_at, 1, 10) = ?1").bind(new Date().toISOString().slice(0, 10)).first(); truthDue = !r2 || !Number(r2.n); }
+      await step('truth', 'the truth check', truthDue, 'the truth check has already run today', async () => {
+        try { await adtoolTruth(env); } catch (e) { /* recorded by adtoolTruth itself */ }
+      });
+      /* warm the KV page cache for the heavy first-open pages, so the owner's first open after the
+         roll-up is a KV read and not a 7-10 s compute. adtWarmHourly is itself time-budgeted and
+         records its own sync_state row, and it is last because it makes nothing true, only quick. */
+      await step('warm', 'the page cache', histOk, 'the history is not complete yet', async () => {
+        try { await adtWarmHourly(env); } catch (e) { /* recorded by its own sync_state row */ }
+      });
+    }
     /* WHAT THIS RUN ACTUALLY TOOK, step by step, so the next run's gate is arithmetic on measurement
        and not a figure somebody typed. Half the figure already held and half this one, so a single
        freak run cannot lock a step out of every run after it. */
@@ -5799,18 +6194,94 @@ async function adtoolRollups(env) {
     await commit('adtool_rollup_step_ms', JSON.stringify(blended));
     await commit('adtool_rollup_step_skips', JSON.stringify(skips || {}));
     note = noteNow();
-    await adtJobEnd(env, 'adtoolRollups', t, rows, coreCut ? 'cut' : 'ok', note);
+    await adtJobEnd(env, JOB, t, rows, coreCut ? 'cut' : 'ok', note);
   } catch (e) {
-    await adtJobEnd(env, 'adtoolRollups', t, rows, 'error', String(e && e.message || e));
+    await adtJobEnd(env, JOB, t, rows, 'error', String(e && e.message || e));
     throw e;
+  } finally {
+    /* the family's lease goes back the moment the run is over, however it ended, so the other slot
+       never waits out a lease for a run that has already finished or thrown */
+    await adtRollupLeaseFree(env);
+  }
+}
+/* THE DAYS THE 5 NOVEMBER AUDIT FOUND WRONG (item 5), as the two spans it found them in rather
+   than fifteen dates in a row nobody could check:
+     · 12 to 21 October carry an eBay vintage the portal never took: £187 of spend and about a
+       thousand clicks the portal counts and eBay does not. They left the tail window while the
+       roll-up was starved and the old rule would never have reached them again.
+     · 29 October to 2 November are the days the roll-up was cut short of, and 2 November is the
+       £29.39 the owner reads where the law gives £246.68. */
+const ADTOOL_OWED_SEED_SPANS = [['2026-10-12', '2026-10-21'], ['2026-10-29', '2026-11-02']];
+async function adtoolRollupOwedSeed(env) {
+  /* ITEM 5: a once-over, RUN BY KEY AND ON NO CRON SLOT. It does nothing the nightly comparison and
+     the drain do not do on their own; what it is for is doing them NOW, so the fifteen days the
+     audit named are right today rather than over the next fifteen slots.
+     It compares first and says what it found, so the note is evidence and not an assertion, and
+     then queues the named days whether or not the comparison agrees: the audit measured them
+     against eBay's own report, and a comparison that disagrees is itself worth seeing. */
+  if ((await adtFlag(env, 'adtool_rollups')) !== 'on') throw new Error('SAY: the roll-up is switched off, so there is nothing to re-roll into');
+  await ensureAdtoolPhase1Schema(env);
+  const lease = await adtRollupClaim(env, 'adtoolRollupOwedSeed', ADTOOL_ROLLUP_CATCHUP_BUDGET_MS + ADTOOL_ROLLUP_LEASE_MARGIN_MS);
+  if (!lease.got) throw new Error('SAY: ' + lease.note);
+  const t = await adtJobStart(env, 'adtoolRollupOwedSeed');
+  const t0 = Date.now();
+  let rows = 0;
+  try {
+    const today = ukDate('');
+    const named = [];
+    for (const sp of ADTOOL_OWED_SEED_SPANS) for (let d = sp[0]; d <= sp[1]; d = adtAddDays(d, 1)) if (d < today) named.push(d);
+    /* over the STANDING window, not only over the spans named above: the audit named the October
+       days, and the comparison is what finds the ones nobody named. */
+    const found = await adtRollupOwedScan(env, adtAddDays(today, -ADTOOL_OWED_SCAN_DAYS), adtAddDays(today, -2));
+    const q = adtRollupOwedDays(await adtFlag(env, 'adtool_rollup_owed_days'), named.concat(found.days), ADTOOL_OWED_CAP);
+    let queue = q.text;
+    const cfgPut = (k, v) => env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')").bind(k, String(v));
+    await adtBatch(env, [cfgPut('adtool_rollup_owed_days', queue), cfgPut('adtool_rollup_owed_scan_day', today)]);
+    /* and drain it under the same gate the slots use, so this run cannot be killed either. A day
+       that does not fit is left in the queue, where the catch-up slot takes it. */
+    const st = { held: 0, written: 0 };
+    const cost = adtRollupStepCosts(await adtFlag(env, 'adtool_rollup_step_ms'), ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_COST_MARGIN);
+    const rolled = [];
+    const ownedDays = [];
+    for (;;) {
+      const take = adtRollupOwedNext(queue);
+      if (!take.day) break;
+      const pl = adtRollupPlan({ now_ms: Date.now(), t0: t0, budget_ms: ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, steps: [{ name: 'owed', words: 'the day ' + take.day, cost_ms: cost.owed }] });
+      if (!pl.run.length) break;
+      const a0 = adtUkMidnightUtcMs(take.day), a1 = adtUkMidnightUtcMs(adtAddDays(take.day, 1));
+      if (isFinite(a0) && isFinite(a1)) rows += await adtoolOrdersRoll(env, new Date(a0).toISOString(), new Date(a1).toISOString());
+      rows += await adtoolRollupDays(env, take.day, take.day, { hours_from: 24, hours_from_day: take.day, periods: false, stats: st });
+      rolled.push(take.day); ownedDays.push(take.day); queue = take.rest;
+      await adtBatch(env, [cfgPut('adtool_rollup_owed_days', queue), cfgPut('adtool_rollup_periods_owed', adtRollupOwed(await adtFlag(env, 'adtool_rollup_periods_owed'), ownedDays).text)]);
+    }
+    /* the week and month sums the re-rolled days owe, paid here rather than left to a later slot */
+    const owe = adtRollupOwed(await adtFlag(env, 'adtool_rollup_periods_owed'), ownedDays);
+    if (owe.owed) {
+      rows += await adtoolRollupPeriods(env, owe.from, owe.to);
+      await cfgPut('adtool_rollup_periods_owed', '').run();
+    }
+    const left = adtRollupOwedNext(queue);
+    const note = 'queued ' + q.owed + ' day' + (q.owed === 1 ? '' : 's') + ', re-rolled ' + (rolled.length ? rolled.join(', ') : 'none')
+      + (left.day ? ' · ' + left.owed + ' still owed, the catch-up slot takes them a day a run' : ' · nothing is owed now')
+      + (found.read ? ' · the comparison found ' + found.days.length + ' day' + (found.days.length === 1 ? '' : 's') + ' behind their own sources' + (found.why ? ' (' + found.why + ')' : '') : ' · the comparison could not be made')
+      + ' · ' + rows + ' rows in ' + Math.round((Date.now() - t0) / 1000) + ' s';
+    await adtJobEnd(env, 'adtoolRollupOwedSeed', t, rows, left.day ? 'cut' : 'ok', note);
+  } catch (e) {
+    await adtJobEnd(env, 'adtoolRollupOwedSeed', t, rows, 'error', String(e && e.message || e));
+    throw e;
+  } finally {
+    await adtRollupLeaseFree(env);
   }
 }
 async function adtoolRollupsFull(env) {
-  /* mgmt lever: rebuild everything from the first ad day, A DAY PER CHUNK on the hourly slot, each day
-     committed as it is built. It was six days a chunk, which no budget could ever finish; the rebuild
-     now takes days of hourly slots rather than hours, and that is the price of never being killed. */
+  /* mgmt lever: rebuild everything from the first ad day, A DAY PER CHUNK on the catch-up slot, each
+     day committed as it is built. It was six days a chunk, which no budget could ever finish; the
+     rebuild now takes days of slots rather than hours, and that is the price of never being killed. */
   await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_rollup_cursor', 'off', datetime('now')) ON CONFLICT(key) DO UPDATE SET value = 'off', updated_at = datetime('now')").run();
-  return adtoolRollups(env);
+  /* and it begins the rebuild on the half that OWNS it (5 Nov): the hourly half never takes the
+     rebuild branch, so calling that one would reset the cursor and then wait for the catch-up slot
+     to notice. */
+  return adtoolRollupRun(env, 'catchup');
 }
 
 /* ---- job: register seed (spec §11.3) ---- */
@@ -7346,7 +7817,14 @@ async function adtoolProfiles(env) {
     }
     await adtBatch(env, stmts); rows += stmts.length;
     const finished = (Math.max(0, startIdx) + done) >= ids.length;
-    await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_profiles_cursor', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?1, updated_at = datetime('now')").bind(today + '|' + (finished ? 'done' : lastId)).run();
+    /* THE CURSOR, AND ON A COMPLETE PASS THE DAY ITSELF (item 4). The cursor says how far THIS day
+       got; the day stamp says which day was the last to be finished, and that is what every page
+       reading "the newest day the table holds" is now capped at, so a day with 600 listings of
+       1,647 in it can never be drawn as the fleet. Both in one batch: the pages must never see a
+       stamp for a day whose cursor does not agree it is done. */
+    const profPuts = [env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_profiles_cursor', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?1, updated_at = datetime('now')").bind(today + '|' + (finished ? 'done' : lastId))];
+    if (finished) profPuts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_profiles_day', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?1, updated_at = datetime('now')").bind(today));
+    await adtBatch(env, profPuts);
     note = (resume ? 'resumed after ' + curAfter + ': ' : 'scopes + ') + done + ' listings' + (finished ? ' — complete for ' + today : ' — continues next run');
     if (finished) {
       /* acceptance (§12 phase 3): the fleet shuffle reproduces the review — Saturday significant, Tue/Thu not */
@@ -7368,13 +7846,13 @@ async function adtoolProfiles(env) {
 /* ADTOOL-P3-ACTIONS-BEGIN ============================================================================
    Phase 3 pages: Accounts, Categories, Phone cases, Time slots (spec §7) + the profile fields the product page shows. */
 async function adtLatestProfiles(env, scope, kind) {
-  const day = await env.DB.prepare('SELECT MAX(computed_day) AS d FROM adtool_profiles WHERE scope = ?1 AND kind = ?2').bind(scope, kind).first();
+  const day = await env.DB.prepare('SELECT MAX(computed_day) AS d FROM adtool_profiles WHERE scope = ?1 AND kind = ?2 AND computed_day <= ' + ADTOOL_PROFILES_DAY_SQL).bind(scope, kind).first();
   if (!day || !day.d) return { day: '', rows: {} };
   const rows = {}; for (const r of ((await env.DB.prepare('SELECT scope_id, json FROM adtool_profiles WHERE scope = ?1 AND kind = ?2 AND computed_day = ?3').bind(scope, kind, day.d).all()).results || [])) { try { rows[r.scope_id] = JSON.parse(r.json); } catch (e) { rows[r.scope_id] = null; } }
   return { day: day.d, rows };
 }
 async function adtLatestStages(env) {
-  const day = await env.DB.prepare('SELECT MAX(day) AS d FROM adtool_stages').first();
+  const day = await env.DB.prepare('SELECT MAX(day) AS d FROM adtool_stages WHERE day <= ' + ADTOOL_PROFILES_DAY_SQL).first();
   if (!day || !day.d) return { day: '', rows: [] };
   return { day: day.d, rows: (await env.DB.prepare('SELECT account, item_id, stage, label, confidence, slope28, level28, days_in_stage FROM adtool_stages WHERE day = ?1').bind(day.d).all()).results || [] };
 }
@@ -7460,7 +7938,7 @@ const ADTOOL_ACTIONS_P3 = {
       const bind = [w.from, w.to]; if (acct) bind.push(acct); if (cat) bind.push(cat);
       const sales = (await env.DB.prepare("SELECT o.slot, o.weekday, SUM(o.qty) AS units, COUNT(*) AS orders, ROUND(SUM(o.sale_price), 2) AS revenue FROM adtool_orders o JOIN adtool_listings l ON l.item_id = o.item_id WHERE o.status <> 'CANCELLED' AND o.local_date >= ?1 AND o.local_date <= ?2" + where('o') + ' GROUP BY o.slot, o.weekday').bind(...bind).all()).results || [];
       const sampled = (await env.DB.prepare('SELECT h.hour, ROUND(SUM(COALESCE(h.spend_r, h.spend_s)), 2) AS spend, SUM(COALESCE(h.clicks_r, h.clicks_s)) AS clicks, SUM(COALESCE(h.attr_units_r, h.attr_units_s)) AS attr_units, COUNT(DISTINCT h.day) AS days FROM adtool_listing_hour h JOIN adtool_listings l ON l.item_id = h.item_id WHERE h.day >= ?1 AND h.day <= ?2 AND h.samples > 0' + where('l') + ' GROUP BY h.hour').bind(...bind).all()).results || [];
-      const conc = (await env.DB.prepare("SELECT d.item_id, l.account, l.title, l.m98m_category, d.json FROM adtool_descriptors d JOIN adtool_listings l ON l.item_id = d.item_id WHERE d.day = (SELECT MAX(day) FROM adtool_descriptors)" + (acct ? ' AND l.account = ?1' : '') + (cat ? ' AND l.m98m_category = ?' + (acct ? 2 : 1) : '')).bind(...[acct, cat].filter(Boolean)).all()).results || [];
+      const conc = (await env.DB.prepare("SELECT d.item_id, l.account, l.title, l.m98m_category, d.json FROM adtool_descriptors d JOIN adtool_listings l ON l.item_id = d.item_id WHERE d.day = (SELECT MAX(day) FROM adtool_descriptors WHERE day <= " + ADTOOL_PROFILES_DAY_SQL + ")" + (acct ? ' AND l.account = ?1' : '') + (cat ? ' AND l.m98m_category = ?' + (acct ? 2 : 1) : '')).bind(...[acct, cat].filter(Boolean)).all()).results || [];
       const products = await adtProductCells(env, conc.map(r => { let j = {}; try { j = JSON.parse(r.json); } catch (e) {} return { item_id: r.item_id, account: r.account, title: r.title, category: r.m98m_category, top_slot: j.top_slot, top_slot_share: j.top_slot_share, slot_hhi: j.slot_hhi, stage: j.stage_label || j.stage, ad_dependence: j.ad_dependence28 }; }).filter(x => x.top_slot_share != null).sort((a, b) => b.slot_hhi - a.slot_hhi).slice(0, 40));
       /* cap hours yesterday: first sample at ≥ 95 % of the listing's summed running budget with flat clicks after */
       const caps = [];
@@ -7488,7 +7966,7 @@ async function adtListingProfileBundle(env, iid) {
      always was), so a batch changes nothing about what a missing table means here. */
   const PB = await adtBatchRead(env, [
     env.DB.prepare('SELECT day, stage, label, confidence, slope28, level28, peak_level, days_in_stage, changepoint_day FROM adtool_stages WHERE item_id = ?1 ORDER BY day DESC LIMIT 1').bind(iid),
-    env.DB.prepare('SELECT kind, json, computed_day FROM adtool_profiles WHERE scope = ?1 AND scope_id = ?2 AND computed_day = (SELECT MAX(computed_day) FROM adtool_profiles WHERE scope = ?1 AND scope_id = ?2)').bind('listing', iid),
+    env.DB.prepare('SELECT kind, json, computed_day FROM adtool_profiles WHERE scope = ?1 AND scope_id = ?2 AND computed_day = (SELECT MAX(computed_day) FROM adtool_profiles WHERE scope = ?1 AND scope_id = ?2 AND computed_day <= ' + ADTOOL_PROFILES_DAY_SQL + ')').bind('listing', iid),
     env.DB.prepare('SELECT day, json FROM adtool_descriptors WHERE item_id = ?1 ORDER BY day DESC LIMIT 1').bind(iid),
     env.DB.prepare('SELECT day, stage, confidence FROM adtool_stages WHERE item_id = ?1 ORDER BY day').bind(iid),
     /* §7 wants the pattern-change history on this page: what moved and when, not just whether today looks odd.
@@ -7781,7 +8259,12 @@ async function adtoolForecast(env) {
     await adtBatch(env, stmts); rows += stmts.length;
     const finished = (Math.max(0, startIdx) + done + skipped) >= ids.length || (startIdx >= 0 && Math.max(0, startIdx) + done + skipped >= ids.length);
     const reached = Math.max(0, startIdx) + done + skipped >= ids.length;
-    await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_forecast_cursor', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?1, updated_at = datetime('now')").bind(today + '|' + (reached ? 'done' : lastId)).run();
+    /* the cursor, and on a complete pass the day itself — the same rule as the pattern pass above:
+       the forecast pages read the newest vintage the table holds, and a vintage with 300 listings of
+       1,200 in it is not the fleet. */
+    const fcPuts = [env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_forecast_cursor', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?1, updated_at = datetime('now')").bind(today + '|' + (reached ? 'done' : lastId))];
+    if (reached) fcPuts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_forecast_day', ?1, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?1, updated_at = datetime('now')").bind(today));
+    await adtBatch(env, fcPuts);
     note = (resume ? 'resumed after ' + curAfter + ': ' : '') + done + ' listings forecast, ' + skipped + ' too new' + (reached ? ' — complete for ' + today : ' — continues next run');
     if (reached) {
       /* keep 30 vintages; acceptance: MASE < 1 for ≥ 70 % of listings with ≥ 20 units in 28 days */
@@ -7793,7 +8276,7 @@ async function adtoolForecast(env) {
 }
 async function adtForecastBundle(env, iid) {
   await ensureAdtoolPhase4Schema(env);
-  const made = await env.DB.prepare('SELECT MAX(made_day) AS d FROM adtool_forecast WHERE item_id = ?1').bind(iid).first();
+  const made = await env.DB.prepare('SELECT MAX(made_day) AS d FROM adtool_forecast WHERE item_id = ?1 AND made_day <= ' + ADTOOL_FORECAST_DAY_SQL).bind(iid).first();
   if (!made || !made.d) return null;
   const rows = (await env.DB.prepare('SELECT target_day, model, units_mean, units_lo, units_hi, revenue_mean, spend_mean FROM adtool_forecast WHERE item_id = ?1 AND made_day = ?2 ORDER BY target_day').bind(iid, made.d).all()).results || [];
   const scores = (await env.DB.prepare('SELECT model, mase, chosen, params_json FROM adtool_model_scores WHERE item_id = ?1 AND scored_day = ?2').bind(iid, made.d).all()).results || [];
@@ -7805,13 +8288,13 @@ const ADTOOL_ACTIONS_P4 = {
       await adtGate(ctx, 'adtool_page_forecast');
       const env = ctx.env; await ensureAdtoolPhase4Schema(env);
       const today = ukDate('');
-      const made = await env.DB.prepare('SELECT MAX(made_day) AS d FROM adtool_forecast').first(); const md = made && made.d;
+      const made = await env.DB.prepare('SELECT MAX(made_day) AS d FROM adtool_forecast WHERE made_day <= ' + ADTOOL_FORECAST_DAY_SQL).first(); const md = made && made.d;
       const actual = (await env.DB.prepare('SELECT day, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue, ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue FROM adtool_listing_day WHERE day >= ?1 AND day < ?2 GROUP BY day ORDER BY day').bind(adtAddDays(today, -30), today).all()).results || [];
       const next = md ? ((await env.DB.prepare('SELECT target_day, ROUND(SUM(units_mean), 2) AS units, ROUND(SUM(units_lo), 2) AS lo_sum, ROUND(SUM(units_hi), 2) AS hi_sum, ROUND(SUM(revenue_mean), 2) AS revenue, ROUND(SUM(spend_mean), 2) AS spend, COUNT(*) AS listings, ROUND(SUM((units_hi - units_lo) * (units_hi - units_lo)), 4) AS var_sum FROM adtool_forecast WHERE made_day = ?1 GROUP BY target_day ORDER BY target_day').bind(md).all()).results || []) : [];
       /* independence assumption: fleet band = mean ± sqrt(Σ((hi−lo)/2.56)²)·1.28 — labelled approximate on the page */
       for (const r of next) { const sd = Math.sqrt(Number(r.var_sum) || 0) / 2.56; r.lo = round2(Math.max(0, Number(r.units) - 1.28 * sd)); r.hi = round2(Number(r.units) + 1.28 * sd); }
-      const stages = (await env.DB.prepare('SELECT stage, COUNT(*) AS n FROM adtool_stages WHERE day = (SELECT MAX(day) FROM adtool_stages) GROUP BY stage').all()).results || [];
-      const movers = (await env.DB.prepare('SELECT s.item_id, s.account, l.title, i.image AS image, s.stage, s.slope28, s.level28, s.confidence FROM adtool_stages s JOIN adtool_listings l ON l.item_id = s.item_id LEFT JOIN items_api i ON i.item_id = s.item_id WHERE s.day = (SELECT MAX(day) FROM adtool_stages) AND s.level28 >= 0.5 ORDER BY s.slope28 DESC').all()).results || [];
+      const stages = (await env.DB.prepare('SELECT stage, COUNT(*) AS n FROM adtool_stages WHERE day = (SELECT MAX(day) FROM adtool_stages WHERE day <= ' + ADTOOL_PROFILES_DAY_SQL + ') GROUP BY stage').all()).results || [];
+      const movers = (await env.DB.prepare('SELECT s.item_id, s.account, l.title, i.image AS image, s.stage, s.slope28, s.level28, s.confidence FROM adtool_stages s JOIN adtool_listings l ON l.item_id = s.item_id LEFT JOIN items_api i ON i.item_id = s.item_id WHERE s.day = (SELECT MAX(day) FROM adtool_stages WHERE day <= ' + ADTOOL_PROFILES_DAY_SQL + ') AND s.level28 >= 0.5 ORDER BY s.slope28 DESC').all()).results || [];
       const risers = movers.slice(0, 10), decliners = movers.slice(-10).reverse();
       const spark = {}; const ids = risers.concat(decliners).map(x => x.item_id);
       if (ids.length) { for (const r of ((await env.DB.prepare('SELECT item_id, day, units FROM adtool_listing_day WHERE day >= ?1 AND item_id IN (' + ids.map(() => '?').join(',') + ') ORDER BY item_id, day').bind(adtAddDays(today, -14), ...ids).all()).results || [])) (spark[r.item_id] = spark[r.item_id] || []).push([r.day, r.units]); }
@@ -7842,9 +8325,9 @@ const ADTOOL_ACTIONS_P4 = {
       for (let i = 0; i < tIds.length; i += 90) {
         const ch = tIds.slice(i, i + 90); const ph = ch.map(() => '?').join(',');
         for (const r of ((await env.DB.prepare('SELECT d.item_id, SUM(d.units) AS units, ROUND(SUM(d.spend), 2) AS spend, ROUND(SUM(d.revenue), 2) AS revenue, ROUND(SUM(d.actual_profit), 2) AS actual_profit, SUM(d.pending_cost_orders) AS pending_cost_orders, SUM(COALESCE(d.pending_fee_orders, 0)) AS pending_fee_orders FROM adtool_listing_day d WHERE d.day >= ?1 AND d.day < ?2 AND d.item_id IN (' + ph + ') GROUP BY d.item_id').bind(adtAddDays(today, -28), today, ...ch).all()).results || [])) base28[r.item_id] = r;
-        for (const r of ((await env.DB.prepare('SELECT d.item_id, d.json FROM adtool_descriptors d WHERE d.day = (SELECT MAX(day) FROM adtool_descriptors) AND d.item_id IN (' + ph + ')').bind(...ch).all()).results || [])) { try { descById[r.item_id] = JSON.parse(r.json); } catch (e) {} }
+        for (const r of ((await env.DB.prepare('SELECT d.item_id, d.json FROM adtool_descriptors d WHERE d.day = (SELECT MAX(day) FROM adtool_descriptors WHERE day <= ' + ADTOOL_PROFILES_DAY_SQL + ') AND d.item_id IN (' + ph + ')').bind(...ch).all()).results || [])) { try { descById[r.item_id] = JSON.parse(r.json); } catch (e) {} }
         for (const r of ((await env.DB.prepare('SELECT item_id, COUNT(*) AS n FROM adtool_cap_days WHERE day >= ?1 AND item_id IN (' + ph + ') GROUP BY item_id').bind(adtAddDays(today, -7), ...ch).all()).results || [])) capById[r.item_id] = Number(r.n);
-        for (const r of ((await env.DB.prepare('SELECT item_id, stage FROM adtool_stages WHERE day = (SELECT MAX(day) FROM adtool_stages) AND item_id IN (' + ph + ')').bind(...ch).all()).results || [])) stageById[r.item_id] = r.stage;
+        for (const r of ((await env.DB.prepare('SELECT item_id, stage FROM adtool_stages WHERE day = (SELECT MAX(day) FROM adtool_stages WHERE day <= ' + ADTOOL_PROFILES_DAY_SQL + ') AND item_id IN (' + ph + ')').bind(...ch).all()).results || [])) stageById[r.item_id] = r.stage;
         if (vint && vint.d && vint.d < today) for (const r of ((await env.DB.prepare('SELECT f.item_id, AVG(ABS(f.units_mean - COALESCE(d.units, 0)) / NULLIF(d.units, 0)) AS mape FROM adtool_forecast f LEFT JOIN adtool_listing_day d ON d.item_id = f.item_id AND d.day = f.target_day WHERE f.made_day = ?1 AND f.target_day < ?2 AND f.item_id IN (' + ph + ') GROUP BY f.item_id').bind(vint.d, today, ...ch).all()).results || [])) mapeById[r.item_id] = r.mape != null ? Number(r.mape) : null;
       }
       const L4 = {}; for (const r of ((await env.DB.prepare('SELECT item_id, margin_before_ads FROM adtool_listings').all()).results || [])) L4[r.item_id] = r;
@@ -7861,7 +8344,7 @@ const ADTOOL_ACTIONS_P4 = {
       }
       /* Stage explainer + stage counts per account, each count linked to the item rows behind it (item-keyed, allowed) */
       const stageExplain = adtStageExplain();
-      const stageRows = (await env.DB.prepare('SELECT s.account, s.stage, s.item_id, l.title, i.image AS image FROM adtool_stages s JOIN adtool_listings l ON l.item_id = s.item_id LEFT JOIN items_api i ON i.item_id = s.item_id WHERE s.day = (SELECT MAX(day) FROM adtool_stages) ORDER BY s.account, s.stage').all()).results || [];
+      const stageRows = (await env.DB.prepare('SELECT s.account, s.stage, s.item_id, l.title, i.image AS image FROM adtool_stages s JOIN adtool_listings l ON l.item_id = s.item_id LEFT JOIN items_api i ON i.item_id = s.item_id WHERE s.day = (SELECT MAX(day) FROM adtool_stages WHERE day <= ' + ADTOOL_PROFILES_DAY_SQL + ') ORDER BY s.account, s.stage').all()).results || [];
       const sba = {}; for (const r of stageRows) { const k = (r.account || '') + '|' + (r.stage || ''); const g = (sba[k] = sba[k] || { account: r.account || '', stage: r.stage || '', n: 0, items: [] }); g.n++; if (g.items.length < 25) g.items.push({ item_id: r.item_id, title: r.title, image: r.image, account: r.account, stage: r.stage }); }
       const stages_by_account = Object.values(sba).sort((a, b) => (a.account + a.stage).localeCompare(b.account + b.stage));
       const objective = 'The goal is to scale PROFITABLE sales — increase units and revenue while keeping each listing profitable — not to maximise ROAS alone. Read each scenario by its modelled profit and the constraint that binds it, then act where profit grows.';
@@ -8800,7 +9283,11 @@ const ADTOOL_ACTIONS_P5 = {
       const truthSummary = (await env.DB.prepare("SELECT metric_id, status, COUNT(*) AS n, MAX(ran_at) AS last FROM validation_runs WHERE metric_id LIKE 'ADTOOL_%' AND ran_at >= datetime('now', '-2 days') GROUP BY metric_id, status ORDER BY metric_id, status").all()).results || [];
       const flags = (await env.DB.prepare("SELECT key, value, updated_at FROM portal_config WHERE key LIKE 'adtool_%' ORDER BY key").all()).results || [];
       const register = adtRegRows((await env.DB.prepare('SELECT metric_id, name, formula, source_tables, recompute, recheck, phase FROM adtool_number_register ORDER BY phase, metric_id').all()).results || []);
-      const cursors = { rollup: await adtFlag(env, 'adtool_rollup_cursor'), profiles: await adtFlag(env, 'adtool_profiles_cursor'), forecast: await adtFlag(env, 'adtool_forecast_cursor'), profit_law: await adtFlag(env, 'adtool_profit_law'), tail_reroll_day: await adtFlag(env, 'adtool_tail_reroll_day') };
+      const cursors = { rollup: await adtFlag(env, 'adtool_rollup_cursor'), profiles: await adtFlag(env, 'adtool_profiles_cursor'), forecast: await adtFlag(env, 'adtool_forecast_cursor'), profit_law: await adtFlag(env, 'adtool_profit_law'), tail_reroll_day: await adtFlag(env, 'adtool_tail_reroll_day'),
+        /* 5 Nov: the day each per-listing pass last FINISHED, which is what the pages are capped
+           at now, and the queue of finished days the sources say are still wrong */
+        profiles_day: await adtFlag(env, 'adtool_profiles_day'), forecast_day: await adtFlag(env, 'adtool_forecast_day'),
+        owed_days: await adtFlag(env, 'adtool_rollup_owed_days'), owed_scan_day: await adtFlag(env, 'adtool_rollup_owed_scan_day') };
       /* the profit-vs-sheet gate is stamped a moment before the parity rows of the same run, so the window above
          would drop it; the page gets the latest run whole (fleet row + one per account, per-day table in evidence) */
       const profitVsSheet = (await env.DB.prepare("SELECT scope_key, ran_at, shown, recomputed, delta, status, evidence FROM validation_runs WHERE metric_id = 'ADTOOL_PROFIT_VS_SHEET' AND ran_at = (SELECT MAX(ran_at) FROM validation_runs WHERE metric_id = 'ADTOOL_PROFIT_VS_SHEET') ORDER BY scope_key").all()).results || [];
@@ -9058,9 +9545,9 @@ async function adtDecisionInputs(env, day) {
   const rows = (await env.DB.prepare('SELECT item_id, day, weekday, spend, attr_units, attr_revenue, ad_profit, actual_profit, pending_cost_orders, COALESCE(pending_fee_orders, 0) AS pending_fee_orders, units, clicks FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 ORDER BY item_id, day').bind(adtAddDays(day, -31), yday).all()).results || [];
   const byItem = {}; for (const r of rows) (byItem[r.item_id] = byItem[r.item_id] || []).push(r);
   const live = {}; for (const r of ((await env.DB.prepare("SELECT ca.listing_id, COUNT(*) AS n FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') AND ((c.funding_model = 'COST_PER_CLICK' AND (ca.ad_status = 'ACTIVE' OR ca.ad_status IS NULL OR ca.ad_status = '')) OR (c.funding_model = 'COST_PER_SALE' AND COALESCE(ca.ad_status, '') <> 'ARCHIVED')) GROUP BY ca.listing_id").all()).results || [])) live[r.listing_id] = Number(r.n);
-  const stages = {}; for (const r of ((await env.DB.prepare('SELECT item_id, stage, days_in_stage FROM adtool_stages WHERE day = (SELECT MAX(day) FROM adtool_stages)').all()).results || [])) stages[r.item_id] = r;
+  const stages = {}; for (const r of ((await env.DB.prepare('SELECT item_id, stage, days_in_stage FROM adtool_stages WHERE day = (SELECT MAX(day) FROM adtool_stages WHERE day <= ' + ADTOOL_PROFILES_DAY_SQL + ')').all()).results || [])) stages[r.item_id] = r;
   const wdp = await adtLatestProfiles(env, 'listing', 'weekday');
-  const desc = {}; for (const r of ((await env.DB.prepare('SELECT item_id, json FROM adtool_descriptors WHERE day = (SELECT MAX(day) FROM adtool_descriptors)').all()).results || [])) { try { desc[r.item_id] = JSON.parse(r.json); } catch (e) {} }
+  const desc = {}; for (const r of ((await env.DB.prepare('SELECT item_id, json FROM adtool_descriptors WHERE day = (SELECT MAX(day) FROM adtool_descriptors WHERE day <= ' + ADTOOL_PROFILES_DAY_SQL + ')').all()).results || [])) { try { desc[r.item_id] = JSON.parse(r.json); } catch (e) {} }
   const capped = {}; for (const r of ((await env.DB.prepare('SELECT item_id, COUNT(*) AS n FROM adtool_cap_days WHERE day >= ?1 GROUP BY item_id').bind(adtAddDays(day, -7)).all()).results || [])) capped[r.item_id] = Number(r.n);
   const organic = {}; for (const r of ((await env.DB.prepare('SELECT item_id, SUM(units) AS u, SUM(attr_units) AS a FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 GROUP BY item_id').bind(adtAddDays(day, -3), yday).all()).results || [])) organic[r.item_id] = Math.max(0, Number(r.u) - Number(r.a));
   /* the most the windows' unpriced orders could add once priced — 0.8 × sale price of each DISTINCT order still
@@ -9462,7 +9949,7 @@ async function adtoolAnalyst(env) {
     const roasRow = await env.DB.prepare('SELECT json FROM adtool_roas ORDER BY day DESC LIMIT 1').first();
     const roasData = roasRow ? JSON.parse(roasRow.json) : null;
     const wdP = await adtLatestProfiles(env, 'account', 'weekday');
-    const stageRows = (await env.DB.prepare('SELECT account, stage, COUNT(*) AS n FROM adtool_stages WHERE day = (SELECT MAX(day) FROM adtool_stages) GROUP BY account, stage').all()).results || [];
+    const stageRows = (await env.DB.prepare('SELECT account, stage, COUNT(*) AS n FROM adtool_stages WHERE day = (SELECT MAX(day) FROM adtool_stages WHERE day <= ' + ADTOOL_PROFILES_DAY_SQL + ') GROUP BY account, stage').all()).results || [];
     if (roasData) {
       for (const a of Object.keys(roasData.accounts || {})) {
         const x = roasData.accounts[a]; const prof = wdP.rows[a]; let best = null, worst = null, p = null;
@@ -10010,8 +10497,8 @@ async function adtoolRunTodayCompute(env, acct) {
   const stmts = [], kinds = [];
   for (const ch of adtChunks(list)) {
     stmts.push(env.DB.prepare('SELECT l.item_id, l.account, l.title, i.image, l.breakeven_roas, l.margin_source, l.status FROM adtool_listings l LEFT JOIN items_api i ON i.item_id = l.item_id WHERE l.item_id IN ' + adtInList(ch)).bind(...ch)); kinds.push('meta');
-    stmts.push(env.DB.prepare('SELECT s.item_id, s.stage, s.label FROM adtool_stages s WHERE s.day = (SELECT MAX(day) FROM adtool_stages) AND s.item_id IN ' + adtInList(ch)).bind(...ch)); kinds.push('stage');
-    stmts.push(env.DB.prepare("SELECT scope_id AS item_id, json FROM adtool_profiles WHERE scope = 'listing' AND kind = 'weekday' AND computed_day = (SELECT MAX(computed_day) FROM adtool_profiles WHERE scope = 'listing' AND kind = 'weekday') AND scope_id IN " + adtInList(ch)).bind(...ch)); kinds.push('profile');
+    stmts.push(env.DB.prepare('SELECT s.item_id, s.stage, s.label FROM adtool_stages s WHERE s.day = (SELECT MAX(day) FROM adtool_stages WHERE day <= ' + ADTOOL_PROFILES_DAY_SQL + ') AND s.item_id IN ' + adtInList(ch)).bind(...ch)); kinds.push('stage');
+    stmts.push(env.DB.prepare("SELECT scope_id AS item_id, json FROM adtool_profiles WHERE scope = 'listing' AND kind = 'weekday' AND computed_day = (SELECT MAX(computed_day) FROM adtool_profiles WHERE scope = 'listing' AND kind = 'weekday' AND computed_day <= " + ADTOOL_PROFILES_DAY_SQL + ") AND scope_id IN " + adtInList(ch)).bind(...ch)); kinds.push('profile');
     /* SQLite carries the bare columns of the row that holds MAX(): the best week by law profit in one aggregate */
     /* the current ISO week is partial (Mon → yesterday): only complete weeks can be a listing's best */
     stmts.push(env.DB.prepare('SELECT w.item_id, w.iso_week, w.spend, w.attr_revenue, MAX(w.actual_profit) AS actual_profit, w.pending_cost_orders, w.pending_fee_orders FROM adtool_listing_week w WHERE w.iso_week < ?1 AND w.item_id IN ' + adtInList(ch, 1) + ' GROUP BY w.item_id').bind(adtIsoWeek(today), ...ch)); kinds.push('week');
@@ -10157,7 +10644,7 @@ const ADTOOL_ACTIONS_P9 = {
       /* stage + lever on every listed item row: two chunked reads, never one per row */
       const listed = [].concat(cutTop, improving, push, budget), listedIds = listed.map(r => String(r.item_id));
       const S = {};
-      for (const rs of await adtBatchRead(env, adtChunks(listedIds).map(ch => env.DB.prepare('SELECT s.item_id, s.stage, s.label FROM adtool_stages s WHERE s.day = (SELECT MAX(day) FROM adtool_stages) AND s.item_id IN ' + adtInList(ch)).bind(...ch)))) for (const r of rs) S[String(r.item_id)] = r;
+      for (const rs of await adtBatchRead(env, adtChunks(listedIds).map(ch => env.DB.prepare('SELECT s.item_id, s.stage, s.label FROM adtool_stages s WHERE s.day = (SELECT MAX(day) FROM adtool_stages WHERE day <= ' + ADTOOL_PROFILES_DAY_SQL + ') AND s.item_id IN ' + adtInList(ch)).bind(...ch)))) for (const r of rs) S[String(r.item_id)] = r;
       const bl = await adtBandsAndLevers(env, listedIds, today, acct);
       for (const r of listed) { const id = String(r.item_id); r.roas = ownRoas(r); r.stage = S[id] ? String(S[id].stage || '') : ''; r.stage_label = S[id] ? String(S[id].label || '') : ''; r.lever = bl.levers[id]; r.who = adtWho(r.account); r.image = r.image ? String(r.image) : null; r.window = { from, to, days }; }
       const verdict = adtPlanVerdict2({ cut_n: cut.length, improving_n: improving.length, spend_freed_day: cut.reduce((t, r) => t + (Number(r.spend) || 0), 0) / days, withheld_unpriced: pool.withheld, from, to, label: w.label, days, listings: rows.length });
@@ -26964,6 +27451,10 @@ const ROUTES = {
         selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch,
         trackingBackfill, markEndedListings, openSync, truthTier1, truthTier3, signalReeval, truthAlertSweep, policyScan, trackingInboxRetry,
         adtoolRollups, adtoolTruth, adtoolVideoSweep, trafficQuota,
+        /* the catch-up half of the roll-up (5 Nov), so a slot that was missed can be made up by
+           hand without waiting an hour, and a once-over of the days the audit found carrying a
+           stale eBay vintage or a stale unpriced-order count, which sits on no cron slot (item 5) */
+        adtoolRollupsCatchup, adtoolRollupOwedSeed,
         /* a once-over of the peak list, run by hand and on no cron slot: it names the campaign a
            listing is already wholly switched in, and never chooses for one in two (2 Nov) */
         adtoolPeakCampaignFill };
@@ -28124,7 +28615,7 @@ const ROUTES = {
         out.sale_membership = await q('sale membership', 'SELECT day, COUNT(*) AS rows FROM adtool_sale_membership_day WHERE day >= ?1 GROUP BY day ORDER BY day DESC', [adtAddDays(today, -3)]);
         out.decisions = await q('decisions', 'SELECT day, batch, COUNT(*) AS rows, COUNT(DISTINCT item_id) AS listings FROM adtool_decisions WHERE day >= ?1 GROUP BY day, batch ORDER BY day DESC, batch', [adtAddDays(today, -3)]);
         out.listings_facts = ((await q('listing facts', 'SELECT COUNT(*) AS n, MIN(synced_at) AS oldest, MAX(synced_at) AS newest FROM adtool_listings')) || [{}])[0] || null;
-        out.cursors = await q('cursors', "SELECT key, value, updated_at FROM portal_config WHERE key IN ('adtool_profiles_cursor', 'adtool_forecast_cursor', 'adtool_rollup_cursor', 'adtool_rollup_tail_day', 'adtool_tail_reroll_day', 'adtool_rollup_yday') ORDER BY key");
+        out.cursors = await q('cursors', "SELECT key, value, updated_at FROM portal_config WHERE key IN ('adtool_profiles_cursor', 'adtool_forecast_cursor', 'adtool_rollup_cursor', 'adtool_rollup_tail_day', 'adtool_tail_reroll_day', 'adtool_rollup_yday', 'adtool_profiles_day', 'adtool_forecast_day', 'adtool_rollup_owed_days', 'adtool_rollup_owed_scan_day') ORDER BY key");
         /* THE LADDER AS THE PAGE DRAWS IT, which is the newest day the table holds, beside the same
            count on the last day the pass reached the whole fleet: a mix taken off a part-finished day
            is a different mix, and the page has no way of saying so. */
@@ -28737,7 +29228,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, trafficNow, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, policyScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume, adtoolPeakSwitch, adtoolPeakPlan };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, trafficNow, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, policyScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsCatchup, adtoolRollupOwedSeed, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume, adtoolPeakSwitch, adtoolPeakPlan };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

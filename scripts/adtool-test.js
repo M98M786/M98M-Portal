@@ -53,7 +53,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -4790,18 +4790,22 @@ function run(argv) {
 
   /* ---- the same rules, read off the source: the wiring, not a second copy of the arithmetic --- */
   const rbSrc = src.slice(src.indexOf('/* ADTOOL-P17-PURE-BEGIN */'), src.indexOf('async function adtoolRollupsFull(env) {'));
-  const rbDrv = src.slice(src.indexOf('async function adtoolRollups(env) {'), src.indexOf('async function adtoolRollupsFull(env) {'));
+  /* 5 Nov: the driver is ONE body run by two jobs, the hourly slot and the catch-up slot, so the
+     tests below read adtoolRollupRun and not the one-line wrapper each slot calls. */
+  const rbDrv = src.slice(src.indexOf('async function adtoolRollupRun(env, part) {'), src.indexOf('/* THE DAYS THE 5 NOVEMBER AUDIT FOUND WRONG'));
+  const rbSeed = src.slice(src.indexOf('async function adtoolRollupOwedSeed(env) {'), src.indexOf('async function adtoolRollupsFull(env) {'));
   t('roll-up engine: a run that stops itself writes its own row with status ‘cut’ — the trail never shows ‘running’ for a run that is over',
-    /await adtJobEnd\(env, 'adtoolRollups', t, rows, coreCut \? 'cut' : 'ok', note\);/.test(rbDrv) &&
-    (rbDrv.match(/adtJobEnd\(env, 'adtoolRollups', t, rows, coreCut \? 'cut' : 'ok', note\)/g) || []).length === 2 &&
-    /const coreCut = leftOver\.length > 0;/.test(rbDrv) && /await adtJobEnd\(env, 'adtoolRollups', t, rows, 'error'/.test(rbDrv), null);
+    /await adtJobEnd\(env, JOB, t, rows, coreCut \? 'cut' : 'ok', note\);/.test(rbDrv) &&
+    (rbDrv.match(/adtJobEnd\(env, JOB, t, rows, coreCut \? 'cut' : 'ok', note\)/g) || []).length === 2 &&
+    /const coreCut = leftOver\.length > 0;/.test(rbDrv) && /await adtJobEnd\(env, JOB, t, rows, 'error'/.test(rbDrv) &&
+    /const JOB = PART === 'catchup' \? 'adtoolRollupsCatchup' : 'adtoolRollups';/.test(rbDrv), null);
   t('roll-up engine: the note on that row names the step the run reached, through the one function that writes it',
     /adtRollupStepNote\(\{ run_steps: ran, skipped: leftOver\.concat\(notDue\) \}\)/.test(rbDrv) && /'left ' \+ left\[0\] \+ ' for the next hour'/.test(rbSrc), null);
   t('roll-up engine: a row the platform left reading ‘running’ is closed by the next run as ‘killed’, before that run has a row of its own to catch',
     (() => {
       const wd = src.slice(src.indexOf('async function adtRollupWatchdog(env, job, deadMin) {'), src.indexOf('async function adtRollupFresh(env) {'));
       return /SET status = 'killed'/.test(wd) && /status = 'running'/.test(wd) && /started_at < \?2/.test(wd) &&
-        F.ADTOOL_ROLLUP_DEAD_MIN === 20 && rbDrv.indexOf('adtRollupWatchdog(env') < rbDrv.indexOf("adtJobStart(env, 'adtoolRollups')");
+        F.ADTOOL_ROLLUP_DEAD_MIN === 20 && rbDrv.indexOf('adtRollupWatchdog(env, JOB,') < rbDrv.indexOf('adtJobStart(env, JOB)');
     })(), null);
   t('roll-up engine: the watchdog invents no finishing time for a run nobody watched end, and says in the row why there is none',
     (() => {
@@ -4812,15 +4816,16 @@ function run(argv) {
     (() => {
       const gated = (rbDrv.match(/await step\(/g) || []).length;
       return gated >= 12 && /adtRollupPlan\(\{ now_ms: Date\.now\(\), t0: t0, budget_ms: BUDGET_MS/.test(rbDrv) &&
-        !/Date\.now\(\) - t0 < 810000/.test(rbDrv) && !/Date\.now\(\) - t0 < 200000/.test(rbDrv) && !/BUDGET_MS = 240000/.test(rbDrv) &&
-        /const BUDGET_MS = ADTOOL_ROLLUP_BUDGET_MS;/.test(rbDrv);
+        !/Date\.now\(\) - t0 < 810000/.test(rbDrv) && !/Date\.now\(\) - t0 < 200000/.test(rbDrv) &&
+        /const BUDGET_MS = PART === 'catchup' \? ADTOOL_ROLLUP_CATCHUP_BUDGET_MS : ADTOOL_ROLLUP_BUDGET_MS;/.test(rbDrv);
     })(), (rbDrv.match(/await step\(/g) || []).length);
   t('roll-up engine: today is rolled first and committed on its own, its cursor and its hour cursor in the one write',
     (() => {
       const iToday = rbDrv.indexOf("await step('today'"), iYday = rbDrv.indexOf("await step('yesterday'"), iDay2 = rbDrv.indexOf("await step('day2'");
       return iToday > 0 && iToday < iYday && iYday < iDay2 &&
         /adtoolRollupDays\(env, today, today, \{ hours_from: hc\.from, hours_from_day: today, periods: false, stats: st \}\)/.test(rbDrv) &&
-        /cfgPut\('adtool_rollup_cursor', today\), cfgPut\('adtool_rollup_hour_cursor', hc\.next\)/.test(rbDrv);
+        /const puts = \[cfgPut\('adtool_rollup_hour_cursor', hc\.next\)\];/.test(rbDrv) &&
+        /if \(cursor >= histWanted\) puts\.push\(cfgPut\('adtool_rollup_cursor', today\)\);/.test(rbDrv);
     })(), null);
   t('roll-up engine: the hour cursor is kept under the name the brief gives it, and read through the one pure rule',
     /adtRollupHourCursor\(await adtFlag\(env, 'adtool_rollup_hour_cursor'\), today, ukH\)/.test(rbDrv) && /const ukH = adtUkParts\(Date\.now\(\)\)\.hour;/.test(rbDrv), null);
@@ -4828,18 +4833,20 @@ function run(argv) {
     /const ydayKey = yday \+ '\|' \+ repState;/.test(rbDrv) && /const ydayDue = \(await adtFlag\(env, 'adtool_rollup_yday'\)\) !== ydayKey;/.test(rbDrv) &&
     /await adtReportStatus\(env, yday\)/.test(rbDrv) && /cfgPut\('adtool_rollup_yday', ydayKey\)/.test(rbDrv), null);
   t('roll-up engine: every finished day is rolled with its hours settled, so a day that closed last week costs a write only where something about it really changed',
-    (rbDrv.match(/hours_from: 24, hours_from_day: /g) || []).length === 4 && /hours_from: hc\.from, hours_from_day: today/.test(rbDrv), (rbDrv.match(/hours_from: 24/g) || []).length);
+    (rbDrv.match(/hours_from: 24, hours_from_day: /g) || []).length === 5 && /hours_from: hc\.from, hours_from_day: today/.test(rbDrv) &&
+    /hours_from: 24, hours_from_day: take\.day/.test(rbSeed), (rbDrv.match(/hours_from: 24/g) || []).length);
   t('roll-up engine: the tail round is a day per run on its own cursor, and the day stamp is set only when the round completes, so partial progress is kept',
-    /const tailNext = tailMid \? adtAddDays\(tailCur, 1\) : tailFrom;/.test(rbDrv) &&
-    /if \(tailNext >= tailTo\) \{ puts\.push\(cfgPut\('adtool_tail_reroll_day', today\)\); puts\.push\(cfgPut\('adtool_rollup_tail_day', 'off'\)\); \}/.test(rbDrv) &&
-    /else puts\.push\(cfgPut\('adtool_rollup_tail_day', tailNext\)\);/.test(rbDrv), null);
+    /adtRollupTailNext\(await adtFlag\(env, 'adtool_rollup_tail_day'\), tailFrom, tailTo\)/.test(rbDrv) &&
+    /if \(tail\.next >= tailTo\) \{ puts\.push\(cfgPut\('adtool_tail_reroll_day', today\)\); puts\.push\(cfgPut\('adtool_rollup_tail_day', 'off'\)\); \}/.test(rbDrv) &&
+    /else puts\.push\(cfgPut\('adtool_rollup_tail_day', tailFrom \+ '\|' \+ tail\.next\)\);/.test(rbDrv) &&
+    !/const tailMid = /.test(rbDrv), null);
   t('roll-up engine: the history catch-up is a day at a time, not six — a six-day chunk could never finish inside any budget worth having',
     /const dayN = adtAddDays\(cursor, 1\);/.test(rbDrv) && !/adtAddDays\(from, 5\)/.test(rbDrv) && /if \(!went\) break;/.test(rbDrv) &&
     /cfgPut\('adtool_rollup_cursor', dayN\)/.test(rbDrv), null);
   t('roll-up engine: the week and month sums are a step of their own, paid before another finished day is taken on, and what is owed survives a run that is cut',
     /if \(O\.periods !== false\) written \+= await adtoolRollupPeriods\(env, fromDay, toDay\);/.test(src) &&
     /async function adtoolRollupPeriods\(env, fromDay, toDay\) \{/.test(src) &&
-    (rbDrv.match(/periods: false/g) || []).length === 5 && /adtRollupOwed\(await adtFlag\(env, 'adtool_rollup_periods_owed'\), ownedDays\)/.test(rbDrv) &&
+    (rbDrv.match(/periods: false/g) || []).length === 6 && /adtRollupOwed\(await adtFlag\(env, 'adtool_rollup_periods_owed'\), ownedDays\)/.test(rbDrv) &&
     rbDrv.indexOf('await doPeriods();\n      /* (d) the listing facts') < rbDrv.indexOf("await step('day2'"), null);
   t('roll-up engine: the hour rows carry when they were last rebuilt, and the Peak time page’s stamp reads that for today with the job’s own last finish behind it',
     (() => {
@@ -6175,6 +6182,306 @@ function run(argv) {
       /took\[name\] = Date\.now\(\) - s0;/.test(j) &&
       /await commit\('adtool_rollup_step_skips'/.test(src);
   })(), null);
+
+  /* ================= 5 NOV: THE ROLL-UP CANNOT FINISH ITS WORK ====================================
+     The gate of 1 November stopped the slot being killed; it did not make the work happen. Over 150
+     runs `yesterday` ran 6 times and was left 36, and the eleven steps behind it in the order were
+     reached only by luck, because every one of them was asked whether it fitted in what today had
+     already spent. The owner read £29.39 of profit for 2 November where the law gives £246.68,
+     twenty-two finished days carried an eBay vintage the portal never took, and two thirds of the
+     fleet had no pattern figures at all because the pass stopped at its first batch and the pages
+     drew that part-day as the whole fleet. Five rules replace that, and each is a test. */
+
+  /* ---- item 1: two slots, one list, one lease ------------------------------------------------- */
+  t('roll-up slots: today and yesterday are the hourly slot’s, and every other step is the catch-up slot’s — the two lists together are the whole order, with nothing in both but the order roll both build their days from',
+    (() => {
+      const H = F.ADTOOL_ROLLUP_HOURLY_STEPS, C = F.ADTOOL_ROLLUP_CATCHUP_STEPS;
+      const both = H.filter(n => C.indexOf(n) >= 0);
+      const union = H.concat(C.filter(n => H.indexOf(n) < 0));
+      const missing = F.ADTOOL_ROLLUP_ORDER.filter(n => union.indexOf(n) < 0);
+      return H.join(',') === 'orders,today,yesterday' && both.join(',') === 'orders' && !missing.length &&
+        C.indexOf('catchup') >= 0 && C.indexOf('ordersall') >= 0 && C.indexOf('warm') === C.length - 1 &&
+        H.length === new Set(H).size && C.length === new Set(C).size;
+    })(), [F.ADTOOL_ROLLUP_HOURLY_STEPS, F.ADTOOL_ROLLUP_CATCHUP_STEPS]);
+  t('roll-up slots: EVERY step name in the real driver is on exactly one of the two lists — a step on neither could never run, and nothing but this would say so',
+    (() => {
+      const names = {};
+      for (const m of (rbDrv.match(/step\('[a-z0-9]+'/g) || [])) names[m.slice(6, -1)] = 1;
+      const keys = Object.keys(names);
+      if (keys.length < 12) return false;
+      return keys.every(n => {
+        const h = F.ADTOOL_ROLLUP_HOURLY_STEPS.indexOf(n) >= 0, c = F.ADTOOL_ROLLUP_CATCHUP_STEPS.indexOf(n) >= 0;
+        return (h || c) && F.ADTOOL_ROLLUP_STEP_MS[n] !== undefined;
+      });
+    })(), Object.keys((rbDrv.match(/step\('[a-z0-9]+'/g) || []).reduce((o, m) => { o[m.slice(6, -1)] = 1; return o; }, {})));
+  t('roll-up slots: a step of the other slot is neither "left for the next hour" nor "not due" — the hourly row used to read cut because the page cache had not been warmed',
+    /if \(!adtRollupMine\(PART, name\)\) \{ otherSlot\.push\(words\); return false; \}/.test(rbDrv) &&
+    rbDrv.indexOf('adtRollupMine(PART, name)') < rbDrv.indexOf('if (due === false)') &&
+    F.adtRollupMine('hourly', 'today') === true && F.adtRollupMine('hourly', 'warm') === false &&
+    F.adtRollupMine('catchup', 'warm') === true && F.adtRollupMine('catchup', 'today') === false &&
+    F.adtRollupMine('rubbish', 'today') === true && F.adtRollupMine('catchup', 'nosuchstep') === false, null);
+  t('roll-up slots: the catch-up slot has a budget of its own and is not racing today’s figures, and the hourly budget is untouched',
+    F.ADTOOL_ROLLUP_CATCHUP_BUDGET_MS === 420000 && F.ADTOOL_ROLLUP_BUDGET_MS === 180000 &&
+    F.ADTOOL_ROLLUP_CATCHUP_BUDGET_MS > F.ADTOOL_ROLLUP_BUDGET_MS, [F.ADTOOL_ROLLUP_BUDGET_MS, F.ADTOOL_ROLLUP_CATCHUP_BUDGET_MS]);
+  /* THE WAY OUT OF THE NEW GATE, PROVED ON MEASURED NUMBERS AND NOT ON HOPE. The freeze of 2 to 5
+     November was a step whose estimate could never fit what was left, so it was never run, never
+     measured, and the estimate stood for ever. Giving the catch-up its own slot repeats that fault
+     exactly if its budget and its order cannot reach the steps at the bottom of the list. These are
+     the costs the engine itself had measured at 14:22 on 5 November, read out of
+     portal_config.adtool_rollup_step_ms, and the planner is the real one. */
+  const rbMeasured = { orders: 6964, today: 61479, listings: 16218, yesterday: 136245, day2: 68196, tail: 35462, periods: 36222, report: 7415, roas: 1776, profiles: 34306, forecast: 53673, truth: 5096, warm: 20164 };
+  t('roll-up slots: ON THE MEASURED COSTS the catch-up slot reaches the pattern pass, which is the whole reason it exists — a budget that could not would be the freeze again, one slot down',
+    (() => {
+      const cost = F.adtRollupStepCosts(rbMeasured, F.ADTOOL_ROLLUP_STEP_MS, F.ADTOOL_ROLLUP_COST_MARGIN);
+      /* a steady run: the boundary batch is only owed before 05:00, so it is not due here */
+      const steps = F.ADTOOL_ROLLUP_CATCHUP_STEPS.filter(n => n !== 'ordersall' && n !== 'catchup')
+        .map(n => ({ name: n, words: n, cost_ms: cost[n], due: n === 'boundary' ? false : undefined }));
+      const pl = F.adtRollupPlan({ now_ms: 0, t0: 0, budget_ms: F.ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, steps: steps });
+      /* and the same list on the hourly budget, which is the arithmetic that made the audit's point:
+         everything from the pattern pass down was unreachable there */
+      const old = F.adtRollupPlan({ now_ms: 0, t0: 0, budget_ms: F.ADTOOL_ROLLUP_BUDGET_MS, steps: steps });
+      return pl.run.indexOf('profiles') >= 0 && pl.run.indexOf('owed') >= 0 && pl.run.indexOf('periods') >= 0 &&
+        pl.run.indexOf('listings') >= 0 && pl.run.indexOf('report') >= 0 && old.run.indexOf('profiles') < 0;
+    })(), F.adtRollupPlan({ now_ms: 0, t0: 0, budget_ms: F.ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, steps: F.ADTOOL_ROLLUP_CATCHUP_STEPS.filter(n => n !== 'ordersall' && n !== 'catchup').map(n => ({ name: n, words: n, cost_ms: F.adtRollupStepCosts(rbMeasured, F.ADTOOL_ROLLUP_STEP_MS, F.ADTOOL_ROLLUP_COST_MARGIN)[n], due: n === 'boundary' ? false : undefined })) }).run);
+  t('roll-up slots: the declared order IS the order the steps are called in, step for step, so the list a reader checks against the brief cannot say one thing while the code does another (real source)',
+    (() => {
+      /* from the steady-state marker on, which is where the order applies: the rebuild's own two
+         steps and the history day loop sit above it. The week and month sums are called through the
+         one helper that pays what the register owes, so that call counts as the step it runs. */
+      const run = rbDrv.slice(rbDrv.indexOf('---- STEADY STATE'));
+      const calls = [];
+      for (const m of (run.match(/step\('[a-z0-9]+'|await doPeriods\(\)/g) || [])) {
+        const n = m === 'await doPeriods()' ? 'periods' : m.slice(6, -1);
+        if (calls[calls.length - 1] !== n) calls.push(n);
+      }
+      return calls.join(',') === F.ADTOOL_ROLLUP_ORDER.join(',');
+    })(), (() => { const run = rbDrv.slice(rbDrv.indexOf('---- STEADY STATE')); const calls = []; for (const m of (run.match(/step\('[a-z0-9]+'|await doPeriods\(\)/g) || [])) { const n = m === 'await doPeriods()' ? 'periods' : m.slice(6, -1); if (calls[calls.length - 1] !== n) calls.push(n); } return calls; })());
+  t('roll-up slots: the catch-up slot is registered, it is the ONLY job on its minute, and that minute is on no other entry in the whole map (real source, real file)',
+    (() => {
+      let file = null; try { file = JSON.parse(readFile('engine/crons.json')); } catch (e) {}
+      const i = src.indexOf('function cronMap() {');
+      const block = i < 0 ? '' : src.slice(i, src.indexOf('\n}', i)).replace(/\/\*[\s\S]*?\*\//g, '');
+      const slots = (block.match(/'[^']+':\s*\[[^\]]*adtoolRollupsCatchup[^\]]*\]/g) || []);
+      if (slots.length !== 1 || slots[0].indexOf("'43 * * * *'") !== 0 || !/\[adtoolRollupsCatchup\]/.test(slots[0])) return false;
+      if (!file || file.crons.indexOf('43 * * * *') < 0) return false;
+      /* and the minute itself is free: no other registered slot ever falls on :43 */
+      const fires = c => { const m = String(c).split(' ')[0]; if (m === '*') return true; return m.split(',').some(part => { const st = part.split('/'); const step = st[1] ? Number(st[1]) : 1; const rg = st[0]; if (rg === '*') return 43 % step === 0; const se = rg.split('-'); const lo = Number(se[0]), hi = se[1] === undefined ? lo : Number(se[1]); return 43 >= lo && 43 <= hi && (43 - lo) % step === 0; }); };
+      return file.crons.filter(fires).join(',') === '43 * * * *';
+    })(), null);
+  t('roll-up slots: ONE lease covers both halves, so the two invocations can never roll the same finished day at once — runJob’s own lease is per job name and would not have stopped it',
+    /const ADTOOL_ROLLUP_LOCK_JOB = 'adtoolRollupFamily';/.test(src) &&
+    /const lease = await adtRollupClaim\(env, JOB, BUDGET_MS \+ ADTOOL_ROLLUP_LEASE_MARGIN_MS\);/.test(rbDrv) &&
+    rbDrv.indexOf('adtRollupClaim(env, JOB') < rbDrv.indexOf('adtJobStart(env, JOB)') &&
+    /if \(!lease\.got\) \{ await ctx_setSync\(env, JOB, '@waited'/.test(rbDrv) &&
+    /await adtRollupLeaseFree\(env\);/.test(rbDrv) && /\} finally \{/.test(rbDrv), null);
+  t('roll-up lease: the three ways out of it — an expired lease, this job’s own lease left by a run the platform stopped, and a row nobody can read at all',
+    (() => {
+      const now = 1000000;
+      const held = F.adtRollupClaimVerdict(String(now + 60000) + '|adtoolRollups', 'adtoolRollupsCatchup', now);
+      const expired = F.adtRollupClaimVerdict(String(now - 1) + '|adtoolRollups', 'adtoolRollupsCatchup', now);
+      const own = F.adtRollupClaimVerdict(String(now + 60000) + '|adtoolRollupsCatchup', 'adtoolRollupsCatchup', now);
+      const none = F.adtRollupClaimVerdict(null, 'adtoolRollups', now);
+      const junk = F.adtRollupClaimVerdict('rubbish', 'adtoolRollups', now);
+      const zero = F.adtRollupClaimVerdict('0', 'adtoolRollups', now);
+      return held.may === false && held.held_by === 'adtoolRollups' && /another 60 s/.test(held.reason) &&
+        expired.may === true && own.may === true && none.may === true && junk.may === true && zero.may === true &&
+        none.until_ms === null;
+    })(), F.adtRollupClaimVerdict('1060000|adtoolRollups', 'adtoolRollupsCatchup', 1000000));
+  t('roll-up lease: a lease that cannot be WRITTEN lets the run go ahead and says so in its own row — a day rolled twice costs a slot, a run that refuses to start is the fault being fixed',
+    (() => {
+      const cl = src.slice(src.indexOf('async function adtRollupClaim(env, who, holdMs) {'), src.indexOf('async function adtRollupLeaseFree(env) {'));
+      return /let written = true;/.test(cl) && /\.catch\(\(\) => \{ written = false; \}\)/.test(cl) &&
+        /return \{ got: true, note: written \? null : 'the roll-up family’s lease could not be written/.test(cl) &&
+        /\.first\(\)\.catch\(\(\) => null\)/.test(cl) && /\(lease\.note \? ' · ' \+ lease\.note : ''\)/.test(rbDrv);
+    })(), null);
+  t('roll-up slots: the history rebuild is the catch-up slot’s, and the hourly slot never moves the day cursor while one is part way through — its own today step would otherwise declare it finished',
+    /while \(PART === 'catchup' && cursor < histWanted\) \{/.test(rbDrv) &&
+    /if \(PART !== 'catchup'\) \{/.test(rbDrv) &&
+    /if \(cursor >= histWanted\) puts\.push\(cfgPut\('adtool_rollup_cursor', today\)\);/.test(rbDrv) &&
+    /const histOk = cursor >= adtAddDays\(today, -1\);/.test(rbDrv), null);
+
+  /* ---- item 3: the tail cursor cannot skip a new window's earliest days ----------------------- */
+  const tlW = ['2026-10-27', '2026-11-02'];     // today-9 .. today-3 on 5 Nov
+  t('tail round: with no cursor, a cursor for another window, a bare day left by the old code or the completed marker, the round starts at the EARLIEST day of the window in force',
+    (() => {
+      const none = F.adtRollupTailNext('', tlW[0], tlW[1]);
+      const off = F.adtRollupTailNext('off', tlW[0], tlW[1]);
+      const bare = F.adtRollupTailNext('2026-10-30', tlW[0], tlW[1]);
+      const other = F.adtRollupTailNext('2026-10-26|2026-11-01', tlW[0], tlW[1]);
+      const junk = F.adtRollupTailNext('rubbish', tlW[0], tlW[1]);
+      return [none, off, bare, other, junk].every(x => x.next === '2026-10-27' && x.resumed === false && x.done === false);
+    })(), F.adtRollupTailNext('2026-10-26|2026-11-01', tlW[0], tlW[1]));
+  t('tail round: THE SKIP ITSELF — yesterday’s cursor one day short of today’s last day used to make the round roll that one day, call itself complete and stamp it, which skipped six days of the window every day after',
+    (() => {
+      /* the old rule: mid-round if the day reached is inside today's window at all. Yesterday's
+         round reached 1 November, today's window is 27 Oct to 2 Nov, so 1 Nov read as mid-round and
+         the next day was 2 November, which is the window's end: one day rolled, stamp set. */
+      const oldMid = '2026-11-01' >= tlW[0] && '2026-11-01' < tlW[1];
+      const oldNext = oldMid ? '2026-11-02' : tlW[0];
+      const now = F.adtRollupTailNext('2026-10-26|2026-11-01', tlW[0], tlW[1]);
+      return oldMid === true && oldNext === '2026-11-02' && now.next === '2026-10-27' && now.resumed === false &&
+        /not this window/.test(now.source);
+    })(), null);
+  t('tail round: a round part way through THIS window is resumed at the next day, and a round that has reached the window’s last day is done rather than begun again',
+    (() => {
+      const mid = F.adtRollupTailNext('2026-10-27|2026-10-29', tlW[0], tlW[1]);
+      const atEnd = F.adtRollupTailNext('2026-10-27|2026-11-02', tlW[0], tlW[1]);
+      const past = F.adtRollupTailNext('2026-10-27|2026-11-05', tlW[0], tlW[1]);
+      return mid.next === '2026-10-30' && mid.resumed === true && mid.done === false && mid.window_from === '2026-10-27' &&
+        atEnd.next === null && atEnd.done === true && past.next === null && past.done === true;
+    })(), F.adtRollupTailNext('2026-10-27|2026-10-29', tlW[0], tlW[1]));
+  t('tail round: a whole round walks every day of its window exactly once, from the earliest to the latest, whatever day it is resumed on',
+    (() => {
+      let cur = '', seen = [], guard = 0;
+      for (;;) {
+        const v = F.adtRollupTailNext(cur, tlW[0], tlW[1]);
+        if (!v.next || guard++ > 20) break;
+        seen.push(v.next);
+        cur = v.next >= tlW[1] ? 'off' : tlW[0] + '|' + v.next;
+        if (cur === 'off') break;
+      }
+      return seen.join(',') === '2026-10-27,2026-10-28,2026-10-29,2026-10-30,2026-10-31,2026-11-01,2026-11-02' &&
+        seen.length === new Set(seen).size;
+    })(), null);
+  t('tail round: a window nobody can read is NULL and never a day — a round with no window is not a round',
+    (() => {
+      const a = F.adtRollupTailNext('2026-10-27|2026-10-28', '', tlW[1]);
+      const b = F.adtRollupTailNext('2026-10-27|2026-10-28', tlW[0], 'rubbish');
+      const c = F.adtRollupTailNext('', '2026-11-02', '2026-10-27');     // back to front
+      return a.next === null && b.next === null && c.next === null && a.done === false && c.done === false;
+    })(), null);
+
+  /* ---- item 2: the days that are behind their own sources ------------------------------------- */
+  t('days behind: 2 NOVEMBER ITSELF — the row still counts 65 orders waiting for an Ali cost where the book has 3, and that one field is enough to owe the day a re-roll',
+    (() => {
+      const v = F.adtRollupBehind(
+        { spend: 456.59, clicks: 2912, attr_units: 310, attr_revenue: 1673.12, orders: 254, pending_cost_orders: 65 },
+        { spend: 456.59, clicks: 2912, attr_units: 310, attr_revenue: 1673.12, orders: 254, pending_cost_orders: 3 });
+      return v.behind === true && v.fields.join(',') === 'pending_cost_orders' && /waiting for an Ali cost is stored as 65 where its source now says 3/.test(v.why);
+    })(), F.adtRollupBehind({ pending_cost_orders: 65 }, { pending_cost_orders: 3 }));
+  t('days behind: THE STALE VINTAGE — 12 October’s £25.52 of spend the portal counts and eBay does not, and a day where both sides agree is not behind at all',
+    (() => {
+      const bad = F.adtRollupBehind({ spend: 818.03, clicks: 5050, attr_units: 400, attr_revenue: 2867.47 }, { spend: 792.51, clicks: 5050, attr_units: 400, attr_revenue: 2876.92 });
+      const good = F.adtRollupBehind({ spend: 727.60, clicks: 4676, attr_units: 400, attr_revenue: 2338.35 }, { spend: 727.60, clicks: 4676, attr_units: 400, attr_revenue: 2338.35 });
+      return bad.behind === true && bad.fields.join(',') === 'spend,attr_revenue' && good.behind === false && good.why === null;
+    })(), F.adtRollupBehind({ spend: 818.03 }, { spend: 792.51 }));
+  t('days behind: money is judged to the penny and a count exactly, so a penny of rounding is not a day re-rolled for ever and one click is',
+    (() => {
+      const penny = F.adtRollupBehind({ spend: 100.004, clicks: 10 }, { spend: 100, clicks: 10 });
+      const tuppence = F.adtRollupBehind({ spend: 100.02, clicks: 10 }, { spend: 100, clicks: 10 });
+      const oneClick = F.adtRollupBehind({ spend: 100, clicks: 11 }, { spend: 100, clicks: 10 });
+      return penny.behind === false && tuppence.behind === true && oneClick.behind === true && oneClick.fields.join(',') === 'clicks';
+    })(), null);
+  t('days behind: A MISSING SIDE IS NOT NOUGHT — two empty sides are a quiet day and agree, while a figure against nothing is a disagreement and is said as one',
+    (() => {
+      const quiet = F.adtRollupBehind(null, null);
+      const neverBuilt = F.adtRollupBehind(null, { spend: 12.5, clicks: 40 });
+      const goneFromSource = F.adtRollupBehind({ spend: 12.5 }, {});
+      const zeroVsNull = F.adtRollupBehind({ spend: 0 }, {});
+      return quiet.behind === false && quiet.why === null && neverBuilt.behind === true && neverBuilt.fields.join(',') === 'spend,clicks' &&
+        goneFromSource.behind === true && /holds none at all/.test(goneFromSource.why) && zeroVsNull.behind === true;
+    })(), [F.adtRollupBehind(null, null), F.adtRollupBehind({ spend: 0 }, {})]);
+  t('days behind: the fields judged are the ones both sources can move — eBay’s spend, clicks, credited units and credited sales, and the book’s orders and unpriced count',
+    F.ADTOOL_OWED_FIELDS.map(f => f[0]).join(',') === 'spend,clicks,attr_units,attr_revenue,orders,pending_cost_orders' &&
+    F.ADTOOL_OWED_FIELDS.every(f => f[1] && f[1] !== f[0]) &&
+    F.ADTOOL_OWED_FIELDS.filter(f => f[2]).map(f => f[0]).join(',') === 'spend,attr_revenue', F.ADTOOL_OWED_FIELDS.map(f => f[0]));
+  t('owed queue: the queue de-duplicates, keeps only real dates, and is drained NEWEST FIRST — the newest wrong day is the one on a page, and draining that way keeps the span the week and month sums are asked to re-sum growing a day at a time',
+    (() => {
+      const q = F.adtRollupOwedDays('2026-10-12,2026-11-02,2026-10-12', ['2026-10-30', 'rubbish', '', '2026-11-02'], 60);
+      const take = F.adtRollupOwedNext(q.text);
+      const after = F.adtRollupOwedNext(take.rest);
+      return q.days.join(',') === '2026-11-02,2026-10-30,2026-10-12' && q.owed === 3 && q.dropped === 0 &&
+        take.day === '2026-11-02' && take.left === 2 && after.day === '2026-10-30';
+    })(), F.adtRollupOwedDays('2026-10-12,2026-11-02,2026-10-12', ['2026-10-30', 'rubbish', '', '2026-11-02'], 60));
+  t('owed queue: an empty queue is NULL and never a day the caller would then roll for no reason, and the queue drains to empty rather than to a day that is not there',
+    (() => {
+      const none = F.adtRollupOwedNext('');
+      const off = F.adtRollupOwedNext('off');
+      const one = F.adtRollupOwedNext('2026-11-02');
+      return none.day === null && none.owed === 0 && off.day === null && one.day === '2026-11-02' && one.rest === '' && one.left === 0 &&
+        F.adtRollupOwedNext(one.rest).day === null;
+    })(), null);
+  t('owed queue: over the cap it is the OLDEST that are dropped and the number dropped is returned rather than swallowed, and the cap cannot be filled by a month of finished days',
+    (() => {
+      const many = []; for (let i = 1; i <= 70; i++) many.push(F.adtAddDays('2026-11-05', -i));
+      const q = F.adtRollupOwedDays('', many, 5);
+      return q.days.join(',') === '2026-11-04,2026-11-03,2026-11-02,2026-11-01,2026-10-31' && q.dropped === 65 &&
+        F.ADTOOL_OWED_CAP > F.ADTOOL_OWED_SCAN_DAYS && F.ADTOOL_OWED_SCAN_DAYS === 60 &&
+        /* and the window reaches the two September days of the audit's £221.90, which a month-wide
+           one would have left uncorrectable: 5 Nov back 60 days is 6 September. */
+        F.adtAddDays('2026-11-05', -F.ADTOOL_OWED_SCAN_DAYS) <= '2026-09-27';
+    })(), F.adtRollupOwedDays('', ['2026-11-04', '2026-11-03'], 1));
+  t('days behind: the nightly comparison is three GROUPED reads and no per-listing work, and the ads side is summed the way the roll stores it — rounded per listing first — or every day in the window would read as behind by pennies for ever',
+    (() => {
+      const sc = src.slice(src.indexOf('async function adtRollupOwedScan(env, fromDay, toDay) {'), src.indexOf("/* ---- job: rollups driver"));
+      const grouped = (sc.match(/GROUP BY/g) || []).length === 4 && /GROUP BY account, item_id, date\) GROUP BY day/.test(sc);
+      const perListing = /ROUND\(SUM\(COALESCE\(spend, 0\) \+ COALESCE\(cpc_spend, 0\)\), 2\) AS sp/.test(sc);
+      const book = /SUM\(CASE WHEN COALESCE\(ali_cost, 0\) > 0 THEN 0 ELSE 1 END\) AS pending_cost_orders/.test(sc) && /status <> 'CANCELLED'/.test(sc);
+      const halfAnswer = /if \(dayRows === null \|\| adRows === null \|\| bookRows === null\) return \{ days: \[\], read: false/.test(sc);
+      return grouped && perListing && book && halfAnswer && /adtRollupBehind\(by\[d\]\.stored, by\[d\]\.live\)/.test(sc);
+    })(), null);
+  t('days behind: the comparison and the drain are ONE budgeted step, the step sits above the two fixed re-rolls, and the day it re-rolls widens the week and month register rather than losing it',
+    (() => {
+      const o = F.ADTOOL_ROLLUP_ORDER;
+      return o.indexOf('owed') > o.indexOf('periods') && o.indexOf('owed') < o.indexOf('day2') && o.indexOf('owed') < o.indexOf('tail') &&
+        F.ADTOOL_ROLLUP_STEP_MS.owed === F.ADTOOL_ROLLUP_WHOLE_DAY_MS &&
+        /await step\('owed', 'a finished day that is behind', owedScanDue \|\| !!adtRollupOwedNext\(owedText\)\.day/.test(rbDrv) &&
+        /ownedDays\.push\(take\.day\);/.test(rbDrv) && /cfgPut\('adtool_rollup_periods_owed', await oweText\(\)\)/.test(rbDrv);
+    })(), F.ADTOOL_ROLLUP_ORDER);
+  t('days behind: the order book is re-rolled for THAT DAY ONLY, bounded both ends, because an Ali cost typed after the day closed is half of why the day is behind and rolling every order since it would cost more than the day',
+    /async function adtoolOrdersRoll\(env, sinceIso, untilIso\) \{/.test(src) &&
+    /created_at >= \?1 AND created_at < \?2/.test(src) &&
+    /adtoolOrdersRoll\(env, new Date\(a0\)\.toISOString\(\), new Date\(a1\)\.toISOString\(\)\)/.test(rbDrv) &&
+    /const a0 = adtUkMidnightUtcMs\(take\.day\), a1 = adtUkMidnightUtcMs\(adtAddDays\(take\.day, 1\)\);/.test(rbDrv), null);
+
+  /* ---- item 4: a part-finished day can never be drawn as the fleet --------------------------- */
+  t('last complete day: every page read of "the newest day the table holds" is capped at the day the pass FINISHED — stages, descriptors, pattern profiles and forecasts, with not one uncapped read left (real source)',
+    (() => {
+      const bare = src.match(/MAX\(day\)[^)]*FROM adtool_(stages|descriptors)[^)]*\)|MAX\(computed_day\)[^)]*FROM adtool_profiles[^)]*\)|MAX\(made_day\)[^)]*FROM adtool_forecast[^)]*\)/g) || [];
+      const uncapped = bare.filter(x => !/DAY_SQL/.test(x));
+      const capped = bare.filter(x => /DAY_SQL/.test(x));
+      return uncapped.length === 0 && capped.length >= 13 &&
+        /MAX\(day\) AS d FROM adtool_stages WHERE day <= ' \+ ADTOOL_PROFILES_DAY_SQL/.test(src) &&
+        /MAX\(made_day\) AS d FROM adtool_forecast WHERE made_day <= ' \+ ADTOOL_FORECAST_DAY_SQL/.test(src);
+    })(), (src.match(/MAX\(day\)[^)]*FROM adtool_(stages|descriptors)[^)]*\)|MAX\(computed_day\)[^)]*FROM adtool_profiles[^)]*\)|MAX\(made_day\)[^)]*FROM adtool_forecast[^)]*\)/g) || []).filter(x => !/DAY_SQL/.test(x)));
+  t('last complete day: the cap has a WAY OUT — a database with no stamp yet answers exactly as it did before, because a cap with no way out would empty every page it sits on',
+    /COALESCE\(\(SELECT value FROM portal_config WHERE key = 'adtool_profiles_day'\), '9999-12-31'\)/.test(F.ADTOOL_PROFILES_DAY_SQL) &&
+    /COALESCE\(\(SELECT value FROM portal_config WHERE key = 'adtool_forecast_day'\), '9999-12-31'\)/.test(F.ADTOOL_FORECAST_DAY_SQL) &&
+    F.ADTOOL_PROFILES_DAY_SQL !== F.ADTOOL_FORECAST_DAY_SQL,
+    [F.ADTOOL_PROFILES_DAY_SQL, F.ADTOOL_FORECAST_DAY_SQL]);
+  t('last complete day: the stamp is written ONLY where the pass completed, and in the same batch as the cursor that agrees it did — a stamp for a day whose cursor says otherwise must never be readable',
+    (() => {
+      const pr = src.slice(src.indexOf('async function adtoolProfiles(env) {'), src.indexOf('/* ADTOOL-P3-END'));
+      const fc = src.slice(src.indexOf('async function adtoolForecast(env) {'), src.indexOf('async function adtForecastBundle(env, iid) {'));
+      return /if \(finished\) profPuts\.push\(/.test(pr) && /'adtool_profiles_day'/.test(pr) && /await adtBatch\(env, profPuts\);/.test(pr) &&
+        /if \(reached\) fcPuts\.push\(/.test(fc) && /'adtool_forecast_day'/.test(fc) && /await adtBatch\(env, fcPuts\);/.test(fc) &&
+        !/'adtool_profiles_day'/.test(pr.slice(0, pr.indexOf('const finished =')));
+    })(), null);
+  t('last complete day: the pattern pass and the forecasts are run until their cursor says done, every call through the budget gate, with a ceiling so one step cannot eat a whole slot',
+    /while \(!profDone && profBatches < ADTOOL_ROLLUP_PASS_CALLS\) \{/.test(rbDrv) &&
+    /while \(fcOn && fcBatches < ADTOOL_ROLLUP_PASS_CALLS && !fcDone\) \{/.test(rbDrv) &&
+    /profDone = String\(await adtFlag\(env, 'adtool_profiles_cursor'\) \|\| ''\) === today \+ '\|done';/.test(rbDrv) &&
+    /fcDone = String\(await adtFlag\(env, 'adtool_forecast_cursor'\) \|\| ''\) === today \+ '\|done';/.test(rbDrv) &&
+    F.ADTOOL_ROLLUP_PASS_CALLS === 4 && F.ADTOOL_ROLLUP_PASS_CALLS * 600 >= 1647 && F.ADTOOL_ROLLUP_PASS_CALLS * 300 >= 1200, F.ADTOOL_ROLLUP_PASS_CALLS);
+
+  /* ---- item 5: the once-over the audit's own fifteen days need ------------------------------- */
+  t('the once-over: the fifteen days the audit named are held as the two SPANS it found them in, it runs by key, it sits on no cron slot, and it drains under the same gate so it cannot be killed either',
+    (() => {
+      const cm = src.slice(src.indexOf('function cronMap() {'), src.indexOf('export default {'));
+      const noCron = cm.length > 1000 && cm.indexOf('adtoolRollupOwedSeed') < 0;
+      const rk = src.slice(src.indexOf('  runJobKey: {'), src.indexOf('  asRunJob: {'));
+      const byKey = /adtoolRollupsCatchup, adtoolRollupOwedSeed,/.test(rk);
+      const spans = /const ADTOOL_OWED_SEED_SPANS = \[\['2026-10-12', '2026-10-21'\], \['2026-10-29', '2026-11-02'\]\];/.test(src);
+      const gated = /const pl = adtRollupPlan\(\{ now_ms: Date\.now\(\), t0: t0, budget_ms: ADTOOL_ROLLUP_CATCHUP_BUDGET_MS/.test(rbSeed) && /if \(!pl\.run\.length\) break;/.test(rbSeed);
+      const leased = /await adtRollupClaim\(env, 'adtoolRollupOwedSeed'/.test(rbSeed) && /await adtRollupLeaseFree\(env\);/.test(rbSeed);
+      const pays = /rows \+= await adtoolRollupPeriods\(env, owe\.from, owe\.to\);/.test(rbSeed);
+      return noCron && byKey && spans && gated && leased && pays && /d < today/.test(rbSeed);
+    })(), null);
+  t('the once-over: nothing in any of it reaches eBay — it reads the engine’s own tables and writes the engine’s own tables, like every other step of the roll-up',
+    (() => {
+      const code = rbSeed.replace(/\/\*[\s\S]*?\*\//g, '') + src.slice(src.indexOf('async function adtRollupOwedScan(env, fromDay, toDay) {'), src.indexOf("/* ---- job: rollups driver")).replace(/\/\*[\s\S]*?\*\//g, '');
+      return !/fetch\(/.test(code) && !/ebay(Call|Trade|Fetch|Token)/i.test(code) && /env\.DB\.prepare/.test(code);
+    })(), null);
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
