@@ -6829,6 +6829,19 @@ function run(argv) {
       return !/fetch\(/.test(code) && !/ebay(Call|Trade|Fetch|Token)/i.test(code) && /env\.DB\.prepare/.test(code);
     })(), null);
 
+  /* 6 Nov: a listing whose clocks are known gets a projected date, so the Friday batch can place it */
+  t('sale eligibility: a running clock projects its date (price changed 9 days ago -> eligible in 5), and an eligible listing keeps today', (() => {
+    const db = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+    const r1 = F.adtSaleEligibility({ price_steady_days: 9, start_time: '2026-09-01' }, '2026-11-06', db);
+    const r2 = F.adtSaleEligibility({ price_steady_days: 20, start_time: '2026-11-05' }, '2026-11-06', db);
+    const r3 = F.adtSaleEligibility({ price_steady_days: 20, start_time: '2026-09-01' }, '2026-11-06', db);
+    const r4 = F.adtSaleEligibility({}, '2026-11-06', db);
+    return r1.eligible === false && r1.eligible_on === '2026-11-11' && r1.projected === true &&
+      r2.eligible === false && r2.eligible_on === '2026-11-19' && r2.projected === true &&
+      r3.eligible === true && r3.eligible_on === '2026-11-06' && r3.projected === false &&
+      r4.eligible === false && r4.eligible_on === null && r4.projected === false;
+  })(), null);
+
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
   return lines.join('\n') + '\n' + (passed === results.length ? 'PASS ' : 'FAIL ') + passed + '/' + results.length;

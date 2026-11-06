@@ -10744,10 +10744,22 @@ function adtSaleEligibility(row, today, daysBetween) {
   if (steady != null && steady < 14) reasons.push(basis === 'price' ? 'price changed ' + steady + ' days ago, needs 14' : 'revised ' + steady + ' days ago, needs 14');
   if (steady == null && ageDays == null) reasons.push('no listing dates');
   const eligible = reasons.length === 0;
+  /* 6 Nov: when the clocks are known the date is known too. "price changed 9 days ago, needs 14" is
+     a date five days out, and under the Friday batch that is the difference between "no date yet"
+     and "next Friday". The projection is the longest of the clocks still running; `projected` says
+     it is a forecast of the rule, not an observed date. */
+  let projected = null;
+  if (!eligible) {
+    const need = [];
+    if (ageDays != null && ageDays < 14) need.push(14 - ageDays);
+    if (steady != null && steady < 14) need.push(14 - steady);
+    if (need.length) projected = adtAddDays(today, Math.max.apply(null, need));
+  }
   return {
     eligible, basis, steady_days: steady, age_days: ageDays,
     why: reasons.join(' · '),
-    eligible_on: eligible ? today : null
+    eligible_on: eligible ? today : projected,
+    projected: !eligible && !!projected
   };
 }
 /* ---- Phase 5 (27 Sep 2026 big update, plan §3): the OBSERVED sale-event lifecycle ----
