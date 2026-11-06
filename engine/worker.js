@@ -28352,6 +28352,13 @@ const ROUTES = {
           else if (where[n].also) { where[n].also.push(cron); } else { where[n].also = [cron]; }
         }
       }
+      /* 6 Nov: some jobs ride an hourly slot but gate themselves to once a day in their own code
+         (uncampaignedDigest and darkAccountWatch return when their cursor is already today;
+         alertAckWatch and nightlyCatchup write their own row only when they act). Judged against the
+         slot alone they read as half a day overdue every afternoon, which is a false alarm that would
+         teach a reader to ignore the real ones. Their expected cadence is a day. */
+      const SELF_DAILY = { uncampaignedDigest: 1440, darkAccountWatch: 1440, alertAckWatch: 1440, nightlyCatchup: 1440 };
+      for (const n of Object.keys(SELF_DAILY)) { if (where[n]) { where[n].every_min = SELF_DAILY[n]; where[n].self_gated = 'once a day, in its own code'; } }
       const rows = (await ctx.env.DB.prepare("SELECT job, last_ok, last_error FROM sync_state WHERE account = '' LIMIT 400").all()).results || [];
       const seen = {}; for (const r of rows) seen[String(r.job)] = r;
       const now = await ctx.env.DB.prepare("SELECT datetime('now') AS now").first().catch(() => null);

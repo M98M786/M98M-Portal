@@ -27836,10 +27836,25 @@ const ROUTES = {
           "MAX(created_at) AS last_order_at " +
           "FROM orders WHERE created_at >= datetime('now','-30 day') AND status != 'NOT_FOUND' GROUP BY account ORDER BY revenue_30d DESC",
       };
+      /* 6 Nov: the advertising tool's own hour grain, so a weekday-by-hour wastage study can be run
+         off this machine without a dashboard session. Bound reads only (a day window and, for the big
+         hour table, one account at a time) so a page never becomes a full-table scan; the hour table
+         is read on its own primary key order. Read-only, like every other entry here. */
+      const ymd = (v, d) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : d);
+      const acct = String(p.account || '').slice(0, 40);
+      const from = ymd(p.from, '2026-09-17'), to = ymd(p.to, '2099-12-31');
+      const TB = {
+        adtool_scope_hour: { sql: 'SELECT scope, scope_id, day, hour, orders, units, revenue, spend_s, clicks_s, attr_units_s FROM adtool_scope_hour WHERE day >= ?1 AND day <= ?2 ORDER BY scope, scope_id, day, hour', binds: [from, to] },
+        adtool_orders: { sql: 'SELECT account, order_id, item_id, created_utc, created_local, local_date, local_hour, slot, weekday, qty, sale_price, status, refunded, ali_cost, ebay_fees, order_earning, vat_ex_ads, raw_ex_ads, cost_pending, ad_attributed FROM adtool_orders WHERE local_date >= ?1 AND local_date <= ?2 ORDER BY local_date, account, order_id', binds: [from, to] },
+        adtool_listing_hour: { sql: 'SELECT account, item_id, day, hour, orders, units, revenue, clicks_s, spend_s, attr_units_s, clicks_r, spend_r, attr_units_r, samples, hourly_status, carry_spend FROM adtool_listing_hour WHERE account = ?3 AND day >= ?1 AND day <= ?2 ORDER BY item_id, day, hour', binds: [from, to, acct], needsAccount: true },
+      };
       const t = String(p.table || '');
-      if (!T[t]) return { tables: Object.keys(T) };
+      if (!T[t] && !TB[t]) return { tables: Object.keys(T).concat(Object.keys(TB)) };
       const limit = Math.min(Number(p.limit) || 2500, 4000), offset = Math.max(Number(p.offset) || 0, 0);
-      const rs = await ctx.env.DB.prepare(T[t] + ' LIMIT ' + limit + ' OFFSET ' + offset).all();
+      if (TB[t] && TB[t].needsAccount && !acct) throw new Error('SAY: name the account');
+      const rs = TB[t]
+        ? await ctx.env.DB.prepare(TB[t].sql + ' LIMIT ' + limit + ' OFFSET ' + offset).bind(...TB[t].binds).all()
+        : await ctx.env.DB.prepare(T[t] + ' LIMIT ' + limit + ' OFFSET ' + offset).all();
       const rows = rs.results || [];
       const header = rows.length ? Object.keys(rows[0]) : [];
       return { table: t, offset, header, rows: rows.map((r) => header.map((h) => r[h])), n: rows.length, done: rows.length < limit };
@@ -28337,6 +28352,13 @@ const ROUTES = {
           else if (where[n].also) { where[n].also.push(cron); } else { where[n].also = [cron]; }
         }
       }
+      /* 6 Nov: some jobs ride an hourly slot but gate themselves to once a day in their own code
+         (uncampaignedDigest and darkAccountWatch return when their cursor is already today;
+         alertAckWatch and nightlyCatchup write their own row only when they act). Judged against the
+         slot alone they read as half a day overdue every afternoon, which is a false alarm that would
+         teach a reader to ignore the real ones. Their expected cadence is a day. */
+      const SELF_DAILY = { uncampaignedDigest: 1440, darkAccountWatch: 1440, alertAckWatch: 1440, nightlyCatchup: 1440 };
+      for (const n of Object.keys(SELF_DAILY)) { if (where[n]) { where[n].every_min = SELF_DAILY[n]; where[n].self_gated = 'once a day, in its own code'; } }
       const rows = (await ctx.env.DB.prepare("SELECT job, last_ok, last_error FROM sync_state WHERE account = '' LIMIT 400").all()).results || [];
       const seen = {}; for (const r of rows) seen[String(r.job)] = r;
       const now = await ctx.env.DB.prepare("SELECT datetime('now') AS now").first().catch(() => null);
