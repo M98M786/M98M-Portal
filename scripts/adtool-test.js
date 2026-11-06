@@ -6426,8 +6426,10 @@ function run(argv) {
     const v = (src.match(/const ADTOOL_SCHEMA_VERSION = '([^']+)';/) || [])[1] || '';
     const h = (src.match(/const ADTOOL_SCHEMA_DDL_HASH = '([^']+)';/) || [])[1] || '';
     const moved = v !== '2026-11-02.1' && h !== '195-b1518cd2';
-    /* the count in the hash is the DDL statement count, and it has grown by exactly these four */
-    const grew = h.indexOf('199-') === 0;
+    /* the count in the hash is the DDL statement count, and it is never again below the 199 these
+       four brought it to (6 Nov took it to 208; the placement test above is what holds these four
+       in the file, so this one only has to refuse a count that has gone BACKWARDS) */
+    const grew = Number(String(h).split('-')[0] || 0) >= 199;
     return moved && grew && /^\d{4}-\d{2}-\d{2}\.\d+$/.test(v);
   })(), null);
   t('billions of rows: the queries those indexes were measured against still lead with the indexed column (regex on the SQL shape, not an EXPLAIN)', (() => {
@@ -6497,6 +6499,131 @@ function run(argv) {
     /* and it is still wired into the run, not merely declared */
     const used = (src.match(/adtRollupForced\(/g) || []).length >= 2;
     return force && used;
+  })(), null);
+
+  /* ══ THE NIGHT-TIME BASELINE: 40 MILLION ROWS AN HOUR WITH NOBODY SIGNED IN (6 Nov) ══════════
+     Yesterday's indexes took the day from 3.9 billion rows read to a pace of 1.2 billion and what
+     was left was FLAT — 40.2 million rows an hour between midnight and 04:00 UTC, which is the
+     cron slots alone and is also the bill. Read out of Cloudflare's own per-query figures for the
+     database (d1QueriesAdaptiveGroups, 6 Nov) rather than guessed at, and it was six query shapes
+     on five tables that carried no index at all plus one guard asked on the wrong side of a read.
+     EVERY TEST IN THIS BLOCK IS A REGEX ON THE SQL SHAPE OR THE CODE'S OWN ORDER, and that is
+     deliberate and stated once: THE HARNESS HAS NO DATABASE, so no EXPLAIN plan can be asserted
+     here. The plans were measured on a local SQLite built from this file's own DDL at the live row
+     counts (adsAuditProbe check=counts, 6 Nov) with the planner's own statistics thrown away, so
+     the model answers the way a database that has never been ANALYZEd does — which is how the
+     figures above were earned. What can be held is the shape those plans were measured against. ══ */
+  t('night baseline: the nine indexes the night\'s reads were measured without are each in a guarded DDL family, named after the query it serves (regex on the DDL text — the harness has no database to EXPLAIN against)', (() => {
+    const truth = src.slice(src.indexOf('async function ensureTruthSchema(env) {'), src.indexOf("let tag = 'schema:'"));
+    const intra = src.slice(src.indexOf('async function ensureAdtoolSchema(env) {'), src.indexOf('async function adtoolIntradayOn(env) {'));
+    const want = [
+      /* alertAckWatch's own NOT EXISTS, and every `WHERE ref = ?` probe in the file: 20.2 million
+         rows an hour, half the night's whole bill */
+      ['"CREATE INDEX IF NOT EXISTS idx_alert_log_ref ON alert_log(ref)"', truth],
+      /* the open-letter slice: the candidate read's outer, and the two nightly tidy-ups */
+      ['"CREATE INDEX IF NOT EXISTS idx_alert_log_open ON alert_log(resolved_at, created_at)"', truth],
+      /* cpcAudit's once-a-day-per-listing guard: 6.7 million rows an hour */
+      ['"CREATE INDEX IF NOT EXISTS idx_campev_item_rule ON campaign_events(item_id, change_type, at)"', truth],
+      /* the alert fixture's per-listing fee check and Potential CPC's last-CPC-day read */
+      ['"CREATE INDEX IF NOT EXISTS idx_ads_daily_item ON ads_daily(item_id, date)"', truth],
+      /* the feedback book, read one account at a time every hour */
+      ['"CREATE INDEX IF NOT EXISTS idx_feedback_account_at ON feedback(account, at)"', truth],
+      /* the three shapes ad_report_tasks is read in: the five-minute poll, the roll-up's report
+         status, and the two-hour zombie sweep */
+      ['"CREATE INDEX IF NOT EXISTS idx_art_account_status ON ad_report_tasks(account, status, created_at)"', truth],
+      ['"CREATE INDEX IF NOT EXISTS idx_art_day_status ON ad_report_tasks(report_date, status)"', truth],
+      ['"CREATE INDEX IF NOT EXISTS idx_art_status_created ON ad_report_tasks(status, created_at)"', truth],
+      /* MAX(sampled_at) over the tick ledger, asked by six readers */
+      ["'CREATE INDEX IF NOT EXISTS idx_adt_ticks_sampled ON adtool_intraday_ticks(sampled_at)'", intra],
+    ];
+    const placed = want.every(w => w[1].indexOf(w[0]) >= 0);
+    /* and each is named after the query it is for, in a comment beside it */
+    const named = /idx_alert_log_ref — THE BIGGEST SINGLE READ IN THE SYSTEM/.test(src) &&
+      /idx_alert_log_open — the other half of the same read/.test(src) &&
+      /idx_campev_item_rule — cpcAudit's once-a-day-per-listing guard/.test(src) &&
+      /idx_ads_daily_item — 1\.8 million rows an hour/.test(src) &&
+      /idx_feedback_account_at — 1\.9 million rows an hour/.test(src) &&
+      /idx_art_account_status, idx_art_day_status, idx_art_status_created — ad_report_tasks has/.test(src) &&
+      /THE WHOLE TICK LEDGER FOR ONE ROW/.test(src);
+    return placed && named;
+  })(), null);
+  t('night baseline: the schema version and the DDL hash both moved with those nine CREATE INDEX statements, or a database already marked would never be given them', (() => {
+    const v = (src.match(/const ADTOOL_SCHEMA_VERSION = '([^']+)';/) || [])[1] || '';
+    const h = (src.match(/const ADTOOL_SCHEMA_DDL_HASH = '([^']+)';/) || [])[1] || '';
+    /* not the version or the hash the 5 November markers were written under */
+    const moved = v !== '2026-11-05.1' && h !== '199-4f19ee92' && /^\d{4}-\d{2}-\d{2}\.\d+$/.test(v);
+    /* 199 statements plus exactly these nine. The hash itself is pinned by the fingerprint test
+       further up this file, which recomputes it from the source. */
+    const grew = String(h).split('-')[0] === '208';
+    return moved && grew;
+  })(), null);
+  t('night baseline: alertAckWatch asks its once-a-day gate BEFORE the candidate read, so the 23 runs a day with nothing to do cost one row instead of 12.8 million', (() => {
+    const fn = src.slice(src.indexOf('async function alertAckWatch(env) {'), src.indexOf('async function statusRefresh(env) {'));
+    const gate = fn.indexOf("const dayRef = 'engine:acksla:day:' + ukDate('');");
+    const read = fn.indexOf('SELECT id, to_addr, type, message, created_at FROM alert_log');
+    const ret = fn.indexOf('if (already) return;');
+    /* the gate, its return, and then the read — in that order, and the gate declared exactly once */
+    const ordered = gate > 0 && read > gate && ret > gate && ret < read &&
+      (fn.match(/const dayRef = /g) || []).length === 1 &&
+      (fn.match(/if \(already\) return;/g) || []).length === 1;
+    /* and nothing it writes has moved above the gate: the digest and every per-alert marker are
+       still written after it, which is why the order can change without changing what happens */
+    const writesAfter = fn.indexOf("await notifyRole(env, 'Management', 'Alert not acknowledged in time'") > ret &&
+      fn.indexOf("INSERT INTO alert_log (to_addr, type, message, ref, created_at) ") > ret;
+    return ordered && writesAfter;
+  })(), null);
+  t('night baseline: cpcAudit asks its day guard as a RANGE over `at` and never date(at) = date(\'now\'), which no index can answer', (() => {
+    /* 530 asks an hour, each a whole walk of campaign_events while the day was a function of the
+       column. `at` is written by every writer of this table as datetime('now'), so the range is
+       the same UTC day and the same set of rows. */
+    const ranged = /SELECT 1 AS x FROM campaign_events WHERE change_type = 'cpc_rule' AND item_id = \?1 AND at >= date\('now'\) AND at < date\('now', '\+1 day'\)/.test(src);
+    /* and the date() form is gone from the engine entirely, not merely from this one read */
+    const gone = src.indexOf("date(at) = date('now')") < 0;
+    /* every writer of campaign_events.at still writes datetime('now'), which is what makes the
+         range the same set of rows — if one of them ever writes something else, this fails */
+    const writes = (src.match(/INSERT INTO campaign_events \([^)]*\) VALUES \([^)]*datetime\('now'\)\)/g) || []).length ===
+      (src.match(/INSERT INTO campaign_events \(/g) || []).length;
+    /* the guard still decides the same thing: a listing already reported today is skipped */
+    const same = /\.bind\(String\(r\.item_id\)\)\.first\(\);\n    if \(seen\) continue;/.test(src);
+    return ranged && gone && writes && same;
+  })(), null);
+  t('night baseline: the queries those nine indexes were measured against still lead with the columns each index leads with (regex on the SQL shape, not an EXPLAIN)', (() => {
+    /* alert_log by ref: the correlated NOT EXISTS, the probes, and the file-unless-filed insert */
+    const byRef = /NOT EXISTS \(SELECT 1 FROM alert_log a2 WHERE a2\.ref = 'engine:acksla:' \|\| alert_log\.id\)/.test(src) &&
+      (src.match(/FROM alert_log WHERE ref = \?1 LIMIT 1/g) || []).length >= 4 &&
+      (src.match(/FROM alert_log WHERE to_addr = \?1 AND ref = \?2/g) || []).length >= 3 &&
+      /WHERE NOT EXISTS \(SELECT 1 FROM alert_log WHERE to_addr = \?1 AND ref = \?4\)/.test(src);
+    /* alert_log open + aged: the candidate read and the two tidy-ups */
+    const byOpen = /WHERE resolved_at = '' AND type != 'Alert not acknowledged in time' /.test(src) &&
+      /WHERE resolved_at = '' AND type LIKE '%ast%' AND created_at < datetime\('now', '-1 day'\)/.test(src) &&
+      /WHERE resolved_at = '' AND created_at < datetime\('now', '-14 days'\)/.test(src);
+    /* ads_daily by item */
+    const byItem = /FROM ads_daily WHERE item_id = \?1 AND spend > 0 AND cpc_spend > 0/.test(src) &&
+      /FROM ads_daily ad JOIN items_api ia ON ia\.item_id = ad\.item_id WHERE ad\.cpc_spend > 0 AND ad\.date >= \?1/.test(src);
+    /* feedback by account */
+    const byAcct = /SELECT fb_key FROM feedback WHERE account = \?1/.test(src);
+    /* ad_report_tasks: account+status, report_date+status, status+age */
+    const byTask = /FROM ad_report_tasks WHERE account = \?1 AND status = 'PENDING' AND family LIKE '%_intra'/.test(src) &&
+      /FROM ad_report_tasks WHERE report_date = \?1 AND status = 'INGESTED' AND family NOT LIKE '%_intra' GROUP BY account/.test(src) &&
+      /FROM ad_report_tasks WHERE account = \?1 AND status IN \('PENDING', 'SUCCESS'\) AND family NOT LIKE '%_intra' ORDER BY created_at/.test(src) &&
+      /UPDATE ad_report_tasks SET status = 'FAILED', error = 'intraday timeout' WHERE status = 'PENDING' AND family LIKE '%_intra' AND created_at < datetime\('now', '-2 hour'\)/.test(src);
+    /* the tick ledger's MAX, in every place that asks it (the freshness badge, the five-minute
+       today grain, the today-freshness verdict, the hourly A23 alert and the two probes) */
+    const byTick = (src.match(/SELECT MAX\(sampled_at\) AS t FROM adtool_intraday_ticks/g) || []).length >= 4;
+    return byRef && byOpen && byItem && byAcct && byTask && byTick;
+  })(), null);
+  t('night baseline: nothing in this pass touched the roll-up, the Sale event route or the warm — the night\'s bill was in the watchers, not the advertising tool', (() => {
+    /* said out loud because the suspects were the other way about: the roll-up's own steps, the
+       catch-up and the hourly page warm are between them under a tenth of what the alert ledger
+       and the CPC guard were spending, so none of them was changed and the forced way out and the
+       warm's horizon are exactly as they were. */
+    const rollup = /await step\('today', 'today', true, '', async \(\) => \{/.test(src) &&
+      /function adtRollupForced\(skips, name, after\) \{/.test(src) &&
+      /function adtWarmUntil\(nowMs, minAheadMs\) \{/.test(src) &&
+      /const jobs = \[\['adtoolCpcListings', \{ period: 'd30', mode: 'active' \}, true\]/.test(src);
+    /* and the Sale event route, which a second pair of hands is editing, is untouched here */
+    const sales = src.indexOf('adtoolSales:') >= 0;
+    return rollup && sales;
   })(), null);
 
   /* ================= THE ROLL-UP'S STARVATION (owner, 5 Nov: "the whole system is stuck") =========

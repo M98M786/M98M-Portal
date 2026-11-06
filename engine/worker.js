@@ -1052,9 +1052,9 @@ function pvTokens(s) {
    every DDL statement in the file, which is wider than these families on purpose: a CREATE put
    anywhere is a reason to look. That is deliberate: a marker that could go stale by accident is a
    column that never lands. */
-const ADTOOL_SCHEMA_VERSION = '2026-11-05.1';
+const ADTOOL_SCHEMA_VERSION = '2026-11-06.1';
 /* the fingerprint of every DDL statement in engine/worker.js, held to this value by the suite */
-const ADTOOL_SCHEMA_DDL_HASH = '199-4f19ee92';
+const ADTOOL_SCHEMA_DDL_HASH = '208-68ff602e';
 const ADTOOL_SCHEMA_KEY = 'adtool_schema_version';
 let ADTOOL_SCHEMA_MARK = null;      /* the one marker read per isolate */
 let ADTOOL_SCHEMA_SETTLE = null;    /* the one apply pass per isolate, and the proof DDL ran here */
@@ -2073,6 +2073,14 @@ function alertStrict(type) {
    hours; everything else gets a 6-hour grace so the mail does not become noise. The escalation is
    itself a letter (ref engine:acksla:<id>) so it never re-escalates and never files twice. */
 async function alertAckWatch(env) {
+  /* ONCE A DAY IS ASKED FIRST (6 Nov). This digest goes out once a UK day and the gate for that was
+     at the BOTTOM, after the candidate read — so on the twenty-three runs a day that had nothing to
+     do, the engine still paid for the heaviest read in the whole system before finding out. The
+     check moved here, nothing else: if the day's letter is already filed this job did nothing
+     below in any case, because the letter and the per-alert markers are both written after it. */
+  const dayRef = 'engine:acksla:day:' + ukDate('');
+  const already = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1').bind(dayRef).first();
+  if (already) return;
   const rows = (await env.DB.prepare(
     "SELECT id, to_addr, type, message, created_at FROM alert_log " +
     "WHERE resolved_at = '' AND type != 'Alert not acknowledged in time' " +
@@ -2100,10 +2108,8 @@ async function alertAckWatch(env) {
   if (!due.length) return;
   /* ONCE A DAY, not hourly (25 Aug): the hourly digest × every Management recipient had itself
      become the single biggest pile of unread mail (498 of 2,045). The Management desk already
-     shows the live unacknowledged count all day — this letter only needs to open the day. */
-  const dayRef = 'engine:acksla:day:' + ukDate('');
-  const already = await env.DB.prepare('SELECT 1 AS x FROM alert_log WHERE ref = ?1 LIMIT 1').bind(dayRef).first();
-  if (already) return;
+     shows the live unacknowledged count all day — this letter only needs to open the day.
+     The gate itself is at the TOP of this function now (6 Nov) — see the note there. */
   const strictN = due.filter((d) => d.strict).length;
   const lines = due.slice(0, 8).map((d) =>
     (d.strict ? '⛔ ' : '⚠ ') + d.type + ' → ' + String(d.to).split('@')[0] + ' (' + d.ageH + 'h)').join(' · ');
@@ -18392,6 +18398,13 @@ async function ensureAdtoolSchema(env) {
     "CREATE TABLE IF NOT EXISTS adtool_intraday_ticks (account TEXT NOT NULL, family TEXT NOT NULL, report_day TEXT NOT NULL, sampled_at TEXT NOT NULL, task_id TEXT DEFAULT '', " +
       "kicked_at TEXT DEFAULT '', rows_total INTEGER DEFAULT 0, rows_changed INTEGER DEFAULT 0, rows_corrected INTEGER DEFAULT 0, source TEXT DEFAULT 'api', " +
       "PRIMARY KEY (account, family, report_day, sampled_at))",
+    /* 6 Nov: THE WHOLE TICK LEDGER FOR ONE ROW. 'SELECT MAX(sampled_at) FROM adtool_intraday_ticks'
+       is how six readers ask when the sampler last ran — the freshness badge, the five-minute today
+       grain, the today-freshness verdict, the hourly A23 alert and the two key-authed probes — and
+       the primary key above leads with the account, so the answer cost a walk of all 111,000 ticks
+       every time: 1.3 million rows an hour over the night as a whole. Leading with sampled_at makes
+       MAX a single seek, as SQLite answers one aggregate off an index: 444,371 steps to 15. */
+    'CREATE INDEX IF NOT EXISTS idx_adt_ticks_sampled ON adtool_intraday_ticks(sampled_at)',
   ];
   await adtDdlRun(env, ddl);
   ADTOOL_SCHEMA_OK = true;
@@ -20325,8 +20338,17 @@ async function cpcAudit(env) {
   const today = ukDate('');
   const digest = [];
   for (const r of (bad.results || [])) {
+    /* THE DAY AS A RANGE AND NOT A date() (6 Nov). This guard is asked once per candidate listing
+       on every five-minute tick — about 530 times an hour — and `date(at)` is a function of the
+       column, so no index could answer it and each ask walked all 12,500 campaign events: 6.7
+       million rows an hour, the second biggest read in the night's bill. `at` is written by every
+       writer of this table as datetime('now'), which is 'YYYY-MM-DD HH:MM:SS' in UTC, so
+       `at >= date('now') AND at < date('now', '+1 day')` is the SAME SET OF ROWS — the same UTC
+       day, by the lexical comparison this file uses on dates everywhere else — and it rides
+       idx_campev_item_rule's own third column. A row with a blank or missing `at` matched neither
+       form. Nothing about which listings are reported, or how often, moves. */
     const seen = await env.DB.prepare(
-      "SELECT 1 AS x FROM campaign_events WHERE change_type = 'cpc_rule' AND item_id = ?1 AND date(at) = date('now')"
+      "SELECT 1 AS x FROM campaign_events WHERE change_type = 'cpc_rule' AND item_id = ?1 AND at >= date('now') AND at < date('now', '+1 day')"
     ).bind(String(r.item_id)).first();
     if (seen) continue;
     const msg = '🔴 Wrong CPC decision · ' + r.account + ' · ' + String(r.title || '').slice(0, 60) +
@@ -20922,6 +20944,60 @@ async function ensureTruthSchema(env) {
     "CREATE INDEX IF NOT EXISTS idx_orders_item ON orders(item_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_ads_daily_date ON ads_daily(date)",
+    /* ---- THE NIGHT-TIME BASELINE: THE FIVE TABLES THE CRONS WERE WALKING WHOLE (6 Nov) -------
+       Yesterday's three indexes took the day from 3.9 billion rows to a pace of 1.2 billion, and
+       what was left was FLAT: ~40 million rows an hour between midnight and 04:00 UTC with nobody
+       signed in, which is the scheduled work alone and is also the bill. Read out of Cloudflare's
+       own per-query figures for 6 November rather than guessed at: the whole of it is six query
+       shapes on five tables that carry no index at all, each walked end to end once per watcher
+       run. Every index below is named after the query it is for and was checked against the
+       engine's own plans on a copy of the live row counts, with the planner's statistics thrown
+       away so the model answers the way a database that has never been ANALYZEd does.
+         idx_alert_log_ref — THE BIGGEST SINGLE READ IN THE SYSTEM, at 20.2 million rows an hour,
+           half the night's whole bill. alert_log is 14,700 rows and every letter this engine has
+           ever filed is deduped by its `ref`, which nothing could look up: alertAckWatch's own
+           candidate read carries `NOT EXISTS (SELECT 1 FROM alert_log a2 WHERE a2.ref = ...)` once
+           per candidate, so one run of it read 12.8 MILLION rows — 870 candidates times the whole
+           table — eight times a night for a digest that goes out once a day. The same miss is in
+           every `WHERE ref = ?` probe in this file (sleepWatch, cpcAudit, processWatch, the waste
+           alarm, the zero-sale scan), in the 'file this letter unless it is already filed' insert,
+           and inside cpcRevisionWatch's own NOT EXISTS. Measured on the model: 12,498,807 steps to
+           602 for the candidate read, and 44,022 to 10 for a probe.
+         idx_alert_log_open — the other half of the same read, and of the two nightly tidy-ups that
+           close superseded letters: `resolved_at = '' AND created_at` over a day or three is a
+           slice of a few hundred rows and was the whole table. 44,860 steps to 1,229.
+         idx_campev_item_rule — cpcAudit's once-a-day-per-listing guard, 6.7 million rows an hour
+           and the second biggest thing here. campaign_events is 12,500 rows and carries an index
+           on (account, at), which a read that names the LISTING and not the account cannot use, so
+           the guard walked the whole table once per candidate listing — about 530 times an hour.
+           It is (item_id, change_type, at) because that is the whole of the guard's own WHERE, and
+           `at` is in it so the day leg rides the index too (see the rewrite at cpcAudit). 41,705
+           steps to 23.
+         idx_ads_daily_item — 1.8 million rows an hour. ads_daily's primary key is (account,
+           item_id, date), so a read that names the item and not the account reached nothing: the
+           alert fixture's per-listing fee check walked all 72,000 rows for one listing's handful,
+           and Potential CPC's last-CPC-day read paid for the table twice. 218,062 steps to 1,124.
+           It is also the index the note above wished for: Potential CPC's 180-day window now rides
+           the item leg in item order, so its GROUP BY needs no sort.
+         idx_feedback_account_at — 1.9 million rows an hour. The feedback book is 18,600 rows with
+           no index, and both the hourly feedback sync and the buyer-message worker read it one
+           account at a time. The date leg is in it for the reads that bound themselves by `at`.
+         idx_art_account_status, idx_art_day_status, idx_art_status_created — ad_report_tasks has
+           grown to 66,650 rows and had only its (account, task_id) primary key, so every read of
+           it that named a STATUS walked the lot: the five-minute intraday poll's own pending list
+           (0.74 million rows an hour), the two-hour zombie sweep that runs beside it, the report
+           poll's queue, and adtReportStatus, which the roll-up asks once an hour to decide whether
+           yesterday is owed a rebuild. The three legs are the three shapes those reads come in —
+           by account and status, by report day and status, and by status and age. 210,975 steps to
+           14,101 for the sweep, 57,422 to 2,900 for the poll, 274,133 to 10,183 for the status. */
+    "CREATE INDEX IF NOT EXISTS idx_alert_log_ref ON alert_log(ref)",
+    "CREATE INDEX IF NOT EXISTS idx_alert_log_open ON alert_log(resolved_at, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_campev_item_rule ON campaign_events(item_id, change_type, at)",
+    "CREATE INDEX IF NOT EXISTS idx_ads_daily_item ON ads_daily(item_id, date)",
+    "CREATE INDEX IF NOT EXISTS idx_feedback_account_at ON feedback(account, at)",
+    "CREATE INDEX IF NOT EXISTS idx_art_account_status ON ad_report_tasks(account, status, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_art_day_status ON ad_report_tasks(report_date, status)",
+    "CREATE INDEX IF NOT EXISTS idx_art_status_created ON ad_report_tasks(status, created_at)",
   ];
   /* 12 Sept (owner: "make these things fast"): this pass ran ~70 sequential D1 statements on the
      FIRST request of every fresh isolate — ~5 s added to whichever staff click happened to land
