@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261106-1542';
+var BUILD = '20261106-1610';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1335,6 +1335,12 @@ var ADT_REG_MAP = [
   [/realised vs forecast|forecast vs actual|MAPE|forecast vs reality/i, ['adtool_forecast', 'adtool_ads_daily_vintage', 'adtool_listing_day']],
   /* Phase 5: sale-event lifecycle (observed membership, derived timeline, eligibility tasks) */
   [/sale event|sale events|eligible again|restriction|membership|eligible on|in sale event/i, ['adtool_sale_membership_day', 'adtool_sale_timeline', 'adtool_sale_tasks', 'promotions', 'promo_members', 'adtool_price_day']],
+  /* The weekly batch (owner, 6 Nov): the Sale event page's three new tags. None of the patterns
+     above matches any of these three labels, so they are named here rather than falling through to
+     the whole register, and each resolves to the one row written for it. */
+  [/sale batch|friday batch/i, ['SALE_BATCH']],
+  [/profit after sale|profit in the sale/i, ['SALE_PROFIT_AFTER', 'MARGIN_BEFORE_ADS']],
+  [/next eligible/i, ['SALE_NEXT_ELIGIBLE', 'SALE_ELIGIBLE_ON']],
   /* Panels whose tag never had a pattern of its own and so opened the whole register. Each of these
      has exactly one registered row behind it, so name it. Anchored where the tag is a short word, so
      a longer label cannot fall in here by accident. */
@@ -9005,67 +9011,94 @@ window.M98M_ADS_ONLY = true;
 })();
 
 /* ---------- view-adtool-sales.js ---------- */
-/* Sale events — the observed lifecycle (Phase 5). Per listing: is it in a running sale, when was it
- * dropped, when does the 14-day 'not in another sale' restriction end, when is it eligible again, and
- * what the buyer actually paid. All nine running events are whole-shop (INVENTORY_ANY, 5% off): eBay
- * auto-enrols and silently skips a listing whose price moved in the last 14 days, and gives no per-item
- * list — so removal of an individual item cannot be seen directly. Everything here is OBSERVED at
- * one-day granularity from `observed_since`, with the limits stated on the page. Nothing is ever sent
- * to eBay; the tool only records what eBay already did. Engine action: adtoolSales. */
+/* view-adtool-sales.js — Advertising · Sale event, rebuilt around the WEEKLY BATCH (the owner's
+ * request, 6 November 2026).
+ *
+ * "Every Friday, every week, we will run a new sale event for 14 days. Every listing that is
+ *  eligible is entered by hand into that event and the event runs. The portal should give us the
+ *  data: each item's current profit, and what its profit will be if we run it in a sale at 5%."
+ *
+ * WHY A BATCH. Left to a sale that covers the whole shop, eBay puts a listing in the moment it
+ * judges it eligible, so a listing that becomes eligible near the end of an event is in that sale
+ * for a day or two and then the event is over. Entering a batch by hand on one named day gives
+ * every listing in it the whole run. The page is built around that one day: what goes in on it,
+ * what it earns now, what it would earn at the sale price, and when everything else comes round.
+ *
+ * THE MONEY. Profit at the sale price is the engine's one pure rule (adSaleProfitAfter): the
+ * listing's profit per unit now, less four fifths of the discount on the price and the percentage
+ * fees that come off with it. The supplier cost does not move. Every figure on this page comes out
+ * of the payload; nothing is worked out here. A figure we do not have prints as "not known" and
+ * never as zero, because a listing nobody has costed is not a listing that earns nothing.
+ *
+ * NOTHING IS EVER SENT TO EBAY. The batch is entered by hand on eBay; the only write this page
+ * makes is our own record of who entered it and which listings they said they entered, so the next
+ * membership check has something to agree or disagree with.
+ *
+ * Engine action: adtoolSales (read; ops task_done / task_dismiss / batch_entered). Own prefix .sv-
+ */
 (function () {
-  var GOLD = '#f2b035', LOSS = '#e0563f';
+  var LOSS = '#e0563f';
   VIEW_CSS.push([
+    '.sv-wrap{max-width:1460px}',
     '.sv-panel{background:linear-gradient(var(--panel),var(--panel)),var(--bg0);border:1px solid var(--gold-line);border-radius:14px;padding:16px 18px;margin-bottom:14px}',
     '.sv-panel h3{margin:0 0 4px;font-size:15px;font-weight:800;color:var(--text)}',
+    '.sv-panel h4{margin:14px 0 6px;font-size:13px;font-weight:800;color:var(--text)}',
     '.sv-note{color:var(--text-2);font-size:12px;line-height:1.55;margin-bottom:10px}',
     '.sv-warn{background:rgba(224,86,63,.1);border:1px solid rgba(224,86,63,.45);border-radius:12px;padding:12px 14px;margin-bottom:14px;color:#ffb3a6;font-size:12.5px;line-height:1.55}',
     '.sv-limits{background:rgba(255,255,255,.03);border:1px dashed var(--gold-line);border-radius:12px;padding:11px 14px;margin-bottom:14px;color:var(--text-3);font-size:11.5px;line-height:1.6}',
     '.sv-limits b{color:var(--text-2)}',
-    '.sv-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}',
-    '.sv-chip{background:var(--panel);border:1px solid var(--gold-line);border-radius:99px;padding:5px 13px;font-size:12px;color:var(--text-2);font-weight:700;cursor:pointer}',
-    '.sv-chip.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}',
-    '.sv-chip .n{opacity:.7;margin-left:5px;font-weight:700}',
+    '.sv-set{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}',
+    '.sv-setc{border:1px solid var(--gold-line);border-radius:12px;padding:9px 13px;background:rgba(255,255,255,.03);min-width:132px}',
+    '.sv-setc .k{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:800}',
+    '.sv-setc .v{font-size:16px;font-weight:800;color:var(--text);margin-top:2px}',
+    '.sv-setc .m{font-size:10.5px;color:var(--text-3);margin-top:2px;line-height:1.45}',
+    '.sv-cal{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}',
+    '.sv-calc{border:1px solid var(--gold-line);border-radius:10px;padding:7px 12px;background:rgba(255,255,255,.02);font-size:11.5px;color:var(--text-2)}',
+    '.sv-calc.now{border-color:var(--gold-b);color:var(--text)}',
+    '.sv-calc b{color:var(--text);font-weight:800}',
     '.sv-tbl{width:100%;border-collapse:collapse;font-size:12px}',
-    '.sv-tbl th{text-align:left;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;padding:6px 8px;border-bottom:1px solid var(--gold-line)}',
+    '.sv-tbl th{text-align:left;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;padding:6px 8px;border-bottom:1px solid var(--gold-line);white-space:nowrap}',
     '.sv-tbl td{padding:8px 8px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text);vertical-align:top}',
     '.sv-tbl td.r,.sv-tbl th.r{text-align:right}',
+    '.sv-tbl tr.loses td{background:rgba(224,86,63,.07)}',
     '.sv-scroll{overflow-x:auto}',
     '.sv-pill{display:inline-block;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:800;white-space:nowrap}',
-    '.sv-pill.live,.sv-pill.eligible{background:rgba(242,176,53,.16);border:1px solid var(--gold-line-hi);color:var(--gold-a)}',
-    '.sv-pill.waiting,.sv-pill.notinsale{background:rgba(255,255,255,.05);border:1px solid var(--gold-line);color:var(--text-2)}',
-    '.sv-pill.removed{background:rgba(224,86,63,.12);border:1px solid rgba(224,86,63,.45);color:#ffb3a6}',
-    '.sv-cd{font-size:11px;color:var(--text-3);margin-top:3px}',
-    '.sv-cd.soon{color:var(--gold-a)}.sv-cd.ready{color:var(--gold-a);font-weight:700}',
-    '.sv-price .o{color:var(--text-2)}.sv-price .s{color:var(--text);font-weight:700}.sv-price .d{color:' + LOSS + ';font-weight:700}',
-    '.sv-obs{font-size:11px;color:var(--text-3);margin-top:4px;line-height:1.5}',
-    '.sv-run{display:flex;gap:10px;flex-wrap:wrap}',
-    '.sv-runc{border:1px solid var(--gold-line);border-radius:12px;padding:10px 13px;background:rgba(255,255,255,.03);min-width:180px}',
-    '.sv-runc .a{font-size:12px;font-weight:800;color:var(--text)}',
-    '.sv-runc .m{font-size:11px;color:var(--text-2);margin-top:3px;line-height:1.5}',
-    '.sv-task{border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;margin-bottom:10px;background:rgba(255,255,255,.02)}',
-    '.sv-task.ending{border-color:rgba(224,86,63,.4)}',
-    '.sv-acct .a{font-size:14px;font-weight:800;color:var(--text)}.sv-acct .m{font-size:11.5px;color:var(--text-2);margin-top:3px;line-height:1.5}',
-    '.sv-task-h{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}',
-    '.sv-flags{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}',
-    '.sv-flag{font-size:11px;color:var(--text-2);background:rgba(255,255,255,.04);border:1px solid var(--gold-line);border-radius:8px;padding:3px 9px}',
-    '.sv-flag b{color:var(--text)}.sv-flag.yes b{color:var(--gold-a)}.sv-flag.warn b{color:' + LOSS + '}',
-    '.sv-task-btns{display:flex;gap:8px;margin-top:10px}',
+    '.sv-pill.worth{background:rgba(242,176,53,.16);border:1px solid var(--gold-line-hi);color:var(--gold-a)}',
+    '.sv-pill.thin{background:rgba(255,255,255,.05);border:1px solid var(--gold-line);color:var(--text-2)}',
+    '.sv-pill.loses{background:rgba(224,86,63,.14);border:1px solid rgba(224,86,63,.5);color:#ffb3a6}',
+    '.sv-pill.unknown{background:rgba(255,255,255,.03);border:1px dashed var(--gold-line);color:var(--text-3)}',
+    '.sv-m{font-variant-numeric:tabular-nums;font-weight:700}',
+    '.sv-m.neg{color:' + LOSS + '}',
+    '.sv-nk{color:var(--text-3);font-size:11.5px;font-weight:600}',
+    '.sv-sub{font-size:10.5px;color:var(--text-3);margin-top:2px;line-height:1.45}',
+    '.sv-blk{border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;margin-bottom:12px;background:rgba(255,255,255,.02)}',
+    '.sv-blk-h{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:8px}',
+    '.sv-blk-h .a{font-size:14px;font-weight:800;color:var(--text)}',
+    '.sv-blk-h .m{font-size:11.5px;color:var(--text-2);margin-top:3px;line-height:1.5}',
+    '.sv-btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}',
     '.sv-btn{background:var(--gold-b);color:var(--gold-ink);border:0;border-radius:8px;padding:6px 14px;font:inherit;font-size:12px;font-weight:800;cursor:pointer}',
     '.sv-btn.ghost{background:transparent;color:var(--text-2);border:1px solid var(--gold-line)}',
-    '.sv-notebox{margin-top:10px}',
-    '.sv-notebox textarea{width:100%;box-sizing:border-box;background:var(--bg0);border:1px solid var(--gold-line);border-radius:8px;color:var(--text);font:inherit;font-size:12px;padding:8px 10px;resize:vertical;min-height:52px}',
-    '.sv-notebox .row{display:flex;gap:8px;margin-top:8px}',
+    '.sv-btn[disabled]{opacity:.5;cursor:default}',
+    '.sv-tick{font-size:11.5px;color:var(--text-2);display:flex;gap:6px;align-items:center;cursor:pointer}',
+    '.sv-ta{width:100%;box-sizing:border-box;background:var(--bg0);border:1px solid var(--gold-line);border-radius:8px;color:var(--text);font:inherit;font-size:11.5px;padding:8px 10px;resize:vertical;min-height:46px;margin-top:8px}',
+    '.sv-done{background:rgba(242,176,53,.1);border:1px solid var(--gold-line-hi);border-radius:10px;padding:9px 12px;font-size:11.5px;color:var(--text-2);line-height:1.55;margin-top:9px}',
+    '.sv-done b{color:var(--text)}',
+    '.sv-task{border:1px solid rgba(224,86,63,.4);border-radius:12px;padding:12px 14px;margin-bottom:10px;background:rgba(255,255,255,.02)}',
+    '.sv-reg{margin-left:8px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;font-weight:800;cursor:pointer}',
     '.sv-empty{color:var(--text-3);font-size:12px;padding:10px 2px}'
   ].join(''));
 
-  var SV = { data: null, filter: '' };
+  /* per-block page state. `loses` is which blocks have the losing rows ticked into the copy list,
+     `pending` is the block whose "mark as entered" is waiting on a note, and `busy` stops a second
+     click writing the record twice. All keyed by account, because every block acts on its own. */
+  var SV = { data: null, loses: {}, pending: '', busy: '', note: {} };
 
   VIEWS.adtoolSales = {
     label: 'Sale events (ads)', hidden: true, order: 93, roles: ['Management', 'Ops Head', 'Advertising Manager'],
     icon: '<path d="M3 9h18M7 3v4M17 3v4"/><rect x="3" y="5" width="18" height="16" rx="2"/><path d="m9 14 6-3"/>',
     render: function () {
-      return adtHgroup('Sale events', 'Which listings are in a sale, which are waiting, and when each is eligible again', 'svFresh') +
-        '<div id="svBody"><div class="sv-note">Loading…</div></div>';
+      return adtHgroup('Sale event', 'The weekly batch: which listings go in, what they earn now, what they earn in the sale', 'svFresh') +
+        '<div id="svBody" class="sv-wrap"><div class="sv-note">Loading…</div></div>';
     },
     init: function () { load(); }
   };
@@ -9075,210 +9108,402 @@ window.M98M_ADS_ONLY = true;
       .catch(function (e) { $('svBody').innerHTML = '<div class="sv-panel"><div class="sv-note">' + esc(e && e.message ? e.message : 'This page could not load.') + '</div></div>'; });
   }
 
-  /* one of the six filter buckets a row's status falls into */
-  function bucket(s) {
-    s = String(s || '').toLowerCase();
-    if (s === 'live' || s === 'added-unconfirmed') return 'live';
-    if (s === 'eligible') return 'eligible';
-    if (s === 'waiting') return 'waiting';
-    if (s === 'removed') return 'removed';
-    return 'notinsale';                                   /* not-discounted · no-event · unknown */
+  /* ---------- small guards. A number we do not have says so; it never prints as zero. ---------- */
+  function num(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
+  function nk() { return '<span class="sv-nk">not known</span>'; }
+  function money(v) {
+    var n = num(v); if (n == null) return nk();
+    return '<span class="sv-m' + (n < 0 ? ' neg' : '') + '">' + (n < 0 ? '−£' : '£') + Math.abs(n).toFixed(2) + '</span>';
   }
-  var CHIPS = [['', 'All'], ['live', 'Live'], ['eligible', 'Eligible'], ['waiting', 'Waiting'], ['removed', 'Removed'], ['notinsale', 'Not in sale']];
-  var STATUS_LABEL = {
-    'live': 'live', 'added-unconfirmed': 'added, not confirmed', 'not-discounted': 'not discounted',
-    'removed': 'removed', 'waiting': 'waiting', 'eligible': 'eligible', 'no-event': 'no event'
-  };
+  function units(v) { var n = num(v); return n == null ? nk() : '<span class="sv-m">' + n + '</span>'; }
+  function day(v) { return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? esc(String(v)) : nk(); }
+  function txt(v) { var s = String(v == null ? '' : v).trim(); return s ? esc(s) : nk(); }
+  function D() { return SV.data || {}; }
+  function rules() { return (D().settings && D().settings.rules) || {}; }
+  function cal() { return D().calendar || {}; }
+  function batchName() { return String(cal().weekday_name || rules().batch_weekday_name || 'batch day'); }
+  /* the explainer hook. Only these labels have a pattern of their own in the register map. */
+  function reg(label, shown) {
+    return '<span class="sv-reg" data-adtreg="' + esc(label) + '" title="how is this worked out">' + esc(shown || label) + '</span>';
+  }
+  var VERDICT_CLASS = { 'worth it': 'worth', thin: 'thin', loses: 'loses', unknown: 'unknown' };
+  function verdictPill(v) {
+    var k = String(v || 'unknown');
+    return '<span class="sv-pill ' + (VERDICT_CLASS[k] || 'unknown') + '">' + esc(k === 'unknown' ? 'not known' : k) + '</span>';
+  }
+  function countdown(to) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(to || ''))) return '';
+    var a = new Date((D().today || adtUkDay()) + 'T12:00:00Z'), b = new Date(String(to) + 'T12:00:00Z');
+    if (isNaN(a.getTime()) || isNaN(b.getTime())) return '';
+    var n = Math.round((b - a) / 86400000);
+    return n <= 0 ? 'today' : 'in ' + n + ' day' + (n === 1 ? '' : 's');
+  }
 
+  /* ---------------------------------------- the page ---------------------------------------- */
   function draw() {
-    var D = SV.data || {}, rows = D.rows || [], h = '';
-
-    /* the lead: the running events are whole-shop, so the owner's "always a sale running" rule is met */
-    var cover = D.covers_whole_shop || [];
-    if (cover.length) {
-      h += '<div class="sv-panel" style="border-color:var(--gold-b)"><h3>You already have this</h3>' +
-        '<div class="sv-note">All ' + cover.length + ' of your accounts with a sale run it across the <b>whole shop</b>, so eBay adds every ' +
-        'eligible listing itself and drops each one when it stops. What limits coverage is the 14-day price rule below.</div></div>';
-    }
-
-    /* the honest estimate banner, kept until the price record is long enough for eBay's real 14-day clock */
-    if (!D.clock_is_real) {
-      h += '<div class="sv-warn"><b>The eligible-again dates below are an estimate for now.</b> eBay counts 14 days at the same ' +
-        '<b>price</b>, and our daily price record only starts on ' + esc(D.observed_since || 'the first snapshot') + ', so earlier dates ' +
-        'use the last change of any kind. Each date firms up as the record lengthens.</div>';
-    }
-
-    /* running events, straight from eBay's markdown sales */
-    var ev = D.running_events || [];
-    h += '<div class="sv-panel"><h3>Running on eBay right now</h3>' +
-      '<div class="sv-note">' + (ev.length ? 'These sale events are live now. A whole-shop event has no listing list, as eBay adds the listings by rule.' : 'No sale event is running on any account.') + '</div>' +
-      (ev.length ? '<div class="sv-run">' + ev.map(function (e) {
-        return '<div class="sv-runc"><div class="a">' + esc(e.account || '') + '</div>' +
-          '<div class="m"><b style="color:var(--text)">' + esc(e.name || 'Sale') + '</b>' + (e.discount ? ' · ' + esc(e.discount) : '') + '<br>' +
-          esc(e.criterion || e.covers || 'whole shop') + '<br>' + esc(e.starts || '?') + ' → ' + esc(e.ends || '?') + '</div></div>';
-      }).join('') + '</div>' : '') + '</div>';
-
-    /* status filter chips — counts from the engine when it gives them, else from the rows on screen */
-    var counts = (D.status_filter && typeof D.status_filter === 'object') ? D.status_filter : countBuckets(rows);
-    h += '<div class="sv-chips">' + CHIPS.map(function (c) {
-      var n = c[0] === '' ? rows.length : (counts[c[0]] || 0);
-      return '<button class="sv-chip' + (SV.filter === c[0] ? ' on' : '') + '" data-f="' + c[0] + '">' + esc(c[1]) + '<span class="n">' + n + '</span></button>';
-    }).join('') + '</div>';
-
-    /* the lifecycle table */
-    var shown = SV.filter ? rows.filter(function (r) { return bucket(r.status) === SV.filter; }) : rows;
-    h += '<div class="sv-panel"><h3>Every advertised &amp; active listing' +
-      '<span class="sv-src" data-adtreg="sale events" title="how is this worked out" style="margin-left:8px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;font-weight:800;cursor:pointer">sale events</span></h3>' +
-      '<div class="sv-note">Where each listing sits: in a sale, dropped, waiting out the 14 days, or eligible again. The price is what the buyer paid where an order shows it. ' +
-      (D.observed_since ? 'Checked daily since <b>' + esc(D.observed_since) + '</b>.' : '') + '</div>';
-    if (!shown.length) {
-      h += '<div class="sv-empty">No listing in this group.</div>';
-    } else {
-      h += '<div class="sv-scroll"><table class="sv-tbl"><thead><tr><th>Listing</th><th>Status</th><th>Event</th>' +
-        '<th>Dropped</th><th>Restriction ends</th><th>Eligible again</th><th class="r">Price</th><th>Observed</th></tr></thead><tbody>' +
-        shown.map(rowHtml).join('') + '</tbody></table></div>';
-    }
-    h += '</div>';
-
-    /* tasks — one open per listing, with the five flags the brief asks for */
-    var tasks = D.tasks || [];
-    h += '<div class="sv-panel"><h3>Tasks · ' + tasks.length + ' open</h3>' +
-      '<div class="sv-note">Raised when a listing becomes eligible again, or when an event is about to end with nothing to replace it.</div>' +
-      (tasks.length ? tasks.map(taskHtml).join('') : '<div class="sv-empty">Nothing needs a hand today.</div>') + '</div>';
-
-    /* the honest limits, printed not buried */
-    h += '<div class="sv-limits"><b>How to read these dates.</b> Everything here is checked once a day' +
-      (D.observed_since ? ' from <b>' + esc(D.observed_since) + '</b>' : '') + ', and a whole-shop event gives no per-item list, so we cannot see one ' +
-      'listing being dropped. <b>Nothing on this page is ever sent to eBay</b>, the tool only records what eBay already did.</div>';
-
+    var d = D(), h = '';
+    h += settingsStrip();
+    h += wholeShopWarning();
+    h += estimateBanner();
+    h += accountTable();
+    h += thisBatch();
+    h += inSaleNow();
+    h += upcoming();
+    h += noDate();
+    h += endingTasks();
+    h += limits();
     $('svBody').innerHTML = h;
     wire();
   }
 
-  function countBuckets(rows) {
-    var c = { live: 0, eligible: 0, waiting: 0, removed: 0, notinsale: 0 };
-    (rows || []).forEach(function (r) { var b = bucket(r.status); c[b] = (c[b] || 0) + 1; });
-    return c;
+  function settingsStrip() {
+    var d = D(), r = rules(), c = cal(), rows = (d.settings && d.settings.rows) || [];
+    var stored = {}; rows.forEach(function (x) { stored[String(x.key)] = x; });
+    var k = (d.settings && d.settings.keys) || {};
+    function cell(label, value, key, extra) {
+      var s = stored[key] || null;
+      var sub = s && s.stored
+        ? ('set' + (s.updated_at ? ' ' + esc(String(s.updated_at).slice(0, 10)) : '') + (s.value != null ? ', stored as ' + esc(String(s.value)) : ''))
+        : 'nobody has set this, so the figure in force is shown';
+      return '<div class="sv-setc"><div class="k">' + esc(label) + '</div><div class="v">' + value + '</div>' +
+        '<div class="m">' + sub + (extra ? '<br>' + esc(extra) : '') + '</div></div>';
+    }
+    var h = '<div class="sv-panel"><h3>The weekly batch' + reg('sale batch') + '</h3>' +
+      '<div class="sv-note">' + txt(d.why_batching) + '</div>' +
+      '<div class="sv-set">' +
+      cell('Discount', txt(r.discount_text), k.discount_pct) +
+      cell('Event runs', r.days == null ? nk() : '<span class="sv-m">' + r.days + '</span> days', k.days) +
+      cell('Batch day', txt(c.weekday_name || r.batch_weekday_name), k.batch_weekday) +
+      cell('Worth-it floor', money(r.floor), k.min_profit, 'per unit, after the sale') +
+      '</div>';
+    if ((c.batches || []).length) {
+      h += '<div class="sv-cal">' + c.batches.map(function (b) {
+        return '<div class="sv-calc' + (b.is_today ? ' now' : '') + '"><b>' + day(b.batch_on) + '</b> ' + esc(String(b.label || '')) +
+          '<br>runs to ' + day(b.ends_on) + '</div>';
+      }).join('') + '</div>';
+    } else {
+      h += '<div class="sv-empty">The batch calendar could not be worked out.</div>';
+    }
+    h += '<div class="sv-note" style="margin:0">' + txt((d.batches && d.batches.verdict_rule) || '') + '</div>';
+    return h + '</div>';
   }
 
-  function rowHtml(r) {
-    var st = String(r.status || '').toLowerCase(), b = bucket(st);
-    var pill = '<span class="sv-pill ' + b + '">' + esc(STATUS_LABEL[st] || st || '—') + '</span>';
-    var evt = r.event_running
-      ? '<b style="color:var(--text)">' + esc(r.discount_pct != null && r.discount_pct !== '' ? pctTxt(r.discount_pct) + ' off' : (r.discount_shown || 'in sale')) + '</b>' + (r.ends ? '<div class="sv-cd">ends ' + esc(r.ends) + '</div>' : '')
-      : '<span style="color:var(--text-3)">—</span>';
-    var cd = countdown(D_today(), r.eligible_on);
-    return '<tr><td>' + adtProductCell(r) + '</td>' +
-      '<td>' + pill + '</td>' +
-      '<td>' + evt + '</td>' +
-      '<td>' + dcell(r.removed_on) + '</td>' +
-      '<td>' + dcell(r.restriction_end) + '</td>' +
-      '<td>' + dcell(r.eligible_on) + (cd ? '<div class="sv-cd ' + cd.cls + '">' + esc(cd.txt) + '</div>' : '') + '</td>' +
-      '<td class="r">' + priceBlock(r) + '</td>' +
-      '<td>' + (r.observed_note ? '<div class="sv-obs">' + esc(r.observed_note) + '</div>' : '<span style="color:var(--text-3)">—</span>') + '</td></tr>';
+  function wholeShopWarning() {
+    var ws = D().whole_shop_running || [];
+    if (!ws.length) return '';
+    return '<div class="sv-warn"><b>A sale covering the whole shop is running, which brings the problem back.</b> ' +
+      'On ' + ws.map(function (e) { return esc(String(e.account || '')) + (e.ends ? ' (ends ' + esc(String(e.ends)) + ')' : ''); }).join(', ') +
+      ' eBay adds every listing it judges eligible by itself, so a listing that becomes eligible near the end of that event is in the sale ' +
+      'for the day or two left of it. End it, or expect the batch below to be overtaken by it.</div>';
   }
 
-  function priceBlock(r) {
-    var o = num(r.original_price), s = num(r.sale_price), d = num(r.difference);
-    if (o == null && s == null) return '<span style="color:var(--text-3)">—</span>';
-    var pct = (o && d != null) ? Math.round(d / o * 100) : (r.discount_pct != null ? Math.round(pctNum(r.discount_pct)) : null);
-    var h = '<div class="sv-price">';
-    if (o != null) h += '<span class="o">£' + o.toFixed(2) + '</span>';
-    if (s != null) h += ' → <span class="s">£' + s.toFixed(2) + '</span>';
-    if (d != null && d !== 0) h += '<div class="d">−£' + Math.abs(d).toFixed(2) + (pct != null ? ' · ' + Math.abs(pct) + '%' : '') + '</div>';
-    else if (pct != null) h += '<div class="d">' + Math.abs(pct) + '% off</div>';
+  function estimateBanner() {
+    var d = D();
+    if (d.clock_is_real) return '';
+    return '<div class="sv-warn"><b>The eligible dates below are an estimate for now.</b> eBay counts 14 days at the same ' +
+      '<b>price</b>, and our daily price record holds ' + (d.price_history_days == null ? 'no days' : esc(String(d.price_history_days)) + ' of 14 days') +
+      ', so earlier dates fall back on the last change of any kind. Each date firms up as the record lengthens.</div>';
+  }
+
+  function accountTable() {
+    var d = D(), rows = d.by_account || [], r = rules();
+    var h = '<div class="sv-panel"><h3>Account by account' + reg('sale batch') + '</h3>' +
+      '<div class="sv-note">Where each account stands for the batch on ' + day(cal().f0) + ', and what the discount costs it over a month at the rate it is selling now.</div>';
+    if (!rows.length) return h + '<div class="sv-empty">No account has an active listing to judge.</div></div>';
+    h += '<div class="sv-scroll"><table class="sv-tbl"><thead><tr>' +
+      '<th>Account</th><th>In the sale now</th><th>This ' + esc(batchName()) + '</th><th>Next ' + esc(batchName()) + '</th>' +
+      '<th>Later</th><th>No date yet</th><th class="r">' + esc(txtPlain(r.discount_text)) + ' off, a month</th></tr></thead><tbody>';
+    rows.forEach(function (a) {
+      var ev = a.event || null, tb = a.this_batch || {};
+      h += '<tr><td><b>' + txt(a.account) + '</b><div class="sv-sub">' + (a.active == null ? '' : esc(String(a.active)) + ' active listings') + '</div></td>' +
+        '<td>' + ((a.in_sale && a.in_sale.n) || 0) +
+          (ev ? '<div class="sv-sub">' + txt(ev.name) + ', ' + txt(ev.discount_text) + ', ' + esc(String(ev.covers || '')) +
+            '<br>ends ' + day(ev.ends) + (ev.days_left == null ? '' : ' (' + esc(String(ev.days_left)) + ' days left)') + '</div>'
+            : '<div class="sv-sub">no sale event running</div>') + '</td>' +
+        '<td><b>' + esc(String(tb.n || 0)) + '</b><div class="sv-sub">' + esc(String(tb.worth_it || 0)) + ' worth it · ' +
+          esc(String(tb.thin || 0)) + ' thin · <span style="color:' + LOSS + '">' + esc(String(tb.loses || 0)) + ' lose</span>' +
+          (tb.unknown ? ' · ' + esc(String(tb.unknown)) + ' not known' : '') + '</div></td>' +
+        '<td>' + esc(String((a.next_batch && a.next_batch.n) || 0)) + '</td>' +
+        '<td>' + esc(String((a.later && a.later.n) || 0)) + '</td>' +
+        '<td>' + esc(String((a.no_date && a.no_date.n) || 0)) + '</td>' +
+        '<td class="r">' + money(a.month_drop_estimate) +
+          '<div class="sv-sub">' + (a.month_drop_items ? 'summed over ' + esc(String(a.month_drop_items)) + ' listings' : 'nothing to sum') + '</div></td></tr>';
+    });
+    h += '</tbody></table></div>';
+    h += '<div class="sv-note" style="margin:10px 0 0">' + txt((d.batches && d.batches.month_drop_label) || '') + '</div>';
+    return h + '</div>';
+  }
+
+  function txtPlain(v) { var s = String(v == null ? '' : v).trim(); return s || 'the discount'; }
+
+  function thisBatch() {
+    var d = D(), tb = d.this_batch || {}, blocks = tb.accounts || [];
+    var h = '<div class="sv-panel"><h3>Enter this ' + esc(batchName()) + ': ' + day(tb.batch_on) +
+      reg('profit after sale') + '</h3>' +
+      '<div class="sv-note">Every listing here can go into the event on ' + day(tb.batch_on) + ' and run to ' + day(tb.ends_on) +
+      '. The losing ones are at the top of each block on purpose, so they are seen before anybody enters them. ' +
+      txt((d.batches && d.batches.profit_after_rule) || '') + '</div>';
+    if (!blocks.length) return h + '<div class="sv-empty">No listing is due on ' + day(tb.batch_on) + '.</div></div>';
+    blocks.forEach(function (b) { h += batchBlock(b, tb); });
+    return h + '</div>';
+  }
+
+  function copyIds(b) {
+    var want = SV.loses[b.account] ? { 'worth it': 1, thin: 1, loses: 1 } : { 'worth it': 1, thin: 1 };
+    return (b.rows || []).filter(function (r) { return want[String(r.verdict)]; }).map(function (r) { return String(r.item_id); });
+  }
+
+  function batchBlock(b, tb) {
+    var c = b.counts || {}, ids = copyIds(b), ent = b.entered || null, chk = b.entered_check || null;
+    var h = '<div class="sv-blk" data-acct="' + esc(b.account) + '">' +
+      '<div class="sv-blk-h"><div><div class="a">' + txt(b.account) + '</div>' +
+      '<div class="m">' + esc(String(c.n || 0)) + ' listings due · ' + esc(String(c.worth_it || 0)) + ' worth it · ' +
+      esc(String(c.thin || 0)) + ' thin · <span style="color:' + LOSS + '">' + esc(String(c.loses || 0)) + ' lose</span>' +
+      (c.unknown ? ' · ' + esc(String(c.unknown)) + ' we cannot judge' : '') + '</div></div></div>';
+    h += '<div class="sv-scroll"><table class="sv-tbl"><thead><tr>' +
+      '<th>Listing</th><th class="r">Price now</th><th class="r">In the sale</th><th class="r">Profit now</th>' +
+      '<th class="r">Profit in the sale</th><th class="r">Off each unit</th><th class="r">Units 7d / 30d</th>' +
+      '<th class="r">Profit 7d / 30d</th><th class="r">Ad cost 7d</th><th>Next eligible</th><th>Verdict</th></tr></thead><tbody>' +
+      (b.rows || []).map(batchRow).join('') + '</tbody></table></div>';
+    h += '<div class="sv-btns">' +
+      '<button class="sv-btn" data-copy="' + esc(b.account) + '">Copy the item numbers</button>' +
+      '<label class="sv-tick"><input type="checkbox" data-loses="' + esc(b.account) + '"' + (SV.loses[b.account] ? ' checked' : '') + '> include the ' + esc(String(c.loses || 0)) + ' that lose money</label>' +
+      '<button class="sv-btn ghost" data-enter="' + esc(b.account) + '"' + (ids.length ? '' : ' disabled') + '>Mark as entered on eBay</button>' +
+      '</div>';
+    h += '<div class="sv-note" style="margin:8px 0 0">' + esc(String(ids.length)) + ' item numbers below' +
+      (c.unknown ? ', and ' + esc(String(c.unknown)) + ' we cannot judge are left out' : '') +
+      '. Marking the batch as entered writes our own record of who did it and when. Nothing is sent to eBay.</div>';
+    h += '<textarea class="sv-ta" readonly data-ta="' + esc(b.account) + '">' + esc(ids.join(',')) + '</textarea>';
+    if (SV.pending === b.account) {
+      h += '<textarea class="sv-ta" data-note="' + esc(b.account) + '" placeholder="Add a note (optional): anything about this batch">' + esc(SV.note[b.account] || '') + '</textarea>' +
+        '<div class="sv-btns"><button class="sv-btn" data-confirm="' + esc(b.account) + '"' + (SV.busy === b.account ? ' disabled' : '') + '>Confirm, ' + esc(String(ids.length)) + ' listings</button>' +
+        '<button class="sv-btn ghost" data-cancel="' + esc(b.account) + '">Cancel</button></div>';
+    }
+    if (ent) {
+      h += '<div class="sv-done">Entered by <b>' + txt(ent.by) + '</b> at <b>' + esc(String(ent.at || '').replace('T', ' ').slice(0, 16)) + '</b>, ' +
+        '<b>' + esc(String(ent.n || 0)) + '</b> listings. ' + (chk ? esc(String(chk.note || '')) : '') +
+        (chk && chk.checked ? ' (' + esc(String(chk.in_sale_now || 0)) + ' in a sale, ' + esc(String(chk.missing || 0)) + ' not)' : '') + '</div>';
+    }
+    return h + '</div>';
+  }
+
+  function batchRow(r) {
+    var cls = String(r.verdict) === 'loses' ? ' class="loses"' : '';
+    return '<tr' + cls + '><td>' + adtProductCell(r) + '</td>' +
+      '<td class="r">' + money(r.price) + '</td>' +
+      '<td class="r">' + money(r.sale_price) + '</td>' +
+      '<td class="r">' + money(r.margin_before_ads) + '<div class="sv-sub">' + (r.margin_source ? esc(String(r.margin_source)) : 'source not known') + '</div></td>' +
+      '<td class="r">' + money(r.profit_after) + (r.profit_after == null && r.profit_after_why ? '<div class="sv-sub">' + esc(String(r.profit_after_why)) + '</div>' : '') + '</td>' +
+      '<td class="r">' + money(r.drop) + '<div class="sv-sub">' + (r.drop_month_estimate == null ? 'a month: not known' : 'a month: ' + moneyPlain(r.drop_month_estimate)) + '</div></td>' +
+      '<td class="r">' + units(r.units_7d) + ' / ' + units(r.units_30d) + '</td>' +
+      '<td class="r">' + money(r.actual_profit_7d) + ' / ' + money(r.actual_profit_30d) + '</td>' +
+      '<td class="r">' + money(r.ad_spend_7d) + '</td>' +
+      '<td>' + day(r.next_eligible_on) + '<div class="sv-sub">' + esc(String(r.next_eligible_why || '')) + '</div></td>' +
+      '<td>' + verdictPill(r.verdict) + '</td></tr>';
+  }
+  function moneyPlain(v) { var n = num(v); return n == null ? 'not known' : (n < 0 ? '−£' : '£') + Math.abs(n).toFixed(2); }
+  /* a discount the payload sends as a fraction, printed. Never a figure typed in here: a listing in
+     a sale is judged at its own event's discount and the rest at the batch setting, and the row says
+     which it was. */
+  function pctOf(v) { var n = num(v); return n == null ? '' : (Math.round(n * 10000) / 100) + '%'; }
+
+  function inSaleNow() {
+    var d = D(), blocks = d.in_sale || [];
+    var h = '<div class="sv-panel"><h3>In the sale now' + reg('sale events') + '</h3>' +
+      '<div class="sv-note">What is running, and how each listing has traded since its event started against the same number of days before it. Each listing against itself, never added up.</div>';
+    if (!blocks.length) return h + '<div class="sv-empty">No listing is in a sale event on any account.</div></div>';
+    blocks.forEach(function (b) {
+      var ev = b.event || {};
+      h += '<div class="sv-blk"><div class="sv-blk-h"><div><div class="a">' + txt(b.account) + '</div>' +
+        '<div class="m"><b>' + txt(ev.name) + '</b> · ' + txt(ev.discount_text) + ' · ' + esc(String(ev.covers || '')) +
+        '<br>' + day(ev.starts) + ' to ' + day(ev.ends) + (ev.days_left == null ? '' : ' · ' + esc(String(ev.days_left)) + ' days left') +
+        ' · ' + esc(String(b.n || 0)) + ' listings</div></div></div>';
+      h += '<div class="sv-scroll"><table class="sv-tbl"><thead><tr><th>Listing</th><th class="r">Sale price</th>' +
+        '<th class="r">Profit in the sale</th><th class="r">Units since / before</th><th class="r">Profit since / before</th>' +
+        '<th>Next eligible' + reg('next eligible') + '</th></tr></thead><tbody>' +
+        (b.rows || []).map(function (r) {
+          return '<tr><td>' + adtProductCell(r) + '</td>' +
+            '<td class="r">' + money(r.sale_price) + '<div class="sv-sub">was ' + moneyPlain(r.price) + '</div></td>' +
+            '<td class="r">' + money(r.profit_after) + '<div class="sv-sub">at ' + txt(pctOf(r.discount_pct)) + ' off, ' +
+              esc(String(r.discount_source || 'source not known')) + '<br>' + (r.margin_source ? 'profit now from ' + esc(String(r.margin_source)) : 'profit source not known') + '</div></td>' +
+            '<td class="r">' + units(r.units_since) + ' / ' + units(r.units_before) +
+              '<div class="sv-sub">' + (r.days_since == null ? 'days not known' : esc(String(r.days_since)) + ' days against ' + esc(String(r.days_before == null ? 0 : r.days_before))) + '</div></td>' +
+            '<td class="r">' + money(r.actual_profit_since) + ' / ' + money(r.actual_profit_before) + '</td>' +
+            '<td>' + day(r.next_eligible_on) + '<div class="sv-sub">' + esc(String(r.next_eligible_why || '')) +
+              (r.batch_on ? '<br>goes in on ' + esc(String(r.batch_on)) : '') + '</div></td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+    });
+    return h + '</div>';
+  }
+
+  function upcoming() {
+    var d = D(), g = (d.batches && d.batches.groups) || {}, nx = g.next_friday || [], later = g.later || [];
+    var h = '<div class="sv-panel"><h3>Coming up' + reg('next eligible') + '</h3>' +
+      '<div class="sv-note">The batch after this one, then every batch day after that, with the date each listing can join and what is holding it.</div>';
+    h += '<h4>Next ' + esc(batchName()) + ': ' + day(cal().f1) + ' · ' + esc(String(nx.length)) + ' listings</h4>';
+    h += nx.length ? upcomingTable(nx) : '<div class="sv-empty">Nothing is due on ' + day(cal().f1) + '.</div>';
+    if (!later.length) {
+      h += '<h4>Later</h4><div class="sv-empty">Nothing is placed on a later batch day.</div>';
+    } else {
+      later.forEach(function (blk) {
+        h += '<h4>' + esc(batchName()) + ' ' + day(blk.batch_on) + ' · ' + esc(String(blk.n || 0)) + ' listings' +
+          (blk.ends_on ? ' <span class="sv-nk">runs to ' + esc(String(blk.ends_on)) + '</span>' : '') + '</h4>' + upcomingTable(blk.rows || []);
+      });
+    }
+    return h + '</div>';
+  }
+
+  function upcomingTable(rows) {
+    return '<div class="sv-scroll"><table class="sv-tbl"><thead><tr><th>Listing</th><th>Eligible on</th><th>Why not yet</th>' +
+      '<th class="r">Profit now</th><th class="r">Profit in the sale</th><th class="r">Units 30d</th><th>Verdict</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr' + (String(r.verdict) === 'loses' ? ' class="loses"' : '') + '><td>' + adtProductCell(r) + '</td>' +
+          '<td>' + day(r.next_eligible_on) + '<div class="sv-sub">' + esc(countdown(r.next_eligible_on)) + '</div></td>' +
+          '<td>' + txt(r.why || r.next_eligible_why) + '</td>' +
+          '<td class="r">' + money(r.margin_before_ads) + '</td>' +
+          '<td class="r">' + money(r.profit_after) + '</td>' +
+          '<td class="r">' + units(r.units_30d) + '</td>' +
+          '<td>' + verdictPill(r.verdict) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  function noDate() {
+    var g = (D().batches && D().batches.groups) || {}, rows = g.no_date || [];
+    var h = '<div class="sv-panel"><h3>No date yet' + reg('next eligible') + '</h3>' +
+      '<div class="sv-note">The clock cannot place these on a batch day. Each one says why rather than being given a date that eBay would not honour.</div>';
+    if (!rows.length) return h + '<div class="sv-empty">Every listing has a date.</div></div>';
+    h += '<div class="sv-scroll"><table class="sv-tbl"><thead><tr><th>Listing</th><th>Where it stands</th><th>Why there is no date</th>' +
+      '<th class="r">Profit now</th><th class="r">Profit in the sale</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr><td>' + adtProductCell(r) + '</td><td>' + txt(r.status) + '</td>' +
+          '<td>' + txt(r.next_eligible_why || r.why) + '</td>' +
+          '<td class="r">' + money(r.margin_before_ads) + '</td>' +
+          '<td class="r">' + money(r.profit_after) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    return h + '</div>';
+  }
+
+  function endingTasks() {
+    var tasks = D().tasks || [];
+    var h = '<div class="sv-panel"><h3>An event ending with nothing to follow it · ' + esc(String(tasks.length)) + ' open</h3>' +
+      '<div class="sv-note">Raised when a running event is about to end and no later event covers the account from the day after. The old task for each listing becoming eligible has gone: the batch above is that list.</div>';
+    if (!tasks.length) return h + '<div class="sv-empty">Nothing needs a hand today.</div></div>';
+    tasks.forEach(function (t) {
+      var ev = endingEvent(t), ends = String(t.ends || t.eligible_on || (ev && ev.ends) || '').slice(0, 10);
+      h += '<div class="sv-task" data-tid="' + esc(String(t.task_id)) + '">' +
+        '<div class="sv-blk-h"><div><div class="a">' + txt(t.account) + '</div><div class="m">' +
+        (ev ? '<b>' + txt(ev.name) + '</b>' + (ev.discount ? ' · ' + esc(String(ev.discount)) : '') + ' · ' + esc(String(ev.covers || ev.criterion || '')) + '<br>' : '') +
+        'ends <b>' + day(ends) + '</b>' + (ends ? ' · ' + esc(countdown(ends)) : '') + ' · no replacement event seen for this account</div></div>' +
+        '<div style="font-size:12px;font-weight:800;color:var(--gold-a);text-align:right">Create the next sale event</div></div>' +
+        '<div class="sv-btns"><button class="sv-btn" data-act="task_done">Done</button>' +
+        '<button class="sv-btn ghost" data-act="task_dismiss">Dismiss</button></div>' +
+        '<textarea class="sv-ta" hidden placeholder="Add a note (optional): what you did"></textarea>' +
+        '<div class="sv-btns" hidden data-taskrow><button class="sv-btn" data-tconfirm>Confirm</button>' +
+        '<button class="sv-btn ghost" data-tcancel>Cancel</button></div></div>';
+    });
     return h + '</div>';
   }
 
   /* the running event an event-ending task is about: matched on the promo id folded into the task id
-     ('end:<account>:<promo>:<end>'), else on the account — the engine sends no promo field on the task */
+     ('end:<account>:<promo>:<end>'), else on the account, because the engine sends no promo field */
   function endingEvent(t) {
-    var evs = (SV.data && SV.data.running_events) || [], parts = String(t.task_id || '').split(':');
+    var evs = D().running_events || [], parts = String(t.task_id || '').split(':');
     var promo = parts.length >= 4 ? parts[parts.length - 2] : '';
     for (var i = 0; i < evs.length; i++) if (promo && String(evs[i].promo_id || '') === promo) return evs[i];
     for (var j = 0; j < evs.length; j++) if (String(evs[j].account || '') === String(t.account || '')) return evs[j];
     return null;
   }
 
-  function taskHtml(t) {
-    var f = t.flags || {}, kind = String(t.kind || ''), ending = kind === 'event-ending';
-    var perform = t.perform_on || t.eligible_on;
-    var head, kindTxt, flags;
-    if (ending) {
-      /* an ACCOUNT task (item_id ''): the ending event and its date, never a product cell */
-      var ev = endingEvent(t), ends = String(t.ends || t.eligible_on || (ev && ev.ends) || '').slice(0, 10);
-      var cd = ends ? countdown(D_today(), ends) : null;
-      kindTxt = 'Create the next sale event on ' + (t.account || '—') + (ends ? ' · ends ' + ends : '');
-      head = '<div class="sv-acct"><div class="a">' + esc(t.account || 'account —') + '</div><div class="m">' +
-        (ev ? '<b>' + esc(ev.name || 'Sale') + '</b>' + (ev.discount ? ' · ' + esc(ev.discount) : '') + ' · ' + esc(ev.covers || ev.criterion || 'whole shop') + '<br>' : '') +
-        'ends <b>' + esc(ends || '—') + '</b>' + (cd ? ' · ' + esc(cd.txt.replace('eligible now', 'ended')) : '') + ' · no replacement event seen for this account</div></div>';
-      flags = '<div class="sv-flags">' +
-        '<span class="sv-flag">account <b>' + esc(t.account || '—') + '</b></span>' +
-        '<span class="sv-flag warn">event ends <b>' + esc(ends || '—') + '</b></span>' +
-        '<span class="sv-flag">act by <b>' + esc(perform || '—') + '</b></span>' +
-        '</div>';
-    } else {
-      kindTxt = kind === 'check' ? 'Check this listing in the sale event' : 'Eligible for a sale event';
-      head = adtProductCell(t);
-      flags = '<div class="sv-flags">' +
-        '<span class="sv-flag">account <b>' + esc(t.account || '—') + '</b></span>' +
-        '<span class="sv-flag">eligible <b>' + esc(t.eligible_on || '—') + '</b></span>' +
-        '<span class="sv-flag">act by <b>' + esc(perform || '—') + '</b></span>' +
-        '<span class="sv-flag ' + (f.already_added ? 'yes' : '') + '">already added <b>' + (f.already_added ? 'yes' : 'no') + '</b></span>' +
-        '<span class="sv-flag ' + (f.live ? 'yes' : '') + '">currently live <b>' + (f.live ? 'yes' : 'no') + '</b></span>' +
-        '<span class="sv-flag ' + (f.price_changed_on ? 'warn' : '') + '">price change <b>' + (f.price_changed_on ? esc(String(f.price_changed_on)) : 'no') + '</b></span>' +
-        '</div>';
-    }
-    return '<div class="sv-task' + (ending ? ' ending' : '') + '" data-tid="' + esc(t.task_id) + '">' +
-      '<div class="sv-task-h"><div style="flex:1 1 320px">' + head + '</div>' +
-      '<div style="font-size:12px;font-weight:800;color:var(--gold-a);text-align:right">' + esc(kindTxt) + '</div></div>' +
-      flags +
-      '<div class="sv-task-btns"><button class="sv-btn" data-act="task_done">Done</button>' +
-      '<button class="sv-btn ghost" data-act="task_dismiss">Dismiss</button></div>' +
-      '<div class="sv-notebox" hidden><textarea placeholder="Add a note (optional): what you did"></textarea>' +
-      '<div class="row"><button class="sv-btn" data-confirm>Confirm</button><button class="sv-btn ghost" data-cancel>Cancel</button></div></div>' +
-      '</div>';
+  function limits() {
+    var d = D(), lim = d.honest_limits || [];
+    return '<div class="sv-limits"><b>How to read this page.</b> Everything here is watched once a day' +
+      (d.observed_since ? ' from <b>' + esc(String(d.observed_since)) + '</b>' : '') + '. ' +
+      '<ul style="margin:6px 0 0 16px;padding:0">' + lim.map(function (x) { return '<li>' + esc(String(x)) + '</li>'; }).join('') + '</ul></div>';
   }
 
-  /* wire the chips and the task Done/Dismiss inline-note flow (no window.prompt) */
+  /* ---------------------------------------- wiring ---------------------------------------- */
   function wire() {
-    var chips = document.querySelectorAll('#svBody .sv-chip');
-    for (var i = 0; i < chips.length; i++) chips[i].onclick = function () { SV.filter = this.getAttribute('data-f'); draw(); };
-
-    var cards = document.querySelectorAll('#svBody .sv-task');
-    for (var c = 0; c < cards.length; c++) (function (card) {
-      var box = card.querySelector('.sv-notebox'), ta = box ? box.querySelector('textarea') : null, pending = null;
-      var acts = card.querySelectorAll('[data-act]');
-      for (var a = 0; a < acts.length; a++) acts[a].onclick = function () {
-        pending = this.getAttribute('data-act');
-        if (box) { box.hidden = false; if (ta) ta.focus(); }
+    var body = $('svBody');
+    if (!body) return;
+    each(body.querySelectorAll('[data-loses]'), function (el) {
+      el.onchange = function () { SV.loses[this.getAttribute('data-loses')] = !!this.checked; draw(); };
+    });
+    each(body.querySelectorAll('[data-copy]'), function (el) {
+      el.onclick = function () {
+        var acct = this.getAttribute('data-copy'), blk = blockFor(acct), btn = this;
+        if (!blk) return;
+        var text = copyIds(blk).join(',');
+        if (!text) { toast('Nothing to copy in this block.'); return; }
+        copyText(text, btn, 'Copy the item numbers');
       };
-      var cancel = card.querySelector('[data-cancel]'); if (cancel) cancel.onclick = function () { if (box) box.hidden = true; pending = null; };
-      var confirm = card.querySelector('[data-confirm]');
-      if (confirm) confirm.onclick = function () {
+    });
+    each(body.querySelectorAll('[data-enter]'), function (el) {
+      el.onclick = function () { SV.pending = this.getAttribute('data-enter'); draw(); };
+    });
+    each(body.querySelectorAll('[data-cancel]'), function (el) {
+      el.onclick = function () { SV.pending = ''; draw(); };
+    });
+    each(body.querySelectorAll('[data-note]'), function (el) {
+      el.oninput = function () { SV.note[this.getAttribute('data-note')] = this.value; };
+    });
+    each(body.querySelectorAll('[data-confirm]'), function (el) {
+      el.onclick = function () {
+        var acct = this.getAttribute('data-confirm'), blk = blockFor(acct), tb = D().this_batch || {};
+        if (!blk || SV.busy) return;
+        var ids = copyIds(blk);
+        if (!ids.length) { toast('Nothing to record in this block.'); return; }
+        SV.busy = acct; this.disabled = true;
+        api('adtoolSales', { op: 'batch_entered', account: acct, batch_on: tb.batch_on, item_ids: ids, note: SV.note[acct] || '' })
+          .then(function (res) {
+            SV.busy = ''; SV.pending = ''; SV.note[acct] = '';
+            toast('Recorded ' + ((res && res.n) || ids.length) + ' listings for ' + acct);
+            load();
+          })
+          .catch(function (e) { SV.busy = ''; toast(e && e.message ? e.message : 'could not record it'); draw(); });
+      };
+    });
+    /* the event-ending task's own inline note flow (no window.prompt) */
+    each(body.querySelectorAll('.sv-task'), function (card) {
+      var ta = card.querySelector('textarea'), row = card.querySelector('[data-taskrow]'), pending = null;
+      each(card.querySelectorAll('[data-act]'), function (b) {
+        b.onclick = function () { pending = this.getAttribute('data-act'); if (ta) { ta.hidden = false; ta.focus(); } if (row) row.hidden = false; };
+      });
+      var cancel = card.querySelector('[data-tcancel]');
+      if (cancel) cancel.onclick = function () { pending = null; if (ta) ta.hidden = true; if (row) row.hidden = true; };
+      var ok = card.querySelector('[data-tconfirm]');
+      if (ok) ok.onclick = function () {
         if (!pending) return;
         var tid = card.getAttribute('data-tid'), note = ta ? ta.value.trim() : '';
-        confirm.disabled = true;
-        api('adtoolSales', { op: pending, task_id: tid, note: note }).then(function () {
-          toast(pending === 'task_done' ? 'Marked done' : 'Dismissed'); load();
-        }).catch(function (e) { confirm.disabled = false; toast(e && e.message ? e.message : 'failed'); });
+        ok.disabled = true;
+        api('adtoolSales', { op: pending, task_id: tid, note: note })
+          .then(function () { toast(pending === 'task_done' ? 'Marked done' : 'Dismissed'); load(); })
+          .catch(function (e) { ok.disabled = false; toast(e && e.message ? e.message : 'failed'); });
       };
-    })(cards[c]);
+    });
   }
 
-  /* small guards */
-  function num(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
-  function pctNum(v) { var n = Number(v); return Math.abs(n) <= 1 ? n * 100 : n; }        /* 0.05 or 5 → 5 */
-  function pctTxt(v) { return Math.round(pctNum(v)) + '%'; }
-  function dcell(ymd) { return ymd ? esc(String(ymd).slice(0, 10)) : '<span style="color:var(--text-3)">—</span>'; }
-  function D_today() { return SV.data && SV.data.today ? SV.data.today : adtUkDay(); }
-  function countdown(today, ymd) {
-    if (!ymd) return null;
-    var a = new Date(today + 'T12:00:00Z'), b = new Date(String(ymd).slice(0, 10) + 'T12:00:00Z');
-    if (isNaN(a.getTime()) || isNaN(b.getTime())) return null;
-    var n = Math.round((b - a) / 86400000);
-    if (n <= 0) return { txt: 'eligible now', cls: 'ready' };
-    return { txt: 'in ' + n + ' day' + (n === 1 ? '' : 's'), cls: n <= 3 ? 'soon' : '' };
+  function each(list, fn) { for (var i = 0; i < list.length; i++) fn(list[i]); }
+  function blockFor(acct) {
+    var blocks = (D().this_batch && D().this_batch.accounts) || [];
+    for (var i = 0; i < blocks.length; i++) if (String(blocks[i].account) === String(acct)) return blocks[i];
+    return null;
+  }
+  /* the clipboard, with the textarea above it as the hand-copy path when the browser refuses */
+  function copyText(text, btn, label) {
+    var done = function () { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = label; }, 1500); };
+    var manual = function () {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', 'readonly');
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); }
+      catch (e) { toast('Select the item numbers in the box and copy them by hand.'); }
+      document.body.removeChild(ta);
+    };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, manual); return; }
+    } catch (e) { /* falls through to the manual path */ }
+    manual();
   }
 })();
 

@@ -1335,6 +1335,12 @@ var ADT_REG_MAP = [
   [/realised vs forecast|forecast vs actual|MAPE|forecast vs reality/i, ['adtool_forecast', 'adtool_ads_daily_vintage', 'adtool_listing_day']],
   /* Phase 5: sale-event lifecycle (observed membership, derived timeline, eligibility tasks) */
   [/sale event|sale events|eligible again|restriction|membership|eligible on|in sale event/i, ['adtool_sale_membership_day', 'adtool_sale_timeline', 'adtool_sale_tasks', 'promotions', 'promo_members', 'adtool_price_day']],
+  /* The weekly batch (owner, 6 Nov): the Sale event page's three new tags. None of the patterns
+     above matches any of these three labels, so they are named here rather than falling through to
+     the whole register, and each resolves to the one row written for it. */
+  [/sale batch|friday batch/i, ['SALE_BATCH']],
+  [/profit after sale|profit in the sale/i, ['SALE_PROFIT_AFTER', 'MARGIN_BEFORE_ADS']],
+  [/next eligible/i, ['SALE_NEXT_ELIGIBLE', 'SALE_ELIGIBLE_ON']],
   /* Panels whose tag never had a pattern of its own and so opened the whole register. Each of these
      has exactly one registered row behind it, so name it. Anchored where the tag is a short word, so
      a longer label cannot fall in here by accident. */

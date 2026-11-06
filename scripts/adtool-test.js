@@ -53,7 +53,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -1367,6 +1367,236 @@ function run(argv) {
     const a1 = resolve('changes on this day'), a2 = resolve('who changed it'), a3 = resolve('spend outside the peak'), a4 = resolve('one part of the day'), a5 = resolve('the 7 days before'), a6 = resolve('the change archive'), a7 = resolve('the peak hours work list');
     return a1.indexOf('CHANGES_STOPPED') >= 0 && a1.indexOf('CHANGES_ACTIVATED') >= 0 && a2.join(',') === 'CHANGE_WHO' && a3.join(',') === 'PEAK_OFF_PEAK_SPEND' && a4.join(',') === 'PEAK_SUGGESTED' && a5.join(',') === 'CHANGE_BEFORE' && a6.indexOf('CHANGE_ARCHIVE') >= 0 && a7.join(',') === 'PEAK_MANUAL';
   })(), null);
+
+
+  /* ---------------------------------------------------------------------------------------------
+     THE FRIDAY BATCH (the owner's request, 6 Nov 2026)
+     "Every Friday, every week, we will run a new sale event for 14 days. Every listing that is
+      eligible is entered by hand into that event. The portal should give us the data: each item's
+      current profit, and what its profit will be if we run it in a sale at 5%."
+     What is held here: the four settings and their fallbacks; the money at the sale price, derived
+     from the books' own rule rather than asserted beside it; the verdict at its own boundary; the
+     batch day for every day of a week; the grouping; and that a reader who may not see collective
+     money still gets every figure this page needs, because not one of them is a profit total.
+     --------------------------------------------------------------------------------------------- */
+  const slR0 = F.adSaleRules({});
+  t('sale batch: with nothing set, the four figures in force are the owner\'s own (a twentieth off, fourteen days, Friday, a pound a unit) and the day is named from the number',
+    slR0.discount_pct === 0.05 && slR0.days === 14 && slR0.batch_weekday === 5 && slR0.batch_weekday_name === 'Friday' && slR0.floor === 1 &&
+    slR0.fee_rate === F.ADTOOL_FEE_RATE && slR0.restriction_days === 14 && slR0.discount_text === '5%' && F.ADTOOL_SALE_WEEKDAYS.length === 7, slR0);
+  t('sale batch: each of the four reads its own stored key, and a blank, an unreadable or a negative edit falls back to the figure in force instead of blanking the page',
+    Object.keys(F.ADTOOL_SALE_CONFIG_KEYS).length === 4 && Object.keys(F.ADTOOL_SALE_CONFIG_KEYS).every(k => F.ADTOOL_SALE_CONFIG_KEYS[k] === 'adtool_sale_' + (k === 'min_profit' ? 'min_profit' : k)) &&
+    (() => { const r = F.adSaleRules({ adtool_sale_discount_pct: '', adtool_sale_days: 'ten', adtool_sale_batch_weekday: '9', adtool_sale_min_profit: '-2' }); return r.discount_pct === 0.05 && r.days === 14 && r.batch_weekday === 5 && r.floor === 0; })(), F.ADTOOL_SALE_CONFIG_KEYS);
+  const slR1 = F.adSaleRules({ adtool_sale_discount_pct: '10', adtool_sale_days: '7', adtool_sale_batch_weekday: '1', adtool_sale_min_profit: '0.50' });
+  t('sale batch: Management\'s own figures are taken, strings included, and 1 is Monday', slR1.discount_pct === 0.1 && slR1.discount_text === '10%' && slR1.days === 7 && slR1.batch_weekday === 1 && slR1.batch_weekday_name === 'Monday' && slR1.floor === 0.5, slR1);
+  t('sale batch: a length past the longest event eBay allows is cut back to it, and a length of nothing becomes one day', F.adSaleRules({ adtool_sale_days: '90' }).days === F.ADTOOL_SALE_MAX_DAYS && F.adSaleRules({ adtool_sale_days: '0' }).days === 1, [F.adSaleRules({ adtool_sale_days: '90' }).days, F.ADTOOL_SALE_MAX_DAYS]);
+  t('sale batch: a discount reads the same whether it is stored the way a person types it or as a fraction, and a whole price off or an unreadable one is nothing at all rather than no discount',
+    F.adSaleDiscountFraction(5) === 0.05 && F.adSaleDiscountFraction(0.05) === 0.05 && F.adSaleDiscountFraction(0) === 0 &&
+    F.adSaleDiscountFraction(1) === null && F.adSaleDiscountFraction(100) === null && F.adSaleDiscountFraction('') === null && F.adSaleDiscountFraction(-1) === null &&
+    F.adSalePctText(0.05) === '5%' && F.adSalePctText(null) === 'not known', null);
+
+  /* (a) THE MONEY. The shortcut the page prints is held against the books' own rule applied to the
+     discounted price: the cost the margin implies is backed out, the price and its percentage fees
+     are discounted, and the law is run again. If the two could ever disagree, this fails. */
+  const slPA = F.adSaleProfitAfter(20, 4, 0.05, F.ADTOOL_FEE_RATE);
+  const slCost = 20 - F.ADTOOL_FEE_RATE * 20 - 4 / 0.8;                       /* the cost £4 a unit at £20 implies */
+  const slLaw = round2(0.8 * (0.95 * 20 - F.ADTOOL_FEE_RATE * 0.95 * 20 - slCost));
+  t('sale profit: £20 at a twentieth off with £4 a unit now leaves £3.34, and the books\' own rule run again on the discounted price gives the same answer, so the shortcut IS the law and not a second opinion about it',
+    slPA.profit_after === 3.34 && slPA.drop === 0.66 && near(slLaw, slPA.profit_after, 0.005) && near(slCost, 11.62, 0.005), [slPA, slLaw, slCost]);
+  t('sale profit: no discount at all gives the margin back exactly as it went in, and the money taken off is nothing',
+    F.adSaleProfitAfter(20, 4, 0, F.ADTOOL_FEE_RATE).profit_after === 4 && F.adSaleProfitAfter(20, 4, 0, F.ADTOOL_FEE_RATE).drop === 0 &&
+    F.adSaleProfitAfter(31.5, 7.25, 0, F.ADTOOL_FEE_RATE).profit_after === 7.25, null);
+  t('sale profit: a margin we do not have stays not known all the way out, never nought, and so does a listing with no price or no readable discount',
+    F.adSaleProfitAfter(20, null, 0.05).profit_after === null && F.adSaleProfitAfter(20, null, 0.05).drop === null && /do not know/.test(F.adSaleProfitAfter(20, null, 0.05).why) &&
+    F.adSaleProfitAfter(20, '', 0.05).profit_after === null && F.adSaleProfitAfter(null, 4, 0.05).profit_after === null && F.adSaleProfitAfter(0, 4, 0.05).profit_after === null &&
+    F.adSaleProfitAfter(20, 4, null).profit_after === null && F.adSaleProfitAfter(20, 4, 100).profit_after === null, [F.adSaleProfitAfter(20, null, 0.05), F.adSaleProfitAfter(20, 4, null)]);
+  t('sale profit: a margin of exactly nought is a real figure and not a missing one, so the discount turns it into a loss rather than into not known',
+    F.adSaleProfitAfter(20, 0, 0.05).profit_after === -0.66 && F.adSaleVerdict(F.adSaleProfitAfter(20, 0, 0.05).profit_after, 1) === 'loses', F.adSaleProfitAfter(20, 0, 0.05));
+  t('sale profit: the fee share is the caller\'s to hand in, so a listing judged at a different fee moves with it and nothing is wired to one number',
+    F.adSaleProfitAfter(20, 4, 0.05, 0).drop === 0.8 && F.adSaleProfitAfter(20, 4, 0.05, 0.5).drop === 0.4, [F.adSaleProfitAfter(20, 4, 0.05, 0).drop, F.adSaleProfitAfter(20, 4, 0.05, 0.5).drop]);
+
+  /* (b) THE VERDICT, at its own boundary. The figure on screen has to mean what it says: exactly the
+     floor passes, a penny under does not, and nought is a loss and not a thin pass. */
+  t('sale verdict: exactly the floor is worth it, a penny under it is thin, a penny over nothing is still thin, nought and below lose, and no margin is not known',
+    F.adSaleVerdict(1, 1) === 'worth it' && F.adSaleVerdict(1.01, 1) === 'worth it' && F.adSaleVerdict(0.99, 1) === 'thin' && F.adSaleVerdict(0.01, 1) === 'thin' &&
+    F.adSaleVerdict(0, 1) === 'loses' && F.adSaleVerdict(-0.5, 1) === 'loses' && F.adSaleVerdict(null, 1) === 'unknown' && F.adSaleVerdict('', 1) === 'unknown', null);
+  t('sale verdict: a floor of nothing makes every listing that earns anything worth it, and the floor is never read as negative', F.adSaleVerdict(0.01, 0) === 'worth it' && F.adSaleVerdict(0.01, -5) === 'worth it' && F.adSaleVerdict(0, 0) === 'loses', null);
+  t('sale verdict: the order the batch is sorted by puts a losing listing above everything else, and a listing we cannot judge above the ones that pay',
+    JSON.stringify(F.ADTOOL_SALE_VERDICTS) === JSON.stringify(['loses', 'thin', 'unknown', 'worth it']), F.ADTOOL_SALE_VERDICTS);
+
+  /* (c) THE BATCH DAY, every day of a week. 6 Nov 2026 is a Friday. */
+  const slWeek = ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07', '2026-11-08'].map(d => F.adSaleBatchDay(d, 5));
+  t('sale batch day: Monday to Friday all land on Friday 6 Nov, and the Saturday and the Sunday wait for the 13th, so a listing eligible ON the batch day goes in that day instead of waiting a week',
+    JSON.stringify(slWeek) === JSON.stringify(['2026-11-06', '2026-11-06', '2026-11-06', '2026-11-06', '2026-11-06', '2026-11-13', '2026-11-13']), slWeek);
+  t('sale batch day: the setting\'s numbering is converted in one place, so a batch day of Monday moves every answer with it, and a day that is not a date has no answer at all',
+    F.adSaleBatchDay('2026-11-06', 1) === '2026-11-09' && F.adSaleBatchDay('2026-11-09', 1) === '2026-11-09' && F.adSaleBatchDay('2026-11-08', 7) === '2026-11-08' &&
+    F.adSaleBatchDay('friday', 5) === null && F.adSaleBatchDay('', 5) === null && F.adSaleBatchDay('2026-11-07', 99) === '2026-11-13', null);
+  const slCal = F.adSaleCalendar('2026-11-06', slR0), slCalSat = F.adSaleCalendar('2026-11-07', slR0);
+  t('sale calendar: on the Friday itself the batch coming IS today, the three after it are a week apart, and a fourteen-day event opened on the 6th runs to the 19th',
+    slCal.f0 === '2026-11-06' && slCal.batches[0].is_today === true && slCal.batches[0].label === 'today' && slCal.batches[0].ends_on === '2026-11-19' &&
+    slCal.f1 === '2026-11-13' && slCal.f2 === '2026-11-20' && slCal.f3 === '2026-11-27' && slCal.batches.length === F.ADTOOL_SALE_BATCHES_AHEAD, slCal);
+  t('sale calendar: on the Saturday the batch coming is the next Friday and is not called today', slCalSat.f0 === '2026-11-13' && slCalSat.batches[0].is_today === false && slCalSat.batches[0].label === 'this Friday' && slCalSat.batches[1].label === 'next Friday', slCalSat);
+
+  /* (d) WHEN A LISTING COMES ROUND. A listing in a sale waits out eBay's restriction from the day its
+     event ends, and the page then puts it on the first batch day on or after that. A listing with no
+     readable clock gets NO date and keeps its own reason, because a made-up date here is a listing
+     somebody enters and eBay silently drops. */
+  const slNe1 = F.adSaleNextEligible({ in_sale: true, ends: '2026-11-20' }, '2026-11-06', slR0);
+  const slNe2 = F.adSaleNextEligible({ in_sale: true, ends: '2026-11-18' }, '2026-11-06', slR0);
+  t('sale next eligible: a listing in a sale ending 20 Nov comes round on 4 Dec (the event ends, then the fourteen days), which is itself a Friday; one ending 18 Nov comes round on the Wednesday and waits for the Friday',
+    slNe1.on === '2026-12-04' && /waits 14 days/.test(slNe1.why) && F.adSaleBatchDay(slNe1.on, 5) === '2026-12-04' &&
+    slNe2.on === '2026-12-02' && F.adSaleBatchDay(slNe2.on, 5) === '2026-12-04', [slNe1, slNe2]);
+  t('sale next eligible: a date already gone reads as today, a listing whose clock is over with no date reads as today, and a listing with no clock at all has no date and says why in its own words',
+    F.adSaleNextEligible({ eligible_on: '2026-10-30' }, '2026-11-06', slR0).on === '2026-11-06' &&
+    F.adSaleNextEligible({ eligible_on: '2026-11-20' }, '2026-11-06', slR0).on === '2026-11-20' &&
+    F.adSaleNextEligible({ status: 'eligible' }, '2026-11-06', slR0).on === '2026-11-06' &&
+    F.adSaleNextEligible({ status: 'no-event', why: 'listed 3 days ago, needs 14' }, '2026-11-06', slR0).on === null &&
+    F.adSaleNextEligible({ status: 'no-event', why: 'listed 3 days ago, needs 14' }, '2026-11-06', slR0).why === 'listed 3 days ago, needs 14' &&
+    F.adSaleNextEligible({ in_sale: true, ends: '' }, '2026-11-06', slR0).on === null, null);
+
+  /* (e) THE GROUPING, over one worked set. Eight listings across two accounts, every group reached. */
+  const slRows = [
+    { item_id: '100000000001', account: 'A', price: 20, margin_before_ads: 4, margin_source: 'orders', status: 'eligible', eligible_on: '2026-11-01', units_7d: 2, units_30d: 10, actual_profit_7d: 3, actual_profit_30d: 12, ad_spend_7d: 1.5 },
+    { item_id: '100000000002', account: 'A', price: 20, margin_before_ads: 1.2, margin_source: 'estimate', status: 'eligible', eligible_on: '2026-11-06', units_30d: 5 },
+    { item_id: '100000000003', account: 'A', price: 20, margin_before_ads: 0.3, margin_source: 'ali cost', status: 'eligible', eligible_on: '2026-11-05', units_30d: 2 },
+    { item_id: '100000000004', account: 'A', price: 20, margin_before_ads: null, margin_source: 'none', status: 'eligible', eligible_on: '2026-11-06', units_30d: 7 },
+    { item_id: '100000000005', account: 'B', price: 20, margin_before_ads: 0.9, status: 'waiting', eligible_on: '2026-11-10', units_30d: 3 },
+    { item_id: '100000000006', account: 'B', price: 20, margin_before_ads: 2, status: 'waiting', eligible_on: '2026-11-25', units_30d: 4 },
+    { item_id: '100000000007', account: 'B', price: 20, margin_before_ads: 4, in_sale: true, ends: '2026-11-20', status: 'live' },
+    { item_id: '100000000008', account: 'B', price: 20, margin_before_ads: 4, status: 'no-event', why: 'listed 3 days ago, needs 14' },
+  ];
+  const slB = F.adSaleBatches(slRows, '2026-11-06', Object.assign({}, slR0, { events: { B: { name: 'Autumn', discount_text: '5%', starts: '2026-11-07', ends: '2026-11-20', days_left: 14, covers: 'whole shop' } } }));
+  t('sale grouping: four of the eight go in on the Friday, one on the next, one on a later batch day, one is already in a sale and one has no date, and every count agrees with its group',
+    slB.counts.this_friday === 4 && slB.counts.next_friday === 1 && slB.counts.later === 1 && slB.counts.batch_days_later === 1 && slB.counts.in_sale_now === 1 && slB.counts.no_date === 1 &&
+    slB.groups.this_friday.length === 4 && slB.groups.next_friday.length === 1 && slB.groups.later.length === 1 && slB.groups.later[0].batch_on === '2026-11-27' && slB.groups.in_sale_now.length === 1 && slB.groups.no_date.length === 1, slB.counts);
+  t('sale grouping: the Friday block is sorted WORST FIRST, so the listing that loses money is read before anybody enters it and the one that pays is last',
+    slB.groups.this_friday.map(r => r.verdict).join('|') === 'loses|thin|unknown|worth it' &&
+    slB.groups.this_friday[0].item_id === '100000000003' && slB.groups.this_friday[3].item_id === '100000000001' &&
+    slB.counts.loses === 1 && slB.counts.thin === 1 && slB.counts.unknown === 1 && slB.counts.worth_it === 1, slB.groups.this_friday.map(r => [r.item_id, r.verdict, r.profit_after]));
+  t('sale grouping: every row carries the sale price, the money off a unit, the profit at the sale price and the day it goes in, and the one with no margin carries not known rather than nought',
+    slB.groups.this_friday[3].sale_price === 19 && slB.groups.this_friday[3].profit_after === 3.34 && slB.groups.this_friday[3].drop === 0.66 &&
+    slB.groups.this_friday[3].batch_on === '2026-11-06' && slB.groups.this_friday[3].batch_ends_on === '2026-11-19' &&
+    slB.groups.this_friday[2].profit_after === null && slB.groups.this_friday[2].drop === null && slB.groups.this_friday[2].drop_month_estimate === null &&
+    slB.groups.this_friday[3].drop_month_estimate === 6.6 && slB.groups.this_friday[3].units_30d === 10 && slB.groups.this_friday[3].actual_profit_30d === 12, [slB.groups.this_friday[2], slB.groups.this_friday[3]]);
+  t('sale grouping: the listing already in a sale comes round fourteen days after its event ends and is placed on that Friday, and the listing with no clock keeps its own reason',
+    slB.groups.in_sale_now[0].next_eligible_on === '2026-12-04' && slB.groups.in_sale_now[0].batch_on === '2026-12-04' &&
+    slB.groups.no_date[0].batch_on === null && slB.groups.no_date[0].next_eligible_why === 'listed 3 days ago, needs 14', [slB.groups.in_sale_now[0].next_eligible_on, slB.groups.no_date[0].next_eligible_why]);
+  t('sale grouping: a listing ALREADY in a sale is judged at its own event\'s discount and not at the batch setting, and the row says which of the two it was',
+    (() => {
+      const live = F.adSaleBatches([{ item_id: '100000000009', account: 'C', price: 20, margin_before_ads: 4, in_sale: true, ends: '2026-11-20', discount_pct: 0.2 }], '2026-11-06', slR0).groups.in_sale_now[0];
+      const set = slB.groups.in_sale_now[0];
+      return live.discount_pct === 0.2 && live.sale_price === 16 && live.drop === 2.66 && live.profit_after === 1.34 && live.discount_source === 'the event it is in' &&
+        set.discount_pct === 0.05 && set.sale_price === 19 && set.discount_source === 'the batch setting' && slB.groups.this_friday[3].discount_source === 'the batch setting';
+    })(),
+    F.adSaleBatches([{ item_id: '100000000009', account: 'C', price: 20, margin_before_ads: 4, in_sale: true, ends: '2026-11-20', discount_pct: 0.2 }], '2026-11-06', slR0).groups.in_sale_now[0]);
+  const slA = slB.accounts.filter(a => a.account === 'A')[0], slBa = slB.accounts.filter(a => a.account === 'B')[0];
+  t('sale grouping: the account line counts its own groups and names the event it is sitting in, and an account with nothing in the batch has nothing to sum rather than a nought',
+    slB.accounts.length === 2 && slA.this_batch.n === 4 && slA.this_batch.worth_it === 1 && slA.this_batch.thin === 1 && slA.this_batch.loses === 1 && slA.this_batch.unknown === 1 &&
+    slBa.next_batch.n === 1 && slBa.later.n === 1 && slBa.in_sale.n === 1 && slBa.no_date.n === 1 && slBa.this_batch.n === 0 &&
+    slBa.month_drop_estimate === null && slBa.month_drop_items === 0 && slBa.event.name === 'Autumn', [slA.this_batch, slBa]);
+  t('sale grouping: the month figure is each listing\'s OWN money off times its OWN units, added up over the batch, counted only where both are known, and said to be exactly that',
+    slA.month_drop_estimate === 11.22 && slA.month_drop_items === 3 && /sum of per-listing estimates/.test(slB.month_drop_label) && !/profit/i.test(slB.month_drop_label.split('.')[0]), [slA.month_drop_estimate, slA.month_drop_items, slB.month_drop_label]);
+  t('sale grouping: a raw settings map is accepted and read through the same rules, so the batch cannot be worked out against figures nobody set',
+    (() => { const m = F.adSaleBatches(slRows, '2026-11-06', { adtool_sale_batch_weekday: '1', adtool_sale_days: '7' });
+      return m.calendar.f0 === '2026-11-09' && m.calendar.weekday_name === 'Monday' && m.calendar.batches[0].ends_on === '2026-11-15' && m.calendar.f1 === '2026-11-16' &&
+        m.counts.this_friday === 4 && m.counts.next_friday === 1 && m.groups.later[0].batch_on === '2026-11-30' && m.groups.this_friday[3].batch_ends_on === '2026-11-15'; })(),
+    JSON.stringify(F.adSaleBatches(slRows, '2026-11-06', { adtool_sale_batch_weekday: '1', adtool_sale_days: '7' }).counts));
+  t('sale grouping: no listing is placed anywhere when the batch day cannot be worked out, which is what the no-date group is for',
+    (() => { const bad = F.adSaleBatches(slRows, 'not-a-day', slR0); return bad.counts.no_date === 7 && bad.counts.this_friday === 0 && bad.counts.in_sale_now === 1; })(), null);
+
+  /* (f) THE RULE A READER MAY NOT SEE COLLECTIVE MONEY. Profit leaves the engine on item-keyed rows
+     only, so the floor, the month estimate and the per-listing figures are all named so that the
+     strip keeps them: not one of them is a profit total, and the page would be unreadable without
+     them. This is the test that stops somebody renaming the floor back to a profit key. */
+  const slStrip = F.adtStripCollectiveProfit(JSON.parse(JSON.stringify({
+    settings: { rules: slR0 }, batches: { groups: slB.groups, counts: slB.counts, verdict_rule: slB.verdict_rule, profit_after_rule: slB.profit_after_rule, month_drop_label: slB.month_drop_label, settings_used: slB.settings_used },
+    by_account: slB.accounts, calendar: slB.calendar,
+  })), { keepCollective: false });
+  t('sale strip: a reader outside the profit roles still gets the floor, the month estimate, the counts and every listing\'s own profit at the sale price, because none of them is a collective total',
+    slStrip.settings.rules.floor === 1 && slStrip.batches.settings_used.floor === 1 && slStrip.by_account.filter(a => a.account === 'A')[0].month_drop_estimate === 11.22 &&
+    slStrip.batches.groups.this_friday[3].profit_after === 3.34 && slStrip.batches.groups.this_friday[3].actual_profit_30d === 12 &&
+    typeof slStrip.batches.profit_after_rule === 'string' && slStrip.batches.counts.worth_it === 1, [slStrip.settings.rules, slStrip.by_account[0]]);
+
+  /* (g) THE RECORD OF WHO ENTERED A BATCH. One spelling for the key, read back by the same rule, and
+     the batch-DAY setting shares the prefix and must never be read as one of these records. */
+  t('sale record: the key a batch is kept under is one spelling, read back by the same rule, and the batch-day setting can never be read as a batch record',
+    F.adSaleBatchKey('AZHAR ABRT', '2026-11-06') === 'adtool_sale_batch_azhar_abrt_2026-11-06' &&
+    JSON.stringify(F.adSaleBatchKeyParse(F.adSaleBatchKey('AZHAR ABRT', '2026-11-06'))) === JSON.stringify({ slug: 'azhar_abrt', batch_on: '2026-11-06' }) &&
+    F.adSaleBatchKeyParse('adtool_sale_batch_weekday') === null && F.adSaleBatchKeyParse('adtool_sale_discount_pct') === null &&
+    F.adSaleBatchKey('', '2026-11-06') === null && F.adSaleBatchKey('A', 'friday') === null && F.adSaleBatchKey('!!!', '2026-11-06') === null, F.adSaleBatchKey('AZHAR ABRT', '2026-11-06'));
+
+  /* (h) THE ENGINE'S OWN HALF (source assertions: these are not pure functions). */
+  const slSrc = src.slice(src.indexOf('async function adtoolSalesCompute(env, acct) {'), src.indexOf('/* ADTOOL-P10-END'));
+  const slSnap = src.slice(src.indexOf('async function adtSaleSnapshot(env) {'), src.indexOf('const ADTOOL_ACTIONS_P10 = {'));
+  t('sale engine: the derivation is written down where the arithmetic lives, so the one line the page prints can be checked against the books\' rule without leaving the file',
+    /profit after = margin_before_ads − 0\.8 × d × \(1 − feeRate\) × price/.test(src) && /after − before/.test(src) && /the Ali cost does not move at all/.test(src), null);
+  t('sale engine: the per-listing eligible task is gone from the snapshot, the page asks only for the event-ending kind, and the ending task itself is untouched',
+    !/'eligible',\?4,'open'/.test(slSnap) && !/const tid = 'elig:'/.test(slSnap) && /NO PER-LISTING "ELIGIBLE" TASK ANY MORE/.test(slSnap) &&
+    /'event-ending',\?3,'open'/.test(slSnap) && /WHERE status = 'open' AND kind = 'event-ending'/.test(slSrc), null);
+  t('sale engine: the windowed figures come from ONE grouped read per chunk of listings, and the before-and-after of a running event from one joined read apiece, never a query per listing',
+    /FROM adtool_listing_day WHERE day >= \?1 AND day <= \?3 AND item_id IN ' \+ adtInList\(ch, 3\) \+ ' GROUP BY item_id/.test(src) &&
+    /adPeakCohortJoin\(sql, 'd\.item_id', 'd\.day'\)/.test(src) && /const SINCE = await adtSaleEventSums\(env, sinceEntries\), BEFORE = await adtSaleEventSums\(env, beforeEntries\);/.test(slSrc), null);
+  t('sale engine: a window whose days carry no profit figure comes back as not known and never as nought, which is why the profit sums have no else branch',
+    /SUM\(CASE WHEN day >= \?2 AND actual_profit IS NOT NULL THEN actual_profit END\)/.test(src) && /SUM\(CASE WHEN actual_profit IS NOT NULL THEN actual_profit END\)/.test(src) &&
+    !/SUM\(CASE WHEN day >= \?2 THEN actual_profit ELSE 0 END\)/.test(src), null);
+  const slOp = slSrc.slice(slSrc.indexOf("if (p.op === 'batch_entered')"), slSrc.indexOf('return adtoolSalesCompute(env, String('));
+  t('sale engine: marking a batch entered validates the item numbers against the batch itself, writes one record and one audit line, clears the page memo, and reaches no eBay endpoint at all',
+    /const D = await adtoolSalesCompute\(env, account\);/.test(slOp) && /const ids = asked\.filter\(id => due\[id\]\), refused = asked\.filter\(id => !due\[id\]\);/.test(slOp) &&
+    /'ADTOOL_SALE_BATCH_ENTERED'/.test(slOp) && /INSERT INTO portal_config \(key, value, updated_at\)/.test(slOp) && /await adtSalesCacheClear\(env\);/.test(slOp) &&
+    /sent_to_ebay: false/.test(slOp) && !/fetch\(/.test(slOp) && !/ebay(Call|Trade|Fetch|Token)/i.test(slOp), null);
+  t('sale engine: the four settings are seeded before they are read and never written over a figure somebody has already set',
+    /for \(const k of Object\.keys\(ADTOOL_SALE_CONFIG_KEYS\)\) \{/.test(src) && /ON CONFLICT\(key\) DO NOTHING"\)\.bind\(ADTOOL_SALE_CONFIG_KEYS\[k\], String\(ADTOOL_SALE_DEFAULTS\[k\]\)\)/.test(src), null);
+  const slProbe = src.slice(src.indexOf('  adsSaleProbe: {'), src.indexOf('  /* THE VIDEO EVIDENCE ROUTE'));
+  t('sale probe: the batch has an evidence route of its own, by key like the backup dump, read-only, printing the settings in force, the calendar, the counts and the first rows with the money now and at the sale price',
+    /adsSaleProbe: \{/.test(slProbe) && /auth: 'sync'/.test(slProbe) && /settings: D\.settings/.test(slProbe) && /calendar: D\.calendar/.test(slProbe) &&
+    /first_rows: first/.test(slProbe) && /profit_after: r\.profit_after/.test(slProbe) && /margin_before_ads: r\.margin_before_ads/.test(slProbe) &&
+    /sent_to_ebay: false/.test(slProbe) && /read_errors: readErrors/.test(slProbe) && !/fetch\(/.test(slProbe) && slProbe.indexOf('adtool') !== 0, null);
+
+  /* (i) THE PAGE. Its blocks, its two controls, and the promises it keeps about a figure it has not
+     got. Read from the file, because the two halves can only be wrong about each other. */
+  const svSrc = readFile('frontend/view-adtool-sales.js');
+  const svCode = svSrc.replace(/\/\*[\s\S]*?\*\//g, '');                    /* the notes name the old page too; this is about the code */
+  t('sale page: the page was read, keeps its key, its prefix and its action, and still carries the two task ops beside the new one',
+    svSrc.length > 8000 && /VIEWS\.adtoolSales = \{/.test(svSrc) && (svCode.match(/api\('[A-Za-z]+'/g) || []).every(c => c === "api('adtoolSales'") &&
+    /op: 'batch_entered'/.test(svCode) && /op: pending/.test(svCode) && /task_done/.test(svCode) && /task_dismiss/.test(svCode) && /\.sv-panel\{/.test(svSrc), [svSrc.length, (svCode.match(/api\('[A-Za-z]+'/g) || [])]);
+  t('sale page: all six blocks the owner asked for are built, each by its own function, and the settings strip prints the stored figures rather than any number typed into the page',
+    ['settingsStrip', 'accountTable', 'thisBatch', 'inSaleNow', 'upcoming', 'noDate', 'endingTasks'].every(f => new RegExp('function ' + f + '\\(').test(svCode) && new RegExp('h \\+= ' + f + '\\(\\)').test(svCode)) &&
+    /d\.settings\.rows/.test(svCode) && /r\.discount_text/.test(svCode) && /c\.weekday_name/.test(svCode) &&
+    !/'\d+ ?%'|>\d+ ?% off/.test(svCode) && !/'(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)'/.test(svCode) && !/'£\d/.test(svCode), null);
+  t('sale page: the whole-shop warning is there, because a sale covering the whole shop brings back the very problem the batch exists to avoid',
+    /function wholeShopWarning\(\)/.test(svCode) && /whole_shop_running/.test(svCode) && /brings the problem back/.test(svSrc), null);
+  t('sale page: the copy control takes the worth-it and thin rows, leaves the losing ones out until somebody ticks them in, and puts them in a box as well for copying by hand',
+    /function copyIds\(b\)/.test(svCode) && /SV\.loses\[b\.account\] \? \{ 'worth it': 1, thin: 1, loses: 1 \} : \{ 'worth it': 1, thin: 1 \}/.test(svCode) &&
+    /data-copy="/.test(svCode) && /data-loses="/.test(svCode) && /class="sv-ta" readonly data-ta=/.test(svCode) && /navigator\.clipboard/.test(svCode), null);
+  t('sale page: marking a block entered sends the account, the batch day and the item numbers, and says in plain words that nothing goes to eBay',
+    /data-enter="/.test(svCode) && /account: acct, batch_on: tb\.batch_on, item_ids: ids/.test(svCode) && /Nothing is sent to eBay/.test(svSrc) &&
+    /Entered by <b>/.test(svCode) && /entered_check/.test(svCode), null);
+  t('sale page: a listing in a sale prints the discount it is actually getting and where that came from, so the batch setting is never shown over a live event\'s own discount',
+    /function pctOf\(v\)/.test(svCode) && /pctOf\(r\.discount_pct\)/.test(svCode) && /r\.discount_source/.test(svCode), null);
+  t('sale page: no task for a listing becoming eligible is drawn any more, and the page says so where that list used to be; the event-ending prompt is kept',
+    !/Eligible for a sale event/.test(svSrc) && !/already added/.test(svSrc) && /An event ending with nothing to follow it/.test(svSrc) && /the batch above is that list/.test(svSrc), null);
+  t('sale page: every listing row goes through the shared product cell, so every one of them carries the link into its own history',
+    (svCode.match(/adtProductCell\(r\)/g) || []).length >= 4 && !/adt-pc/.test(svCode), (svCode.match(/adtProductCell\(/g) || []).length);
+  t('sale page: a figure the engine has not got prints as not known and never as nought or as a bare dash, and a loss is in the loss colour',
+    /function nk\(\) \{ return '<span class="sv-nk">not known<\/span>'; \}/.test(svCode) &&
+    /function money\(v\) \{[\s\S]{0,120}if \(n == null\) return nk\(\);/.test(svCode) && /function units\(v\)[\s\S]{0,120}n == null \? nk\(\)/.test(svCode) &&
+    /var LOSS = '#e0563f'/.test(svCode) && /'\.sv-m\.neg\{color:' \+ LOSS/.test(svCode), null);
+  t('sale page: not one em-dash in anything a reader sees, and the money is British',
+    (svSrc.split('\n').filter((l, i) => i > 25 && l.indexOf('—') >= 0).length === 0) && /£/.test(svSrc) && !/\$\d|USD|\bdollars?\b/.test(svCode), svSrc.split('\n').filter((l, i) => i > 25 && l.indexOf('—') >= 0).slice(0, 3));
+  /* the page's three new tags, resolved through the REAL map down to real register rows, the way the
+     change-and-peak pages' tags are. A tag with no pattern of its own opens the whole register, which
+     is noise where a reader asked one question. */
+  const svHooks = (svSrc.match(/\breg\('[^']+'/g) || []).map(m => m.slice(5, -1)).filter((v, i, a) => a.indexOf(v) === i);
+  const svResolve = (lab) => { for (const row of (regMap || [])) { if (row[0].test(lab)) { return rgAll.filter(r => row[1].some(k => String(r.sources).indexOf(k) >= 0 || r.id === k)).map(r => r.id); } } return []; };
+  t('sale page: every tag on it has a pattern of its own and reaches a real note, and the three new ones reach the three rows written for them',
+    svHooks.length >= 4 && svHooks.indexOf('sale batch') >= 0 && svHooks.indexOf('profit after sale') >= 0 && svHooks.indexOf('next eligible') >= 0 &&
+    svHooks.every(l => svResolve(l).length > 0) && svResolve('sale batch').join(',') === 'SALE_BATCH' &&
+    svResolve('profit after sale').indexOf('SALE_PROFIT_AFTER') >= 0 && svResolve('next eligible').indexOf('SALE_NEXT_ELIGIBLE') >= 0,
+    svHooks.map(l => [l, svResolve(l)]));
+  t('sale register: the three new notes exist exactly once each, say what they are worked out from and how they are rechecked, and name no setting\'s value in their words',
+    ['SALE_BATCH', 'SALE_PROFIT_AFTER', 'SALE_NEXT_ELIGIBLE'].every(id => {
+      const r = rgAll.filter(x => x.id === id);
+      return r.length === 1 && r[0].name && r[0].formula && r[0].sources && r[0].recompute && r[0].recheck && !/\b5 ?%|\bFriday\b|£1\b/.test(r[0].formula);
+    }), ['SALE_BATCH', 'SALE_PROFIT_AFTER', 'SALE_NEXT_ELIGIBLE'].map(id => rgAll.filter(x => x.id === id).length));
 
   /* (l) the fields the three pages read, against the ones the engine actually sends. A field the page
      reads and the engine never sends is an EMPTY CELL, and an empty cell where a number belongs is

@@ -10873,6 +10873,299 @@ function adtSaleTimeline(mdays, priceDays, today) {
   const status = adtSaleStatus({ today, in_sale, event_running, removed_on, removed_by, eligible_on, discount_pct, added_on, disc_src: lastDiscSrc });
   return { added_on, removed_on, removed_by, restriction_end, eligible_on, eligible_basis, status, promo_id: promo_id || (last && last.promo_id ? String(last.promo_id) : ''), basis: basis || (last && last.basis ? String(last.basis) : ''), in_sale, event_running, discount_pct, disc_src: lastDiscSrc, last_price_change: lastPriceChange };
 }
+/* ---- THE FRIDAY BATCH (the owner's request, 6 November 2026) ---------------------------------
+   "Every Friday, every week, we will run a new sale event for 14 days. Every listing that is
+   eligible is entered by hand into that event and the event runs."
+
+   WHY A BATCH ON ONE NAMED DAY, AND NOT THE WHOLE SHOP. Under a whole-shop (INVENTORY_ANY) event
+   eBay enrols a listing the moment it judges it eligible, so a listing that becomes eligible on
+   day 12 of a 14-day event is in the sale for two days and then the event is over. A batch entered
+   by hand on one named day gives every listing in it the whole run, and the team sees what it is
+   entering before it enters it.
+
+   THE MONEY, DERIVED AND NOT GUESSED. The books' own rule (adtOrderBrain / adtSheetLawProfit) is
+   profit before ads = 0.8 × (sold − fees − cost), with fees taken at ADTOOL_FEE_RATE × price where
+   eBay has not billed the listing yet. A markdown of d moves the price, and the percentage fees
+   move with it; the Ali cost does not move at all. So
+
+       before          = 0.8 × (price − feeRate × price − cost)
+       after           = 0.8 × ((1 − d) × price − feeRate × (1 − d) × price − cost)
+       after − before  = 0.8 × (1 − feeRate) × price × ((1 − d) − 1) = −0.8 × d × (1 − feeRate) × price
+
+   which is the one line adSaleProfitAfter computes:
+
+       profit after = margin_before_ads − 0.8 × d × (1 − feeRate) × price
+
+   and nothing else about the listing moves. At d = 0 the drop is 0 and the margin comes back
+   unchanged; where the margin is not known the answer is null and never 0.
+
+   Every rule below is pure, so the calendar, the money and the words are tests and not hopes.
+*/
+const ADTOOL_SALE_DEFAULTS = { discount_pct: 5, days: 14, batch_weekday: 5, min_profit: 1 };
+const ADTOOL_SALE_CONFIG_KEYS = {
+  discount_pct: 'adtool_sale_discount_pct', days: 'adtool_sale_days',
+  batch_weekday: 'adtool_sale_batch_weekday', min_profit: 'adtool_sale_min_profit',
+};
+/* eBay's own two numbers, and NOT settings: the team cannot change either, so neither is offered
+   as one. The restriction is the 14 days a listing waits after leaving a sale or moving its price;
+   45 days is the longest an event may run, which is what the length setting is clamped to. */
+const ADTOOL_SALE_RESTRICTION_DAYS = 14;
+const ADTOOL_SALE_MAX_DAYS = 45;
+const ADTOOL_SALE_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+/* WORST FIRST. This order is the whole point of the sort: a listing that loses money under the
+   discount has to be in front of the person entering the batch, not below the ones that pay. */
+const ADTOOL_SALE_VERDICTS = ['loses', 'thin', 'unknown', 'worth it'];
+const ADTOOL_SALE_BATCHES_AHEAD = 4;        /* this batch day and the three after it */
+/* how many listings already in a sale get the before-and-after comparison in one read. The cohort
+   travels in the statement itself, so it is bounded for the same reason the peak cohort is, and the
+   page says when it has been cut off rather than quietly answering for part of the shop. */
+const ADTOOL_SALE_COHORT_CAP = 600;
+
+function adSaleBatchKey(account, batchOn) {
+  /* THE ONE SPELLING of the key a batch's own record is kept under, so the write and the read can
+     never drift apart. The account is folded to lower case with anything that is not a letter or a
+     digit becoming an underscore, because a settings key cannot carry the spaces an account name
+     has; the account's real name is kept inside the record itself. An account that folds to nothing
+     and a day that is not a date have NO key at all, and the caller refuses rather than writing
+     somebody else's row. */
+  const slug = String(account || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const day = String(batchOn || '');
+  if (!slug || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  return 'adtool_sale_batch_' + slug + '_' + day;
+}
+function adSaleBatchKeyParse(key) {
+  /* the same spelling read back. The batch-DAY setting shares this prefix and must never be read as
+     a batch record: it carries no date, so it fails here, which is the whole reason this is a
+     function and not a string test at the call site. */
+  const m = /^adtool_sale_batch_([a-z0-9_]*[a-z0-9])_(\d{4}-\d{2}-\d{2})$/.exec(String(key || ''));
+  return m ? { slug: m[1], batch_on: m[2] } : null;
+}
+
+function adSaleDiscountFraction(v) {
+  /* a discount as the FRACTION the arithmetic needs. The setting is kept in whole percent, because
+     that is what a person types, while an observed discount is already a fraction, so a value above
+     1 is read as percentage points and anything at or above a whole price off is refused. Nothing
+     unreadable becomes 0: a discount we cannot read is null, and null never prints as none. */
+  const n = Number(v);
+  if (v === undefined || v === null || v === '' || !isFinite(n) || n < 0) return null;
+  const f = n > 1 ? n / 100 : n;
+  return f >= 1 ? null : Math.round(f * 10000) / 10000;
+}
+function adSalePctText(f) {
+  /* a fraction as the words a page prints. Derived from whatever is stored, never typed: the house
+     rule is that no setting's value is written into copy. */
+  const n = Number(f);
+  if (f === undefined || f === null || f === '' || !isFinite(n)) return 'not known';
+  return (Math.round(n * 10000) / 100) + '%';
+}
+function adSaleRules(cfg) {
+  /* the four settings Management keeps, with the defaults standing in for anything nobody has set.
+     Nothing on the page prints a fixed figure: it prints what comes back from here. */
+  const c = cfg || {}, K = ADTOOL_SALE_CONFIG_KEYS, D = ADTOOL_SALE_DEFAULTS;
+  const num = (v, d) => { const n = Number(v); return v === undefined || v === null || v === '' || !isFinite(n) ? d : n; };
+  const disc = adSaleDiscountFraction(num(c[K.discount_pct], D.discount_pct));
+  const days = Math.min(ADTOOL_SALE_MAX_DAYS, Math.max(1, Math.round(num(c[K.days], D.days))));
+  let wd = Math.round(num(c[K.batch_weekday], D.batch_weekday));
+  if (!(wd >= 1 && wd <= 7)) wd = D.batch_weekday;
+  /* the floor travels as `floor` and never as a name carrying the word profit: this object is not
+     keyed by a listing, and the collective-profit strip takes every such key out for a reader who
+     may not see collective money. The floor is a rule, not somebody's earnings, and it must reach
+     every reader of the page or the verdict beside it cannot be checked. */
+  const floor = Math.max(0, round2(num(c[K.min_profit], D.min_profit)));
+  return {
+    discount_pct: disc == null ? adSaleDiscountFraction(D.discount_pct) : disc,
+    discount_text: adSalePctText(disc == null ? adSaleDiscountFraction(D.discount_pct) : disc),
+    discount_readable: disc != null,
+    days: days, batch_weekday: wd, batch_weekday_name: ADTOOL_SALE_WEEKDAYS[wd - 1],
+    floor: floor, fee_rate: ADTOOL_FEE_RATE, restriction_days: ADTOOL_SALE_RESTRICTION_DAYS,
+  };
+}
+function adSaleProfitAfter(price, marginBeforeAds, discountPct, feeRate) {
+  /* ONE listing's profit per unit under the markdown, from the derivation in the block note above:
+     profit after = margin_before_ads − 0.8 × d × (1 − feeRate) × price. The cost does not move, the
+     price and its percentage fees do.
+     A margin we do not have is null all the way out, never 0: a listing with no margin is "not
+     known" on the page and carries the verdict `unknown`, which is a different thing from a listing
+     that earns nothing. At d = 0 the drop is 0 and the margin comes back exactly as it went in. */
+  const mRaw = marginBeforeAds;
+  const m = (mRaw === undefined || mRaw === null || mRaw === '' || !isFinite(Number(mRaw))) ? null : Number(mRaw);
+  const p = (price === undefined || price === null || price === '' || !isFinite(Number(price))) ? null : Number(price);
+  const d = adSaleDiscountFraction(discountPct);
+  const fr = (feeRate === undefined || feeRate === null || feeRate === '' || !isFinite(Number(feeRate))) ? ADTOOL_FEE_RATE : Number(feeRate);
+  if (m == null) return { profit_after: null, drop: null, why: 'we do not know this listing’s profit per unit, so we cannot say what the sale leaves' };
+  if (d == null) return { profit_after: null, drop: null, why: 'the discount is not readable, so the sale price cannot be worked out' };
+  if (p == null || !(p > 0)) return { profit_after: null, drop: null, why: 'no price for this listing, so the money taken off cannot be worked out' };
+  const drop = round2(0.8 * d * (1 - fr) * p);
+  return { profit_after: round2(m - drop), drop: drop, why: '' };
+}
+function adSaleVerdict(profitAfter, floor) {
+  /* the one word beside a row. `unknown` where there is no margin to judge, `loses` at or below
+     nothing, `thin` above nothing but under the floor Management set, `worth it` at the floor or
+     above it. The boundary is deliberately AT the floor: a listing that makes exactly the floor
+     passes, so the figure on screen means what it says. */
+  if (profitAfter === undefined || profitAfter === null || profitAfter === '' || !isFinite(Number(profitAfter))) return 'unknown';
+  const v = Number(profitAfter), f = Math.max(0, Number(floor) || 0);
+  if (!(v > 0)) return 'loses';
+  return v >= f ? 'worth it' : 'thin';
+}
+function adSaleBatchDay(fromDay, weekday) {
+  /* the first batch day on or after `fromDay`, so a listing eligible on the batch day itself goes
+     in that day rather than waiting a week. `weekday` is the SETTING's own numbering (1 = Monday
+     through 7 = Sunday, so the default 5 is Friday), which is one ahead of adtWeekdayOf's 0 = Monday:
+     the conversion lives here and in no other place. */
+  const d = String(fromDay || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  let w = Math.round(Number(weekday));
+  if (!(w >= 1 && w <= 7)) w = ADTOOL_SALE_DEFAULTS.batch_weekday;
+  return adtAddDays(d, ((w - 1) - adtWeekdayOf(d) + 7) % 7);
+}
+function adSaleCalendar(today, rules) {
+  /* the batch day coming (today itself when today IS the batch day) and the three after it, each
+     with the day its event would end. The length is the setting's, so a 14-day event ends on the
+     thirteenth day after it starts: the day it begins is one of its days. */
+  const r = (rules && rules.batch_weekday != null) ? rules : adSaleRules(rules || {});
+  const t = String(today || ''), f0 = adSaleBatchDay(t, r.batch_weekday);
+  const out = { weekday: r.batch_weekday, weekday_name: r.batch_weekday_name, days: r.days, batches: [], f0: null, f1: null, f2: null, f3: null };
+  if (!f0) return out;
+  for (let k = 0; k < ADTOOL_SALE_BATCHES_AHEAD; k++) {
+    const starts = adtAddDays(f0, k * 7);
+    out.batches.push({
+      batch_on: starts, ends_on: adtAddDays(starts, r.days - 1), is_today: starts === t,
+      label: k === 0 ? (starts === t ? 'today' : 'this ' + r.batch_weekday_name) : k === 1 ? 'next ' + r.batch_weekday_name : r.batch_weekday_name + ' ' + starts,
+    });
+  }
+  out.f0 = out.batches[0].batch_on; out.f1 = out.batches[1].batch_on;
+  out.f2 = out.batches[2].batch_on; out.f3 = out.batches[3].batch_on;
+  return out;
+}
+function adSaleNextEligible(row, today, rules) {
+  /* the next day THIS listing can be entered, and why that day. Three cases and no fourth:
+       in a sale now      the event ends, then eBay's restriction runs from the day it leaves
+       a clock we can see the observed eligible date, never earlier than today
+       eligible already   today
+     A listing with no readable clock gets no date at all and keeps its own reason, because a made-up
+     date on this page is a listing somebody enters and eBay silently drops. */
+  const r = (rules && rules.restriction_days != null) ? rules : adSaleRules(rules || {});
+  const o = row || {}, t = String(today || '');
+  const ymd = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null;
+  if (o.in_sale) {
+    const ends = ymd(o.ends);
+    if (!ends) return { on: null, basis: 'in a sale', why: 'in the sale now and the event has no end date we can read' };
+    const on = adtAddDays(ends, r.restriction_days);
+    return { on: on, basis: 'restriction', why: 'the event ends ' + ends + ', then it waits ' + r.restriction_days + ' days before it can join another' };
+  }
+  const eo = ymd(o.eligible_on);
+  if (eo) {
+    const on = eo < t ? t : eo;
+    return { on: on, basis: String(o.eligible_basis || '') || 'clock', why: on === t ? 'eligible now' : 'the clock runs to ' + eo };
+  }
+  if (String(o.status || '') === 'eligible') return { on: t, basis: 'clock over', why: 'eligible now' };
+  return { on: null, basis: '', why: String(o.why || o.observed_note || '') || 'no price clock we can read for this listing yet' };
+}
+function adSaleBatches(rows, today, cfg) {
+  /* THE WHOLE MODEL IN ONE PURE PASS. `rows` are the listings the action has already built, each
+     carrying its account, price, margin before ads and its source, whether it is in a sale, the
+     clock the lifecycle observed, and its own windowed figures. `cfg` is adSaleRules's answer (a raw
+     settings map is accepted and read through it), and may carry `events`: the running markdown
+     event per account, so a per-account line can name the event a listing is sitting in.
+     Out come the five groups the page shows, a per-account summary and the counts, with every
+     listing judged at the discount in force. No profit is added up over listings anywhere: the only
+     sum here is each listing's own money taken off times its own units, which is said to be exactly
+     that wherever it is printed. */
+  const rules = (cfg && cfg.batch_weekday != null && cfg.days != null && cfg.floor != null) ? cfg : adSaleRules(cfg || {});
+  const events = (cfg && cfg.events) || {};
+  const t = String(today || ''), cal = adSaleCalendar(t, rules);
+  /* no readable batch day means no listing can be placed on one, and a listing placed on a day that
+     does not exist is worse than a listing waiting: everything not already in a sale falls to the
+     "no date yet" group with its own reason, which is the group that exists for exactly this. */
+  const haveCal = !!cal.f0;
+  const d = rules.discount_pct, fee = rules.fee_rate == null ? ADTOOL_FEE_RATE : rules.fee_rate;
+  const groups = { this_friday: [], next_friday: [], later: [], in_sale_now: [], no_date: [] };
+  const laterBy = {}, accts = {};
+  const numOr = v => (v === undefined || v === null || v === '' || !isFinite(Number(v))) ? null : Number(v);
+  for (const raw of (rows || [])) {
+    const o = raw || {}, account = String(o.account || ''), id = String(o.item_id || '');
+    const price = numOr(o.price);
+    /* A LISTING ALREADY IN A SALE IS JUDGED AT ITS OWN EVENT'S DISCOUNT, not at the discount the
+       batch will be run at: the two can differ, and printing the setting over a live event's own
+       discount would state something untrue about money that is already being taken. Which of the
+       two was used travels with the row. A listing not in a sale is judged at the batch setting,
+       because that is the discount it is about to be entered at. */
+    const ownD = o.in_sale ? adSaleDiscountFraction(o.discount_pct) : null;
+    const rowD = ownD == null ? d : ownD;
+    const pa = adSaleProfitAfter(price, o.margin_before_ads, rowD, fee);
+    const verdict = adSaleVerdict(pa.profit_after, rules.floor);
+    const ne = adSaleNextEligible(o, t, rules);
+    const batchOn = ne.on ? adSaleBatchDay(ne.on, rules.batch_weekday) : null;
+    const u30 = numOr(o.units_30d);
+    const row = {
+      item_id: id, account: account, title: String(o.title || ''), image: o.image == null ? null : o.image,
+      status: String(o.status || ''), in_sale: !!o.in_sale,
+      price: price, margin_before_ads: numOr(o.margin_before_ads), margin_source: String(o.margin_source || ''),
+      discount_pct: rowD, discount_source: ownD == null ? 'the batch setting' : 'the event it is in',
+      sale_price: (price != null && rowD != null) ? round2(price * (1 - rowD)) : null,
+      profit_after: pa.profit_after, drop: pa.drop, profit_after_why: pa.why,
+      drop_month_estimate: (pa.drop != null && u30 != null) ? round2(pa.drop * u30) : null,
+      units_7d: numOr(o.units_7d), units_30d: u30,
+      actual_profit_7d: numOr(o.actual_profit_7d), actual_profit_30d: numOr(o.actual_profit_30d),
+      ad_spend_7d: numOr(o.ad_spend_7d),
+      eligible_on: o.eligible_on || null, eligible_basis: String(o.eligible_basis || ''),
+      next_eligible_on: ne.on, next_eligible_basis: ne.basis, next_eligible_why: ne.why,
+      batch_on: batchOn, batch_ends_on: batchOn ? adtAddDays(batchOn, rules.days - 1) : null,
+      verdict: verdict, why: String(o.why || o.observed_note || ''),
+      event_ends: o.ends ? String(o.ends) : null,
+    };
+    const A = accts[account] || (accts[account] = {
+      account: account, active: 0, in_sale: { n: 0 }, this_batch: { n: 0, worth_it: 0, thin: 0, loses: 0, unknown: 0 },
+      next_batch: { n: 0 }, later: { n: 0 }, no_date: { n: 0 }, month_drop_estimate: null, month_drop_items: 0,
+      event: events[account] || null,
+    });
+    A.active++;
+    if (row.in_sale) { groups.in_sale_now.push(row); A.in_sale.n++; }
+    else if (!batchOn || !haveCal) { groups.no_date.push(row); A.no_date.n++; }
+    else if (batchOn === cal.f0) {
+      groups.this_friday.push(row); A.this_batch.n++;
+      A.this_batch[verdict === 'worth it' ? 'worth_it' : verdict]++;
+      /* the month figure is each listing's OWN money taken off times its OWN units, added up over
+         the listings about to be entered. It is a sum of per-listing estimates and it is labelled
+         as one wherever it is shown; it is not anybody's profit and it is not a profit total. */
+      if (row.drop_month_estimate != null) { A.month_drop_estimate = round2((A.month_drop_estimate || 0) + row.drop_month_estimate); A.month_drop_items++; }
+    }
+    else if (batchOn === cal.f1) { groups.next_friday.push(row); A.next_batch.n++; }
+    else { (laterBy[batchOn] = laterBy[batchOn] || []).push(row); A.later.n++; }
+  }
+  const rank = v => { const i = ADTOOL_SALE_VERDICTS.indexOf(String(v)); return i < 0 ? ADTOOL_SALE_VERDICTS.length : i; };
+  const worstFirst = (a, b) => {
+    const r = rank(a.verdict) - rank(b.verdict); if (r) return r;
+    const an = a.profit_after == null, bn = b.profit_after == null;
+    if (an !== bn) return an ? 1 : -1;
+    if (!an && Number(a.profit_after) !== Number(b.profit_after)) return Number(a.profit_after) - Number(b.profit_after);
+    return a.item_id < b.item_id ? -1 : a.item_id > b.item_id ? 1 : 0;
+  };
+  const byDate = (a, b) => (String(a.next_eligible_on || '') < String(b.next_eligible_on || '') ? -1 : String(a.next_eligible_on || '') > String(b.next_eligible_on || '') ? 1 : worstFirst(a, b));
+  groups.this_friday.sort(worstFirst);
+  groups.next_friday.sort(worstFirst);
+  groups.in_sale_now.sort(byDate);
+  groups.no_date.sort((a, b) => (a.account < b.account ? -1 : a.account > b.account ? 1 : worstFirst(a, b)));
+  groups.later = Object.keys(laterBy).sort().map(day => ({
+    batch_on: day, ends_on: adtAddDays(day, rules.days - 1), n: laterBy[day].length, rows: laterBy[day].sort(byDate),
+  }));
+  const counts = {
+    this_friday: groups.this_friday.length, next_friday: groups.next_friday.length,
+    later: groups.later.reduce((n, g) => n + g.n, 0), in_sale_now: groups.in_sale_now.length,
+    no_date: groups.no_date.length, batch_days_later: groups.later.length,
+    worth_it: 0, thin: 0, loses: 0, unknown: 0,
+  };
+  for (const r of groups.this_friday) counts[r.verdict === 'worth it' ? 'worth_it' : r.verdict]++;
+  const accounts = Object.keys(accts).sort().map(a => accts[a]);
+  return {
+    calendar: cal, groups: groups, counts: counts, accounts: accounts,
+    settings_used: { discount_pct: d, discount_text: rules.discount_text || adSalePctText(d), days: rules.days, batch_weekday: rules.batch_weekday, batch_weekday_name: rules.batch_weekday_name, floor: rules.floor, fee_rate: fee, restriction_days: rules.restriction_days },
+    verdict_rule: 'worth it at or above the figure Management set, thin above nothing but under it, loses at or below nothing, not known where we have no profit per unit for the listing',
+    profit_after_rule: 'profit after the sale = the listing’s profit per unit now, less four fifths of the discount on the price and the percentage fees that come off with it. The supplier cost does not change.',
+    month_drop_label: 'each listing’s own money taken off times its own units over the last 30 days, added up across the listings in this batch. A sum of per-listing estimates, not a profit figure.',
+  };
+}
 /* ADTOOL-P10-PURE-END */
 
 /* ---- Phase 5 schema: the three observed sale-event grains (plan §3, big update 27 Sep 2026) ----
@@ -10883,6 +11176,13 @@ const ADTOOL_REGISTER_P10 = [
   ['SALE_TIMELINE', 'A listing\'s own sale-event history', 'When it went into a sale, when it came out, and the earliest it can go into another one. eBay makes a listing wait fourteen days after leaving a sale, and fourteen days after any price change, so the later of those two is the date shown. A whole-shop sale never shows a listing leaving, because eBay does not tell us.', 'adtool_sale_membership_day, adtool_price_day', 'Every hour, working through the fleet a few hundred listings at a time', 'Tested on a worked example, on a whole-shop item, and on a price change during a live event'],
   ['SALE_TASKS', 'Sale-event tasks', 'A task opens when a listing first becomes able to join a sale again, and another when a running event is about to end with nothing lined up to follow it. Marketing marks a task done or dismissed on the Sale events page, and every action is logged.', 'adtool_sale_timeline, promotions', 'Every hour', 'The history that drives the task is covered by tests'],
   ['SALE_ELIGIBLE_ON', 'In a sale now, and when it can join one', 'Yes or no for today, and a date for the next time this listing can join a sale. Both are what we have watched happen, accurate to the day. For a whole-shop sale eBay never tells us a listing left, so the date falls back on fourteen days after its last price change.', 'adtool_sale_membership_day, adtool_sale_timeline', 'Read when you open the page', 'The page itself states that it is accurate to the day, and says what a whole-shop sale hides'],
+  /* the owner's request of 6 November 2026: the weekly batch, the money beside it, and the date a
+     listing comes round again. Each row is named here so the tag on its block opens this note and
+     not the whole register. No setting's value is written into any of them: the page prints the
+     figures in force, and these say which figure a number came from. */
+  ['SALE_BATCH', 'The weekly batch of listings to enter', 'Once a week, on the day Management picks, every listing that can join a sale is gathered into one batch and entered by hand, so each of them gets the full run of the event. Left to a sale that covers the whole shop, eBay adds a listing the moment it can join, which can leave it in the sale for a day or two before the event ends. Each listing is placed on the first batch day on or after the date it can next join, and the page shows the batch coming and the three after it.', 'items_api, adtool_listings, adtool_sale_timeline, adtool_sale_membership_day, promotions, adtool_price_day, portal_config', 'Worked out when you open the page', 'The batch dates, the grouping and the wording are covered by tests across a whole week, including the day the batch falls on today'],
+  ['SALE_PROFIT_AFTER', 'Profit on a listing at the sale price', 'What one unit of this listing earns today, and what one unit would earn at the sale price. The supplier cost does not change in a sale. The price does, and so do the fees eBay charges as a share of it, which is the whole of the difference. The earnings today come from the portal where somebody has recorded them, otherwise from this listing\'s own orders, otherwise from the supplier cost, otherwise from the fleet\'s usual share of a price, and the page says which of those it used. Where none of them is known the page says not known and puts no figure in its place.', 'adtool_listings, items_facts, adtool_orders, portal_config', 'Worked out when you open the page', 'Tested against the way the sales books work profit out, including a sale of nothing at all, a listing with no known earnings and the money a discount takes off a unit'],
+  ['SALE_NEXT_ELIGIBLE', 'When a listing can next join a sale', 'For a listing in a sale now: the day its event ends, and then the fourteen days eBay makes it wait before it may join another. For a listing not in one: the later of fourteen days after it last moved its price and fourteen days after it last left a sale. Either way the page then shows the first batch day on or after that date, because that is the day somebody would actually enter it.', 'adtool_sale_timeline, adtool_sale_membership_day, adtool_price_day, promotions', 'Read when you open the page', 'Tested on a listing in a sale, one waiting out the fourteen days, and one with no price record to read'],
 ];
 let ADTOOL_SALE_SCHEMA_OK = false;
 async function ensureAdtoolSaleSchema(env) {
@@ -10910,6 +11210,13 @@ async function ensureAdtoolSaleSchema(env) {
      overrides an existing choice (adtool_page_sales may already be set by Apps Script). */
   seeds.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_sale_snapshot', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
   seeds.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_page_sales', 'on', datetime('now')) ON CONFLICT(key) DO NOTHING"));
+  /* THE FOUR FIGURES THE FRIDAY BATCH RUNS ON, SEEDED BEFORE THEY ARE READ, the way the freshness
+     and peak settings are: a manager opening Flags meets the figures in force instead of a blank
+     and can see what he is changing from. DO NOTHING on conflict, so a figure somebody has already
+     set is never written back over, and the defaults still answer for a seed that did not land. */
+  for (const k of Object.keys(ADTOOL_SALE_CONFIG_KEYS)) {
+    seeds.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO NOTHING").bind(ADTOOL_SALE_CONFIG_KEYS[k], String(ADTOOL_SALE_DEFAULTS[k])));
+  }
   await adtSeedRun(env, seeds, 'register p10');   /* documentation + defaults; never let it stop a page */
   ADTOOL_SALE_SCHEMA_OK = true;
 }
@@ -11014,19 +11321,20 @@ async function adtSaleSnapshot(env) {
     for (const rs of await adtBatchRead(env, ms)) for (const r of rs) { (memHist[String(r.item_id)] = memHist[String(r.item_id)] || []).push(r); accById[String(r.item_id)] = String(r.account); }
     const ps = adtChunks(todo).map(ch => env.DB.prepare("SELECT item_id, day, price FROM adtool_price_day WHERE item_id IN " + adtInList(ch, 0) + " ORDER BY item_id, day").bind(...ch));
     for (const rs of await adtBatchRead(env, ps)) for (const r of rs) (priceHist[String(r.item_id)] = priceHist[String(r.item_id)] || []).push(r);
-    const tlWrites = [], taskWrites = [];
+    const tlWrites = [];
     for (const id of todo) {
       const tl = adtSaleTimeline(memHist[id] || [], priceHist[id] || [], today), acct = accById[id] || '';
       tlWrites.push(env.DB.prepare("INSERT INTO adtool_sale_timeline (account, item_id, promo_id, added_on, removed_on, restriction_end, eligible_on, eligible_basis, status, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,datetime('now')) ON CONFLICT(account, item_id, promo_id) DO UPDATE SET added_on=?4, removed_on=?5, restriction_end=?6, eligible_on=?7, eligible_basis=?8, status=?9, updated_at=datetime('now')").bind(acct, id, tl.promo_id || '', tl.added_on || '', tl.removed_on || '', tl.restriction_end || '', tl.eligible_on || '', tl.eligible_basis || '', tl.status));
-      const prev = tlInfo[id] ? tlInfo[id].s : '';
-      if (tl.status === 'eligible' && prev !== 'eligible') {
-        const tid = 'elig:' + acct + ':' + id + ':' + (tl.eligible_on || today);
-        taskWrites.push(env.DB.prepare("INSERT OR IGNORE INTO adtool_sale_tasks (task_id, account, item_id, kind, eligible_on, status, created_at) VALUES (?1,?2,?3,'eligible',?4,'open',datetime('now'))").bind(tid, acct, id, tl.eligible_on || today));
-      }
+      /* NO PER-LISTING "ELIGIBLE" TASK ANY MORE (the owner's request, 6 November 2026, §7). Under a
+         weekly batch entered by hand, a task for each listing the day its clock runs out is noise:
+         the batch page already lists every listing coming up and the day it goes in, and a task per
+         listing would raise hundreds of them a week against work nobody does listing by listing.
+         The timeline is still written for every listing, which is what the batch reads. The
+         event-ending task below stays: that one is an account's event with nothing to follow it,
+         which is a thing somebody has to act on and nothing else would notice. */
     }
     if (tlWrites.length) await adtBatch(env, tlWrites);
-    if (taskWrites.length) await adtBatch(env, taskWrites);
-    tlN = tlWrites.length; taskN = taskWrites.length;
+    tlN = tlWrites.length; taskN = 0;
   }
   /* the 2-day ending bell, as a task: a running event ends within 2 days and no later event — RUNNING or
      SCHEDULED — covers the account from the day after it ends */
@@ -11046,125 +11354,366 @@ async function adtSaleSnapshot(env) {
   try { await ctx_setSync(env, 'adtoolSaleSnapshot', '', 'accounts ' + accounts.length + ' (' + Object.keys(acctEvents).length + ' with a running event) · listings ' + items.length + ' · changed ' + changed.length + ' · timelines ' + tlN + ' · tasks ' + (taskN + endTasks.length) + (backlog > 0 ? ' · backlog ' + backlog + ' (cursor ' + (newCursor || 'start') + ', next run)' : ' · backlog clear') + ' in ' + (Date.now() - t0) + ' ms'); } catch (e) {}
 }
 
+/* ---- the Friday batch's own reads (the owner's request, 6 November 2026) ---------------------
+   Three bounded reads, each one grouped statement per chunk of listings, and never one query per
+   row. Nothing here reaches eBay: every figure comes out of the engine's own tables. */
+async function adtSaleWindowSums(env, ids, today) {
+  /* per listing over the last 7 and 30 days ending YESTERDAY: units, the money the Sales Analysis
+     law says the listing made, and what its ads cost. ONE grouped statement per chunk.
+     The profit sums are written WITHOUT an else branch on purpose: a window whose days all carry no
+     profit figure comes back as null, which the page prints as "not known". With `ELSE 0` it would
+     come back as £0.00, and a listing nobody has costed would read as a listing that earned
+     nothing, which is a different statement and not a true one. Units and ad spend keep their 0,
+     because a day with no orders really did sell nothing. */
+  const yday = adtAddDays(today, -1), d7 = adtAddDays(today, -7), d30 = adtAddDays(today, -30);
+  const out = {};
+  const stmts = adtChunks(ids).map(ch => env.DB.prepare(
+    'SELECT item_id, ' +
+    'SUM(CASE WHEN day >= ?2 THEN COALESCE(units, 0) ELSE 0 END) AS units_7d, ' +
+    'SUM(COALESCE(units, 0)) AS units_30d, ' +
+    'ROUND(SUM(CASE WHEN day >= ?2 AND actual_profit IS NOT NULL THEN actual_profit END), 2) AS actual_profit_7d, ' +
+    'ROUND(SUM(CASE WHEN actual_profit IS NOT NULL THEN actual_profit END), 2) AS actual_profit_30d, ' +
+    'SUM(CASE WHEN day >= ?2 AND actual_profit IS NOT NULL THEN 1 ELSE 0 END) AS actual_profit_days_7d, ' +
+    'SUM(CASE WHEN actual_profit IS NOT NULL THEN 1 ELSE 0 END) AS actual_profit_days_30d, ' +
+    'ROUND(SUM(CASE WHEN day >= ?2 THEN COALESCE(cpc_spend, 0) ELSE 0 END), 2) AS ad_spend_7d ' +
+    'FROM adtool_listing_day WHERE day >= ?1 AND day <= ?3 AND item_id IN ' + adtInList(ch, 3) + ' GROUP BY item_id'
+  ).bind(d30, d7, yday, ...ch));
+  for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) out[String(r.item_id)] = r;
+  return { map: out, from_7d: d7, from_30d: d30, to: yday };
+}
+async function adtSaleEventSums(env, entries) {
+  /* the in-sale comparison: for each listing, its own window SINCE its event started, and the same
+     number of days immediately BEFORE that. Each listing's window is its own, because the accounts'
+     events started on different days, so this is the cohort shape the Peak pages use: ONE statement
+     over a joined list of (listing, from, to), not one statement per listing and not a UNION of
+     hundreds of selects, which is past what the database will take in one compound read. */
+  const sql = adPeakCohortSql(entries || []);
+  const out = {};
+  if (!(entries || []).length) return { map: out, sql: sql, rows_read: 0 };
+  const rs = await env.DB.prepare(
+    'SELECT d.item_id, SUM(COALESCE(d.units, 0)) AS units, ' +
+    'ROUND(SUM(CASE WHEN d.actual_profit IS NOT NULL THEN d.actual_profit END), 2) AS actual_profit, ' +
+    'SUM(CASE WHEN d.actual_profit IS NOT NULL THEN 1 ELSE 0 END) AS actual_profit_days, ' +
+    'COUNT(DISTINCT d.day) AS days FROM adtool_listing_day d' +
+    adPeakCohortJoin(sql, 'd.item_id', 'd.day') + ' GROUP BY d.item_id'
+  ).all().catch(() => ({ results: [] }));
+  for (const r of ((rs && rs.results) || [])) out[String(r.item_id)] = r;
+  return { map: out, sql: sql, rows_read: Object.keys(out).length };
+}
+async function adtSaleSettingsRead(env) {
+  /* the four figures in force, as the rows that hold them AND as the rules the arithmetic uses. The
+     rows travel so the page can print the stored value and when it was last changed: the house rule
+     is that no setting's value is ever written into the page's own words. */
+  const keys = Object.keys(ADTOOL_SALE_CONFIG_KEYS).map(k => ADTOOL_SALE_CONFIG_KEYS[k]);
+  const rs = await env.DB.prepare('SELECT key, value, updated_at FROM portal_config WHERE key IN ' + adtInList(keys, 0)).bind(...keys).all().catch(() => ({ results: [] }));
+  const rows = (rs && rs.results) || [], cfg = {};
+  for (const r of rows) cfg[String(r.key)] = r.value;
+  const rules = adSaleRules(cfg);
+  const byKey = {}; for (const r of rows) byKey[String(r.key)] = r;
+  return {
+    rules: rules,
+    rows: keys.map(k => ({ key: k, value: byKey[k] ? String(byKey[k].value) : null, updated_at: byKey[k] ? String(byKey[k].updated_at || '') : null, stored: !!byKey[k] })),
+    keys: ADTOOL_SALE_CONFIG_KEYS,
+  };
+}
+async function adtSaleBatchRecordsRead(env) {
+  /* who entered which batch, from our own record and nothing else. The key spelling is
+     adSaleBatchKey's, read back through adSaleBatchKeyParse, so the write and the read cannot drift;
+     the batch-day setting shares the prefix and is thrown out by the parse because it carries no
+     date. */
+  const rs = await env.DB.prepare("SELECT key, value, updated_at FROM portal_config WHERE key LIKE 'adtool_sale_batch_%'").all().catch(() => ({ results: [] }));
+  const out = {};
+  for (const r of ((rs && rs.results) || [])) {
+    const parsed = adSaleBatchKeyParse(r.key);
+    if (!parsed) continue;
+    let rec = null;
+    try { rec = JSON.parse(String(r.value || '')); } catch (e) { rec = null; }
+    if (!rec || typeof rec !== 'object') continue;
+    out[String(r.key)] = {
+      key: String(r.key), batch_on: parsed.batch_on, account: String(rec.account || ''),
+      by: String(rec.by || ''), at: String(rec.at || r.updated_at || ''), n: Number(rec.n) || 0,
+      ids: Array.isArray(rec.ids) ? rec.ids.map(String) : [],
+    };
+  }
+  return out;
+}
+/* THE SALE PAGE'S OWN MEMO, dropped BY PREFIX by the one write this page makes. By prefix and not
+   by key because the page may be asked for the whole fleet or for one account, and naming the keys
+   would mean guessing which of those a reader had open and leaving the rest stale. It never throws:
+   a memo that survives this is a page up to three minutes behind, which is the ceiling the page
+   already states, and that is not worth failing somebody's record over. */
+async function adtSalesCacheClear(env) {
+  let dropped = 0;
+  try {
+    let cursor = '';
+    for (let page = 0; page < 10; page++) {
+      const opts = { prefix: adtKvPrefix('adtoolSales'), limit: 200 };
+      if (cursor) opts.cursor = cursor;
+      const r = await env.HOT.list(opts);
+      for (const k of ((r && r.keys) || [])) { try { await env.HOT.delete(k.name); dropped++; } catch (e) { /* one key is not the page */ } }
+      if (!r || r.list_complete || !r.cursor) break;
+      cursor = r.cursor;
+    }
+  } catch (e) { /* no listing, no clear: the memo still expires inside the page's own ceiling */ }
+  return dropped;
+}
+
+async function adtoolSalesCompute(env, acct) {
+  const today = ukDate('');
+  const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+  const SET = await adtSaleSettingsRead(env), rules = SET.rules;
+  /* how long has the price actually held? only answerable where the snapshot has history — the observed clock */
+  const hist = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS d, MIN(day) AS first FROM adtool_price_day').first();
+  const priceDays = Number(hist && hist.d) || 0;
+  const rows0 = (await env.DB.prepare(
+    'SELECT i.item_id, i.account, i.title, i.image, i.price, i.start_time, i.last_revised, ' +
+    '(SELECT MIN(pd.day) FROM adtool_price_day pd WHERE pd.item_id = i.item_id AND pd.price = i.price ' +
+    '   AND pd.day > COALESCE((SELECT MAX(p2.day) FROM adtool_price_day p2 WHERE p2.item_id = i.item_id AND p2.price <> i.price), "")) AS price_since ' +
+    "FROM items_api i WHERE i.status = 'ACTIVE'" + (acct ? ' AND i.account = ?1' : '') + ' ORDER BY i.account, i.item_id'
+  ).bind(...(acct ? [acct] : [])).all()).results || [];
+  const ids = rows0.map(r => String(r.item_id));
+  /* observed lifecycle (latest timeline per item) + today's membership — precomputed by marketingSync */
+  const tlById = {}, memById = {};
+  { const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, account, promo_id, added_on, removed_on, restriction_end, eligible_on, eligible_basis, status, updated_at FROM adtool_sale_timeline WHERE item_id IN ' + adtInList(ch, 0)).bind(...ch));
+    for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) { const k = String(r.item_id); if (!tlById[k] || String(r.updated_at || '') > String(tlById[k].updated_at || '')) tlById[k] = r; } }
+  { const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, promo_id, in_sale, basis, discount_pct, disc_src, price FROM adtool_sale_membership_day WHERE day = ?1 AND item_id IN ' + adtInList(ch, 1)).bind(today, ...ch));
+    for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) memById[String(r.item_id)] = r; }
+  /* the money per unit, as the advertising tool already works it out for every listing: the portal's
+     own recorded figure, else the listing's own orders, else the supplier cost, else the fleet's
+     usual share of a price. The source travels with it and the page prints it. */
+  const mgById = {};
+  { const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, price, margin_before_ads, margin_source, breakeven_roas FROM adtool_listings WHERE item_id IN ' + adtInList(ch, 0)).bind(...ch));
+    for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) mgById[String(r.item_id)] = r; }
+  const WIN = await adtSaleWindowSums(env, ids, today);
+  const running = (await env.DB.prepare(
+    "SELECT account, name, promo_id, status, COALESCE(discount,'') AS discount, item_n, COALESCE(criterion_type,'') AS criterion, substr(start_at,1,10) AS starts, substr(end_at,1,10) AS ends " +
+    "FROM promotions WHERE type = 'MARKDOWN_SALE' AND status LIKE '%RUNNING%'" + (acct ? ' AND account = ?1' : '') + ' ORDER BY account'
+  ).bind(...(acct ? [acct] : [])).all()).results || [];
+  /* INVENTORY_ANY covers the WHOLE SHOP: eBay returns no listing list and enrols each listing itself, so item_n=0
+     means "not enumerated", never "empty". Per-item removal is therefore not observable for these (honest limits below).
+     It is also the fault the Friday batch exists to avoid, so the page warns about it by name. */
+  const anyCover = Array.from(new Set(running.filter(r => String(r.criterion) === 'INVENTORY_ANY').map(r => String(r.account))));
+  const coveredAcct = {}; for (const a of anyCover) coveredAcct[a] = true;
+  const runByAcct = {}; for (const e of running) (runByAcct[String(e.account)] = runByAcct[String(e.account)] || []).push(e);
+  const items = rows0.map(r => {
+    const id = String(r.item_id), t = tlById[id] || null, m = memById[id] || null, runs = runByAcct[String(r.account)] || [];
+    const steadyFromPrice = (priceDays >= 14 && r.price_since) ? daysBetween(String(r.price_since), today) : null;
+    const est = adtSaleEligibility(Object.assign({}, r, { price_steady_days: steadyFromPrice }), today, daysBetween);
+    const inSale = m ? Number(m.in_sale) === 1 : false;
+    /* only a MEMBER of a running event carries a discount: for a listing not in the sale, do not borrow the
+       account's event and fabricate an "original → sale price". evForItem, pct and sale stay null unless in_sale. */
+    const evForItem = inSale ? ((m && m.promo_id ? runs.find(e => String(e.promo_id) === String(m.promo_id)) : null) || runs[0] || null) : null;
+    const observedDisc = m ? String(m.disc_src || '') === 'observed' : false;
+    const pct = !inSale ? null : ((m && m.discount_pct != null) ? Number(m.discount_pct) : (evForItem ? adtParseDiscountPct(evForItem.discount) : null));
+    const orig = r.price == null ? null : round2(r.price);
+    const sale = (inSale && orig != null && pct != null) ? round2(orig * (1 - pct)) : null;
+    /* a member with today's membership row but no timeline yet (the :50 backlog has not reached it) is in the event and
+       unconfirmed — never a fabricated 'eligible' */
+    const status = t ? String(t.status) : (m && inSale ? 'added-unconfirmed' : (est.eligible ? 'eligible' : 'no-event'));
+    const eligible_on = t ? (t.eligible_on || null) : est.eligible_on;
+    /* only say "(observed)" when an order actually proved the price; the event text alone is "states … (unconfirmed)" */
+    const dpNum = m && m.discount_pct != null ? Number(m.discount_pct) : null;
+    const observed_note = !m
+      ? (priceDays >= 14 ? 'no snapshot for this listing yet' : 'an estimate: the observed price clock has ' + priceDays + ' of 14 days')
+      : !inSale ? 'not in a running sale event'
+      : observedDisc
+        ? (dpNum > 0 ? 'buyers paid ' + Math.round(dpNum * 100) + '% off (observed)' : 'an order today shows buyers paid full price')
+        : String(m.basis) === 'any' ? 'whole-shop event: eBay auto-enrols; per-item removal not observable'
+        : dpNum != null ? 'event states ' + Math.round(dpNum * 100) + '% off (no order yet to confirm)' : 'in the event; no order yet to observe the discount';
+    const mg = mgById[id] || null, w = WIN.map[id] || null;
+    const numOr = v => (v === undefined || v === null || v === '' || !isFinite(Number(v))) ? null : Number(v);
+    return {
+      item_id: id, account: String(r.account), title: String(r.title || ''), image: r.image ? String(r.image) : null,
+      event_running: inSale, promo_id: t ? String(t.promo_id || '') : (evForItem ? String(evForItem.promo_id || '') : ''),
+      discount_pct: pct, ends: evForItem ? String(evForItem.ends || '') : (runs[0] ? String(runs[0].ends || '') : ''),
+      starts: evForItem ? String(evForItem.starts || '') : (runs[0] ? String(runs[0].starts || '') : ''),
+      basis: m ? String(m.basis) : (coveredAcct[String(r.account)] ? 'any' : 'none'),
+      in_sale: inSale, status, added_on: t ? (t.added_on || null) : null, removed_on: t ? (t.removed_on || null) : null,
+      restriction_end: t ? (t.restriction_end || null) : null, eligible_on, eligible_basis: t ? String(t.eligible_basis || '') : (est.eligible_on ? 'estimate' : ''), timeline_pending: !t && !!m,
+      original_price: orig, sale_price: sale, difference: (orig != null && sale != null) ? round2(orig - sale) : null,
+      discount_shown: pct != null ? Math.round(pct * 100) + '%' : null, observed_note, estimate: !m,
+      /* what the batch judges on: the price we would discount, the money a unit makes now and where
+         that came from, and the listing's own recent trade. All item-keyed, which is the only level
+         at which money leaves this engine. */
+      price: orig != null ? orig : (mg ? numOr(mg.price) : null),
+      margin_before_ads: mg ? numOr(mg.margin_before_ads) : null,
+      margin_source: mg ? String(mg.margin_source || '') : '',
+      breakeven_roas: mg ? numOr(mg.breakeven_roas) : null,
+      units_7d: w ? numOr(w.units_7d) : null, units_30d: w ? numOr(w.units_30d) : null,
+      actual_profit_7d: w ? numOr(w.actual_profit_7d) : null, actual_profit_30d: w ? numOr(w.actual_profit_30d) : null,
+      actual_profit_days_7d: w ? (Number(w.actual_profit_days_7d) || 0) : 0,
+      actual_profit_days_30d: w ? (Number(w.actual_profit_days_30d) || 0) : 0,
+      ad_spend_7d: w ? numOr(w.ad_spend_7d) : null,
+      why: est.why || '',
+    };
+  });
+  const inSaleById = {}; for (const it of items) if (it.in_sale) inSaleById[it.item_id] = 1;
+  /* counts keyed by the view's status buckets (live folds in added-unconfirmed; not-discounted/no-event fold
+     into notinsale), kept because the probe and the limits panel both print them. */
+  const saleBucket = s => { s = String(s || '').toLowerCase(); if (s === 'live' || s === 'added-unconfirmed') return 'live'; if (s === 'eligible') return 'eligible'; if (s === 'waiting') return 'waiting'; if (s === 'removed') return 'removed'; return 'notinsale'; };
+  const status_filter = { live: 0, eligible: 0, waiting: 0, removed: 0, notinsale: 0 };
+  for (const it of items) { const b = saleBucket(it.status); status_filter[b] = (status_filter[b] || 0) + 1; }
+  /* the event each account is running, in the words the per-account line prints */
+  const evByAcct = {};
+  for (const a of Object.keys(runByAcct)) {
+    const e = runByAcct[a][0];
+    const pct = adtParseDiscountPct(e.discount);
+    const ends = String(e.ends || '');
+    evByAcct[a] = {
+      account: a, name: String(e.name || 'Sale'), promo_id: String(e.promo_id || ''),
+      discount_text: pct != null ? adSalePctText(pct) : (String(e.discount || '') || 'not known'),
+      discount_pct: pct, starts: String(e.starts || '') || null, ends: ends || null,
+      days_left: /^\d{4}-\d{2}-\d{2}$/.test(ends) ? daysBetween(today, ends) : null,
+      covers: String(e.criterion) === 'INVENTORY_ANY' ? 'whole shop' : 'listed items',
+      whole_shop: String(e.criterion) === 'INVENTORY_ANY',
+      events: runByAcct[a].length,
+    };
+  }
+  const B = adSaleBatches(items, today, Object.assign({}, rules, { events: evByAcct }));
+  /* §4: in the sale now, judged against itself. For each of those listings the days since its event
+     started, and the SAME number of days immediately before it, from the day table in one read each. */
+  const inSaleRows = B.groups.in_sale_now;
+  const sinceEntries = [], beforeEntries = [];
+  for (const r of inSaleRows.slice(0, ADTOOL_SALE_COHORT_CAP)) {
+    const ev = evByAcct[r.account] || null, starts = ev && ev.starts ? String(ev.starts) : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(starts) || starts > today) continue;
+    const n = Math.max(1, daysBetween(starts, today));      /* days the event has been running, to yesterday */
+    sinceEntries.push({ item_id: r.item_id, added_day: starts, removed_day: today });
+    beforeEntries.push({ item_id: r.item_id, added_day: adtAddDays(starts, -n), removed_day: starts });
+  }
+  const SINCE = await adtSaleEventSums(env, sinceEntries), BEFORE = await adtSaleEventSums(env, beforeEntries);
+  const inSaleByAcct = {};
+  for (const r of inSaleRows) {
+    const ev = evByAcct[r.account] || null;
+    const s = SINCE.map[r.item_id] || null, b = BEFORE.map[r.item_id] || null;
+    const num = v => (v === undefined || v === null || v === '' || !isFinite(Number(v))) ? null : Number(v);
+    const row = Object.assign({}, r, {
+      units_since: s ? (Number(s.units) || 0) : null, actual_profit_since: s ? num(s.actual_profit) : null,
+      days_since: s ? (Number(s.days) || 0) : null,
+      units_before: b ? (Number(b.units) || 0) : null, actual_profit_before: b ? num(b.actual_profit) : null,
+      days_before: b ? (Number(b.days) || 0) : null,
+      window_note: (!s && !b) ? 'no trading days recorded either side of the event starting' : '',
+    });
+    const blk = inSaleByAcct[r.account] || (inSaleByAcct[r.account] = { account: r.account, event: ev, n: 0, rows: [] });
+    blk.n++; blk.rows.push(row);
+  }
+  const in_sale = Object.keys(inSaleByAcct).sort().map(a => inSaleByAcct[a]);
+  /* our own record of who entered which batch, hung on the block it belongs to. Nothing here was
+     asked of eBay: it is what somebody on this team wrote down when they entered the batch. */
+  const RECS = await adtSaleBatchRecordsRead(env);
+  const thisByAcct = {};
+  for (const r of B.groups.this_friday) {
+    const blk = thisByAcct[r.account] || (thisByAcct[r.account] = { account: r.account, rows: [], counts: { n: 0, worth_it: 0, thin: 0, loses: 0, unknown: 0 } });
+    blk.rows.push(r); blk.counts.n++; blk.counts[r.verdict === 'worth it' ? 'worth_it' : r.verdict]++;
+  }
+  const batchOn = B.calendar.f0;
+  const this_batch = {
+    batch_on: batchOn, ends_on: batchOn ? adtAddDays(batchOn, rules.days - 1) : null,
+    is_today: !!batchOn && batchOn === today,
+    accounts: Object.keys(thisByAcct).sort().map(a => {
+      const blk = thisByAcct[a], key = adSaleBatchKey(a, batchOn), rec = key ? (RECS[key] || null) : null;
+      /* ENTERED, AND THEN CHECKED THE NEXT DAY. The record says what somebody entered; the next
+         day's membership snapshot says what eBay actually did with it. Until that snapshot has run
+         the page says the record is not confirmed yet; after it, the two are compared and the
+         difference is named rather than smoothed over. */
+      let check = null;
+      if (rec) {
+        const recDay = String(rec.at || '').slice(0, 10);
+        const seen = rec.ids.filter(id => inSaleById[id]).length;
+        check = {
+          entered: rec.n, in_sale_now: seen, missing: Math.max(0, rec.n - seen), checked: !!recDay && recDay < today,
+          note: (!recDay || recDay >= today)
+            ? 'the next membership check, tomorrow, will confirm this record or disagree with it'
+            : seen === rec.n ? 'the membership check since then shows every one of them in a sale'
+            : 'the membership check since then shows ' + seen + ' of ' + rec.n + ' in a sale',
+        };
+      }
+      return { account: a, rows: blk.rows, counts: blk.counts, entered: rec, entered_check: check, entered_key: key };
+    }),
+  };
+  /* §7: the tasks table keeps the EVENT-ENDING kind and nothing else. A task per listing the day its
+     clock runs out is noise under a weekly batch, and the snapshot no longer opens one. */
+  const tasksRaw = (await env.DB.prepare("SELECT task_id, account, item_id, kind, eligible_on, status, created_at FROM adtool_sale_tasks WHERE status = 'open' AND kind = 'event-ending'" + (acct ? ' AND account = ?1' : '') + ' ORDER BY created_at DESC LIMIT 100').bind(...(acct ? [acct] : [])).all()).results || [];
+  const tasks = tasksRaw.map(x => ({ task_id: String(x.task_id), item_id: '', account: String(x.account || ''), kind: String(x.kind || ''), eligible_on: x.eligible_on || null, status: String(x.status || '') }));
+  const obsSince = await env.DB.prepare('SELECT MIN(day) AS d FROM adtool_sale_membership_day' + (acct ? ' WHERE account = ?1' : '')).bind(...(acct ? [acct] : [])).first();
+  const observed_since = obsSince && obsSince.d ? String(obsSince.d) : null;
+  const byAcctMap = {}; for (const a of B.accounts) byAcctMap[a.account] = a;
+  return {
+    today, fresh: await adtFresh(env, 'day'), account: acct || 'all', accounts: Object.keys(byAcctMap).sort(),
+    settings: SET, calendar: B.calendar,
+    why_batching: 'Under a sale that covers the whole shop, eBay puts a listing in the moment it judges it eligible, so a listing that becomes eligible near the end of a ' + rules.days + '-day event is in that sale for the day or two left of it, and then the event is over. Entering a batch by hand on one named day gives every listing in it the whole run.',
+    batches: { groups: B.groups, counts: B.counts, verdict_rule: B.verdict_rule, profit_after_rule: B.profit_after_rule, month_drop_label: B.month_drop_label, settings_used: B.settings_used },
+    this_batch: this_batch, in_sale: in_sale, by_account: B.accounts,
+    whole_shop_running: anyCover.map(a => evByAcct[a] || { account: a }),
+    clock_is_real: priceDays >= 14, price_history_days: priceDays, observed_since,
+    covers_whole_shop: anyCover,
+    estimate_banner: priceDays < 14 ? ('dates are estimated until 14 days of price history exist (' + priceDays + ' so far)' + (observed_since ? '; observed removal begins from ' + observed_since : '')) : null,
+    rules: ['14 days at the same price', 'not in another sale for 14 days before', 'an event runs 1 to 45 days'],
+    running_events: running.map(e => ({ account: String(e.account), name: String(e.name || ''), promo_id: String(e.promo_id || ''), discount: String(e.discount || ''), criterion: String(e.criterion || ''), starts: String(e.starts || ''), ends: String(e.ends || ''), covers: String(e.criterion) === 'INVENTORY_ANY' ? 'whole shop' : 'listed items' })),
+    status_filter, active_total: items.length, rows_total: items.length,
+    windows: { units_and_profit: { from_7d: WIN.from_7d, from_30d: WIN.from_30d, to: WIN.to }, in_sale_listings_read: SINCE.rows_read, in_sale_cap: ADTOOL_SALE_COHORT_CAP },
+    tasks,
+    honest_limits: [
+      'dates are observed at one-day granularity from ' + (observed_since || 'the first snapshot'),
+      'for a sale that covers the whole shop, eBay never tells us one listing has left it, so the listing counts as in the sale while the event runs and the listing is active, with a dip in the daily price record as corroboration',
+      'the profit at the sale price is this listing’s own profit per unit, less the discount on the price and the percentage fees that come off with it; the supplier cost does not move',
+      'nothing on this page is ever sent to eBay. The only thing it writes is our own record of who entered a batch',
+    ],
+    computed_at: new Date().toISOString(),
+    source: 'adtool_sale_timeline + adtool_sale_membership_day (observed) · promotions (running events) · adtool_listings (profit per unit) · adtool_listing_day (units and profit by window) · items_api + adtool_price_day (estimate until the clock is real) · portal_config (the four settings) · eBay sale-event rules, Seller Centre',
+  };
+}
+
 const ADTOOL_ACTIONS_P10 = {
   adtoolSales: {
     auth: 'any', fn: async (p, ctx) => {
-      await ensureAdtoolSaleSchema(ctx.env);   /* seeds adtool_page_sales + adtool_sale_snapshot before the gate reads them */
+      await ensureAdtoolSaleSchema(ctx.env);   /* seeds adtool_page_sales + the four batch settings before the gate reads them */
       await adtGate(ctx, 'adtool_page_sales');
-      const env = ctx.env, today = ukDate(''), u = ctx.user || {};
+      const env = ctx.env, u = ctx.user || {};
       /* ---- write ops (payload.op → route cache skipped; gated to the ads roles by adtGate above) ---- */
       if (p && p.op) {
-        const tid = String(p.task_id || ''), note = String(p.note || '').slice(0, 500);
-        if (!tid) throw new Error('SAY: give a task id');
+        const note = String(p.note || '').slice(0, 500);
         if (p.op === 'task_done' || p.op === 'task_dismiss') {
+          const tid = String(p.task_id || '');
+          if (!tid) throw new Error('SAY: give a task id');
           const st = p.op === 'task_done' ? 'done' : 'dismissed';
           await env.DB.prepare("UPDATE adtool_sale_tasks SET status = ?2, done_by = ?3, done_at = datetime('now'), note = ?4 WHERE task_id = ?1").bind(tid, st, String(u.email || ''), note).run();
           await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_SALE_TASK', ?2, '', ?3, datetime('now'))").bind(String(u.email || ''), tid, st + (note ? ' · ' + note : '')).run();
-          /* the page reloads adtoolSales with an empty payload right after — purge both profit-class KV entries so the
-             just-closed task drops out at once instead of lingering for the 3-min read TTL. */
-          try { await env.HOT.delete(adtKvKey('adtoolSales', 'p', {})); await env.HOT.delete(adtKvKey('adtoolSales', 'np', {})); } catch (e) {}
+          /* the page reloads adtoolSales right after — purge the page's memo so the just-closed task
+             drops out at once instead of lingering for the read TTL */
+          await adtSalesCacheClear(env);
           return { ok: true, task_id: tid, status: st };
+        }
+        if (p.op === 'batch_entered') {
+          /* OUR OWN RECORD AND NOTHING ELSE. Entering the batch is done by hand on eBay; this writes
+             down who did it and which listings they said they entered, so tomorrow's membership check
+             has something to agree or disagree with. No eBay endpoint is touched here. */
+          const account = String(p.account || '').trim();
+          const batchOn = String(p.batch_on || '').trim();
+          if (!account) throw new Error('SAY: which account?');
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(batchOn)) throw new Error('SAY: give the batch day as a date (YYYY-MM-DD)');
+          const key = adSaleBatchKey(account, batchOn);
+          if (!key) throw new Error('SAY: that account name cannot be recorded against a batch');
+          const raw = Array.isArray(p.item_ids) ? p.item_ids : String(p.item_ids || '').split(/[^0-9]+/);
+          const asked = Array.from(new Set(raw.map(x => String(x).replace(/\D/g, '')).filter(x => /^\d{9,13}$/.test(x)))).slice(0, 2000);
+          if (!asked.length) throw new Error('SAY: give the item numbers that were entered');
+          /* VALIDATED AGAINST THE BATCH ITSELF, not against whatever was posted: a listing recorded
+             as entered on a day it was not due is a record that will read as a disagreement for ever. */
+          const D = await adtoolSalesCompute(env, account);
+          const due = {};
+          for (const g of [D.batches.groups.this_friday, D.batches.groups.next_friday]) for (const r of g) if (String(r.batch_on || '') === batchOn && r.account === account) due[r.item_id] = 1;
+          for (const blk of (D.batches.groups.later || [])) if (String(blk.batch_on) === batchOn) for (const r of blk.rows) if (r.account === account) due[r.item_id] = 1;
+          const ids = asked.filter(id => due[id]), refused = asked.filter(id => !due[id]);
+          if (!ids.length) throw new Error('SAY: none of those listings is in ' + account + '’s batch for ' + batchOn);
+          const rec = { account: account, batch_on: batchOn, by: String(u.email || ''), at: new Date().toISOString(), n: ids.length, ids: ids.slice(0, 1000) };
+          await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')").bind(key, JSON.stringify(rec)).run();
+          await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_SALE_BATCH_ENTERED', ?2, '', ?3, datetime('now'))").bind(String(u.email || ''), account + ' · ' + batchOn, ids.length + ' listings' + (refused.length ? ' · ' + refused.length + ' not in this batch, left out' : '') + (note ? ' · ' + note : '')).run();
+          await adtSalesCacheClear(env);
+          return { ok: true, account, batch_on: batchOn, n: ids.length, by: rec.by, at: rec.at, left_out: refused, sent_to_ebay: false };
         }
         throw new Error('SAY: unknown op');
       }
-      const acct = String((p && p.account) || '').trim();
-      const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
-      /* how long has the price actually held? only answerable where the snapshot has history — the observed clock */
-      const hist = await env.DB.prepare('SELECT COUNT(DISTINCT day) AS d, MIN(day) AS first FROM adtool_price_day').first();
-      const priceDays = Number(hist && hist.d) || 0;
-      const rows0 = (await env.DB.prepare(
-        'SELECT i.item_id, i.account, i.title, i.image, i.price, i.start_time, i.last_revised, ' +
-        '(SELECT MIN(pd.day) FROM adtool_price_day pd WHERE pd.item_id = i.item_id AND pd.price = i.price ' +
-        '   AND pd.day > COALESCE((SELECT MAX(p2.day) FROM adtool_price_day p2 WHERE p2.item_id = i.item_id AND p2.price <> i.price), "")) AS price_since ' +
-        "FROM items_api i WHERE i.status = 'ACTIVE'" + (acct ? ' AND i.account = ?1' : '') + ' ORDER BY i.account, i.item_id'
-      ).bind(...(acct ? [acct] : [])).all()).results || [];
-      const ids = rows0.map(r => String(r.item_id));
-      /* observed lifecycle (latest timeline per item) + today's membership — precomputed by marketingSync */
-      const tlById = {}, memById = {};
-      { const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, account, promo_id, added_on, removed_on, restriction_end, eligible_on, eligible_basis, status, updated_at FROM adtool_sale_timeline WHERE item_id IN ' + adtInList(ch, 0)).bind(...ch));
-        for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) { const k = String(r.item_id); if (!tlById[k] || String(r.updated_at || '') > String(tlById[k].updated_at || '')) tlById[k] = r; } }
-      { const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, promo_id, in_sale, basis, discount_pct, disc_src, price FROM adtool_sale_membership_day WHERE day = ?1 AND item_id IN ' + adtInList(ch, 1)).bind(today, ...ch));
-        for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) memById[String(r.item_id)] = r; }
-      const running = (await env.DB.prepare(
-        "SELECT account, name, promo_id, status, COALESCE(discount,'') AS discount, item_n, COALESCE(criterion_type,'') AS criterion, substr(start_at,1,10) AS starts, substr(end_at,1,10) AS ends " +
-        "FROM promotions WHERE type = 'MARKDOWN_SALE' AND status LIKE '%RUNNING%'" + (acct ? ' AND account = ?1' : '') + ' ORDER BY account'
-      ).bind(...(acct ? [acct] : [])).all()).results || [];
-      /* INVENTORY_ANY covers the WHOLE SHOP: eBay returns no listing list and enrols each listing itself, so item_n=0
-         means "not enumerated", never "empty". Per-item removal is therefore not observable for these (honest limits below). */
-      const anyCover = Array.from(new Set(running.filter(r => String(r.criterion) === 'INVENTORY_ANY').map(r => String(r.account))));
-      const coveredAcct = {}; for (const a of anyCover) coveredAcct[a] = true;
-      const runByAcct = {}; for (const e of running) (runByAcct[String(e.account)] = runByAcct[String(e.account)] || []).push(e);
-      const items = rows0.map(r => {
-        const id = String(r.item_id), t = tlById[id] || null, m = memById[id] || null, runs = runByAcct[String(r.account)] || [];
-        const steadyFromPrice = (priceDays >= 14 && r.price_since) ? daysBetween(String(r.price_since), today) : null;
-        const est = adtSaleEligibility(Object.assign({}, r, { price_steady_days: steadyFromPrice }), today, daysBetween);
-        const inSale = m ? Number(m.in_sale) === 1 : false;
-        /* only a MEMBER of a running event carries a discount: for a listing not in the sale, do not borrow the
-           account's event and fabricate an "original → sale price". evForItem, pct and sale stay null unless in_sale. */
-        const evForItem = inSale ? ((m && m.promo_id ? runs.find(e => String(e.promo_id) === String(m.promo_id)) : null) || runs[0] || null) : null;
-        const observedDisc = m ? String(m.disc_src || '') === 'observed' : false;
-        const pct = !inSale ? null : ((m && m.discount_pct != null) ? Number(m.discount_pct) : (evForItem ? adtParseDiscountPct(evForItem.discount) : null));
-        const orig = r.price == null ? null : round2(r.price);
-        const sale = (inSale && orig != null && pct != null) ? round2(orig * (1 - pct)) : null;
-        /* a member with today's membership row but no timeline yet (the :50 backlog has not reached it) is in the event and
-           unconfirmed — never a fabricated 'eligible' */
-        const status = t ? String(t.status) : (m && inSale ? 'added-unconfirmed' : (est.eligible ? 'eligible' : 'no-event'));
-        const eligible_on = t ? (t.eligible_on || null) : est.eligible_on;
-        /* only say "(observed)" when an order actually proved the price; the event text alone is "states … (unconfirmed)" */
-        const dpNum = m && m.discount_pct != null ? Number(m.discount_pct) : null;
-        const observed_note = !m
-          ? (priceDays >= 14 ? 'no snapshot for this listing yet' : 'estimate — the observed price clock has ' + priceDays + ' of 14 days')
-          : !inSale ? 'not in a running sale event'
-          : observedDisc
-            ? (dpNum > 0 ? 'buyers paid ' + Math.round(dpNum * 100) + '% off (observed)' : 'an order today shows buyers paid full price')
-            : String(m.basis) === 'any' ? 'whole-shop event: eBay auto-enrols; per-item removal not observable'
-            : dpNum != null ? 'event states ' + Math.round(dpNum * 100) + '% off (no order yet to confirm)' : 'in the event; no order yet to observe the discount';
-        return {
-          item_id: id, account: String(r.account), title: String(r.title || ''), image: r.image ? String(r.image) : null,
-          event_running: inSale, promo_id: t ? String(t.promo_id || '') : (evForItem ? String(evForItem.promo_id || '') : ''),
-          discount_pct: pct, ends: evForItem ? String(evForItem.ends || '') : (runs[0] ? String(runs[0].ends || '') : ''),
-          basis: m ? String(m.basis) : (coveredAcct[String(r.account)] ? 'any' : 'none'),
-          in_sale: inSale, status, added_on: t ? (t.added_on || null) : null, removed_on: t ? (t.removed_on || null) : null,
-          restriction_end: t ? (t.restriction_end || null) : null, eligible_on, eligible_basis: t ? String(t.eligible_basis || '') : (est.eligible_on ? 'estimate' : ''), timeline_pending: !t && !!m,
-          original_price: orig, sale_price: sale, difference: (orig != null && sale != null) ? round2(orig - sale) : null,
-          discount_shown: pct != null ? Math.round(pct * 100) + '%' : null, observed_note, estimate: !m,
-        };
-      });
-      /* counts keyed by the view's six chip buckets (live folds in added-unconfirmed; not-discounted/no-event fold
-         into notinsale), not by raw status — the frontend reads status_filter[bucket] directly. */
-      const saleBucket = s => { s = String(s || '').toLowerCase(); if (s === 'live' || s === 'added-unconfirmed') return 'live'; if (s === 'eligible') return 'eligible'; if (s === 'waiting') return 'waiting'; if (s === 'removed') return 'removed'; return 'notinsale'; };
-      const status_filter = { live: 0, eligible: 0, waiting: 0, removed: 0, notinsale: 0 };
-      for (const it of items) { const b = saleBucket(it.status); status_filter[b] = (status_filter[b] || 0) + 1; }
-      const C = adtSaleCohorts(items.map(i => ({ item_id: i.item_id, eligible: i.status === 'eligible' })), today, adtAddDays);
-      const byAcct = {};
-      for (const i of items) { const a = byAcct[i.account] = byAcct[i.account] || { account: i.account, active: 0, in_sale: 0, eligible: 0, waiting: 0 }; a.active++; if (i.in_sale) a.in_sale++; if (i.status === 'eligible') a.eligible++; if (i.status === 'waiting') a.waiting++; }
-      /* open tasks with their product cell + the flags the brief asks for */
-      const tasksRaw = (await env.DB.prepare("SELECT task_id, account, item_id, kind, eligible_on, status, created_at FROM adtool_sale_tasks WHERE status = 'open'" + (acct ? ' AND account = ?1' : '') + ' ORDER BY created_at DESC LIMIT 200').bind(...(acct ? [acct] : [])).all()).results || [];
-      await adtProductCells(env, tasksRaw.filter(x => x.item_id));
-      const byId = {}; for (const it of items) byId[it.item_id] = it;
-      const tasks = tasksRaw.map(x => { const it = byId[String(x.item_id)] || {}; return { task_id: x.task_id, item_id: String(x.item_id || ''), account: String(x.account || ''), title: x.title || it.title || '', image: x.image || it.image || null, kind: String(x.kind || ''), eligible_on: x.eligible_on || null, status: String(x.status || ''), flags: { already_added: !!it.in_sale, live: it.status === 'live', price_changed_on: it.status === 'removed' ? (it.removed_on || null) : null } }; });
-      const obsSince = await env.DB.prepare('SELECT MIN(day) AS d FROM adtool_sale_membership_day' + (acct ? ' WHERE account = ?1' : '')).bind(...(acct ? [acct] : [])).first();
-      const observed_since = obsSince && obsSince.d ? String(obsSince.d) : null;
-      const rowsCapped = items.slice(0, 500);
-      return {
-        today, fresh: await adtFresh(env, 'day'), account: acct || 'all', accounts: Object.keys(byAcct).sort(),
-        clock_is_real: priceDays >= 14, price_history_days: priceDays, observed_since,
-        covers_whole_shop: anyCover,
-        estimate_banner: priceDays < 14 ? ('dates are estimated until 14 days of price history exist (' + priceDays + ' so far)' + (observed_since ? '; observed removal begins from ' + observed_since : '')) : null,
-        rules: ['14 days at the same price', 'not in another sale for 14 days before', 'an event runs 1 to 45 days'],
-        running_events: running.map(e => ({ account: String(e.account), name: String(e.name || ''), promo_id: String(e.promo_id || ''), discount: String(e.discount || ''), criterion: String(e.criterion || ''), starts: String(e.starts || ''), ends: String(e.ends || ''), covers: String(e.criterion) === 'INVENTORY_ANY' ? 'whole shop' : 'listed items' })),
-        by_account: Object.values(byAcct), cohorts: { a: C.A.length, b: C.B.length, cycle: C.cycle }, schedule: C.plan,
-        status_filter, active_total: items.length, rows: rowsCapped, rows_total: items.length,
-        tasks,
-        honest_limits: [
-          'dates are observed at one-day granularity from ' + (observed_since || 'the first snapshot'),
-          'for whole-shop (INVENTORY_ANY) events an individual item’s removal cannot be seen from eBay — it counts as in-sale while the event runs and the listing is active, with an adtool_price_day dip as corroboration',
-          'sale price is computed from the event’s discount unless the observed order price proves the marked-down price',
-          'nothing is ever sent to eBay — the tool only observes and records',
-        ],
-        computed_at: new Date().toISOString(),
-        source: 'adtool_sale_timeline + adtool_sale_membership_day (observed) · promotions (running events) · items_api + adtool_price_day (estimate until the clock is real) · eBay sale-event rules, Seller Centre',
-      };
+      return adtoolSalesCompute(env, String((p && p.account) || '').trim());
     },
   },
 };
@@ -28197,6 +28746,84 @@ const ROUTES = {
         apply_log: applyRows, planner_runs: planJobs, switch_runs: switchJobs,
         reconcile_note: 'Orders and units by hour come from the same roll-up the day row comes from, so those two must add up exactly; a difference there is a fault. SPEND CANNOT, and a difference is not one: eBay publishes no ad spend by hour, so the hourly figures are our own readings of its running total every few minutes with each difference booked to the hour it arrived in, while the day figure is the one eBay finally publishes in its report. A day whose first reading arrived mid-morning has the spend before it in no hour of trading at all, and the hours of today are a part day, so today will always sum short of a finished day. The hour of 08:00 on days before the carry fix is left out of the hours and is still inside the day figure.',
         envelope_note: 'The hours somebody typed are the envelope: a schedule can only switch a listing off inside them and can never switch one on outside them, so the worst a wrong pattern can do is leave an ad paused in an hour that has never sold.',
+        sent_to_ebay: false,
+        read_errors: readErrors,
+      };
+    },
+  },
+
+  /* THE FRIDAY BATCH'S EVIDENCE ROUTE (the owner's request, 6 November 2026). Read-only and by key,
+     gated like backupDump: it reaches no eBay endpoint, writes nothing of its own beyond the
+     documented settings the page's own seed writes, and decides nothing. It exists so the owner can
+     be shown REAL figures for the batch coming before he opens the page: the four settings in force,
+     the batch calendar, the counts per account and per group, and the first ten rows of this
+     batch with the money a unit makes now and the money it would make at the sale price.
+     Deliberately NOT adtool-prefixed, so it sits with the other key-gated probes and is not wrapped
+     by the collective-profit strip; there is no collective profit in it to strip, because the only
+     money here sits on rows keyed by one listing. */
+  adsSaleProbe: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const env = ctx.env;
+      const acct = String((p && p.account) || '').trim();
+      const show = Math.min(Math.max(Math.round(Number((p && p.rows)) || 10), 1), 50);
+      const readErrors = [];
+      /* a read that FAILS says so rather than answering with an empty list: on an evidence route the
+         difference between "nothing is due" and "I could not look" is the whole point, and an empty
+         batch reads identical to a refused read otherwise. */
+      try { await ensureAdtoolSaleSchema(env); } catch (e) { readErrors.push('schema: ' + String((e && e.message) || e).slice(0, 160)); }
+      let D = null;
+      try { D = await adtoolSalesCompute(env, acct); } catch (e) { readErrors.push('batch: ' + String((e && e.message) || e).slice(0, 160)); }
+      const flags = {
+        page: await adtFlag(env, 'adtool_page_sales').catch(() => 'unknown'),
+        snapshot: await adtFlag(env, 'adtool_sale_snapshot').catch(() => 'unknown'),
+      };
+      if (!D) return { asked: { account: acct || null, rows: show }, flags: flags, read_errors: readErrors, sent_to_ebay: false };
+      /* ONE row shape, so the ten rows printed here are the ten rows the page would show, field for
+         field, rather than a second opinion about the same listing. */
+      const slim = r => ({
+        item_id: r.item_id, account: r.account, title: String(r.title || '').slice(0, 70),
+        price: r.price, sale_price: r.sale_price,
+        margin_before_ads: r.margin_before_ads, margin_source: r.margin_source,
+        profit_after: r.profit_after, drop: r.drop, profit_after_why: r.profit_after_why,
+        verdict: r.verdict, units_7d: r.units_7d, units_30d: r.units_30d,
+        actual_profit_7d: r.actual_profit_7d, actual_profit_30d: r.actual_profit_30d,
+        ad_spend_7d: r.ad_spend_7d, next_eligible_on: r.next_eligible_on, batch_on: r.batch_on,
+      });
+      const first = [];
+      for (const blk of (D.this_batch.accounts || [])) for (const r of blk.rows) if (first.length < show) first.push(slim(r));
+      return {
+        asked: { account: acct || null, rows: show },
+        today: D.today, flags: flags,
+        settings: D.settings,                       /* the rows as stored, and the figures they parse to */
+        calendar: D.calendar,
+        why_batching: D.why_batching,
+        counts: D.batches.counts,
+        verdict_rule: D.batches.verdict_rule,
+        profit_after_rule: D.batches.profit_after_rule,
+        month_drop_label: D.batches.month_drop_label,
+        by_account: (D.by_account || []).map(a => ({
+          account: a.account, active: a.active, in_sale: a.in_sale.n,
+          this_batch: a.this_batch, next_batch: a.next_batch.n, later: a.later.n, no_date: a.no_date.n,
+          month_drop_estimate: a.month_drop_estimate, month_drop_items: a.month_drop_items,
+          event: a.event ? { name: a.event.name, discount_text: a.event.discount_text, starts: a.event.starts, ends: a.event.ends, days_left: a.event.days_left, covers: a.event.covers } : null,
+        })),
+        this_batch: {
+          batch_on: D.this_batch.batch_on, ends_on: D.this_batch.ends_on, is_today: D.this_batch.is_today,
+          accounts: (D.this_batch.accounts || []).map(b => ({ account: b.account, n: b.counts.n, counts: b.counts, entered: b.entered ? { by: b.entered.by, at: b.entered.at, n: b.entered.n } : null, entered_check: b.entered_check })),
+          first_rows: first,
+        },
+        in_sale: (D.in_sale || []).map(b => ({ account: b.account, n: b.n, event: b.event, first_rows: b.rows.slice(0, 3).map(slim) })),
+        whole_shop_running: D.whole_shop_running,
+        later_days: (D.batches.groups.later || []).map(g => ({ batch_on: g.batch_on, n: g.n })),
+        no_date_reasons: (() => {
+          const by = {};
+          for (const r of (D.batches.groups.no_date || [])) { const w = String(r.why || r.next_eligible_why || 'no reason recorded'); by[w] = (by[w] || 0) + 1; }
+          return Object.keys(by).sort((a, b) => by[b] - by[a]).slice(0, 8).map(w => ({ reason: w, listings: by[w] }));
+        })(),
+        windows: D.windows,
+        clock_is_real: D.clock_is_real, price_history_days: D.price_history_days, observed_since: D.observed_since,
+        tasks_open: (D.tasks || []).length,
+        honest_limits: D.honest_limits,
         sent_to_ebay: false,
         read_errors: readErrors,
       };
