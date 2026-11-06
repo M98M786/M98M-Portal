@@ -729,7 +729,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['priceRevisionBoard','priceItemDetail','priceDecide','adtoolPeakHold','adtoolPeakProfile','adtoolVideoBoard','adtoolPeakCampaigns','adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
+var ENGINE_ACTIONS = ['priceRevisionBoard','priceItemDetail','priceDecide','adtoolPeakHold','adtoolPeakProfile','adtoolVideoBoard','adtoolPeakCampaigns','adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolHourWindow','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261106-1634';
+var BUILD = '20261106-1952';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -6813,6 +6813,7 @@ VIEW_CSS.push(
     },
     init: function () {
       OV.period = adtPeriodBar('ovBar', { page: 'adtoolOverview', def: 'd30', onChange: function (v) { OV.period = v; loadPlan(false); } });
+      HR.period = adtPeriodLoad('adtoolOverviewHours', 'today'); HR.account = null; HR.data = null; HR.err = ''; HR.key = '';
       acctChips();
       loadPlan(false)['catch'](function () {});
       loadCmd(false)['catch'](function () {});
@@ -6832,7 +6833,7 @@ VIEW_CSS.push(
     /* ONE chip for the whole page. It used to move block 1 only, so the reader picked an account
        and the nine tiles, the account table, the slots and the hourly chart under it went on
        answering for the whole fleet with nothing saying so. Both halves are re-asked. */
-    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { OV.account = this.getAttribute('data-a'); acctChips(); loadPlan(false)['catch'](function () {}); loadCmd(false)['catch'](function () {}); };
+    for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { OV.account = this.getAttribute('data-a'); HR.account = null; acctChips(); loadPlan(false)['catch'](function () {}); loadCmd(false)['catch'](function () {}); };
   }
   function loadPlan(quiet) {
     var p = adtPeriodParams(OV.period); if (OV.account) p.account = OV.account;
@@ -6911,7 +6912,8 @@ VIEW_CSS.push(
     /* THROUGH THE SHARED BLOCKS, not past them. The Peak-time overview draws the same five in the
        same order from a cohort answer, so neither screen can quietly grow a tile the other has not. */
     var B = window.adtOverviewBlocks;
-    $('ovToday').innerHTML = B.today(D) + B.byAccount(D) + B.slots(D) + B.hourly(D) + B.foot(D);
+    $('ovToday').innerHTML = B.today(D) + B.byAccount(D) + B.slots(D) + B.hourly(D, { picker: true }) + B.foot(D);
+    wireHour();    /* 6 Nov: the hour panel's own period bar and account chips */
   }
 
   /* block 2 — the status line and the tiles, as one block: they answer the same question and a
@@ -7056,17 +7058,95 @@ VIEW_CSS.push(
      order sync (today_hours), on the same hour key, so the two bars of an hour line up. Drawn
      with the portal's own value-pill kit and no library. The two series count different things,
      so each is drawn against its own busiest hour and every bar carries its figure. */
-  function hourBlock(D) {
-    var head = '<h3>Today hour by hour' + src('today hour by hour', 'today so far · every 5 min') + '</h3>' +
-      '<div class="ov-sub">Money spent and orders received in each UK hour.</div>';
-    var curve = (Array.isArray(D.hour_curve) && D.hour_curve.length) ? D.hour_curve : null;
-    var ords = (Array.isArray(D.today_hours) && D.today_hours.length) ? D.today_hours : null;
-    var missing = [];
-    if (!curve) missing.push('Spend by hour is not available yet.');
-    if (!ords) missing.push(D.today_hours ? 'No orders yet today.' : 'Orders by hour are not available yet.');
-    if (!curve && !ords) {
-      return '<div class="ov-panel">' + head + '<div class="ov-empty">' + esc(missing.join(' ')) + '</div></div>';
+  /* 6 Nov (owner): "develop the period option above the hour-by-hour graph … the graph changes to
+     the period clicked". HR is the hour panel's own choice — its period bar and its account chips —
+     separate from the page's window above (block 1) and from the page's account chip, which it
+     follows until an account is picked here. Today is the live five-minute curve exactly as before;
+     every other key is one adtoolHourWindow read over the hourly roll-up, remembered per key so a
+     reader flicking between chips does not re-ask for figures already on hand. */
+  var HR = { period: { key: 'today' }, account: null, data: null, err: '', key: '' };
+  function hrAccount() { return HR.account === null ? (OV.account || '') : HR.account; }
+  function hrKey(v) { v = v || {}; return (v.key === 'custom' ? v.from + '|' + v.to : v.key) + '|' + hrAccount(); }
+
+  function hourBlock(D, opts) {
+    opts = opts || {};
+    var picker = !!opts.picker;
+    var v = picker ? (HR.period || { key: 'today' }) : { key: 'today' };
+    var isToday = v.key === 'today';
+    var head = '<h3>' + (isToday
+        ? 'Today hour by hour' + src('today hour by hour', 'today so far · every 5 min')
+        : 'Hour by hour · ' + esc(adtPeriodLabel(v)) + src('today hour by hour', 'the hourly roll-up')) + '</h3>' +
+      '<div class="ov-sub">Money spent and orders received in each UK hour' + (isToday ? '.' : ', added up over every day in the window.') + '</div>' +
+      (picker ? '<div id="ovHourBar"></div><div id="ovHourAcct" class="ov-acct"></div>' : '');
+    var body;
+    if (isToday) {
+      var curve = (Array.isArray(D.hour_curve) && D.hour_curve.length) ? D.hour_curve : null;
+      var ords = (Array.isArray(D.today_hours) && D.today_hours.length) ? D.today_hours : null;
+      var missing = [];
+      if (!curve) missing.push('Spend by hour is not available yet.');
+      if (!ords) missing.push(D.today_hours ? 'No orders yet today.' : 'Orders by hour are not available yet.');
+      body = (!curve && !ords) ? '<div class="ov-empty">' + esc(missing.join(' ')) + '</div>'
+        : hourChart(curve, ords, { live: true, missing: missing, carry: num(D.carry_spend) });
+    } else if (HR.data && HR.key === hrKey(v)) {
+      var W = HR.data, hs = Array.isArray(W.hours) ? W.hours : [];
+      var wc = hs.map(function (h) { return { hour_uk: h.hour_uk, spend: h.spend }; });
+      var wo = hs.map(function (h) { return { hour_uk: h.hour_uk, orders: h.orders, units: h.units }; });
+      body = !hs.length
+        ? '<div class="ov-empty">Nothing is recorded by the hour for ' + esc(adtPeriodLabel(v)) + (hrAccount() ? ' on ' + esc(hrAccount()) : '') + '. The hourly roll-up starts on ' + esc(String(W.sampled_from || '2026-09-17')) + '.</div>'
+        : hourChart(wc, wo, { live: false, days: Number(W.days_with_data) || 0, period: W.period || {}, first: W.first_day, last: W.last_day, carry: num(W.carry_spend), totals: W.totals || {} });
+    } else if (HR.err && HR.key === hrKey(v)) {
+      body = '<div class="ov-empty">The hours for ' + esc(adtPeriodLabel(v)) + ' could not be read: ' + esc(HR.err) + '</div>';
+    } else {
+      body = '<div class="ov-empty">Reading the hours for ' + esc(adtPeriodLabel(v)) + '\u2026</div>';
     }
+    return '<div class="ov-panel" id="ovHourPanel">' + head + body + '</div>';
+  }
+
+  /* the period bar and account chips inside the hour panel; called after the panel is in the page */
+  function wireHour() {
+    var bar = $('ovHourBar'); if (!bar) return;
+    HR.period = adtPeriodBar('ovHourBar', { page: 'adtoolOverviewHours', def: 'today', value: HR.period, onChange: function (v) { HR.period = v; hourRefresh(); } });
+    if (HR.data && HR.key === hrKey(HR.period) && HR.period.key !== 'today') adtPeriodEcho('ovHourBar', HR.data.period);
+    var el = $('ovHourAcct');
+    if (el) {
+      var cur = hrAccount();
+      el.innerHTML = '<button class="' + (cur ? '' : 'on') + '" data-a="">All accounts</button>' +
+        OV.accounts.map(function (a) { return '<button class="' + (cur === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('');
+      var bs = el.querySelectorAll('button');
+      for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { HR.account = this.getAttribute('data-a'); hourRefresh(); };
+    }
+    /* a window other than today whose figures are not on hand yet (first paint, or the page's
+       account chip moved under it) is asked for now; a read already in flight is left alone */
+    var v = HR.period || { key: 'today' };
+    if (v.key !== 'today' && HR.key !== hrKey(v)) hourRefresh();
+  }
+  function hourRepaint() { var pn = $('ovHourPanel'); if (!pn) return; pn.outerHTML = hourBlock(OV.cmd || {}, { picker: true }); wireHour(); }
+  function hourRefresh() {
+    var v = HR.period || { key: 'today' };
+    if (v.key === 'today') { hourRepaint(); return; }
+    var key = hrKey(v);
+    if (HR.data && HR.key === key) { hourRepaint(); return; }
+    HR.key = key; HR.data = null; HR.err = '';
+    hourRepaint();
+    var p = adtPeriodParams(v); var a = hrAccount(); if (a) p.account = a;
+    api('adtoolHourWindow', p).then(function (d) {
+      if (HR.key !== key) return;
+      HR.data = d || {}; hourRepaint();
+    })['catch'](function (e) {
+      if (HR.key !== key) return;
+      HR.err = (e && e.message) || 'no answer'; hourRepaint();
+    });
+  }
+
+  /* block 4 — ONE hourly chart. Per UK hour a red bar of money beside a green bar of orders.
+     Live (today): the spend from the 5-minute ad readings (hour_curve) and the orders from the
+     order sync (today_hours). A window: both from the hourly roll-up, summed over its days.
+     Drawn with the portal's own value-pill kit and no library. The two series count different
+     things, so each is drawn against its own busiest hour and every bar carries its figure. */
+  function hourChart(curve, ords, o) {
+    o = o || {};
+    var live = !!o.live, missing = o.missing || [];
+    var days = live ? 1 : Math.max(1, Number(o.days) || 1);
     var sp = {}, od = {}, un = {}, i;
     (curve || []).forEach(function (x) { var hh = num(x.hour_uk != null ? x.hour_uk : x.hour); if (hh != null && hh >= 0 && hh < 24) sp[hh] = num(x.spend) || 0; });
     (ords || []).forEach(function (x) { var hh = num(x.hour_uk != null ? x.hour_uk : x.hour); if (hh != null && hh >= 0 && hh < 24) { od[hh] = num(x.orders) || 0; un[hh] = num(x.units) || 0; } });
@@ -7082,6 +7162,7 @@ VIEW_CSS.push(
        way there is to make a reader think the money stopped. */
     var lastKnown = -1;
     for (i = 0; i < 24; i++) { if (sp[i] != null || od[i] != null) lastKnown = i; }
+    if (!live) lastKnown = 23;    /* a window's hours have all happened; a sum of nought is a real nought */
     var scS = maxS > 0 ? plot / maxS : 0, scO = maxO > 0 ? plot / maxO : 0;
     var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block" role="img">';
     s += '<line x1="' + L + '" y1="' + zero + '" x2="' + (W - R) + '" y2="' + zero + '" stroke="rgba(255,255,255,.12)" stroke-width="1"/>';
@@ -7091,7 +7172,8 @@ VIEW_CSS.push(
       var ahead = i > lastKnown;
       var tip = ahead ? pad2(i) + ':00 UK · this hour has not happened yet'
         : pad2(i) + ':00 UK · ' + (curve ? gbp(v == null ? 0 : v) + ' spent' : 'spend not available yet') + ' · ' +
-        (ords ? (o == null ? 0 : o) + ' order' + ((o || 0) === 1 ? '' : 's') + ', ' + (u == null ? 0 : u) + ' unit' + ((u || 0) === 1 ? '' : 's') : 'orders not available yet');
+        (ords ? (o == null ? 0 : o) + ' order' + ((o || 0) === 1 ? '' : 's') + ', ' + (u == null ? 0 : u) + ' unit' + ((u || 0) === 1 ? '' : 's') : 'orders not available yet') +
+        (days > 1 ? ' · a day on average: ' + gbp((v || 0) / days) + ', ' + (Math.round((o || 0) / days * 10) / 10) + ' orders' : '');
       var rd = null, gd = null;
       if (ahead) {
         /* the slot is kept, so the hours still line up with the clock, and nothing is claimed in it */
@@ -7124,17 +7206,30 @@ VIEW_CSS.push(
     s += chartValueDots(redDots, { color: LOSS, ink: '#fff', fontSize: PILL_FS, minGap: 0 });
     s += chartValueDots(grnDots, { color: ORDERS_C, ink: ORDERS_INK, fontSize: PILL_FS, minGap: 0 });
     s += '</svg>';
-    var carry = num(D.carry_spend);
+    var carry = o.carry;
     var notes = [];
-    if (carry != null && carry > 0) notes.push('<b>' + esc(gbp(carry)) + ' had already been spent before the first reading today</b> and is not on the chart.');
-    if (lastKnown >= 0 && lastKnown < 23) notes.push('The day has reached <b>' + pad2(lastKnown) + ':00</b>. The hours after it are left empty rather than drawn as nothing spent.');
-    if (lastKnown < 0) notes.push('Nothing has been read for any hour of today yet.');
-    missing.forEach(function (m) { notes.push(esc(m)); });
+    if (live) {
+      if (carry != null && carry > 0) notes.push('<b>' + esc(gbp(carry)) + ' had already been spent before the first reading today</b> and is not on the chart.');
+      if (lastKnown >= 0 && lastKnown < 23) notes.push('The day has reached <b>' + pad2(lastKnown) + ':00</b>. The hours after it are left empty rather than drawn as nothing spent.');
+      if (lastKnown < 0) notes.push('Nothing has been read for any hour of today yet.');
+    } else {
+      var P = o.period || {}, want = Number(P.days) || days;
+      notes.push('<b>' + days + ' day' + (days === 1 ? '' : 's') + '</b> of hourly figures' + (o.first && o.last && o.first !== o.last ? ' (' + esc(o.first) + ' \u2192 ' + esc(o.last) + ')' : o.first ? ' (' + esc(o.first) + ')' : '') +
+        (days > 1 ? ', added up; hover a bar for the day-average.' : '.') +
+        (o.totals && o.totals.spend != null ? ' In all <b>' + esc(gbp(o.totals.spend)) + '</b> spent and <b>' + esc(String(o.totals.orders || 0)) + '</b> orders.' : ''));
+      if (want > days) notes.push((want - days) + ' of the window\u2019s ' + want + ' days hold no hourly figures (the hourly roll-up starts on 17 Sep 2026).');
+      if (P.includes_today) notes.push('Today is in this window and is still being read; its later hours are not in yet.');
+      if (carry != null && carry > 0) notes.push(esc(gbp(carry)) + ' of first-reading money on days eBay has not yet published is not on the chart.');
+    }
     var legend = '<div class="ov-legend"><span><i style="background:' + LOSS + '"></i>money spent' + (maxS > 0 ? ', busiest hour ' + esc(gbp0(maxS)) : '') + '</span>' +
       '<span><i style="background:' + ORDERS_C + '"></i>orders received' + (maxO > 0 ? ', busiest hour ' + esc(cnt(maxO)) : '') + '</span></div>';
-    return '<div class="ov-panel">' + head + (notes.length ? '<div class="ov-carry">' + notes.join(' ') + '</div>' : '') + legend + s + '</div>';
+    return head_free(notes, missing, legend, s);
   }
-
+  /* the chart's own wrapper: notes, legend and the drawing — the heading is the block's business */
+  function head_free(notes, missing, legend, s) {
+    missing.forEach(function (m) { notes.push(esc(m)); });
+    return (notes.length ? '<div class="ov-carry">' + notes.join(' ') + '</div>' : '') + legend + s;
+  }
 
   /* ══ VIDEOS, the sub-page under this one (owner's brief, 31 Oct, §4) ════════════════════════
      "All the videos we have on our listings, how they are performing, all the data, the way it

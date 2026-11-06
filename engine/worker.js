@@ -316,7 +316,7 @@ export default {
            (Stop today, Alerts, live apply, the listing page with its action log, Data health)
            are deliberately absent: acting then seeing a stale page reads as broken. */
         adtoolCommand: 60000, adtoolToday: 60000, adtoolAccounts: 180000, adtoolCategories: 180000, adtoolCases: 180000,
-        adtoolSlots: 180000, adtoolForecastLab: 180000, adtoolRoasTarget: 180000, adtoolPlan: 180000,
+        adtoolSlots: 180000, adtoolForecastLab: 180000, adtoolRoasTarget: 180000, adtoolPlan: 180000, adtoolHourWindow: 120000,
         adtoolSales: 180000, adtoolReport: 120000, adtoolCampaigns: 90000,
         /* Running today is a read page (the note op lives on adtoolStopToday, which stays uncached) */
         adtoolRunToday: 60000,
@@ -7943,6 +7943,41 @@ const ADTOOL_ACTIONS_P3 = {
       const overrides = await adtProductCells(env, (await env.DB.prepare('SELECT item_id, m98m_category, case_type, set_by, set_at FROM adtool_overrides ORDER BY set_at DESC LIMIT 50').all()).results || []);
       for (const r of [fleet, cases].concat(matrix)) { if (!r) continue; r.roas = Number(r.spend) > 0 ? round2(Number(r.attr_revenue) / Number(r.spend)) : null; r.cpc = Number(r.clicks) > 0 ? round2(Number(r.spend) / Number(r.clicks)) : null; r.cvr = Number(r.clicks) > 0 ? round2(Number(r.attr_units) / Number(r.clicks)) : null; }
       return Object.assign({ window: w, period: w, fresh: await adtFresh(env, w.includes_today ? 'today' : 'day'), account: acct || 'all', fleet, cases, zero_sale: zero, share_spend: fleet && Number(fleet.spend) > 0 ? round2(Number(cases.spend) / Number(fleet.spend)) : null, matrix, types: Object.values(types).map(t => Object.assign(t, { spend: round2(t.spend), attr_revenue: round2(t.attr_revenue), roas: t.spend > 0 ? round2(t.attr_revenue / t.spend) : null, cpc: t.clicks > 0 ? round2(t.spend / t.clicks) : null, cvr: t.clicks > 0 ? round2(t.attr_units / t.clicks) : null })).sort((a, b) => b.spend - a.spend), losers, losers_withheld_unpriced, winners, profit_label: 'Profit (Sales Analysis law)', overrides, case_types: ['MagSafe / magnetic', 'Rugged / shockproof', 'Wallet / leather / card', 'Clear / slim', 'Silicone / soft', 'Glitter / bling', 'Kickstand / ring', 'Other case'], computed_at: new Date().toISOString(), source: 'adtool_listing_day' + (w.includes_today ? ' + adtool_listing_today (sampled, provisional)' : '') + ', adtool_listings (rule taxonomy + manual overrides)' }, await adtPeriodExtras(env, w));
+    },
+  },
+  /* 6 Nov (owner): the Overview's "Today hour by hour" chart gets the same period bar as every
+     other advertising page, and the chart follows it. Today stays the live five-minute curve the
+     page already draws (adtoolCommand); any other window is THIS read over the hourly roll-up
+     (adtool_listing_hour — UK hours; orders on each order's own hour, money from the five-minute
+     ad readings scaled to the day eBay published where that day has been published). The hours
+     are added up over every day in the window; `days_with_data` says over how many days, so a
+     thirty-day sum can be read as a typical day. The roll-up starts on 17 Sep 2026. */
+  adtoolHourWindow: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, 'adtool_page_command'); const env = ctx.env; await ensureAdtoolPhase3Schema(env);
+      const today = ukDate('');
+      const w = adtPeriodOr(p, today, 'yesterday');
+      const acct = String((p && p.account) || '').trim();
+      const bind = [w.from, w.to]; if (acct) bind.push(acct);
+      const aw = acct ? ' AND account = ?3' : '';
+      const rows = (await env.DB.prepare(
+        'SELECT hour, ROUND(SUM(COALESCE(spend_r, spend_s, 0)), 2) AS spend, SUM(COALESCE(orders, 0)) AS orders, SUM(COALESCE(units, 0)) AS units, ' +
+        'ROUND(SUM(CASE WHEN spend_r IS NULL THEN COALESCE(carry_spend, 0) ELSE 0 END), 2) AS carry ' +
+        'FROM adtool_listing_hour WHERE day >= ?1 AND day <= ?2' + aw + ' GROUP BY hour ORDER BY hour'
+      ).bind(...bind).all()).results || [];
+      const dayRow = (await env.DB.prepare(
+        'SELECT COUNT(DISTINCT day) AS days, MIN(day) AS first_day, MAX(day) AS last_day FROM adtool_listing_hour WHERE day >= ?1 AND day <= ?2' + aw
+      ).bind(...bind).first()) || {};
+      const hours = rows.map((r) => ({ hour_uk: Number(r.hour), spend: round2(Number(r.spend) || 0), orders: Number(r.orders) || 0, units: Number(r.units) || 0 }))
+        .filter((h) => h.hour_uk >= 0 && h.hour_uk < 24);
+      const tot = { spend: 0, orders: 0, units: 0 };
+      for (const h of hours) { tot.spend += h.spend; tot.orders += h.orders; tot.units += h.units; }
+      let carry = 0; for (const r of rows) carry += Number(r.carry) || 0;
+      return { period: w, account: acct || 'all', today, hours,
+        days_with_data: Number(dayRow.days) || 0, first_day: dayRow.first_day || null, last_day: dayRow.last_day || null,
+        totals: { spend: round2(tot.spend), orders: tot.orders, units: tot.units }, carry_spend: round2(carry),
+        sampled_from: '2026-09-17',
+        source: 'adtool_listing_hour, the hourly roll-up: orders on each order\u2019s own UK hour; money from the five-minute ad readings, scaled to the day eBay published where that day has landed' };
     },
   },
   adtoolSlots: {
