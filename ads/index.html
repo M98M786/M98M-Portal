@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261106-2252';
+var BUILD = '20261106-2303';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -5741,14 +5741,14 @@ window.M98M_ADS_ONLY = true;
       if (!curve) missing.push('Spend by hour is not available yet.');
       if (!ords) missing.push(D.today_hours ? 'No orders yet today.' : 'Orders by hour are not available yet.');
       body = (!curve && !ords) ? '<div class="ov-empty">' + esc(missing.join(' ')) + '</div>'
-        : hourChart(curve, ords, { live: true, missing: missing, carry: num(D.carry_spend) });
+        : hourChart(curve, ords, { live: true, missing: missing, carry: num(D.carry_spend), carry_hour: num(D.carry_hour_uk) });
     } else if (HR.data && HR.key === hrKey(v)) {
       var W = HR.data, hs = Array.isArray(W.hours) ? W.hours : [];
       var wc = hs.map(function (h) { return { hour_uk: h.hour_uk, spend: h.spend }; });
       var wo = hs.map(function (h) { return { hour_uk: h.hour_uk, orders: h.orders, units: h.units }; });
       body = !hs.length
         ? '<div class="ov-empty">Nothing is recorded by the hour for ' + esc(adtPeriodLabel(v)) + (hrAccount() ? ' on ' + esc(hrAccount()) : '') + '. The hourly roll-up starts on ' + esc(String(W.sampled_from || '2026-09-17')) + '.</div>'
-        : hourChart(wc, wo, { live: false, days: Number(W.days_with_data) || 0, period: W.period || {}, first: W.first_day, last: W.last_day, carry: num(W.carry_spend), totals: W.totals || {}, published: W.published || null });
+        : hourChart(wc, wo, { live: false, days: Number(W.days_with_data) || 0, period: W.period || {}, first: W.first_day, last: W.last_day, carry: num(W.carry_spend), totals: W.totals || {}, published: W.published || null, overnight: W.overnight || null });
     } else if (HR.err && HR.key === hrKey(v)) {
       body = '<div class="ov-empty">The hours for ' + esc(adtPeriodLabel(v)) + ' could not be read: ' + esc(HR.err) + '</div>';
     } else {
@@ -5798,6 +5798,24 @@ window.M98M_ADS_ONLY = true;
      order sync (today_hours). A window: both from the hourly roll-up, summed over its days.
      Drawn with the portal's own value-pill kit and no library. The two series count different
      things, so each is drawn against its own busiest hour and every bar carries its figure. */
+  /* THE OVERNIGHT LUMP, SPREAD (6 Nov, the owner: "yes, estimate it"). eBay will not report a day
+     before midnight in California, so the first reading (~08:05 UK) carries everything since
+     midnight as one sum with no hour. Each arrival {hour H, amount} is dealt out over hours 0..H-1:
+     half evenly, half in proportion to the orders those hours took, so a busy 06:00 gets more of it
+     than a dead 03:00 without any hour being claimed as nought. Returns {hour: estimated £}. */
+  function nightSpread(arrivals, od) {
+    var est = {};
+    (arrivals || []).forEach(function (a) {
+      var H = Math.min(23, Math.round(num(a.hour) || 0)), A = num(a.amount) || 0, h, sumO = 0;
+      if (!(A > 0) || H < 1) return;
+      for (h = 0; h < H; h++) sumO += od[h] || 0;
+      for (h = 0; h < H; h++) {
+        var w = (sumO > 0 ? 0.5 * (od[h] || 0) / sumO : 0) + (sumO > 0 ? 0.5 : 1) / H;
+        est[h] = (est[h] || 0) + A * w;
+      }
+    });
+    return est;
+  }
   function hourChart(curve, ords, opt) {
     opt = opt || {};
     var live = !!opt.live, missing = opt.missing || [];
@@ -5807,8 +5825,13 @@ window.M98M_ADS_ONLY = true;
     (ords || []).forEach(function (x) { var hh = num(x.hour_uk != null ? x.hour_uk : x.hour); if (hh != null && hh >= 0 && hh < 24) { od[hh] = num(x.orders) || 0; un[hh] = num(x.units) || 0; } });
     var W = 980, H = 280, L = 46, R = 12, T = 46, B = 30;
     var zero = H - B, plot = zero - T, slot = (W - L - R) / 24;
+    var arrivals = live
+      ? (opt.carry > 0 ? [{ hour: (opt.carry_hour != null && opt.carry_hour > 0) ? opt.carry_hour : 8, amount: opt.carry }] : [])
+      : ((opt.overnight && opt.overnight.arrivals) || []);
+    var est = curve ? nightSpread(arrivals, od) : {}, estTotal = 0;
+    for (i = 0; i < 24; i++) estTotal += est[i] || 0;
     var maxS = 0, maxO = 0;
-    for (i = 0; i < 24; i++) { maxS = Math.max(maxS, sp[i] || 0); maxO = Math.max(maxO, od[i] || 0); }
+    for (i = 0; i < 24; i++) { maxS = Math.max(maxS, (sp[i] || 0) + (est[i] || 0)); maxO = Math.max(maxO, od[i] || 0); }
     /* THE DAY IS NOT OVER. Both halves leave out an hour nothing happened in, so the chart has to
        draw all 24 or the hours would not line up with the clock. But an hour that has not arrived
        yet is not a nought: the LAST hour either half has anything for is as far as the day has got,
@@ -5835,9 +5858,20 @@ window.M98M_ADS_ONLY = true;
         s += '<rect x="' + (hx + slot * 0.10).toFixed(1) + '" y="' + (zero - 1.5).toFixed(1) + '" width="' + (slot * 0.78).toFixed(1) + '" height="1.5" rx="0.75" fill="rgba(255,255,255,.10)"><title>' + esc(tip) + '</title></rect>';
       }
       if (curve && !ahead) {
-        var hs = Math.max(1.5, (v || 0) * scS), xs = hx + slot * 0.10, ws = slot * 0.36, ys = zero - hs;
-        s += '<rect x="' + xs.toFixed(1) + '" y="' + ys.toFixed(1) + '" width="' + ws.toFixed(1) + '" height="' + hs.toFixed(1) + '" rx="2.5" fill="' + LOSS + '"><title>' + esc(tip) + '</title></rect>';
-        rd = { x: xs + ws / 2, y: ys - 9, label: chartMoney(v || 0), title: tip };
+        var e = est[i] || 0, real = v || 0;
+        var hs = Math.max(1.5, (real + e) * scS), xs = hx + slot * 0.10, ws = slot * 0.36, ys = zero - hs;
+        var tipS = e > 0
+          ? tip.replace(gbp(v == null ? 0 : v) + ' spent', 'about ' + gbp(real + e) + ' spent: ' + gbp(real) + ' read in the hour, about ' + gbp(e) + ' estimated from the overnight lump')
+          : tip;
+        if (e > 0) {
+          /* the read part solid, the estimated part hatched on top of it */
+          var hr = real * scS, he = Math.max(1.5, e * scS);
+          if (hr > 0.5) s += '<rect x="' + xs.toFixed(1) + '" y="' + (zero - hr).toFixed(1) + '" width="' + ws.toFixed(1) + '" height="' + hr.toFixed(1) + '" rx="2.5" fill="' + LOSS + '"><title>' + esc(tipS) + '</title></rect>';
+          s += '<rect x="' + (xs + 0.5).toFixed(1) + '" y="' + (zero - hr - he + 0.5).toFixed(1) + '" width="' + (ws - 1).toFixed(1) + '" height="' + Math.max(1, he - 1).toFixed(1) + '" rx="2.5" fill="' + LOSS + '" fill-opacity="0.32" stroke="' + LOSS + '" stroke-width="1" stroke-dasharray="3 2"><title>' + esc(tipS) + '</title></rect>';
+        } else {
+          s += '<rect x="' + xs.toFixed(1) + '" y="' + ys.toFixed(1) + '" width="' + ws.toFixed(1) + '" height="' + hs.toFixed(1) + '" rx="2.5" fill="' + LOSS + '"><title>' + esc(tip) + '</title></rect>';
+        }
+        rd = { x: xs + ws / 2, y: ys - 9, label: (e > 0 ? '\u2248' : '') + chartMoney(real + e), title: tipS };
       }
       if (ords && !ahead) {
         var ho = Math.max(1.5, (o || 0) * scO), xo = hx + slot * 0.52, wo = slot * 0.36, yo = zero - ho;
@@ -5864,7 +5898,7 @@ window.M98M_ADS_ONLY = true;
     var carry = opt.carry;
     var notes = [];
     if (live) {
-      if (carry != null && carry > 0) notes.push('<b>' + esc(gbp(carry)) + ' had already been spent before the first reading today</b> and is not on the chart: eBay will not report a day until midnight in California, so the money spent from midnight to about 08:05 UK arrives as one lump with no hour.');
+      if (carry != null && carry > 0) notes.push('<b>' + esc(gbp(carry)) + ' had already been spent before the first reading today.</b> eBay will not report a day until midnight in California, so the money spent from midnight to about 08:05 UK arrives as one lump with no hour; it is drawn over those hours as hatched bars marked \u2248, an estimate split half evenly and half by each hour\u2019s orders.');
       if (lastKnown >= 0 && lastKnown < 23) notes.push('The day has reached <b>' + pad2(lastKnown) + ':00</b>. The hours after it are left empty rather than drawn as nothing spent.');
       if (lastKnown < 0) notes.push('Nothing has been read for any hour of today yet.');
     } else {
@@ -5880,11 +5914,14 @@ window.M98M_ADS_ONLY = true;
         var pubSpend = num(pub.spend) || 0, gap = Math.round((pubSpend - hourSum) * 100) / 100;
         var night = num(pub.before_first_reading) || 0;
         if (gap > 0.5) notes.push('eBay\u2019s published day totals for the ' + pub.days + ' published day' + (pub.days === 1 ? '' : 's') + ' here come to <b>' + esc(gbp(pubSpend)) + '</b>; <b>' + esc(gbp(gap)) + '</b> of that has no hour and is not on the chart. ' +
-          'eBay will not report a day until midnight in California, so everything spent from midnight to the first reading at ' + esc(pub.first_reading_uk || 'about 08:05') + ' UK arrives as one lump' + (night > 0 ? ' (about <b>' + esc(gbp(night)) + '</b> here)' : '') + '; the ads do run and charge through those hours. The rest was spent by listings the readings never caught.');
+          'eBay will not report a day until midnight in California, so everything spent from midnight to the first reading at ' + esc(pub.first_reading_uk || 'about 08:05') + ' UK arrives as one lump' + (night > 0 ? ' (about <b>' + esc(gbp(night)) + '</b> here)' : '') + '; the ads do run and charge through those hours.' +
+          (estTotal > 0 ? ' That lump is drawn over those hours as hatched bars marked \u2248: an estimate, split half evenly and half by each hour\u2019s orders.' : '') +
+          ' The rest was spent by listings the readings never caught.');
       }
-      if (carry != null && carry > 0) notes.push(esc(gbp(carry)) + ' of first-reading money on days eBay has not yet published is not on the chart.');
+      if (carry != null && carry > 0) notes.push(esc(gbp(carry)) + ' of first-reading money on days eBay has not yet published is inside the hatched estimate too.');
     }
     var legend = '<div class="ov-legend"><span><i style="background:' + LOSS + '"></i>money spent' + (maxS > 0 ? ', busiest hour ' + esc(gbp0(maxS)) : '') + '</span>' +
+      (estTotal > 0 ? '<span><i style="background:' + LOSS + ';opacity:.45;outline:1px dashed ' + LOSS + '"></i>overnight money, estimated (\u2248)</span>' : '') +
       '<span><i style="background:' + ORDERS_C + '"></i>orders received' + (maxO > 0 ? ', busiest hour ' + esc(cnt(maxO)) : '') + '</span></div>';
     return head_free(notes, missing, legend, s);
   }

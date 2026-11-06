@@ -7962,7 +7962,8 @@ const ADTOOL_ACTIONS_P3 = {
       const aw = acct ? ' AND account = ?3' : '';
       const rows = (await env.DB.prepare(
         'SELECT hour, ROUND(SUM(COALESCE(spend_r, spend_s, 0)), 2) AS spend, SUM(COALESCE(orders, 0)) AS orders, SUM(COALESCE(units, 0)) AS units, ' +
-        'ROUND(SUM(CASE WHEN spend_r IS NULL THEN COALESCE(carry_spend, 0) ELSE 0 END), 2) AS carry ' +
+        'ROUND(SUM(CASE WHEN spend_r IS NULL THEN COALESCE(carry_spend, 0) ELSE 0 END), 2) AS carry, ' +
+        'ROUND(SUM(COALESCE(carry_spend, 0)), 2) AS carry_all ' +
         'FROM adtool_listing_hour WHERE day >= ?1 AND day <= ?2' + aw + ' GROUP BY hour ORDER BY hour'
       ).bind(...bind).all()).results || [];
       const dayRow = (await env.DB.prepare(
@@ -7988,13 +7989,24 @@ const ADTOOL_ACTIONS_P3 = {
          the first reading arrives as that reading's carry, and the reconcile scales it out of the
          hours. Its share of the published total is the carry's share of the sampled mass — an
          estimate, said as one. */
-      const raw = (await env.DB.prepare(
+      const raw = pubTo >= w.from ? ((await env.DB.prepare(
         'SELECT ROUND(SUM(COALESCE(spend_s, 0)), 2) AS spend_s, ROUND(SUM(COALESCE(carry_spend, 0)), 2) AS carry_all FROM adtool_listing_hour WHERE day >= ?1 AND day <= ?2' + aw
-      ).bind(...bind).first().catch(() => null)) || {};
+      ).bind(...(acct ? [w.from, pubTo, acct] : [w.from, pubTo])).first().catch(() => null)) || {}) : {};
       const base = (Number(raw.spend_s) || 0) + (Number(raw.carry_all) || 0), pubSpend = Number(pub.spend) || 0;
       const beforeFirst = pubSpend > 0 && base > 0 ? round2(pubSpend * (Number(raw.carry_all) || 0) / base) : 0;
+      /* THE LUMP BY THE HOUR IT ARRIVED IN (6 Nov, the owner: "yes, estimate it"). A day's first
+         reading normally lands in UK hour 8, but a sampler that was down lands later and its lump
+         then covers more hours; the hour the carry sits on says how far back it reaches. The whole
+         window's lump (the published share above plus the unpublished days' own carry) is dealt
+         out across those arrival hours in proportion to the raw carry each holds, and the page
+         spreads each over the hours before it. An estimate, said as one on the chart. */
+      let carryAll = 0; const arr = [];
+      for (const r of rows) { const c = Number(r.carry_all) || 0; if (c > 0) { carryAll += c; arr.push({ hour: Number(r.hour), raw: c }); } }
+      const nightTotal = round2(beforeFirst + carry);
+      const arrivals = carryAll > 0 ? arr.map(a => ({ hour: a.hour, amount: round2(nightTotal * a.raw / carryAll) })) : [];
       return { period: w, account: acct || 'all', today, hours,
         published: { spend: round2(pubSpend), orders: Number(pub.orders) || 0, days: Number(pub.days) || 0, to: pubTo, before_first_reading: beforeFirst, first_reading_uk: 'about 08:05' },
+        overnight: { total: nightTotal, published_part: beforeFirst, unpublished_part: round2(carry), arrivals, first_reading_uk: 'about 08:05', basis: 'spread by the page over the hours before each arrival: half evenly, half by those hours\u2019 orders' },
         days_with_data: Number(dayRow.days) || 0, first_day: dayRow.first_day || null, last_day: dayRow.last_day || null,
         totals: { spend: round2(tot.spend), orders: tot.orders, units: tot.units }, carry_spend: round2(carry),
         sampled_from: '2026-09-17',
