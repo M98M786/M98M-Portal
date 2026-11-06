@@ -441,10 +441,10 @@
      order sync (today_hours). A window: both from the hourly roll-up, summed over its days.
      Drawn with the portal's own value-pill kit and no library. The two series count different
      things, so each is drawn against its own busiest hour and every bar carries its figure. */
-  function hourChart(curve, ords, o) {
-    o = o || {};
-    var live = !!o.live, missing = o.missing || [];
-    var days = live ? 1 : Math.max(1, Number(o.days) || 1);
+  function hourChart(curve, ords, opt) {
+    opt = opt || {};
+    var live = !!opt.live, missing = opt.missing || [];
+    var days = live ? 1 : Math.max(1, Number(opt.days) || 1);
     var sp = {}, od = {}, un = {}, i;
     (curve || []).forEach(function (x) { var hh = num(x.hour_uk != null ? x.hour_uk : x.hour); if (hh != null && hh >= 0 && hh < 24) sp[hh] = num(x.spend) || 0; });
     (ords || []).forEach(function (x) { var hh = num(x.hour_uk != null ? x.hour_uk : x.hour); if (hh != null && hh >= 0 && hh < 24) { od[hh] = num(x.orders) || 0; un[hh] = num(x.units) || 0; } });
@@ -504,17 +504,17 @@
     s += chartValueDots(redDots, { color: LOSS, ink: '#fff', fontSize: PILL_FS, minGap: 0 });
     s += chartValueDots(grnDots, { color: ORDERS_C, ink: ORDERS_INK, fontSize: PILL_FS, minGap: 0 });
     s += '</svg>';
-    var carry = o.carry;
+    var carry = opt.carry;
     var notes = [];
     if (live) {
       if (carry != null && carry > 0) notes.push('<b>' + esc(gbp(carry)) + ' had already been spent before the first reading today</b> and is not on the chart.');
       if (lastKnown >= 0 && lastKnown < 23) notes.push('The day has reached <b>' + pad2(lastKnown) + ':00</b>. The hours after it are left empty rather than drawn as nothing spent.');
       if (lastKnown < 0) notes.push('Nothing has been read for any hour of today yet.');
     } else {
-      var P = o.period || {}, want = Number(P.days) || days;
-      notes.push('<b>' + days + ' day' + (days === 1 ? '' : 's') + '</b> of hourly figures' + (o.first && o.last && o.first !== o.last ? ' (' + esc(o.first) + ' \u2192 ' + esc(o.last) + ')' : o.first ? ' (' + esc(o.first) + ')' : '') +
+      var P = opt.period || {}, want = Number(P.days) || days;
+      notes.push('<b>' + days + ' day' + (days === 1 ? '' : 's') + '</b> of hourly figures' + (opt.first && opt.last && opt.first !== opt.last ? ' (' + esc(opt.first) + ' \u2192 ' + esc(opt.last) + ')' : opt.first ? ' (' + esc(opt.first) + ')' : '') +
         (days > 1 ? ', added up; hover a bar for the day-average.' : '.') +
-        (o.totals && o.totals.spend != null ? ' In all <b>' + esc(gbp(o.totals.spend)) + '</b> spent and <b>' + esc(String(o.totals.orders || 0)) + '</b> orders.' : ''));
+        (opt.totals && opt.totals.spend != null ? ' In all <b>' + esc(gbp(opt.totals.spend)) + '</b> spent and <b>' + esc(String(opt.totals.orders || 0)) + '</b> orders.' : ''));
       if (want > days) notes.push((want - days) + ' of the window\u2019s ' + want + ' days hold no hourly figures (the hourly roll-up starts on 17 Sep 2026).');
       if (P.includes_today) notes.push('Today is in this window and is still being read; its later hours are not in yet.');
       if (carry != null && carry > 0) notes.push(esc(gbp(carry)) + ' of first-reading money on days eBay has not yet published is not on the chart.');
