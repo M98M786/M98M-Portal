@@ -7973,7 +7973,17 @@ const ADTOOL_ACTIONS_P3 = {
       const tot = { spend: 0, orders: 0, units: 0 };
       for (const h of hours) { tot.spend += h.spend; tot.orders += h.orders; tot.units += h.units; }
       let carry = 0; for (const r of rows) carry += Number(r.carry) || 0;
+      /* THE PUBLISHED DAY TOTAL beside the hourly sum. The hours can only hold money for listings
+         the five-minute readings caught; eBay's own daily report (adtool_listing_day, both ad
+         families) is the whole day. The difference is money with no hour, and the chart says so
+         rather than under-reporting the window in silence. Today's day row carries no ad columns
+         until the report lands, so the published total runs to yesterday. */
+      const pubTo = w.to < today ? w.to : adtAddDays(today, -1);
+      const pub = pubTo >= w.from ? ((await env.DB.prepare(
+        'SELECT ROUND(SUM(COALESCE(spend, 0)), 2) AS spend, SUM(COALESCE(orders, 0)) AS orders, COUNT(DISTINCT day) AS days FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2' + aw
+      ).bind(...(acct ? [w.from, pubTo, acct] : [w.from, pubTo])).first().catch(() => null)) || {}) : {};
       return { period: w, account: acct || 'all', today, hours,
+        published: { spend: round2(Number(pub.spend) || 0), orders: Number(pub.orders) || 0, days: Number(pub.days) || 0, to: pubTo },
         days_with_data: Number(dayRow.days) || 0, first_day: dayRow.first_day || null, last_day: dayRow.last_day || null,
         totals: { spend: round2(tot.spend), orders: tot.orders, units: tot.units }, carry_spend: round2(carry),
         sampled_from: '2026-09-17',

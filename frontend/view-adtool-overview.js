@@ -138,7 +138,7 @@
     return api('adtoolPlan', p).then(function (d) {
       OV.plan = d || {};
       var names = (d && d.accounts) || [];
-      if (names.length) { OV.accounts = names.map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean); acctChips(); }
+      if (names.length) { OV.accounts = names.map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean); acctChips(); if ($('ovHourAcct')) wireHour(); }   /* 6 Nov: the hour panel's chips follow the list too */
       if (!$('ovHero')) return;
       $('ovHero').innerHTML = window.adtOverviewBlocks.hero(OV.plan);
       adtPeriodEcho('ovBar', d && d.period);
@@ -391,7 +391,7 @@
       var wo = hs.map(function (h) { return { hour_uk: h.hour_uk, orders: h.orders, units: h.units }; });
       body = !hs.length
         ? '<div class="ov-empty">Nothing is recorded by the hour for ' + esc(adtPeriodLabel(v)) + (hrAccount() ? ' on ' + esc(hrAccount()) : '') + '. The hourly roll-up starts on ' + esc(String(W.sampled_from || '2026-09-17')) + '.</div>'
-        : hourChart(wc, wo, { live: false, days: Number(W.days_with_data) || 0, period: W.period || {}, first: W.first_day, last: W.last_day, carry: num(W.carry_spend), totals: W.totals || {} });
+        : hourChart(wc, wo, { live: false, days: Number(W.days_with_data) || 0, period: W.period || {}, first: W.first_day, last: W.last_day, carry: num(W.carry_spend), totals: W.totals || {}, published: W.published || null });
     } else if (HR.err && HR.key === hrKey(v)) {
       body = '<div class="ov-empty">The hours for ' + esc(adtPeriodLabel(v)) + ' could not be read: ' + esc(HR.err) + '</div>';
     } else {
@@ -517,6 +517,12 @@
         (opt.totals && opt.totals.spend != null ? ' In all <b>' + esc(gbp(opt.totals.spend)) + '</b> spent and <b>' + esc(String(opt.totals.orders || 0)) + '</b> orders.' : ''));
       if (want > days) notes.push((want - days) + ' of the window\u2019s ' + want + ' days hold no hourly figures (the hourly roll-up starts on 17 Sep 2026).');
       if (P.includes_today) notes.push('Today is in this window and is still being read; its later hours are not in yet.');
+      /* the money with no hour: eBay's published day total against what the readings could place */
+      var pub = opt.published || null, hourSum = num(opt.totals && opt.totals.spend) || 0;
+      if (pub && pub.days > 0) {
+        var pubSpend = num(pub.spend) || 0, gap = Math.round((pubSpend - hourSum) * 100) / 100;
+        if (gap > 0.5) notes.push('eBay\u2019s published day totals for the ' + pub.days + ' published day' + (pub.days === 1 ? '' : 's') + ' here come to <b>' + esc(gbp(pubSpend)) + '</b>; <b>' + esc(gbp(gap)) + '</b> of that was spent by listings the five-minute readings did not catch, so it has no hour and is not on the chart.');
+      }
       if (carry != null && carry > 0) notes.push(esc(gbp(carry)) + ' of first-reading money on days eBay has not yet published is not on the chart.');
     }
     var legend = '<div class="ov-legend"><span><i style="background:' + LOSS + '"></i>money spent' + (maxS > 0 ? ', busiest hour ' + esc(gbp0(maxS)) : '') + '</span>' +

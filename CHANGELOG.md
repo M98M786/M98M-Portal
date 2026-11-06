@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2026-11-06 - ADVERTISING OVERVIEW: the hour-by-hour chart takes its own period bar
+
+Owner: "develop the period option above the hour-by-hour graph - previous days and month data - the
+graph changes to the period clicked". The hour panel now carries the same period bar as the other
+advertising pages (Today, Yesterday, 3/7/14/30/90 d, this/last week, this/last month, custom) and its
+own account chips (following the page chip until one is picked here). Today is the live five-minute
+curve as before. Every other key is `adtoolHourWindow`: money and orders per UK hour from the hourly
+roll-up (`adtool_listing_hour`), added up over the window, with the day count, the day-average in each
+bar's tooltip, a note for days the roll-up does not hold (it starts 17 Sep 2026), and the published day
+total beside it so money the five-minute readings never caught is named rather than dropped.
+Verified live: Yesterday 209 orders / 230 units = the engine's own Yesterday tile exactly; spend lower
+by the unplaceable part (published £612.33, in hours £542.88), now stated on the chart.
+
 ## 2026-11-04 - ACCOUNT TRAFFIC: the month-back comparison is its own block, not a dashed line
 
 Owner: "red dotted line makes no sense, remove that - I want the same presentation duplicated with
