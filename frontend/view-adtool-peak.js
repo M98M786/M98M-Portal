@@ -297,7 +297,7 @@
   }
   /* the four parts of the day the rest of the tool already talks in, offered as a starting point */
   var PRESETS = [
-    ['Evening', [{ from: 17, to: 23 }]],
+    ['Evening', [{ from: 17, to: 22 }]],
     ['Afternoon', [{ from: 12, to: 17 }]],
     ['Morning', [{ from: 9, to: 13 }]],
     ['Late evening into the night', [{ from: 22, to: 2 }]],
@@ -324,7 +324,7 @@
         '<div id="pktBody"><div class="pkt-empty">Loading…</div></div></div>';
     },
     init: function () {
-      PK.data = null; PK.edit = null; PK.ranges = [{ from: 17, to: 23 }];
+      PK.data = null; PK.edit = null; PK.ranges = [{ from: 17, to: 22 }];
       PK.item = ''; PK.note = ''; PK.pick = ''; PK.pickName = '';
       PK.camps = null; PK.campFor = ''; PK.campNote = ''; PK.campErr = ''; PK.campBusy = false;
       PK.cell = ''; PK.dataFor = ''; PK.holdBy = {}; PK.holdBusy = '';
@@ -1708,7 +1708,7 @@
       var row = null;
       manual().forEach(function (r) { if (String(r.item_id || '') === id) row = r; });
       var p = row ? parsedRanges(row) : null;
-      PK.ranges = (p && p.length) ? p : [{ from: 17, to: 23 }];
+      PK.ranges = (p && p.length) ? p : [{ from: 17, to: 22 }];
       /* the change form opens on the campaign the row already runs in, so saving new hours keeps it
          rather than quietly putting the listing back across every campaign */
       PK.pick = String((row && row.campaign_id) || '');

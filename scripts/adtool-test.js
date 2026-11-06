@@ -2026,7 +2026,7 @@ function run(argv) {
   t('hours: more than six stretches in a day is refused', F.adPeakHoursParse('01-02,03-04,05-06,07-08,09-10,11-12,13-14').ranges === null, F.adPeakHoursParse('01-02,03-04,05-06,07-08,09-10,11-12,13-14').reason);
   t('hours: they are written back in the form they were read as, so the page and the switch cannot disagree', F.adPeakHoursText(F.adPeakHoursParse('9-13, 18-22').ranges) === '09-13,18-22' && F.adPeakHoursText(F.adPeakHoursParse('22-02').ranges) === '22-02', F.adPeakHoursText(F.adPeakHoursParse('9-13, 18-22').ranges));
   t('hours: what happens next is said in plain words, from either side of either boundary', F.adPeakNextChange(hp.ranges, 10) === 'on at 17:00' && F.adPeakNextChange(hp.ranges, 18) === 'off at 23:00' && F.adPeakNextChange(hp.ranges, 22) === 'off at 23:00' && F.adPeakNextChange(hp.ranges, 23) === 'on at 17:00', [F.adPeakNextChange(hp.ranges, 10), F.adPeakNextChange(hp.ranges, 18), F.adPeakNextChange(hp.ranges, 23)]);
-  t('hours: the help line says what the second number means, because nobody guesses that right', /on at 17:00 and off at 23:00/.test(F.ADTOOL_PEAK_HOURS_HELP) && /midnight/.test(F.ADTOOL_PEAK_HOURS_HELP), F.ADTOOL_PEAK_HOURS_HELP);
+  t('hours: the help line says what the second number means, because nobody guesses that right', /on at 17:00 and off at 22:00/.test(F.ADTOOL_PEAK_HOURS_HELP) && /midnight/.test(F.ADTOOL_PEAK_HOURS_HELP), F.ADTOOL_PEAK_HOURS_HELP);
   t('hours: text that cannot be read is refused as it is typed, with the reason and the help beside it', (() => { const a = src.slice(src.indexOf('adtoolPeakAdd: {'), src.indexOf('adtoolPeakRemove: {')); return /adPeakHoursParse\(hours\)/.test(a) && /throw new Error\('SAY: ' \+ parsed\.reason/.test(a) && /ADTOOL_PEAK_HOURS_HELP/.test(a) && /adPeakHoursText\(parsed\.ranges\)/.test(a) && /const auto = \(!parsed\.ranges \|\|/.test(a); })(), null);
   t('hours: a work-list row with no hours at all is still allowed, and stored with its switching off rather than looking armed', (() => { const a = src.slice(src.indexOf('adtoolPeakAdd: {'), src.indexOf('adtoolPeakRemove: {')); return /const auto = \(!parsed\.ranges/.test(a) && !/give the hours this listing should run/.test(a) && F.adPeakHoursParse('').ranges === null; })(), null);
 
@@ -3005,7 +3005,7 @@ function run(argv) {
     const ov = readFile('frontend/view-adtool-overview.js');
     const exported = /window\.adtOverviewBlocks = \{\n\s*hero: heroBlock, today: todayBlock, hourly: hourBlock,\n\s*byAccount: accountBlock, slots: slotBlock, foot: footBlock,\n\s*\};/.test(ov);
     const heroThrough = /\$\('ovHero'\)\.innerHTML = window\.adtOverviewBlocks\.hero\(OV\.plan\);/.test(ov);
-    const todayThrough = /var B = window\.adtOverviewBlocks;\n\s*\$\('ovToday'\)\.innerHTML = B\.today\(D\) \+ B\.byAccount\(D\) \+ B\.slots\(D\) \+ B\.hourly\(D\) \+ B\.foot\(D\);/.test(ov);
+    const todayThrough = /var B = window\.adtOverviewBlocks;\n\s*\$\('ovToday'\)\.innerHTML = B\.today\(D\) \+ B\.byAccount\(D\) \+ B\.slots\(D\) \+ B\.hourly\(D(?:, \{ picker: true \})?\) \+ B\.foot\(D\);/.test(ov);
     /* and the old straight-line render is gone, so there is no way past the blocks */
     const noBypass = !/statusBlock\(D\) \+ tilesBlock\(D\) \+ accountBlock\(D\)/.test(ov);
     return exported && heroThrough && todayThrough && noBypass;
@@ -6159,7 +6159,7 @@ function run(argv) {
   })(), null);
   t('peak campaign fill: the job runs by key and sits on no cron slot, because a once-over of a list people keep must not re-name rows somebody cleared on purpose', (() => {
     const rk = src.slice(src.indexOf('  runJobKey: {'), src.indexOf('  asRunJob: {'));
-    const byKey = rk.length > 200 && /adtoolPeakCampaignFill \};/.test(rk);
+    const byKey = rk.length > 200 && /adtoolPeakCampaignFill, adtoolPeakHoursSet \};/.test(rk);
     const cm = src.slice(src.indexOf('function cronMap() {'), src.indexOf('export default {'));
     const noCron = cm.length > 1000 && cm.indexOf('adtoolPeakCampaignFill') < 0;
     /* it keeps its own row in the job trail, under its own name, like every other job here */
@@ -6967,6 +6967,20 @@ function run(argv) {
       r2.eligible === false && r2.eligible_on === '2026-11-19' && r2.projected === true &&
       r3.eligible === true && r3.eligible_on === '2026-11-06' && r3.projected === false &&
       r4.eligible === false && r4.eligible_on === null && r4.projected === false;
+  })(), null);
+
+  /* 7 Nov: the owner's standard peak hours, 17:00 to 22:00, held on every row and offered on the form */
+  t('peak hours: the standard is 17-22, the job rewrites every live row to it with an audit row each, runs by key and rides no cron, and the form opens on it', (() => {
+    const pk = readFile('frontend/view-adtool-peak.js');
+    const std = /const ADTOOL_PEAK_HOURS_STANDARD = '17-22';/.test(src) && /17-22 means on at 17:00 and off at 22:00/.test(src);
+    const job = /async function adtoolPeakHoursSet\(env\) \{/.test(src) &&
+      /WHERE removed_at = '' AND COALESCE\(hours, ''\) <> \?1 ORDER BY account, item_id LIMIT 1000/.test(src) &&
+      /'ADTOOL_PEAK_HOURS_SET'/.test(src) && /UPDATE adtool_peak_items SET hours = \?3 WHERE item_id = \?1 AND account = \?2 AND removed_at = ''/.test(src) &&
+      !/SET hours = \?3, auto/.test(src);
+    const cron = !new RegExp("'[0-9*/, -]+': \\[[^\\]]*adtoolPeakHoursSet").test(src);
+    const keyed = /adtoolPeakCampaignFill, adtoolPeakHoursSet/.test(src);
+    const form = /\['Evening', \[\{ from: 17, to: 22 \}\]\],/.test(pk) && /PK\.ranges = \[\{ from: 17, to: 22 \}\];/.test(pk) && !/from: 17, to: 23/.test(pk);
+    return std && job && cron && keyed && form;
   })(), null);
 
   const passed = results.filter(r => r.ok).length;

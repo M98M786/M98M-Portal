@@ -14684,7 +14684,10 @@ function adPotentialBucket(verdict, rules) {
 
 /* ---- pure: peak hours, and the switching ---- */
 const ADTOOL_PEAK_SWITCH_CAP = 20;
-const ADTOOL_PEAK_HOURS_HELP = 'UK hours as HH-HH, more than one separated by commas: 17-23 means on at 17:00 and off at 23:00, and 22-02 runs through midnight';
+/* THE STANDARD PEAK HOURS (owner, 7 Nov 2026: "from now on, the peak time listings will start at 5pm and stop
+   at 10pm"). Every row on the by-hand list is held to this by adtoolPeakHoursSet, and the add form opens on it. */
+const ADTOOL_PEAK_HOURS_STANDARD = '17-22';
+const ADTOOL_PEAK_HOURS_HELP = 'UK hours as HH-HH, more than one separated by commas: 17-22 means on at 17:00 and off at 22:00, and 22-02 runs through midnight';
 function adPeakHoursParse(text) {
   /* the hours beside a peak listing, in a form the system can switch on.
      Comma-separated UK ranges HH-HH. '17-23' is ON at 17:00 and OFF at 23:00, so the ad runs through
@@ -17663,6 +17666,39 @@ async function adtoolPeakSwitch(env) {
    standing rule, and a job that re-ran nightly would keep re-naming rows somebody had cleared on
    purpose. Idempotent either way: it reads only the rows naming nothing, and its write names the
    campaign only while the row still names none, so a second run fills nothing and says so. */
+async function adtoolPeakHoursSet(env) {
+  /* ONE STANDARD FOR EVERY ROW (owner, 7 Nov 2026). Rewrites the typed hours of every live row on the by-hand
+     list to ADTOOL_PEAK_HOURS_STANDARD, one audit row per listing carrying what it said before, and leaves
+     whether the row switches itself exactly as it was: a row left to a person stays left to a person, it just
+     carries the standard hours for the day somebody arms it. Runnable by key, on no cron, and a second run
+     rewrites nothing. */
+  await ensureAdtoolPhase16Schema(env);
+  const t = await adtJobStart(env, 'adtoolPeakHoursSet');
+  let written = 0;
+  try {
+    const want = ADTOOL_PEAK_HOURS_STANDARD;
+    const rows = (await env.DB.prepare("SELECT account, item_id, COALESCE(hours, '') AS hours FROM adtool_peak_items WHERE removed_at = '' AND COALESCE(hours, '') <> ?1 ORDER BY account, item_id LIMIT 1000").bind(want).all()).results || [];
+    if (!rows.length) { await adtJobEnd(env, 'adtoolPeakHoursSet', t, 0, 'ok', 'every live row already reads ' + want); return; }
+    const was = {};
+    for (const r of rows) { const k = String(r.hours || '') || '(none)'; was[k] = (was[k] || 0) + 1; }
+    for (let i = 0; i < rows.length; i += 40) {
+      const ch = rows.slice(i, i + 40), stmts = [];
+      for (const r of ch) {
+        stmts.push(env.DB.prepare("UPDATE adtool_peak_items SET hours = ?3 WHERE item_id = ?1 AND account = ?2 AND removed_at = ''").bind(String(r.item_id), String(r.account), want));
+        stmts.push(env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES ('adtool (hours set)', 'ADTOOL_PEAK_HOURS_SET', ?1, ?2, ?3, datetime('now'))").bind(String(r.account) + ':' + String(r.item_id), String(r.hours || ''), want));
+      }
+      await env.DB.batch(stmts); written += ch.length;
+    }
+    const accts = Array.from(new Set(rows.map(r => String(r.account))));
+    for (const a of accts) { try { await adtPeakCacheClear(env, a); } catch (e) {} }
+    try { await adtPeakCacheClear(env, ''); } catch (e) {}
+    await adtJobEnd(env, 'adtoolPeakHoursSet', t, written, 'ok',
+      written + ' live row' + (written === 1 ? '' : 's') + ' now read ' + want + ' · before: ' + Object.keys(was).map(k => k + ' x' + was[k]).join(', ') + ' · accounts: ' + accts.join(', '));
+  } catch (e) {
+    await adtJobEnd(env, 'adtoolPeakHoursSet', t, written, 'error', String(e && e.message || e));
+    throw e;
+  }
+}
 async function adtoolPeakCampaignFill(env) {
   await ensureAdtoolPhase16Schema(env);     // the campaign column this job writes lives there
   const t = await adtJobStart(env, 'adtoolPeakCampaignFill');
@@ -28225,7 +28261,7 @@ const ROUTES = {
         adtoolRollupsCatchup, adtoolRollupOwedSeed,
         /* a once-over of the peak list, run by hand and on no cron slot: it names the campaign a
            listing is already wholly switched in, and never chooses for one in two (2 Nov) */
-        adtoolPeakCampaignFill };
+        adtoolPeakCampaignFill, adtoolPeakHoursSet };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
