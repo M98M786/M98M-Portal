@@ -123,3 +123,7 @@ evidence per phase: `docs/TRUTH-UPDATE-PROGRESS.md`.
 
 Deploys: worker `m98m-engine` (1 Sept 01:34 UTC), Apps Script v88 (same /exec URL), Pages
 builds 20260901-00xx–01xx.
+
+## 2026-11-06 — Overview hour chart: the overnight money, named
+- `adtoolHourWindow` now returns `published.before_first_reading`: the share of eBay's published day total that was spent between midnight and the first reading (~08:05 UK), estimated as the carry's share of the sampled mass. eBay refuses a report task for a day Pacific time has not reached, so no hour before ~08:00 UK can ever hold ad money.
+- The chart's gap note says so (owner: "between 1 am and 6 am I do not see any CPC deducted"): the ads run and charge through those hours; the money arrives as one lump with no hour. The live Today note says the same.

@@ -7982,8 +7982,19 @@ const ADTOOL_ACTIONS_P3 = {
       const pub = pubTo >= w.from ? ((await env.DB.prepare(
         'SELECT ROUND(SUM(COALESCE(spend, 0)), 2) AS spend, SUM(COALESCE(orders, 0)) AS orders, COUNT(DISTINCT day) AS days FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2' + aw
       ).bind(...(acct ? [w.from, pubTo, acct] : [w.from, pubTo])).first().catch(() => null)) || {}) : {};
+      /* THE MONEY WITH NO HOUR, NAMED (6 Nov, the owner: "between 1 am and 6 am I do not see any
+         CPC deducted"). eBay dates a report task in Pacific time and refuses one for a day Pacific has
+         not reached, so no reading of a day exists before ~08:05 UK: everything spent from midnight to
+         the first reading arrives as that reading's carry, and the reconcile scales it out of the
+         hours. Its share of the published total is the carry's share of the sampled mass — an
+         estimate, said as one. */
+      const raw = (await env.DB.prepare(
+        'SELECT ROUND(SUM(COALESCE(spend_s, 0)), 2) AS spend_s, ROUND(SUM(COALESCE(carry_spend, 0)), 2) AS carry_all FROM adtool_listing_hour WHERE day >= ?1 AND day <= ?2' + aw
+      ).bind(...bind).first().catch(() => null)) || {};
+      const base = (Number(raw.spend_s) || 0) + (Number(raw.carry_all) || 0), pubSpend = Number(pub.spend) || 0;
+      const beforeFirst = pubSpend > 0 && base > 0 ? round2(pubSpend * (Number(raw.carry_all) || 0) / base) : 0;
       return { period: w, account: acct || 'all', today, hours,
-        published: { spend: round2(Number(pub.spend) || 0), orders: Number(pub.orders) || 0, days: Number(pub.days) || 0, to: pubTo },
+        published: { spend: round2(pubSpend), orders: Number(pub.orders) || 0, days: Number(pub.days) || 0, to: pubTo, before_first_reading: beforeFirst, first_reading_uk: 'about 08:05' },
         days_with_data: Number(dayRow.days) || 0, first_day: dayRow.first_day || null, last_day: dayRow.last_day || null,
         totals: { spend: round2(tot.spend), orders: tot.orders, units: tot.units }, carry_spend: round2(carry),
         sampled_from: '2026-09-17',

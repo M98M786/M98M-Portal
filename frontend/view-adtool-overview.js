@@ -507,7 +507,7 @@
     var carry = opt.carry;
     var notes = [];
     if (live) {
-      if (carry != null && carry > 0) notes.push('<b>' + esc(gbp(carry)) + ' had already been spent before the first reading today</b> and is not on the chart.');
+      if (carry != null && carry > 0) notes.push('<b>' + esc(gbp(carry)) + ' had already been spent before the first reading today</b> and is not on the chart: eBay will not report a day until midnight in California, so the money spent from midnight to about 08:05 UK arrives as one lump with no hour.');
       if (lastKnown >= 0 && lastKnown < 23) notes.push('The day has reached <b>' + pad2(lastKnown) + ':00</b>. The hours after it are left empty rather than drawn as nothing spent.');
       if (lastKnown < 0) notes.push('Nothing has been read for any hour of today yet.');
     } else {
@@ -521,7 +521,9 @@
       var pub = opt.published || null, hourSum = num(opt.totals && opt.totals.spend) || 0;
       if (pub && pub.days > 0) {
         var pubSpend = num(pub.spend) || 0, gap = Math.round((pubSpend - hourSum) * 100) / 100;
-        if (gap > 0.5) notes.push('eBay\u2019s published day totals for the ' + pub.days + ' published day' + (pub.days === 1 ? '' : 's') + ' here come to <b>' + esc(gbp(pubSpend)) + '</b>; <b>' + esc(gbp(gap)) + '</b> of that was spent by listings the five-minute readings did not catch, so it has no hour and is not on the chart.');
+        var night = num(pub.before_first_reading) || 0;
+        if (gap > 0.5) notes.push('eBay\u2019s published day totals for the ' + pub.days + ' published day' + (pub.days === 1 ? '' : 's') + ' here come to <b>' + esc(gbp(pubSpend)) + '</b>; <b>' + esc(gbp(gap)) + '</b> of that has no hour and is not on the chart. ' +
+          'eBay will not report a day until midnight in California, so everything spent from midnight to the first reading at ' + esc(pub.first_reading_uk || 'about 08:05') + ' UK arrives as one lump' + (night > 0 ? ' (about <b>' + esc(gbp(night)) + '</b> here)' : '') + '; the ads do run and charge through those hours. The rest was spent by listings the readings never caught.');
       }
       if (carry != null && carry > 0) notes.push(esc(gbp(carry)) + ' of first-reading money on days eBay has not yet published is not on the chart.');
     }
