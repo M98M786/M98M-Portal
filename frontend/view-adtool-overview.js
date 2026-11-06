@@ -506,15 +506,21 @@
         var tipS = e > 0
           ? tip.replace(gbp(v == null ? 0 : v) + ' spent', 'about ' + gbp(real + e) + ' spent: ' + gbp(real) + ' read in the hour, about ' + gbp(e) + ' estimated from the overnight lump')
           : tip;
-        if (e > 0) {
+        /* A listing whose first changed reading came late in the day carries a few pence that
+           the spread deals across every hour before it. Pennies must not stamp the whole day as
+           estimated: the hatch and the mark appear only where the estimate is a real share of the
+           hour (at least 50p and 2 % of the bar); below that the bar is drawn whole and only the
+           tooltip tells the split. */
+        var marked = e >= 0.5 && e >= 0.02 * (real + e);
+        if (marked) {
           /* the read part solid, the estimated part hatched on top of it */
           var hr = real * scS, he = Math.max(1.5, e * scS);
           if (hr > 0.5) s += '<rect x="' + xs.toFixed(1) + '" y="' + (zero - hr).toFixed(1) + '" width="' + ws.toFixed(1) + '" height="' + hr.toFixed(1) + '" rx="2.5" fill="' + LOSS + '"><title>' + esc(tipS) + '</title></rect>';
           s += '<rect x="' + (xs + 0.5).toFixed(1) + '" y="' + (zero - hr - he + 0.5).toFixed(1) + '" width="' + (ws - 1).toFixed(1) + '" height="' + Math.max(1, he - 1).toFixed(1) + '" rx="2.5" fill="' + LOSS + '" fill-opacity="0.32" stroke="' + LOSS + '" stroke-width="1" stroke-dasharray="3 2"><title>' + esc(tipS) + '</title></rect>';
         } else {
-          s += '<rect x="' + xs.toFixed(1) + '" y="' + ys.toFixed(1) + '" width="' + ws.toFixed(1) + '" height="' + hs.toFixed(1) + '" rx="2.5" fill="' + LOSS + '"><title>' + esc(tip) + '</title></rect>';
+          s += '<rect x="' + xs.toFixed(1) + '" y="' + ys.toFixed(1) + '" width="' + ws.toFixed(1) + '" height="' + hs.toFixed(1) + '" rx="2.5" fill="' + LOSS + '"><title>' + esc(tipS) + '</title></rect>';
         }
-        rd = { x: xs + ws / 2, y: ys - 9, label: (e > 0 ? '\u2248' : '') + chartMoney(real + e), title: tipS };
+        rd = { x: xs + ws / 2, y: ys - 9, label: (marked ? '\u2248' : '') + chartMoney(real + e), title: tipS };
       }
       if (ords && !ahead) {
         var ho = Math.max(1.5, (o || 0) * scO), xo = hx + slot * 0.52, wo = slot * 0.36, yo = zero - ho;
