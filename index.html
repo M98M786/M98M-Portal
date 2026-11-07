@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261106-2328';
+var BUILD = '20261107-1906';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2161,24 +2161,39 @@ VIEWS.home = {
   function alxCanHistory() { var u = STATE.user || {}; return ALX_HISTORY_ROLES.indexOf(String(u.role || '')) >= 0 || !!u.super; }
 
   /* 30 Aug (owner): "in active listings ... 'New listings' (listed in last 7 days), 'No sales
-     in 7 days', 'Top items' (sales history of more than 30 units)". One fleet, four lenses. */
+     in 7 days', 'Top items' (sales history of more than 30 units)". One fleet, four lenses.
+     7 Nov (owner): "with No sales in 7 days we also need No sales in 14 days and 30 days". */
   var ALX_TABS = [
     { key: 'all', label: 'All listings' },
     { key: 'new7', label: 'New listings · 7d' },
-    { key: 'nosale7', label: 'No sales in 7 days' },
+    { key: 'nosale7', label: 'No sales in 7 days', days: 7, sold: 'sold_7d' },
+    { key: 'nosale14', label: 'No sales in 14 days', days: 14, sold: 'sold_14d' },
+    { key: 'nosale30', label: 'No sales in 30 days', days: 30, sold: 'sold_30d_live' },
     { key: 'top', label: 'Top items · 30+ sold' },
     { key: 'rate', label: 'Best weekly average' }   // 18 Oct (owner): weekly average across all weeks
   ];
   function alxBornMs(r) { var t = Date.parse(axStr(r.born)); return isFinite(t) ? t : 0; }
+  /* The sold count a no-sales window reads. sold_30d_live is the engine's own order count over
+     the last 30 days; the older sold_30d column (eBay's figure) stands in only for a row from an
+     engine release without it, so an old row is never read as "no sales" for want of a field. */
+  function alxSoldIn(r, t) {
+    var v = r[t.sold];
+    if (v === undefined && t.sold === 'sold_30d_live') { v = r.sold_30d; }
+    return Number(v) || 0;
+  }
   function alxTabFilter(rows, tab) {
     var now = Date.now(), wk = 7 * 86400000;
     if (tab === 'new7') {
       return rows.filter(function (r) { var b = alxBornMs(r); return b && (now - b) <= wk; })
         .sort(function (a, b) { return alxBornMs(b) - alxBornMs(a); });
     }
-    if (tab === 'nosale7') {
-      /* a listing younger than 7 days belongs to New, not here — it never had 7 days to sell */
-      return rows.filter(function (r) { var b = alxBornMs(r); return !(Number(r.sold_7d) > 0) && (!b || (now - b) > wk); });
+    var win = null;
+    ALX_TABS.forEach(function (t) { if (t.key === tab && t.days) { win = t; } });
+    if (win) {
+      /* a listing younger than the window never had that long to sell — it is not "no sales in
+         14 days" after 5 days live. The 7-day case has always sent those rows to New. */
+      var span = win.days * 86400000;
+      return rows.filter(function (r) { var b = alxBornMs(r); return !(alxSoldIn(r, win) > 0) && (!b || (now - b) > span); });
     }
     if (tab === 'top') {
       return rows.filter(function (r) { return (Number(r.sold_qty) || 0) >= 30; })
