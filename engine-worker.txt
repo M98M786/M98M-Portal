@@ -22477,12 +22477,16 @@ const ROUTES = {
          command centre carries the history, not just today. */
       /* 18 Oct: the floor was 7, so asking for 3 days silently returned 7 days of numbers under a
          3-day heading. The owner asked for 3 days everywhere, so the floor is now 3. */
-      const histDays = Math.min(60, Math.max(3, Number(p.days) || 14));
+      /* 8 Nov (the owner): Today and Yesterday chips. A period names the window outright; the day
+         count and the custom dates are the other two ways in. */
+      const period = /^(today|yesterday)$/.test(String(p.period || '')) ? String(p.period) : '';
+      const histDays = period ? 1 : Math.min(60, Math.max(3, Number(p.days) || 14));
       /* Review 3: the centre takes a CUSTOM window and an account filter — from/to override the
          day-count chips, and every series row carries eBay-attributed revenue for ROAS. */
       const okDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
-      const from = okDate(p.from) ? String(p.from) : ukDate(new Date(Date.now() - histDays * 86400000).toISOString());
-      const to = okDate(p.to) ? String(p.to) : day;
+      const from = period === 'today' ? day : period === 'yesterday' ? adtAddDays(day, -1)
+        : okDate(p.from) ? String(p.from) : ukDate(new Date(Date.now() - histDays * 86400000).toISOString());
+      const to = period ? from : okDate(p.to) ? String(p.to) : day;
       const acctF = String(p.account || '');
       const AF = acctF ? ' AND account = ?3' : '';
       const bindR = acctF ? [from, to, acctF] : [from, to];
@@ -22506,6 +22510,61 @@ const ROUTES = {
       ).bind(...bindR).all();
       const hBy = {};
       for (const h of (hist.results || [])) hBy[h.account + '|' + h.item_id] = h;
+      let seriesOut = series.results || [], sbaOut = seriesByAcct.results || [], windowSource = '', liveRev = null;
+      if (period === 'today') {
+        /* TODAY. eBay publishes a day only after it has ended in Pacific time, so ads_daily never
+           holds today: the window IS the live table, and the ad revenue (which ads_today never
+           stored) comes from the five-minute readings of eBay's running total. The UTC report day
+           is the UK day except in the first hour of a BST day, when the readings still belong to
+           yesterday and are left out rather than booked to the wrong day. */
+        const rev = {};
+        if (utcDate() === day) {
+          const rr = await ctx.env.DB.prepare(
+            'SELECT account, item_id, ROUND(SUM(cum_revenue), 2) AS rev FROM adtool_intraday_latest WHERE report_day = ?1' + (acctF ? ' AND account = ?2' : '') + ' GROUP BY account, item_id'
+          ).bind(...(acctF ? [day, acctF] : [day])).all().catch(() => ({ results: [] }));
+          for (const r of (rr.results || [])) rev[r.account + '|' + r.item_id] = Number(r.rev) || 0;
+        }
+        for (const k of Object.keys(hBy)) delete hBy[k];
+        const byA = {}; let tS = 0, tC = 0, tU = 0, tR = 0;
+        for (const t of (today.results || [])) {
+          const k = t.account + '|' + t.item_id, r = rev[k] || 0;
+          hBy[k] = { item_id: t.item_id, account: t.account, spend_14: Number(t.spend_t) || 0, clicks_14: Number(t.clicks_t) || 0, sold_14: Number(t.sold_t) || 0 };
+          const a = (byA[t.account] = byA[t.account] || { account: t.account, date: day, spend: 0, rev: 0 });
+          a.spend += Number(t.spend_t) || 0; a.rev += r; tS += Number(t.spend_t) || 0; tC += Number(t.clicks_t) || 0; tU += Number(t.sold_t) || 0; tR += r;
+        }
+        seriesOut = (tS > 0 || tC > 0) ? [{ date: day, spend: round2(tS), clicks: tC, sold: tU, rev: round2(tR) }] : [];
+        sbaOut = Object.values(byA).map(a => ({ ...a, spend: round2(a.spend), rev: round2(a.rev) })).sort((a, b) => b.spend - a.spend);
+        liveRev = {}; for (const a of sbaOut) liveRev[a.account] = a.rev;
+        windowSource = 'today\u2019s live readings of eBay\u2019s running total; eBay publishes a day only after it ends, at about 08:00 UK the next morning, and produces the first reading of a day at about 08:05 UK';
+      } else if (period === 'yesterday' && !(hist.results || []).length) {
+        /* YESTERDAY BEFORE EBAY HAS PUBLISHED IT (from UK midnight to roughly 08:00-09:00 UK): the
+           last five-minute reading of each listing's day is the day's closing total — spend, clicks,
+           attributed units and revenue, both ad families. Indexed by report day, one row per
+           listing and family, so this is cheap. */
+        const yd = from;
+        const rr = await ctx.env.DB.prepare(
+          'SELECT account, item_id, family, MAX(sampled_at) AS at, cum_spend, cum_clicks, cum_units, cum_revenue FROM adtool_ads_intraday WHERE report_day = ?1' + (acctF ? ' AND account = ?2' : '') + ' GROUP BY account, item_id, family'
+        ).bind(...(acctF ? [yd, acctF] : [yd])).all().catch(() => ({ results: [] }));
+        const byA = {}; let tS = 0, tC = 0, tU = 0, tR = 0;
+        for (const r of (rr.results || [])) {
+          const k = r.account + '|' + r.item_id;
+          const h = (hBy[k] = hBy[k] || { item_id: r.item_id, account: r.account, spend_14: 0, clicks_14: 0, sold_14: 0 });
+          const sp = Number(r.cum_spend) || 0, cl = Number(r.cum_clicks) || 0, un = Number(r.cum_units) || 0, rv = Number(r.cum_revenue) || 0;
+          h.spend_14 = round2(h.spend_14 + sp); h.clicks_14 += cl; h.sold_14 += un;
+          const a = (byA[r.account] = byA[r.account] || { account: r.account, date: yd, spend: 0, rev: 0 });
+          a.spend += sp; a.rev += rv; tS += sp; tC += cl; tU += un; tR += rv;
+        }
+        if ((rr.results || []).length) {
+          seriesOut = [{ date: yd, spend: round2(tS), clicks: tC, sold: tU, rev: round2(tR) }];
+          sbaOut = Object.values(byA).map(a => ({ ...a, spend: round2(a.spend), rev: round2(a.rev) })).sort((a, b) => b.spend - a.spend);
+          liveRev = {}; for (const a of sbaOut) liveRev[a.account] = a.rev;
+          windowSource = 'the last five-minute readings of yesterday; eBay has not published the day yet (it does so at about 08:00 UK), and the published figures take over as soon as they land';
+        } else {
+          windowSource = 'nothing is recorded for yesterday: eBay has not published it and no readings were taken';
+        }
+      } else if (period === 'yesterday') {
+        windowSource = 'eBay\u2019s published report for yesterday';
+      }
       const items = [];
       const accounts = {};
       let updated = '';
@@ -22550,7 +22609,9 @@ const ROUTES = {
         'FROM sales_daily WHERE date >= ?1 AND date <= ?2' + AF + ' GROUP BY account'
       ).bind(...bindR).all().catch(() => ({ results: [] }));
       const split = (splitRows.results || []).map((r) => {
-        const total = Number(r.total_rev) || 0, promoted = Math.min(total, Number(r.promoted_rev) || 0);
+        /* on a day eBay has not published, the attributed revenue in sales_daily is still nought;
+           the readings' figure stands in until the published one lands */
+        const total = Number(r.total_rev) || 0, promoted = Math.min(total, Math.max(Number(r.promoted_rev) || 0, liveRev ? (liveRev[r.account] || 0) : 0));
         return { account: r.account, total_rev: round2(total), promoted_rev: round2(promoted),
           organic_rev: round2(total - promoted), promoted_pct: total ? round2(promoted / total * 100) : 0 };
       }).sort((a, b) => b.total_rev - a.total_rev);
@@ -22560,9 +22621,9 @@ const ROUTES = {
       }), { total_rev: 0, promoted_rev: 0, organic_rev: 0 });
       splitTotal.promoted_pct = splitTotal.total_rev ? round2(splitTotal.promoted_rev / splitTotal.total_rev * 100) : 0;
       splitTotal.organic_pct = splitTotal.total_rev ? round2(splitTotal.organic_rev / splitTotal.total_rev * 100) : 0;
-      return { day, updated_at: updated, combined, days: histDays, from, to, account: acctF,
-        series: (series.results || []),
-        series_by_account: (seriesByAcct.results || []),
+      return { day, updated_at: updated, combined, days: histDays, from, to, account: acctF, period, window_source: windowSource,
+        series: seriesOut,
+        series_by_account: sbaOut,
         accounts: Object.values(accounts).sort((a, b) => b.spend - a.spend),
         items: items.slice(0, 300),
         split: split, split_total: splitTotal,

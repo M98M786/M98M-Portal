@@ -130,3 +130,6 @@ builds 20260901-00xx–01xx.
 
 ## 2026-11-06 — Overview hour chart: the overnight lump drawn as an estimate
 - `adtoolHourWindow` returns `overnight` (total = published share + unpublished carry, and `arrivals` by the hour each day's first reading landed in). The page spreads each arrival over the hours before it, half evenly and half by those hours' orders, and draws it as hatched bars marked ≈ on top of the read money; Today does the same with the live carry.
+
+## 2026-11-08 — Ads command centre: Today and Yesterday chips
+- `adsBoard` takes `period` (today | yesterday). Today's window is the live table plus ad revenue from the five-minute readings; Yesterday reads eBay's published report, and until that lands (about 08:00 UK) the last readings of the day stand in, named as such on the page. Day chips now clear picked dates, Refresh keeps the window on screen, and every heading names the window in words.

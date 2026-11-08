@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261107-1906';
+var BUILD = '20261108-0031';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2602,7 +2602,15 @@ VIEWS.home = {
   var AC_ROLES = ['Advertising Manager', 'Management', 'Ops Head']; /* review 4: ad revenue = earnings */
   /* sort: {key:'', dir:-1} means "nothing chosen", which is the board's own order — the waste rows
      first, then the biggest spend today. A choice is remembered per browser under AC_SORT_KEY. */
-  var AC = { timer: null, days: 14, acct: '', from: '', to: '', items: [], lastDays: 14, sort: { key: '', dir: -1 } };
+  var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', sort: { key: '', dir: -1 } };
+  /* the window in words, for every heading that names it: today, yesterday, the dates picked, or the last N days */
+  function acWin(d) {
+    d = d || {};
+    if (d.period === 'today') { return 'today'; }
+    if (d.period === 'yesterday') { return 'yesterday'; }
+    if (AC.from && AC.to && d.from && d.to) { return String(d.from) + ' \u2192 ' + String(d.to); }
+    return 'last ' + (d.days || 14) + ' days';
+  }
   var AC_SORT_KEY = 'm98m:adsCentre:sort';
 
   /* `acc-tbl`, not `ac-tbl`: view-adtool-campaigns.js declares its OWN `.ac-tbl` with a different
@@ -2680,11 +2688,11 @@ VIEW_CSS.push(
       val: function (r) { return acNum(r.cpc_today); }, cell: function (r) { return r.cpc_today ? acGBP(r.cpc_today) : '\u2014'; } },
     { key: 'sold_today', label: 'Sold via ads', sorts: 'units eBay credits to the ad today',
       val: function (r) { return acNum(r.sold_today); }, cell: function (r) { return r.sold_today || 0; } },
-    { key: 'spend_14d', label: function () { return 'Spend ' + AC.lastDays + 'd'; }, sorts: 'ad spend over the window',
+    { key: 'spend_14d', label: function () { return 'Spend ' + AC.win; }, sorts: 'ad spend over the window',
       val: function (r) { return acNum(r.spend_14d); }, cell: function (r) { return acGBP(r.spend_14d); } },
-    { key: 'clicks_14d', label: function () { return 'Clicks ' + AC.lastDays + 'd'; }, sorts: 'clicks over the window',
+    { key: 'clicks_14d', label: function () { return 'Clicks ' + AC.win; }, sorts: 'clicks over the window',
       val: function (r) { return acNum(r.clicks_14d); }, cell: function (r) { return r.clicks_14d || 0; } },
-    { key: 'sold_14d', label: function () { return 'Sold ' + AC.lastDays + 'd'; }, sorts: 'units from ads over the window',
+    { key: 'sold_14d', label: function () { return 'Sold ' + AC.win; }, sorts: 'units from ads over the window',
       val: function (r) { return acNum(r.sold_14d); }, cell: function (r) { return r.sold_14d || 0; } }
   ];
 
@@ -2738,17 +2746,22 @@ VIEW_CSS.push(
     if (!box) { return; }
     var rows = AC.items || [];
     if (!rows.length) {
-      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">No ad activity recorded yet today \u2014 the first intraday report lands within ~10 minutes of the day starting.</div>';
+      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' +
+        (AC.period === 'yesterday' ? 'Nothing is recorded for yesterday yet.'
+          : 'No ad activity recorded yet today \u2014 eBay produces the first same-day report at about 08:05 UK, so nothing can be read before then.') + '</div>';
       return;
     }
-    var h = '<div class="scroll"><table class="acc-tbl"><thead><tr>' + AC_COLS.map(function (c) {
+    /* with Today chosen the window IS today, so the three window columns would repeat the three
+       beside them; they are left out rather than printed twice */
+    var cols = AC.win === 'today' ? AC_COLS.filter(function (c) { return !/_14d$/.test(c.key); }) : AC_COLS;
+    var h = '<div class="scroll"><table class="acc-tbl"><thead><tr>' + cols.map(function (c) {
       var on = AC.sort.key === c.key;
       return '<th class="acc-s" data-ac-k="' + esc(c.key) + '" title="' + esc('Sort by ' + c.sorts) + '">' +
         esc(acLabel(c)) + (on ? '<span class="acc-ar">' + (AC.sort.dir < 0 ? '\u25bc' : '\u25b2') + '</span>' : '') + '</th>';
     }).join('') + '</tr></thead><tbody>';
     acSortRows(rows).forEach(function (r) {
       h += '<tr' + (r.waste ? ' class="ac-waste"' : '') + '>' +
-        AC_COLS.map(function (c) { return '<td>' + c.cell(r) + '</td>'; }).join('') + '</tr>';
+        cols.map(function (c) { return '<td>' + c.cell(r) + '</td>'; }).join('') + '</tr>';
     });
     h += '</tbody></table></div>';
     box.innerHTML = h;
@@ -2766,9 +2779,9 @@ VIEW_CSS.push(
   function acLoad() {
     var box = $('acBody');
     if (!box) { return; }
-    var payload = { days: AC.days };
+    var payload = AC.period ? { period: AC.period } : { days: AC.days };
     if (AC.acct) { payload.account = AC.acct; }
-    if (AC.from && AC.to) { payload.from = AC.from; payload.to = AC.to; }
+    if (!AC.period && AC.from && AC.to) { payload.from = AC.from; payload.to = AC.to; }
     api('adsBoard', payload).then(function (d) {
       d = d || {};
       var c = d.combined || {};
@@ -2777,15 +2790,16 @@ VIEW_CSS.push(
         '<div class="ac-tile"><div class="k">Clicks today</div><div class="v">' + (c.clicks_today || 0) + '</div></div>' +
         '<div class="ac-tile"><div class="k">Sold via ads today</div><div class="v">' + (c.sold_today || 0) + '</div></div>' +
         '<div class="ac-tile' + (c.waste_n ? ' bad' : '') + '"><div class="k">Wasting £3+ · no order</div><div class="v">' + (c.waste_n || 0) + '</div></div>' +
-        '<div class="ac-tile"><div class="k">Spend · ' + (d.days || 14) + ' days</div><div class="v">' + acGBP(c.spend_14d) + '</div></div>' +
+        '<div class="ac-tile"><div class="k">Spend · ' + esc(acWin(d)) + '</div><div class="v">' + acGBP(c.spend_14d) + '</div></div>' +
       '</div>';
+      if (d.window_source) { h += '<div class="ac-split-note" style="margin:-4px 0 10px">Window figures from ' + esc(String(d.window_source)) + '.</div>'; }
       /* R7-8 (Hasib): "organic vs promoted sales stats everywhere". Promoted = eBay-attributed
          ad revenue; organic = the rest. Combined bar + per-account split over the window. */
       var sp = d.split_total || {}, spl = d.split || [];
       if (Number(sp.total_rev)) {
         var promoPct = Number(sp.promoted_pct) || 0, orgPct = Number(sp.organic_pct);
         if (!isFinite(orgPct)) { orgPct = 100 - promoPct; }
-        var rangeLabel = (d.from && d.to) ? (String(d.from) + ' → ' + String(d.to)) : ('last ' + (d.days || 14) + ' days');
+        var rangeLabel = acWin(d);
         h += '<div class="ac-split"><div class="ac-split-h">Organic vs promoted sales · ' + esc(rangeLabel) + '</div>' +
           '<div class="ac-bar"><span class="ac-bar-p" style="width:' + Math.max(0, Math.min(100, promoPct)) + '%"></span></div>' +
           '<div class="ac-bar-lg"><span class="ac-lg-p"><b>Promoted</b> ' + acGBP(sp.promoted_rev) + ' · ' + promoPct.toFixed(1) + '%</span>' +
@@ -2806,7 +2820,7 @@ VIEW_CSS.push(
       /* the history — every previous day's spend, clicks and ad-attributed sales in the window */
       var ser = d.series || [];
       if (ser.length) {
-        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:4px 0 4px">Day by day · last ' + (d.days || 14) + '</div>' +
+        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:4px 0 4px">Day by day · ' + esc(acWin(d)) + '</div>' +
           '<div class="scroll" style="max-height:220px;margin-bottom:14px"><table class="acc-tbl" style="min-width:520px"><thead><tr>' +
           '<th>Date</th><th>Spend</th><th>Ad revenue</th><th>ROAS</th><th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th></tr></thead><tbody>';
         ser.forEach(function (r) {
@@ -2855,6 +2869,7 @@ VIEW_CSS.push(
       /* the per-item board is painted on its own so a sort can redraw it without asking the engine again */
       AC.items = (d.items || []).filter(function (r) { return r && typeof r === 'object'; });
       AC.lastDays = Number(d.days) || 14;
+      AC.win = d.period === 'today' ? 'today' : d.period === 'yesterday' ? 'yesterday' : AC.lastDays + 'd';
       h += '<div id="acItems"></div>';
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Snapshot ' +
         esc(String(d.updated_at || '—')) + ' UTC · ' + esc(String(d.note || '')) + '</p>';
@@ -2875,6 +2890,8 @@ VIEW_CSS.push(
       return '<div class="hgroup enter d1"><h1>Ads <span class="goldtext">command centre</span></h1>' +
           '<span class="sub">every advertised item, live CPC, the waste alarm, and every previous day, combined: per account, per item</span>' +
           '<span style="margin-left:auto;display:flex;gap:6px">' +
+            '<button class="minibtn" data-ac-p="today">Today</button>' +
+            '<button class="minibtn" data-ac-p="yesterday">Yesterday</button>' +
             '<button class="minibtn" data-ac-d="3">3d</button>' +
             '<button class="minibtn" data-ac-d="7">7d</button>' +
             '<button class="minibtn on" data-ac-d="14">14d</button>' +
@@ -2889,7 +2906,13 @@ VIEW_CSS.push(
     init: function () {
       acSortRestore();
       var rf = $('acRefresh');
-      if (rf) { rf.onclick = function () { AC.from = ''; AC.to = ''; acLoad(); }; }
+      /* Refresh re-reads the window on screen; it no longer throws the picked dates away */
+      if (rf) { rf.onclick = function () { acLoad(); }; }
+      var chipsOff = function () { document.querySelectorAll('[data-ac-d],[data-ac-p]').forEach(function (x) { x.classList.remove('on'); }); };
+      var chipOn = function (sel) { var b = document.querySelector(sel); if (b) { b.classList.add('on'); } };
+      if (AC.period) { chipsOff(); chipOn('[data-ac-p="' + AC.period + '"]'); }
+      else if (!(AC.from && AC.to)) { chipsOff(); chipOn('[data-ac-d="' + AC.days + '"]'); }
+      else { chipsOff(); }
       var sel = $('acAcct');
       if (sel) {
         fillAccountSelect(sel, AC.acct || '', function () { AC.acct = sel.value; acLoad(); });
@@ -2898,15 +2921,22 @@ VIEW_CSS.push(
       if (ap) {
         ap.onclick = function () {
           var f = $('acFrom'), t = $('acTo');
-          if (f && t && f.value && t.value) { AC.from = f.value; AC.to = t.value; acLoad(); }
+          if (f && t && f.value && t.value) { AC.from = f.value; AC.to = t.value; AC.period = ''; chipsOff(); acLoad(); }
           else { toast('Pick both dates first.'); }
         };
       }
       document.querySelectorAll('[data-ac-d]').forEach(function (b) {
         b.onclick = function () {
-          document.querySelectorAll('[data-ac-d]').forEach(function (x) { x.classList.remove('on'); });
-          this.classList.add('on');
+          chipsOff(); this.classList.add('on');
           AC.days = Number(this.getAttribute('data-ac-d')) || 14;
+          AC.period = ''; AC.from = ''; AC.to = '';     /* a day chip is a whole window; picked dates no longer override it */
+          acLoad();
+        };
+      });
+      document.querySelectorAll('[data-ac-p]').forEach(function (b) {
+        b.onclick = function () {
+          chipsOff(); this.classList.add('on');
+          AC.period = this.getAttribute('data-ac-p') || ''; AC.from = ''; AC.to = '';
           acLoad();
         };
       });
