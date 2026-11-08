@@ -22604,6 +22604,7 @@ const ROUTES = {
       /* R7-8 (Hasib): "organic vs promoted sales stats". The split is PRECISE — sales_daily.sold
          is total revenue and ads_rev is eBay's own attributed (promoted) revenue, so organic is
          the remainder. Per account and combined, over the same window as the rest of the board. */
+      let splitIncomplete = false;
       const splitRows = await ctx.env.DB.prepare(
         'SELECT account, ROUND(SUM(sold), 2) AS total_rev, ROUND(SUM(ads_rev), 2) AS promoted_rev ' +
         'FROM sales_daily WHERE date >= ?1 AND date <= ?2' + AF + ' GROUP BY account'
@@ -22612,6 +22613,9 @@ const ROUTES = {
         /* on a day eBay has not published, the attributed revenue in sales_daily is still nought;
            the readings' figure stands in until the published one lands */
         const total = Number(r.total_rev) || 0, promoted = Math.min(total, Math.max(Number(r.promoted_rev) || 0, liveRev ? (liveRev[r.account] || 0) : 0));
+        /* the sales roll-up lags the readings: when the ads alone are credited with more revenue
+           than the day's sales total so far, the total is not in yet and no split can be drawn */
+        if (liveRev && (liveRev[r.account] || 0) > total * 1.05) splitIncomplete = true;
         return { account: r.account, total_rev: round2(total), promoted_rev: round2(promoted),
           organic_rev: round2(total - promoted), promoted_pct: total ? round2(promoted / total * 100) : 0 };
       }).sort((a, b) => b.total_rev - a.total_rev);
@@ -22626,7 +22630,7 @@ const ROUTES = {
         series_by_account: sbaOut,
         accounts: Object.values(accounts).sort((a, b) => b.spend - a.spend),
         items: items.slice(0, 300),
-        split: split, split_total: splitTotal,
+        split: split, split_total: splitTotal, split_incomplete: splitIncomplete,
         note: 'refreshed every 5 minutes; each cycle is as fresh as eBay built its last report (typically 5-10 minutes behind live). Organic vs promoted uses eBay-attributed sale revenue — promoted is what eBay credits to the ads, organic is the rest.' };
     },
   },
