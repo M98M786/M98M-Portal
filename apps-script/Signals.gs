@@ -1637,6 +1637,16 @@ function runLossEscalationSweep() {
       logActivity_('system', 'FREE_HAMZA_18OCT', 'm98mone@gmail.com', '', 'run from the 5-minute sweep', freeHamzaEmailToM98meleven());
     }
   } catch (e) { logActivity_('trigger', 'ERROR:freeHamza18Oct', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  /* 7 Nov (owner): three mailboxes change hands — Bilal, Abdul Ahad, Muhammad Ahmad. The same
+     flag-guarded one-shot pattern as 18 Oct, so it lands from this clock without the editor's Run
+     button; the flag is set BEFORE the call so a crash cannot loop it. Delete at the next tidy-up. */
+  try {
+    const props7n = PropertiesService.getScriptProperties();
+    if (props7n.getProperty('STAFF_REASSIGN_7NOV') !== 'done' && typeof staffReassign7Nov === 'function') {
+      props7n.setProperty('STAFF_REASSIGN_7NOV', 'done');
+      logActivity_('system', 'STAFF_REASSIGN_7NOV', '', '', 'run from the 5-minute sweep', staffReassign7Nov());
+    }
+  } catch (e) { logActivity_('trigger', 'ERROR:staffReassign7Nov', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   /* 22 Oct: seed the "pending send" set from the activity log once, flag-guarded on this 5-minute
      clock so it lands without the editor Run button (the Approved archive needs it to show genuine
      new-flow approvals; without it the set is empty). Idempotent; delete at the next tidy-up. */

@@ -528,6 +528,63 @@ function addHasibThirdManagementEmail() {
   return res;
 }
 
+/* 7 Nov (owner): three mailboxes change hands —
+     m98mone@gmail.com     → Bilal, Item Lister            (was Hamza Hassan's freed mailbox: disabled, no role)
+     m98msixteen@gmail.com → Abdul Ahad, Item Lister       (was Malik Irfan Riaz Khan, Advertising Manager)
+     m98mfour@gmail.com    → Muhammad Ahmad, Product Hunter (was Tahir Amin, Advertising Manager)
+   Same mailbox, new holder: name, role, status approved, deactivated_at cleared. The modules and
+   tools columns are CLEARED — they carried the Advertising Manager screens and the CPC keyword
+   tool, which must not follow the mailbox to a lister or a hunter; a blank row gets the role's own
+   defaults (Config §8/§24), exactly like m98mthree. Tasks and history stay with the mailbox — the
+   owner did not ask for them to move. Runs once from the 5-minute sweep under a property flag, or
+   by hand from the editor. Idempotent: a second run reports "already". */
+function staffReassign7Nov() {
+  var CHANGES = [
+    { email: 'm98mone@gmail.com', name: 'Bilal', role: 'Item Lister' },
+    { email: 'm98msixteen@gmail.com', name: 'Abdul Ahad', role: 'Item Lister' },
+    { email: 'm98mfour@gmail.com', name: 'Muhammad Ahmad', role: 'Product Hunter' }
+  ];
+  var sh = sadmUsersSheet_();
+  var out = [];
+  CHANGES.forEach(function (ch) {
+    try {
+      if (ROLES.indexOf(ch.role) < 0) { out.push(ch.email + ': unknown role ' + ch.role); return; }
+      if (isSuperAdmin(ch.email)) { out.push(ch.email + ': REFUSED — super admin'); return; }
+      var f = sadmFind_(sh, ch.email);
+      var col = function (k) { return f.head.indexOf(k); };
+      var s = function (k) { return String(f.rec[k] == null ? '' : f.rec[k]).trim(); };
+      var before = s('name') + ' / ' + (s('role') || 'no role') + ' / ' + s('status');
+      if (s('name') === ch.name && s('role') === ch.role && s('status') === SADM_STATUS_APPROVED && !s('modules') && !s('tools')) {
+        out.push(ch.email + ': already ' + ch.name + ' / ' + ch.role); return;
+      }
+      var set = function (k, v, text) {
+        var c = col(k); if (c < 0) return;
+        var cell = sh.getRange(f.row, c + 1);
+        if (text) cell.setNumberFormat('@');             // a name typed as "=…" must stay text, never a formula
+        cell.setValue(v);
+      };
+      set('name', ch.name, true);
+      set('role', ch.role);
+      set('status', SADM_STATUS_APPROVED);
+      set('deactivated_at', '');
+      set('approved_by', 'system:owner-7nov');
+      set('modules', '', true);
+      set('tools', '', true);
+      set('notes', 'Mailbox handed to ' + ch.name + ' (' + ch.role + ') on 7 Nov by owner instruction; was ' + before + '. Modules and tools cleared to the role defaults.', true);
+      logActivity_('system', 'STAFF_REASSIGN_7NOV', ch.email, before, ch.name + ' / ' + ch.role + ' / ' + SADM_STATUS_APPROVED, 'owner instruction 7 Nov · modules+tools cleared');
+      out.push(ch.email + ': ' + before + ' → ' + ch.name + ' / ' + ch.role + ' / approved');
+    } catch (e) { out.push(ch.email + ': ' + String(e && e.message || e)); }
+  });
+  SpreadsheetApp.flush();
+  sadmForgetUsers_();
+  var mirror = 'mirror not pushed';
+  try { if (typeof pushEngineSync === 'function') mirror = String(pushEngineSync()); } catch (e) { mirror = 'mirror push failed: ' + (e && e.message || e); }
+  out.push('mirror: ' + mirror);
+  var res = out.join(' · ');
+  Logger.log(res);
+  return res;
+}
+
 function renameM98mfourToTahirAmin() {
   const r = staffRename({ email: 'm98mfour@gmail.com', name: 'Tahir Amin' });
   Logger.log(r);
