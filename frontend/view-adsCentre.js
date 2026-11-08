@@ -202,7 +202,7 @@ VIEW_CSS.push(
       var sp = d.split_total || {}, spl = d.split || [];
       if (d.split_incomplete) {
         h += '<div class="ac-split"><div class="ac-split-h">Organic vs promoted sales · ' + esc(acWin(d)) + '</div>' +
-          '<div class="ac-split-note">The day\u2019s sales total has not been rolled up yet, so the split cannot be drawn honestly; the ads alone are credited with ' + acGBP(sp.promoted_rev) + ' of revenue so far. It fills in once the sales roll-up and eBay\u2019s published report land.</div></div>';
+          '<div class="ac-split-note">The day\u2019s sales total has not been rolled up yet, so the split cannot be drawn honestly; the ads alone are credited with ' + acGBP((d.series && d.series[0] && Number(d.series[0].rev)) || sp.promoted_rev) + ' of revenue so far. It fills in once the sales roll-up and eBay\u2019s published report land.</div></div>';
       } else if (Number(sp.total_rev)) {
         var promoPct = Number(sp.promoted_pct) || 0, orgPct = Number(sp.organic_pct);
         if (!isFinite(orgPct)) { orgPct = 100 - promoPct; }
