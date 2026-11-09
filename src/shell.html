@@ -1338,6 +1338,14 @@ var ADT_REG_MAP = [
   /* The weekly batch (owner, 6 Nov): the Sale event page's three new tags. None of the patterns
      above matches any of these three labels, so they are named here rather than falling through to
      the whole register, and each resolves to the one row written for it. */
+  /* The truth rule, the clocks, the cohorts and the morning-after check (owner, 10 Nov). These four
+     labels appear on no other page, and each resolves to the one row written for it — ahead of the
+     three below, because "on sale" and "really in a sale" would otherwise fall into the batch
+     pattern and open a note about the calendar instead of the evidence. */
+  [/really in a sale|on sale, really|the evidence|added against on sale/i, ['SALE_ON_SALE', 'SALE_MEMBERSHIP_DAY']],
+  [/the sale’s own price moves|the sale's own price moves|which clock/i, ['SALE_PRICE_STEPS', 'SALE_TIMELINE']],
+  [/cohort|freeze rule/i, ['SALE_COHORTS', 'SALE_BATCH']],
+  [/the morning after|entered against on sale/i, ['SALE_MORNING_AFTER', 'SALE_ON_SALE']],
   [/sale batch|friday batch/i, ['SALE_BATCH']],
   [/profit after sale|profit in the sale/i, ['SALE_PROFIT_AFTER', 'MARGIN_BEFORE_ADS']],
   [/next eligible/i, ['SALE_NEXT_ELIGIBLE', 'SALE_ELIGIBLE_ON']],

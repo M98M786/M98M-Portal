@@ -1052,9 +1052,9 @@ function pvTokens(s) {
    every DDL statement in the file, which is wider than these families on purpose: a CREATE put
    anywhere is a reason to look. That is deliberate: a marker that could go stale by accident is a
    column that never lands. */
-const ADTOOL_SCHEMA_VERSION = '2026-11-06.1';
+const ADTOOL_SCHEMA_VERSION = '2026-11-10.1';
 /* the fingerprint of every DDL statement in engine/worker.js, held to this value by the suite */
-const ADTOOL_SCHEMA_DDL_HASH = '208-68ff602e';
+const ADTOOL_SCHEMA_DDL_HASH = '211-62a7d27a';
 const ADTOOL_SCHEMA_KEY = 'adtool_schema_version';
 let ADTOOL_SCHEMA_MARK = null;      /* the one marker read per isolate */
 let ADTOOL_SCHEMA_SETTLE = null;    /* the one apply pass per isolate, and the proof DDL ran here */
@@ -11136,7 +11136,16 @@ function adtSaleEligibility(row, today, daysBetween) {
      when a price history exists, and how long since ANY revision when it does not — the second is
      the pessimistic reading, and which one was used is returned so the page can say so. */
   const priceDays = row.price_steady_days == null ? null : Number(row.price_steady_days);
-  const revDays = row.last_revised ? daysBetween(String(row.last_revised).slice(0, 10), today) : null;
+  /* 10 Nov (the owner's brief §2): EBAY BUMPS THE REVISION STAMP WHEN IT ENROLS A LISTING ITSELF.
+     Every one of ABRT's 133 entries is stamped 21 October, the day that event began, and read as a
+     revision the stamp restarts the very clock the sale caused — so a listing nobody touched reads
+     as revised and waits a fortnight for nothing. A stamp that falls on a day the price record
+     labelled an enrol or an exit is therefore ignored, and the row says it was. */
+  const moveDays = {};
+  for (const d of (Array.isArray(row.sale_move_days) ? row.sale_move_days : [])) { const k = String(d || '').slice(0, 10); if (k) moveDays[k] = 1; }
+  const revDay = row.last_revised ? String(row.last_revised).slice(0, 10) : '';
+  const revision_ignored = !!(revDay && moveDays[revDay]);
+  const revDays = (revDay && !revision_ignored) ? daysBetween(revDay, today) : null;
   const basis = priceDays != null ? 'price' : (revDays != null ? 'revision' : 'unknown');
   const steady = priceDays != null ? priceDays : (revDays != null ? revDays : null);
   const ageDays = row.start_time ? daysBetween(String(row.start_time).slice(0, 10), today) : null;
@@ -11160,7 +11169,9 @@ function adtSaleEligibility(row, today, daysBetween) {
     eligible, basis, steady_days: steady, age_days: ageDays,
     why: reasons.join(' · '),
     eligible_on: eligible ? today : projected,
-    projected: !eligible && !!projected
+    projected: !eligible && !!projected,
+    revision_ignored: revision_ignored,
+    revision_note: revision_ignored ? 'the revision stamp falls on the day the sale itself moved the price, so it is not counted as a revision' : ''
   };
 }
 /* ---- Phase 5 (27 Sep 2026 big update, plan §3): the OBSERVED sale-event lifecycle ----
@@ -11223,17 +11234,24 @@ function adtSaleSuccessor(events, e) {
   const end = String((e && e.ends) || '');
   return (events || []).some(x => x && x !== e && String(x.promo_id || '') !== String((e && e.promo_id) || '') && String(x.ends || '') > end && (!x.starts || String(x.starts) <= adtAddDays(end, 1)));
 }
-function adtSaleTimeline(mdays, priceDays, today) {
+function adtSaleTimeline(mdays, priceDays, today, opts) {
   /* the per-listing timeline from its membership-day sequence and its price history (all pure, so the brief's
      worked example is a unit test): added_on = first day in_sale = 1; removed_on = the first day in_sale flips
      1 → 0 after being 1, OR the day the price changed during a live run (eBay's silent drop) — whichever is
      earlier; restriction_end = removed_on + 14; eligible_on = max(restriction_end, lastPriceChange + 14); a
      whole-shop 'any' item never flips to 0 (removal is not observable) so its removed_on stays null while the
-     event runs. Dates are YYYY-MM-DD strings compared lexically. */
+     event runs. Dates are YYYY-MM-DD strings compared lexically.
+     10 Nov (the owner's brief §2): `opts.discounts` are the discounts the account's events run at, and with
+     them the sale's OWN price moves — x(1 − d) on the way in and ÷(1 − d) on the way out — stop being read as
+     price changes. Only a `change` restarts the price clock, and the day a listing left a sale by price adds
+     its own clock. `opts.listed_on` adds the third clock, the 14 days after a listing went up. With no opts
+     every move is a change and no listing clock exists, which is exactly what this did before. */
   const days = (mdays || []).slice().filter(d => d && d.day).sort((a, b) => a.day < b.day ? -1 : a.day > b.day ? 1 : 0);
   const pd = (priceDays || []).slice().filter(d => d && d.day).sort((a, b) => a.day < b.day ? -1 : a.day > b.day ? 1 : 0);
-  let prevP = null, lastPriceChange = null;
-  for (const r of pd) { const p = Number(r.price); if (!isFinite(p)) continue; if (prevP != null && p !== prevP) lastPriceChange = r.day; prevP = p; }
+  const O = opts || {};
+  const steps = adSalePriceSteps(pd, O.discounts || []);
+  const clocks = adSalePriceClocks(steps);
+  const lastPriceChange = clocks.last_change;
   let added_on = null, flipRemoved = null, sawOne = false, lastLive = null, promo_id = null, basis = null;
   for (const d of days) {
     const inSale = Number(d.in_sale) === 1;
@@ -11273,18 +11291,34 @@ function adtSaleTimeline(mdays, priceDays, today) {
   const provenLive = lastDiscSrc === 'observed' && discount_pct != null && discount_pct > 0;
   const restriction_end = removed_on ? adtAddDays(removed_on, 14) : null;
   const priceClock = lastPriceChange ? adtAddDays(lastPriceChange, 14) : null;
+  /* §2: the three clocks, and eligible_on is the latest of them. The exit clock is the day the
+     sale's own ÷(1 − d) move put the price back, which is a leaving we can see even where the
+     membership days never flipped; the listing clock is the 14 days after it went up. Both are
+     absent unless the caller hands over the discounts and the listing date, so nothing changes for
+     a caller that does not. */
+  const exitClock = clocks.last_exit ? adtAddDays(clocks.last_exit, ADTOOL_SALE_RESTRICTION_DAYS) : null;
+  const listedOn = /^\d{4}-\d{2}-\d{2}$/.test(String(O.listed_on || '').slice(0, 10)) ? String(O.listed_on).slice(0, 10) : null;
+  const listedClock = listedOn ? adtAddDays(listedOn, ADTOOL_SALE_RESTRICTION_DAYS) : null;
   let eligible_on = null, eligible_basis = '';
   if (!(in_sale && removed_by !== 'price')) {
-    const cands = [restriction_end, priceClock].filter(Boolean);
+    const cands = [restriction_end, priceClock, exitClock, listedClock].filter(Boolean);
     eligible_on = cands.length ? cands.reduce((a, b) => a > b ? a : b) : null;   /* no observed clock → leave the date to the estimate */
-    eligible_basis = eligible_on ? ((removed_by === 'price' || eligible_on !== restriction_end) ? 'price clock' : 'restriction') : '';
+    eligible_basis = eligible_on
+      ? (eligible_on === listedClock && eligible_on !== restriction_end && eligible_on !== priceClock && eligible_on !== exitClock ? 'listing clock'
+        : eligible_on === exitClock && eligible_on !== restriction_end && eligible_on !== priceClock ? 'exit clock'
+        : (removed_by === 'price' || eligible_on !== restriction_end) ? 'price clock' : 'restriction')
+      : '';
   } else if (in_sale && (basis || (last && last.basis)) === 'any' && priceClock && priceClock > today && !provenLive) {
     /* a whole-shop event auto-enrols, but a price change inside the last 14 days — even one before the first
        snapshot — makes eBay skip the listing until the clock runs out: the date is the price clock, said so */
     eligible_on = priceClock; eligible_basis = 'price clock';
   }
   const status = adtSaleStatus({ today, in_sale, event_running, removed_on, removed_by, eligible_on, discount_pct, added_on, disc_src: lastDiscSrc });
-  return { added_on, removed_on, removed_by, restriction_end, eligible_on, eligible_basis, status, promo_id: promo_id || (last && last.promo_id ? String(last.promo_id) : ''), basis: basis || (last && last.basis ? String(last.basis) : ''), in_sale, event_running, discount_pct, disc_src: lastDiscSrc, last_price_change: lastPriceChange };
+  return { added_on, removed_on, removed_by, restriction_end, eligible_on, eligible_basis, status, promo_id: promo_id || (last && last.promo_id ? String(last.promo_id) : ''), basis: basis || (last && last.basis ? String(last.basis) : ''), in_sale, event_running, discount_pct, disc_src: lastDiscSrc, last_price_change: lastPriceChange,
+    /* the sale's own moves, carried out so the revision clock can be told to ignore the day eBay
+       bumped the stamp on enrolment, and so the page can say which clock set the date */
+    last_exit: clocks.last_exit, last_enrol: clocks.last_enrol, sale_move_days: clocks.move_days,
+    price_steps_read: clocks.steps_read, listed_clock: listedClock, exit_clock: exitClock, price_clock: priceClock };
 }
 /* ---- THE FRIDAY BATCH (the owner's request, 6 November 2026) ---------------------------------
    "Every Friday, every week, we will run a new sale event for 14 days. Every listing that is
@@ -11527,6 +11561,12 @@ function adSaleBatches(rows, today, cfg) {
       batch_on: batchOn, batch_ends_on: batchOn ? adtAddDays(batchOn, rules.days - 1) : null,
       verdict: verdict, why: String(o.why || o.observed_note || ''),
       event_ends: o.ends ? String(o.ends) : null,
+      /* §1 travels with the row: whether an event named it, which proof put it in the sale, and
+         the reason our own clocks give where eBay left it out */
+      added: !!o.added, added_promo_id: String(o.added_promo_id || ''),
+      membership_basis: String(o.membership_basis || ''),
+      skip_reason: String(o.skip_reason || ''), skip_word: String(o.skip_word || ''),
+      observed_note: String(o.observed_note || ''),
     };
     const A = accts[account] || (accts[account] = {
       account: account, active: 0, in_sale: { n: 0 }, this_batch: { n: 0, worth_it: 0, thin: 0, loses: 0, unknown: 0 },
@@ -11579,6 +11619,435 @@ function adSaleBatches(rows, today, cfg) {
     month_drop_label: 'each listing’s own money taken off times its own units over the last 30 days, added up across the listings in this batch. A sum of per-listing estimates, not a profit figure.',
   };
 }
+/* ---- THE TRUTH: ON SALE MEANS THE PRICE SHOWS IT, AN ORDER PROVED IT, OR EBAY SAID SO ---------
+   (the owner's brief, 10 November 2026, §1 and §2)
+
+   WHAT WENT WRONG. Sir Hasib has two events both called "Sale event ending 16 Nov 2026", created
+   on 3 November with the SAME 150 listings in each. eBay enrolled 11 in one and 1 in the other and
+   marked the rest "Skipped: in recent sale". This page said 150 in sale on each, because the
+   snapshot marked every id a listed-items event names as being in the sale without once checking
+   that eBay had discounted it. A page that says 150 where eBay discounted 12 is not a page with a
+   rounding fault in it: it is the opposite answer.
+
+   WHAT SETTLES IT. A listing under a markdown of d carries its pre-sale price times (1 − d), so
+   there are three proofs and the event's own list is not one of them:
+     · THE LEDGER   today's price in the daily price record is the price the record held before the
+                    event began, less the discount, to the penny. The pre-sale price comes from
+                    before the event started, so a listing whose everyday price happens to look
+                    sale-shaped is never mistaken for one that was discounted.
+     · AN ORDER     a buyer today or yesterday paid that same figure for a unit.
+     · EBAY ITSELF  GetItem's SellingStatus.PromotionalSaleDetails carries the original price and
+                    the event's own start and end. That is eBay's answer about this one listing, so
+                    it outranks both of ours, in either direction.
+   Anything else the event names is SKIPPED, and the reason comes from OUR OWN clocks and never
+   from a guess at eBay's: it left a sale too recently, it was really revised too recently, it was
+   listed too recently, or none of those — in which case the answer is that eBay's reason is not
+   known, rather than an invented one.
+
+   THE SALE'S OWN PRICE MOVES ARE NOT PRICE CHANGES. eBay multiplies the price by (1 − d) when a
+   listing joins and divides by (1 − d) when it leaves, and it bumps the listing's revision stamp
+   on enrolment (every one of ABRT's 133 entries is dated 21 October). Read as price changes, those
+   restart the very clock the sale itself caused, so a listing that behaved perfectly reads as
+   ineligible for a fortnight. adSalePriceSteps labels each step in the record, and only a `change`
+   restarts anything.
+*/
+function adSaleDayGap(a, b) {
+  /* whole days from a to b, both YYYY-MM-DD; null where either is not a date, because a gap we
+     cannot work out must not read as 0 days (which is "today" and would pass every clock). */
+  const x = String(a || '').slice(0, 10), y = String(b || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(x) || !/^\d{4}-\d{2}-\d{2}$/.test(y)) return null;
+  return Math.round((Date.parse(y + 'T00:00:00Z') - Date.parse(x + 'T00:00:00Z')) / 86400000);
+}
+/* "within a penny", with room for the rounding either side of it */
+const ADTOOL_SALE_PENNY = 0.011;
+function adSaleNearPrice(a, b) {
+  const x = Number(a), y = Number(b);
+  if (a === undefined || a === null || a === '' || b === undefined || b === null || b === '' || !isFinite(x) || !isFinite(y)) return false;
+  return Math.abs(x - y) <= ADTOOL_SALE_PENNY;
+}
+function adSaleLedgerRead(ledger, day, strictlyBefore) {
+  /* the latest price the daily record holds on or before `day` — or strictly before it, which is
+     how the pre-sale price is taken, since the day an event starts is already a sale day. */
+  const d = String(day || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  let best = null;
+  for (const r of (ledger || [])) {
+    if (!r || !r.day) continue;
+    const p = Number(r.price);
+    if (!isFinite(p)) continue;
+    const dy = String(r.day).slice(0, 10);
+    if (strictlyBefore ? !(dy < d) : !(dy <= d)) continue;
+    if (!best || dy > best.day) best = { day: dy, price: round2(p) };
+  }
+  return best;
+}
+function adSalePaidPerUnit(orders) {
+  /* what buyers actually paid for a unit over a set of orders. sale_price in adtool_orders is the
+     line total, so per unit is the sum of the lines over the sum of the units. A cancelled order
+     proves nothing and is left out; no readable order at all is null, never 0. */
+  let sale = 0, units = 0, n = 0;
+  for (const o of (orders || [])) {
+    if (!o || String(o.status || '') === 'CANCELLED') continue;
+    const q = Number(o.qty) || 0, sp = Number(o.sale_price) || 0;
+    if (q <= 0) continue;
+    sale += sp; units += q; n++;
+  }
+  if (!n || units <= 0) return { orders: 0, units: 0, paid_per_unit: null };
+  return { orders: n, units: units, paid_per_unit: round2(sale / units) };
+}
+function adSalePromoSaleFromXml(xml) {
+  /* eBay's own answer for ONE listing, out of a Trading GetItem reply: Item.SellingStatus.
+     PromotionalSaleDetails, which carries the original price and the event's start and end. The
+     block being ABSENT from a reply eBay answered is a FACT — eBay is not discounting this listing
+     — and is a different thing from a reply we could not read at all, which is what `readable`
+     separates. Proved read-only on 10 November against item 237122623788 (9.49 now, original 9.99,
+     3 to 16 November) and against one eBay is not discounting, where the block is absent. */
+  const s = String(xml || '');
+  /* its own tag reader rather than the engine's, so this function is pure all the way down and the
+     test suite can call it without the rest of the worker */
+  const tag = (block, name) => { const m = String(block || '').match(new RegExp('<' + name + '[^>]*>([\\s\\S]*?)</' + name + '>')); return m ? m[1].trim() : ''; };
+  const ok = /<Ack>\s*(Success|Warning)\s*<\/Ack>/i.test(s);
+  if (!ok) return { readable: false, in_sale: false, original_price: null, starts: null, ends: null, why: 'eBay did not answer this listing' };
+  const blk = tag(s, 'PromotionalSaleDetails');
+  if (!blk) return { readable: true, in_sale: false, original_price: null, starts: null, ends: null, why: 'eBay answered, and says this listing is not in a sale' };
+  const op = Number(String(tag(blk, 'OriginalPrice') || '').replace(/[^0-9.]/g, ''));
+  return {
+    readable: true, in_sale: true,
+    original_price: isFinite(op) && op > 0 ? round2(op) : null,
+    starts: String(tag(blk, 'StartTime') || '').slice(0, 10) || null,
+    ends: String(tag(blk, 'EndTime') || '').slice(0, 10) || null,
+    why: 'eBay names a sale on this listing itself',
+  };
+}
+function adSaleEventNamed(ebay, event) {
+  /* does eBay's answer name THIS event? The event's own start and end are the thing to match on,
+     allowing a day either side because eBay's are timestamps in its own zone and ours are days. A
+     listing in some other sale is not in this one, and must not be counted as if it were. */
+  const eb = ebay || {}, e = event || {};
+  const near = v => v != null && Math.abs(v) <= 1;
+  const dEnd = adSaleDayGap(String(eb.ends || ''), String(e.ends || ''));
+  const dStart = adSaleDayGap(String(eb.starts || ''), String(e.starts || ''));
+  if (near(dEnd) && near(dStart)) return true;
+  /* one of the two missing on either side: the other one alone decides, because an event with no
+     end date we can read is still an event we can recognise by the day it began. */
+  if (dEnd == null && near(dStart)) return true;
+  if (dStart == null && near(dEnd)) return true;
+  return false;
+}
+/* the reasons, in the order they are reported, and the words each one prints */
+const ADTOOL_SALE_SKIP_REASONS = ['cooldown', 'revised', 'too_new', 'eligible_but_skipped'];
+const ADTOOL_SALE_SKIP_WORDS = {
+  cooldown: 'left a sale too recently',
+  revised: 'really revised too recently',
+  too_new: 'listed too recently',
+  eligible_but_skipped: 'eBay’s own reason is not known',
+};
+const ADTOOL_SALE_SKIP_SHORT = { cooldown: 'cooldown', revised: 'revised', too_new: 'too new', eligible_but_skipped: 'reason not known' };
+function adSaleMembership(row, event, ledger, orders, today) {
+  /* ONE listing against ONE event, on the evidence and nothing else. `row` carries the listing and
+     the clocks observed for it (listed_on, exited_on, last_change_on, and eBay's own answer where
+     it has been read); `event` carries the discount, the dates and whether the event names this
+     listing at all; `ledger` is the listing's daily price record; `orders` are its orders for today
+     and yesterday. Pure, so the 150-listing shape above is a test rather than a story. */
+  const r = row || {}, e = event || {};
+  const t = /^\d{4}-\d{2}-\d{2}$/.test(String(today || '')) ? String(today) : '';
+  const d = adSaleDiscountFraction(e.discount_pct);
+  const starts = /^\d{4}-\d{2}-\d{2}$/.test(String(e.starts || '')) ? String(e.starts) : '';
+  const added = !!e.added;
+  const out = {
+    item_id: String(r.item_id || ''), promo_id: String(e.promo_id || ''),
+    added: added, on_sale: false, basis: added ? 'event-text' : '',
+    skip_reason: '', skip_word: '', discount_pct: d,
+    pre_sale_price: null, price_today: null, expected_sale_price: null,
+    paid_per_unit: null, orders: 0, ebay: null, readable: false, why: '',
+  };
+  if (!added) { out.why = 'this event does not name the listing'; return out; }
+  const today0 = adSaleLedgerRead(ledger, t, false);
+  const pre = starts ? adSaleLedgerRead(ledger, starts, true) : null;
+  out.price_today = today0 ? today0.price : (r.price === undefined || r.price === null || !isFinite(Number(r.price)) ? null : round2(r.price));
+  out.pre_sale_price = pre ? pre.price : (r.pre_sale_price === undefined || r.pre_sale_price === null || !isFinite(Number(r.pre_sale_price)) ? null : round2(r.pre_sale_price));
+  const expected = (out.pre_sale_price != null && d != null) ? round2(out.pre_sale_price * (1 - d)) : null;
+  out.expected_sale_price = expected;
+  const paid = adSalePaidPerUnit(orders);
+  out.paid_per_unit = paid.paid_per_unit; out.orders = paid.orders;
+  /* 1. EBAY'S OWN ANSWER OUTRANKS OURS, both ways. It having said nothing about a sale is an
+        answer, so the proofs below are not even tried: this listing is not in one. */
+  const eb = r.ebay_promo && typeof r.ebay_promo === 'object' ? r.ebay_promo : null;
+  if (eb && eb.readable) {
+    out.ebay = { in_sale: !!eb.in_sale, original_price: eb.original_price == null ? null : round2(eb.original_price), starts: eb.starts || null, ends: eb.ends || null };
+    out.readable = true;
+    if (eb.in_sale && adSaleEventNamed(eb, e)) {
+      out.on_sale = true; out.basis = 'ebay';
+      out.why = 'eBay names this event on the listing itself';
+      return out;
+    }
+    out.why = eb.in_sale ? 'eBay has this listing in a different sale, not this event' : 'eBay answered, and this listing is not in a sale';
+    return adSaleSkipReason(out, r, starts && t && starts <= t ? starts : (t || starts));
+  }
+  /* 2. THE LEDGER. The day's price is the pre-sale price less the discount, to the penny. */
+  if (expected != null && out.price_today != null) {
+    out.readable = true;
+    if (adSaleNearPrice(out.price_today, expected)) {
+      out.on_sale = true; out.basis = 'ledger';
+      out.why = 'the price record shows the discount against the price it held before the event began';
+      return out;
+    }
+  }
+  /* 3. AN ORDER. A buyer paid the sale figure for a unit. Two shapes are accepted because the two
+        kinds of event move the listed price differently: where the discount has landed in the
+        day's price the paid figure matches it, and where it has not the paid figure is the day's
+        price less the discount. Either way a buyer paid the marked-down price. */
+  if (d != null && out.paid_per_unit != null) {
+    out.readable = true;
+    const fromToday = out.price_today == null ? null : round2(out.price_today * (1 - d));
+    if ((expected != null && adSaleNearPrice(out.paid_per_unit, expected)) || (fromToday != null && adSaleNearPrice(out.paid_per_unit, fromToday))) {
+      out.on_sale = true; out.basis = 'order';
+      out.why = 'a buyer paid the sale price for a unit';
+      return out;
+    }
+  }
+  if (!out.readable) out.why = 'no price record from before the event and no order since, so the discount cannot be looked for';
+  else out.why = 'the event names it and neither the price nor an order shows the discount';
+  return adSaleSkipReason(out, r, starts && t && starts <= t ? starts : (t || starts));
+}
+function adSaleSkipReason(out, row, judgeDay) {
+  /* WHY EBAY LEFT IT OUT, from our own clocks and in the order they are reported: it left a sale
+     too recently, a real change moved it too recently, it was listed too recently, or none of the
+     three, in which case we say eBay's reason is not known instead of inventing one. The clocks are
+     read on the day EBAY judged — the day the event began — and not today, because that is the day
+     it decided. A clock we cannot read never passes as 0 days. */
+  const r = row || {}, judge = String(judgeDay || '').slice(0, 10);
+  const R = ADTOOL_SALE_RESTRICTION_DAYS;
+  const gap = v => adSaleDayGap(String(v || '').slice(0, 10), judge);
+  const exited = gap(r.exited_on), changed = gap(r.last_change_on), listed = gap(r.listed_on);
+  out.judged_on = /^\d{4}-\d{2}-\d{2}$/.test(judge) ? judge : null;
+  out.days_since_exit = exited; out.days_since_change = changed; out.days_listed = listed;
+  if (exited != null && exited >= 0 && exited < R) out.skip_reason = 'cooldown';
+  else if (changed != null && changed >= 0 && changed < R) out.skip_reason = 'revised';
+  else if (listed != null && listed >= 0 && listed < R) out.skip_reason = 'too_new';
+  else out.skip_reason = 'eligible_but_skipped';
+  out.skip_word = ADTOOL_SALE_SKIP_WORDS[out.skip_reason] || '';
+  return out;
+}
+function adSaleCountMembership(list) {
+  /* an event's or a batch's own tally: how many were named, how many are on sale, how many were
+     skipped and why, and which proof each on-sale listing rests on. One pass, so the counts on the
+     page and the counts in the probe cannot drift apart. */
+  const reasons = {}; for (const k of ADTOOL_SALE_SKIP_REASONS) reasons[k] = 0;
+  const basis = { ebay: 0, ledger: 0, order: 0, 'event-text': 0 };
+  let added = 0, on = 0, skipped = 0, unreadable = 0;
+  for (const m of (list || [])) {
+    if (!m || !m.added) continue;
+    added++;
+    if (m.on_sale) { on++; if (basis[m.basis] != null) basis[m.basis]++; }
+    else {
+      skipped++;
+      if (reasons[m.skip_reason] != null) reasons[m.skip_reason]++;
+      if (!m.readable) unreadable++;
+    }
+  }
+  return { added_n: added, on_sale_n: on, skipped_n: skipped, reasons: reasons, unreadable_n: unreadable, basis_counts: basis };
+}
+function adSaleReasonText(reasons) {
+  /* "cooldown 20, revised 9, too new 4" — only the reasons that happened, in the order above, and
+     "nothing to say why" where a skip has no reason counted rather than a bare empty bracket. */
+  const r = reasons || {}, parts = [];
+  for (const k of ADTOOL_SALE_SKIP_REASONS) { const n = Number(r[k]) || 0; if (n > 0) parts.push(ADTOOL_SALE_SKIP_SHORT[k] + ' ' + n); }
+  return parts.length ? parts.join(', ') : 'nothing to say why';
+}
+function adSaleMorningAfter(record, byItem, today) {
+  /* THE MORNING AFTER (the owner's brief §5). The record says what somebody entered; the next day's
+     membership says what eBay did with it. Both are printed and the difference is named: "entered
+     94, on sale 61, skipped 33 (cooldown 20, revised 9, too new 4)". A listing we have no
+     membership for at all is counted separately and never folded into the skipped figure, because
+     "eBay left it out" and "we have not looked yet" are different statements. */
+  const rec = record || {}, map = byItem || {};
+  const ids = Array.isArray(rec.ids) ? rec.ids.map(String) : [];
+  const entered = Number(rec.n) || ids.length;
+  const recDay = String(rec.at || '').slice(0, 10);
+  const t = String(today || '').slice(0, 10);
+  const seen = [];
+  let notSeen = 0;
+  for (const id of ids) { const m = map[id]; if (m) seen.push(m); else notSeen++; }
+  const C = adSaleCountMembership(seen.map(m => Object.assign({}, m, { added: true })));
+  const checked = !!recDay && !!t && recDay < t;
+  const line = 'entered ' + entered + ', on sale ' + C.on_sale_n + ', skipped ' + C.skipped_n +
+    (C.skipped_n > 0 ? ' (' + adSaleReasonText(C.reasons) + ')' : '') +
+    (notSeen > 0 ? ', ' + notSeen + ' not looked at yet' : '');
+  return {
+    entered: entered, on_sale: C.on_sale_n, skipped: C.skipped_n, not_looked_at: notSeen,
+    reasons: C.reasons, basis_counts: C.basis_counts, unreadable: C.unreadable_n,
+    checked: checked, line: line, recorded_on: recDay || null,
+    note: checked
+      ? (C.on_sale_n === entered ? 'every listing entered is in the sale' : 'eBay left ' + C.skipped_n + ' of them out')
+      : 'the next membership check, tomorrow, will confirm this record or disagree with it',
+  };
+}
+function adSalePriceSteps(priceDays, discounts) {
+  /* EVERY DAY-TO-DAY STEP IN THE PRICE RECORD, LABELLED (the owner's brief §2). eBay's own moves
+     are x(1 − d) when a listing joins a sale and ÷(1 − d) when it leaves, so those two are `enrol`
+     and `exit` and not price changes at all. Anything else that moves is a `change`, and a price
+     that holds is `same`. With no readable discount to compare against, every move is a `change`:
+     that is the cautious reading and it is what the clocks did before this existed.
+     `same` is judged to the exact penny, so a one-penny repricing is still a change; `enrol` and
+     `exit` are judged within a penny, because eBay rounds the discounted price itself. */
+  const ds = [];
+  for (const v of (Array.isArray(discounts) ? discounts : [discounts])) {
+    const f = adSaleDiscountFraction(v);
+    if (f != null && f > 0 && ds.indexOf(f) < 0) ds.push(f);
+  }
+  const rows = (priceDays || []).filter(r => r && r.day && isFinite(Number(r.price)))
+    .map(r => ({ day: String(r.day).slice(0, 10), price: round2(Number(r.price)) }))
+    .sort((a, b) => a.day < b.day ? -1 : a.day > b.day ? 1 : 0);
+  const out = [];
+  let prev = null;
+  for (const r of rows) {
+    if (prev == null) { prev = r.price; continue; }   /* the first day on record is not a step */
+    let kind = 'change', pct = null;
+    if (r.price === prev) kind = 'same';
+    else {
+      for (const f of ds) {
+        if (adSaleNearPrice(r.price, round2(prev * (1 - f)))) { kind = 'enrol'; pct = f; break; }
+        if (adSaleNearPrice(r.price, round2(prev / (1 - f)))) { kind = 'exit'; pct = f; break; }
+      }
+    }
+    out.push({ day: r.day, from: prev, to: r.price, kind: kind, discount_pct: pct });
+    prev = r.price;
+  }
+  return out;
+}
+function adSalePriceClocks(steps) {
+  /* what the labelled steps leave behind: the last REAL change, the last time the sale's own moves
+     took the price down and put it back, and the days those moves happened on — which is what the
+     revision stamp has to be checked against, since eBay bumps it on enrolment. */
+  const s = steps || [];
+  let last_change = null, last_enrol = null, last_exit = null;
+  const move_days = [];
+  for (const st of s) {
+    if (!st || !st.day) continue;
+    if (st.kind === 'change') last_change = st.day;
+    else if (st.kind === 'enrol') { last_enrol = st.day; move_days.push(st.day); }
+    else if (st.kind === 'exit') { last_exit = st.day; move_days.push(st.day); }
+  }
+  return { last_change: last_change, last_enrol: last_enrol, last_exit: last_exit, move_days: move_days, steps_read: s.length };
+}
+function adSaleCohorts2(rows, calendar) {
+  /* TWO COHORTS, AND THE FREEZE RULE (the owner's brief §4). eBay keeps a listing waiting after it
+     leaves a sale for as long as the restriction runs, so a listing can be on sale for the event's
+     length out of every (length + restriction) days and no more. One batch of everything eligible
+     would therefore put the whole shop in and take the whole shop out together, with nothing on
+     sale for the second half of every cycle. Two cohorts fix that: the better-selling half goes in
+     on the nearer batch day and the rest a batch later, and each comes round again on the first
+     batch day after its own restriction has run.
+     Units we do not know sort last and the item number breaks every tie, so a listing keeps its
+     cohort from one run to the next instead of being reshuffled overnight. A listing whose own
+     clock already dates it to the later batch day is held there and never pulled forward: the split
+     decides where there is a choice, and the clock decides where there is not. */
+  const cal = calendar || {};
+  const ymd = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null;
+  const f0 = ymd(cal.f0), f1 = ymd(cal.f1) || (f0 ? adtAddDays(f0, 7) : null);
+  const days = (cal.days === undefined || cal.days === null || !isFinite(Number(cal.days))) ? null : Math.max(1, Math.round(Number(cal.days)));
+  const rest = (cal.restriction_days === undefined || cal.restriction_days === null || !isFinite(Number(cal.restriction_days))) ? ADTOOL_SALE_RESTRICTION_DAYS : Math.max(0, Math.round(Number(cal.restriction_days)));
+  let wd = Math.round(Number(cal.weekday));
+  if (!(wd >= 1 && wd <= 7)) wd = ADTOOL_SALE_DEFAULTS.batch_weekday;
+  const list = (rows || []).filter(r => r && r.item_id);
+  const num = v => (v === undefined || v === null || v === '' || !isFinite(Number(v))) ? null : Number(v);
+  const pool = [], held = [], later = [], noDate = [];
+  for (const r of list) {
+    const b = ymd(r.batch_on);
+    if (!b) { noDate.push(r); continue; }
+    if (f0 && b === f0) pool.push(r);
+    else if (f1 && b === f1) held.push(r);
+    else later.push(r);
+  }
+  pool.sort((a, b) => {
+    const an = num(a.units_30d), bn = num(b.units_30d);
+    if ((an == null) !== (bn == null)) return an == null ? 1 : -1;
+    if (an != null && bn != null && an !== bn) return bn - an;
+    return String(a.item_id) < String(b.item_id) ? -1 : String(a.item_id) > String(b.item_id) ? 1 : 0;
+  });
+  const half = Math.ceil(pool.length / 2);
+  const tag = (r, name, why) => Object.assign({}, r, { cohort: name, cohort_reason: why });
+  const aRows = pool.slice(0, half).map(r => tag(r, 'A', 'the better-selling half of what can go in on the nearer batch day'));
+  const bRows = pool.slice(half).map(r => tag(r, 'B', 'the other half of the split, a batch later so the two never come out together'))
+    .concat(held.map(r => tag(r, 'B', 'its own clock dates it to this batch day')));
+  const mk = (name, batchOn, members) => {
+    const ends = (batchOn && days != null) ? adtAddDays(batchOn, days - 1) : null;
+    const free = ends ? adtAddDays(ends, rest + 1) : null;      /* the day the restriction has run */
+    return {
+      cohort: name, batch_on: batchOn, ends_on: ends, free_on: free,
+      returns_on: free ? adSaleBatchDay(free, wd) : null,
+      freeze_from: batchOn ? adtAddDays(batchOn, -rest) : null,
+      n: members.length, item_ids: members.map(r => String(r.item_id)), rows: members,
+    };
+  };
+  const A = mk('A', f0, aRows), B = mk('B', f1, bRows);
+  const by_item = {};
+  for (const r of aRows) by_item[String(r.item_id)] = 'A';
+  for (const r of bRows) by_item[String(r.item_id)] = 'B';
+  return {
+    cohorts: [A, B], A: A, B: B, by_item: by_item,
+    in_days: days, out_days: rest, cycle_days: days == null ? null : days + rest,
+    eligible: pool.length + held.length, split: pool.length, held: held.length,
+    later: later.length, no_date: noDate.length,
+    cycle_text: days == null
+      ? 'the length of an event is not known, so the cycle cannot be worked out'
+      : 'in for ' + days + ' days, then out for ' + rest + ', so at most ' + days + ' days of every ' + (days + rest),
+    split_rule: 'the better-selling half by units over the last 30 days goes in on the nearer batch day; units we do not know go last, and the item number breaks every tie so a listing keeps its cohort',
+    freeze_rule: 'no price change and no listing change in the ' + rest + ' days before a listing’s turn, and none at all while it is in the sale: eBay will not take a listing changed inside that window, and it drops one changed mid-sale',
+  };
+}
+/* ---- THE TRADING REQUEST'S OWN SHAPE (the 6 November GetItem failure, found 10 November) -------
+   WHAT WAS HAPPENING. Trading GetItem through the key route answered eBay error 21359, "Input
+   transfer has been terminated because your request timed out", on every account and every item,
+   with and without an OutputSelector, while the GetItem the listing sync and the video sweep make
+   succeeded all day long. Those two build their XML inside the worker. The key route posted
+   `String(p.xml || '')` — whatever had arrived under the name `xml` — so a caller that named that
+   field anything else, or whose XML never arrived, sent a POST with a ZERO-LENGTH body and a
+   content type of text/xml. eBay's ws/api.dll then waits for the request it was told to expect,
+   gives up, and answers HTTP 200 with Ack Failure and 21359: an error about OUR body that reads
+   like a timeout at eBay's end, which is why it was chased on eBay's side for days.
+   PROVED READ-ONLY ON 10 NOVEMBER. The same call with the XML under `xml` answers Ack Success; with
+   the field absent it answers 21359 every time; with the XML present but no declaration it answers
+   error 5, "XML Parse error". The compatibility level was ruled out — eBay serves 1193 whichever
+   level is asked for, and both the working paths and this one get the same answer.
+   SO THE BODY IS CHECKED HERE AND AN EMPTY ONE IS NEVER SENT. It is taken from any of the names a
+   caller reasonably uses, a leading byte-order mark and the whitespace a copied heredoc leaves are
+   trimmed off, and a request with nothing to send, or with no XML declaration, is refused with a
+   message that says what is missing — rather than posted to eBay for it to answer in a code nobody
+   can trace back to us. */
+const ADTOOL_TRADE_XML_FIELDS = ['xml', 'body', 'request', 'request_xml', 'xml_body', 'requestXml'];
+function adTradeRequestXml(p) {
+  const o = p || {};
+  let raw = '', named = '';
+  for (const k of ADTOOL_TRADE_XML_FIELDS) {
+    const v = o[k];
+    if (typeof v === 'string' && v.trim()) { raw = v; named = k; break; }
+  }
+  const xml = String(raw || '').replace(/^\uFEFF/, '').trim();
+  if (!xml) {
+    return { ok: false, xml: '', named: '', bytes: 0,
+      error: 'SAY: give the request XML (under "xml") — an empty body makes eBay answer 21359, which reads as a timeout but means the request never arrived' };
+  }
+  if (xml.slice(0, 5) !== '<?xml') {
+    return { ok: false, xml: xml, named: named, bytes: xml.length,
+      error: 'SAY: the request XML must begin with its declaration, <?xml version="1.0" encoding="utf-8"?> — eBay answers "XML Parse error" without it' };
+  }
+  return { ok: true, xml: xml, named: named, bytes: xml.length, error: '' };
+}
+function adTradeAckOf(xml) {
+  /* what eBay said, carried out of the route beside the body. A refusal that arrives as HTTP 200
+     with Ack Failure is the shape that hid the fault above for four days: the caller saw a 200 and
+     believed it. Now the ack and the error codes come back named. */
+  const s = String(xml || '');
+  const ack = (s.match(/<Ack>\s*([A-Za-z]+)\s*<\/Ack>/) || [])[1] || '';
+  const codes = [];
+  const re = /<ErrorCode>\s*(\d+)\s*<\/ErrorCode>/g;
+  let m;
+  while ((m = re.exec(s))) if (codes.indexOf(m[1]) < 0) codes.push(m[1]);
+  const first = (s.match(/<ShortMessage>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*<\/ShortMessage>/) || [])[1] || '';
+  return { ack: ack, ok: /^(Success|Warning)$/i.test(ack), error_codes: codes, first_message: String(first).trim().slice(0, 200) };
+}
 /* ADTOOL-P10-PURE-END */
 
 /* ---- Phase 5 schema: the three observed sale-event grains (plan §3, big update 27 Sep 2026) ----
@@ -11596,6 +12065,13 @@ const ADTOOL_REGISTER_P10 = [
   ['SALE_BATCH', 'The weekly batch of listings to enter', 'Once a week, on the day Management picks, every listing that can join a sale is gathered into one batch and entered by hand, so each of them gets the full run of the event. Left to a sale that covers the whole shop, eBay adds a listing the moment it can join, which can leave it in the sale for a day or two before the event ends. Each listing is placed on the first batch day on or after the date it can next join, and the page shows the batch coming and the three after it.', 'items_api, adtool_listings, adtool_sale_timeline, adtool_sale_membership_day, promotions, adtool_price_day, portal_config', 'Worked out when you open the page', 'The batch dates, the grouping and the wording are covered by tests across a whole week, including the day the batch falls on today'],
   ['SALE_PROFIT_AFTER', 'Profit on a listing at the sale price', 'What one unit of this listing earns today, and what one unit would earn at the sale price. The supplier cost does not change in a sale. The price does, and so do the fees eBay charges as a share of it, which is the whole of the difference. The earnings today come from the portal where somebody has recorded them, otherwise from this listing\'s own orders, otherwise from the supplier cost, otherwise from the fleet\'s usual share of a price, and the page says which of those it used. Where none of them is known the page says not known and puts no figure in its place.', 'adtool_listings, items_facts, adtool_orders, portal_config', 'Worked out when you open the page', 'Tested against the way the sales books work profit out, including a sale of nothing at all, a listing with no known earnings and the money a discount takes off a unit'],
   ['SALE_NEXT_ELIGIBLE', 'When a listing can next join a sale', 'For a listing in a sale now: the day its event ends, and then the fourteen days eBay makes it wait before it may join another. For a listing not in one: the later of fourteen days after it last moved its price and fourteen days after it last left a sale. Either way the page then shows the first batch day on or after that date, because that is the day somebody would actually enter it.', 'adtool_sale_timeline, adtool_sale_membership_day, adtool_price_day, promotions', 'Read when you open the page', 'Tested on a listing in a sale, one waiting out the fourteen days, and one with no price record to read'],
+  /* the owner's brief of 10 November: what being in a sale actually means, the clocks that ignore
+     the sale's own price moves, the two cohorts and the check the morning after a batch. Each is
+     named here so the tag on its block opens this note and not the whole register. */
+  ['SALE_ON_SALE', 'Whether a listing is really in a sale', 'An event naming a listing is not a listing in a sale: eBay silently leaves out whatever it judges ineligible. One account listed the same hundred and fifty in two events; eBay took eleven under one, one under the other. So a listing counts as in a sale on evidence only: the price record shows today\'s price as the price held before the event, less the discount, to the penny; or a buyer paid that figure; or eBay names the event on it. Otherwise it was skipped, and the reason is our own clock: it left a sale too recently, was really revised too recently, was listed too recently, or every clock is clear and eBay\'s reason is not known.', 'adtool_sale_membership_day, adtool_price_day, adtool_orders, promotions, items_api', 'Every hour, writing only what changed', 'Tested on the hundred and fifty listed in two events on one account, on a listing whose everyday price merely looks sale-shaped, on a buyer\'s own paid price, on eBay\'s own answer in both directions, and on each of the four reasons'],
+  ['SALE_PRICE_STEPS', 'The sale\'s own price moves are not price changes', 'eBay multiplies a price by one less the discount when a listing joins a sale, divides it back when it leaves, and moves the revision stamp the day it enrols it. Read as price changes, those restart the very clock the sale caused, so a listing nobody touched waits a fortnight for nothing. Every step in the price record is labelled instead: joining, leaving, a real change, or no change. Only a real change restarts the clock, and a stamp on a joining or leaving day is not a revision. A listing can next join fourteen days after leaving a sale, after its last real change, or after it went up, whichever is latest.', 'adtool_price_day, adtool_sale_timeline, items_api', 'Every hour, with the timeline', 'Tested on the enrolment stamp one whole account carried on a single day, on a real change made during a live event, and on a price that held'],
+  ['SALE_COHORTS', 'The two cohorts and the freeze rule', 'A listing is in a sale for the event\'s length, then waits out eBay\'s restriction, so it is on sale for that length of every length-plus-restriction days and no more. One batch of everything eligible would put the whole shop in and take it out together, leaving nothing on sale for half of each cycle. So the listings that can go in are split: the better-selling half by units over thirty days goes in on the nearer batch day, the rest a batch later, each returning after its own restriction. Ties break on the item number, so a listing keeps its cohort. The freeze rule: no price or listing change in the restriction before its turn, or during it.', 'adtool_sale_timeline, adtool_price_day, adtool_listing_day, portal_config', 'Worked out when you open the page', 'Tested on the split, on the dates each cohort returns, on a listing held by its own clock, and on the order the best sellers come in'],
+  ['SALE_MORNING_AFTER', 'Entered against on sale, the morning after', 'A batch is entered by hand on eBay and recorded here. The next day\'s membership check says what eBay actually did with it, and the two are printed side by side with the difference named: how many were entered, how many are in the sale, how many eBay left out and the reason our clocks give for each. A listing the check has not reached yet is counted apart from the ones eBay left out, because "eBay left it out" and "we have not looked yet" are different statements and only one of them is somebody\'s fault.', 'portal_config, adtool_sale_membership_day', 'Read when you open the page, against the membership written every hour', 'Tested on a batch every listing of which went in, on one eBay part-filled, and on a record written today that nothing has checked yet'],
 ];
 let ADTOOL_SALE_SCHEMA_OK = false;
 async function ensureAdtoolSaleSchema(env) {
@@ -11618,6 +12094,14 @@ async function ensureAdtoolSaleSchema(env) {
      account's state rather than inferred from the row's own promo_id; eligible_basis says which clock set the date */
   await adtDdlOne(env, "ALTER TABLE adtool_sale_membership_day ADD COLUMN event_promo TEXT DEFAULT ''");
   await adtDdlOne(env, "ALTER TABLE adtool_sale_timeline ADD COLUMN eligible_basis TEXT DEFAULT ''");
+  /* 10 Nov (the owner's brief §1): in_sale is now written from the EVIDENCE and never from the
+     event's own list, so each row carries the proof it rests on — 'ebay', 'ledger' or 'order' where
+     the listing is in the sale, 'event-text' where the event names it and nothing proves it — and,
+     where it was skipped, the reason OUR clocks give. `basis` keeps its old meaning (how the event
+     covers the account: a named list, or the whole shop) so everything reading it is untouched. */
+  await adtDdlOne(env, "ALTER TABLE adtool_sale_membership_day ADD COLUMN proof_basis TEXT DEFAULT ''");
+  await adtDdlOne(env, "ALTER TABLE adtool_sale_membership_day ADD COLUMN skip_reason TEXT DEFAULT ''");
+  await adtDdlOne(env, "ALTER TABLE adtool_sale_membership_day ADD COLUMN added INTEGER DEFAULT 0");
   const seeds = ADTOOL_REGISTER_P10.map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 10, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6, phase = 10").bind(r[0], r[1], r[2], r[3], r[4], r[5]));
   /* the snapshot behaviour and the page are born ON; a manager can switch either off in Flags. DO NOTHING never
      overrides an existing choice (adtool_page_sales may already be set by Apps Script). */
@@ -11664,19 +12148,80 @@ async function adtSaleSnapshot(env) {
   for (const r of ((await env.DB.prepare('SELECT DISTINCT account FROM adtool_sale_membership_day WHERE day >= ?1 AND in_sale = 1').bind(adtAddDays(today, -30)).all()).results || [])) if (r.account) acctSet[String(r.account)] = 1;
   const accounts = Object.keys(acctSet);
   if (!accounts.length) { try { await ctx_setSync(env, 'adtoolSaleSnapshot', '', 'no running markdown sale events and no membership history'); } catch (e) {} return; }
-  const items = (await env.DB.prepare("SELECT item_id, account, price FROM items_api WHERE status = 'ACTIVE' AND account IN " + adtInList(accounts, 0)).bind(...accounts).all()).results || [];
+  const items = (await env.DB.prepare("SELECT item_id, account, price, start_time, last_revised FROM items_api WHERE status = 'ACTIVE' AND account IN " + adtInList(accounts, 0)).bind(...accounts).all()).results || [];
   const ids = items.map(i => String(i.item_id));
-  const ordMap = {};
-  { const stmts = adtChunks(ids).map(ch => env.DB.prepare("SELECT item_id, qty, sale_price, status FROM adtool_orders WHERE local_date = ?1 AND item_id IN " + adtInList(ch, 1)).bind(today, ...ch));
-    for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) (ordMap[String(r.item_id)] = ordMap[String(r.item_id)] || []).push(r); }
-  const memRows = [];
+  /* ORDERS FOR TODAY AND YESTERDAY. A day with no order yet cannot prove anything, and the truth
+     rule (§1) accepts a buyer's price from either day, so the window is both. */
+  const yday = adtAddDays(today, -1);
+  const ordMap = {}, ordMap2 = {};
+  { const stmts = adtChunks(ids).map(ch => env.DB.prepare("SELECT item_id, local_date, qty, sale_price, status FROM adtool_orders WHERE local_date >= ?1 AND local_date <= ?2 AND item_id IN " + adtInList(ch, 2)).bind(yday, today, ...ch));
+    for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) {
+      const k = String(r.item_id);
+      (ordMap2[k] = ordMap2[k] || []).push(r);                                        /* both days: the truth rule */
+      if (String(r.local_date) === today) (ordMap[k] = ordMap[k] || []).push(r);      /* today alone: the observed discount */
+    } }
+  /* WHICH LISTINGS AN EVENT NAMES, AND THE PRICE RECORD BEHIND THEM. A listed-items event names its
+     own ids; a whole-shop event names every active listing on the account. Those are the CANDIDATES,
+     and the price record is read for them alone, over a window that begins a restriction before the
+     earliest running event — enough to hold the pre-sale price and every clock still running, and no
+     more, because this runs every hour over the whole fleet. */
+  const candSet = {};
+  for (const a of Object.keys(acctEvents)) {
+    const s = acctEvents[a];
+    if (s.any.length) { for (const it of items) if (String(it.account) === a) candSet[String(it.item_id)] = 1; }
+    for (const id of Object.keys(s.listMap)) candSet[id] = 1;
+  }
+  const candIds = Object.keys(candSet);
+  let firstStart = '';
+  for (const e of running) { const st = String(e.starts || ''); if (/^\d{4}-\d{2}-\d{2}$/.test(st) && (!firstStart || st < firstStart)) firstStart = st; }
+  const ledgerFrom = adtAddDays(firstStart && firstStart < today ? firstStart : today, -(ADTOOL_SALE_RESTRICTION_DAYS + 2));
+  const ledger = {};
+  if (candIds.length) {
+    const stmts = adtChunks(candIds).map(ch => env.DB.prepare('SELECT item_id, day, price FROM adtool_price_day WHERE day >= ?1 AND item_id IN ' + adtInList(ch, 1) + ' ORDER BY item_id, day').bind(ledgerFrom, ...ch));
+    for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) (ledger[String(r.item_id)] = ledger[String(r.item_id)] || []).push(r);
+  }
+  /* THE CLOCK A LISTING ARRIVES WITH: the day it last left a sale, from its own timeline. Read for
+     the candidates only, and alongside the status the timeline walk below already reads. */
+  const leftOn = {};
+  if (candIds.length) {
+    const stmts = adtChunks(candIds).map(ch => env.DB.prepare("SELECT item_id, removed_on, updated_at FROM adtool_sale_timeline WHERE item_id IN " + adtInList(ch, 0)).bind(...ch));
+    for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) { const k = String(r.item_id), d = String(r.removed_on || ''); if (/^\d{4}-\d{2}-\d{2}$/.test(d) && (!leftOn[k] || d > leftOn[k])) leftOn[k] = d; }
+  }
+  const memRows = [], memByItem = {};
   for (const it of items) {
     const a = String(it.account), id = String(it.item_id), s = acctEvents[a] || null;
     /* the account's running event, member or not (event_running for a non-member of a listed-items event) */
     const eventPromo = s ? String((s.any[0] || s.events[0]).promo_id) : '';
-    let inSale = 0, basis = 'none', promo = '';
-    if (s && s.listMap[id]) { inSale = 1; basis = 'list'; promo = String(s.listMap[id].promo_id); }
-    else if (s && s.any.length) { inSale = 1; basis = 'any'; promo = String(s.any[0].promo_id); }
+    /* ADDED is still the event's own list (or the whole shop). ON SALE is no longer the same thing:
+       it is the truth rule's answer, and nothing but the proofs can set it. This is the fault of 6
+       November — 150 listings named, 12 discounted, 150 reported. */
+    let added = 0, basis = 'none', promo = '', ev = null;
+    if (s && s.listMap[id]) { added = 1; basis = 'list'; ev = s.listMap[id]; promo = String(ev.promo_id); }
+    else if (s && s.any.length) { added = 1; basis = 'any'; ev = s.any[0]; promo = String(ev.promo_id); }
+    const evDisc = ev ? adtParseDiscountPct(ev.discount) : null;
+    const accDiscounts = s ? s.events.map(x => adtParseDiscountPct(x.discount)).filter(v => v != null) : [];
+    const steps = adSalePriceSteps(ledger[id] || [], accDiscounts);
+    const clocks = adSalePriceClocks(steps);
+    const revDay = String(it.last_revised || '').slice(0, 10);
+    const moved = {}; for (const d of clocks.move_days) moved[d] = 1;
+    /* THE CLOCKS AS THEY STOOD ON THE DAY EBAY JUDGED, which is the day the event began. A change
+       made AFTER that day did not make eBay leave the listing out, and counting it would put the
+       wrong reason beside the listing: on 7 November a whole account was repriced in one pass, four
+       days after the event eBay had already filled on 3 November. So both clocks are cut off at the
+       judging day, and anything later is simply not part of the reason. */
+    const judge = (ev && /^\d{4}-\d{2}-\d{2}$/.test(String(ev.starts || '')) && String(ev.starts) <= today) ? String(ev.starts) : today;
+    /* a REAL change: the later of the last labelled price change and the revision stamp, with a
+       stamp eBay bumped on an enrol or exit day thrown out (§2) */
+    const changeDays = steps.filter(st => st.kind === 'change' && st.day <= judge).map(st => st.day);
+    const realRev = (/^\d{4}-\d{2}-\d{2}$/.test(revDay) && !moved[revDay] && revDay <= judge) ? revDay : '';
+    const lastChange = changeDays.concat(realRev ? [realRev] : []).sort().pop() || null;
+    const exitedOn = [leftOn[id] || '', clocks.last_exit || ''].filter(d => d && d <= judge).sort().pop() || null;
+    const M = adSaleMembership(
+      { item_id: id, price: it.price, listed_on: String(it.start_time || '').slice(0, 10), exited_on: exitedOn, last_change_on: lastChange },
+      { promo_id: promo, discount_pct: evDisc, starts: ev ? String(ev.starts || '') : '', ends: ev ? String(ev.ends || '') : '', added: !!added, whole_shop: basis === 'any' },
+      ledger[id] || [], ordMap2[id] || [], today
+    );
+    const inSale = M.on_sale ? 1 : 0;
     let dpct = null, dsrc = '';
     if (inSale) {
       const obs = adtSaleDiscountObserved(ordMap[id] || [], it.price);
@@ -11685,22 +12230,24 @@ async function adtSaleSnapshot(env) {
          threshold), so it is written as 0, still 'observed'. Fall back to the event's own discount text ONLY when no
          order let us look. */
       if (obs.observable && obs.pct != null) { dpct = obs.discounted ? obs.pct : 0; dsrc = 'observed'; }
-      else { const ev = basis === 'list' ? s.listMap[id] : s.any[0]; dpct = adtParseDiscountPct(ev && ev.discount); dsrc = dpct == null ? '' : 'event'; }
+      else { dpct = evDisc; dsrc = dpct == null ? '' : 'event'; }
     }
-    memRows.push({ account: a, item_id: id, promo_id: promo, in_sale: inSale, basis, discount_pct: dpct, disc_src: dsrc, price: it.price == null ? null : Number(it.price), event_promo: eventPromo });
+    memRows.push({ account: a, item_id: id, promo_id: inSale ? promo : '', added: added, in_sale: inSale, basis, discount_pct: dpct, disc_src: dsrc, price: it.price == null ? null : Number(it.price), event_promo: eventPromo, proof_basis: added ? String(M.basis || '') : '', skip_reason: (added && !inSale) ? String(M.skip_reason || '') : '' });
+    memByItem[id] = M;
   }
   const existing = {};
-  { const stmts = adtChunks(ids).map(ch => env.DB.prepare("SELECT account, item_id, promo_id, in_sale, basis, discount_pct, disc_src, price, event_promo FROM adtool_sale_membership_day WHERE day = ?1 AND item_id IN " + adtInList(ch, 1)).bind(today, ...ch));
+  { const stmts = adtChunks(ids).map(ch => env.DB.prepare("SELECT account, item_id, promo_id, in_sale, added, basis, discount_pct, disc_src, price, event_promo, proof_basis, skip_reason FROM adtool_sale_membership_day WHERE day = ?1 AND item_id IN " + adtInList(ch, 1)).bind(today, ...ch));
     for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) existing[r.account + '|' + r.item_id] = r; }
   const changed = [], changedSet = {}, writes = [];
   for (const m of memRows) {
     const cur = existing[m.account + '|' + m.item_id];
-    const same = cur && Number(cur.in_sale) === m.in_sale && String(cur.promo_id || '') === (m.promo_id || '') && String(cur.basis || '') === m.basis &&
+    const same = cur && Number(cur.in_sale) === m.in_sale && Number(cur.added || 0) === m.added && String(cur.promo_id || '') === (m.promo_id || '') && String(cur.basis || '') === m.basis &&
       ((cur.discount_pct == null && m.discount_pct == null) || Number(cur.discount_pct) === Number(m.discount_pct)) &&
       String(cur.disc_src || '') === (m.disc_src || '') && String(cur.event_promo || '') === (m.event_promo || '') &&
+      String(cur.proof_basis || '') === (m.proof_basis || '') && String(cur.skip_reason || '') === (m.skip_reason || '') &&
       ((cur.price == null && m.price == null) || Number(cur.price) === Number(m.price));
     if (same) continue;
-    writes.push(env.DB.prepare("INSERT INTO adtool_sale_membership_day (account, item_id, day, promo_id, in_sale, basis, discount_pct, disc_src, price, event_promo, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,datetime('now')) ON CONFLICT(account, item_id, day) DO UPDATE SET promo_id=?4, in_sale=?5, basis=?6, discount_pct=?7, disc_src=?8, price=?9, event_promo=?10, updated_at=datetime('now')").bind(m.account, m.item_id, today, m.promo_id, m.in_sale, m.basis, m.discount_pct, m.disc_src, m.price, m.event_promo));
+    writes.push(env.DB.prepare("INSERT INTO adtool_sale_membership_day (account, item_id, day, promo_id, in_sale, basis, discount_pct, disc_src, price, event_promo, added, proof_basis, skip_reason, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,datetime('now')) ON CONFLICT(account, item_id, day) DO UPDATE SET promo_id=?4, in_sale=?5, basis=?6, discount_pct=?7, disc_src=?8, price=?9, event_promo=?10, added=?11, proof_basis=?12, skip_reason=?13, updated_at=datetime('now')").bind(m.account, m.item_id, today, m.promo_id, m.in_sale, m.basis, m.discount_pct, m.disc_src, m.price, m.event_promo, m.added, m.proof_basis, m.skip_reason));
     changed.push(m.item_id); changedSet[m.item_id] = 1;
   }
   if (writes.length) await adtBatch(env, writes);
@@ -11735,8 +12282,19 @@ async function adtSaleSnapshot(env) {
     const ps = adtChunks(todo).map(ch => env.DB.prepare("SELECT item_id, day, price FROM adtool_price_day WHERE item_id IN " + adtInList(ch, 0) + " ORDER BY item_id, day").bind(...ch));
     for (const rs of await adtBatchRead(env, ps)) for (const r of rs) (priceHist[String(r.item_id)] = priceHist[String(r.item_id)] || []).push(r);
     const tlWrites = [];
+    /* §2: the timeline is handed the discounts the account's events run at and the day the listing
+       went up, so eBay's own x(1 − d) and ÷(1 − d) moves are read as joining and leaving rather
+       than as price changes, and the listing clock joins the other two. */
+    const listedOnById = {}, discByAcct = {};
+    for (const it of items) listedOnById[String(it.item_id)] = String(it.start_time || '').slice(0, 10);
+    for (const a of Object.keys(acctEvents)) discByAcct[a] = acctEvents[a].events.map(x => adtParseDiscountPct(x.discount)).filter(v => v != null);
+    const allDisc = []; for (const a of Object.keys(discByAcct)) for (const v of discByAcct[a]) if (allDisc.indexOf(v) < 0) allDisc.push(v);
     for (const id of todo) {
-      const tl = adtSaleTimeline(memHist[id] || [], priceHist[id] || [], today), acct = accById[id] || '';
+      const acct = accById[id] || '';
+      /* the listing's own account first; where no membership row names an account (a listing that
+         has never been in one) the fleet's discounts stand in, because the move's SHAPE is what is
+         being recognised and every event runs at one of them */
+      const tl = adtSaleTimeline(memHist[id] || [], priceHist[id] || [], today, { discounts: (discByAcct[acct] && discByAcct[acct].length) ? discByAcct[acct] : allDisc, listed_on: listedOnById[id] || '' });
       tlWrites.push(env.DB.prepare("INSERT INTO adtool_sale_timeline (account, item_id, promo_id, added_on, removed_on, restriction_end, eligible_on, eligible_basis, status, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,datetime('now')) ON CONFLICT(account, item_id, promo_id) DO UPDATE SET added_on=?4, removed_on=?5, restriction_end=?6, eligible_on=?7, eligible_basis=?8, status=?9, updated_at=datetime('now')").bind(acct, id, tl.promo_id || '', tl.added_on || '', tl.removed_on || '', tl.restriction_end || '', tl.eligible_on || '', tl.eligible_basis || '', tl.status));
       /* NO PER-LISTING "ELIGIBLE" TASK ANY MORE (the owner's request, 6 November 2026, §7). Under a
          weekly batch entered by hand, a task for each listing the day its clock runs out is noise:
@@ -11764,7 +12322,12 @@ async function adtSaleSnapshot(env) {
     }
   }
   if (endTasks.length) await adtBatch(env, endTasks);
-  try { await ctx_setSync(env, 'adtoolSaleSnapshot', '', 'accounts ' + accounts.length + ' (' + Object.keys(acctEvents).length + ' with a running event) · listings ' + items.length + ' · changed ' + changed.length + ' · timelines ' + tlN + ' · tasks ' + (taskN + endTasks.length) + (backlog > 0 ? ' · backlog ' + backlog + ' (cursor ' + (newCursor || 'start') + ', next run)' : ' · backlog clear') + ' in ' + (Date.now() - t0) + ' ms'); } catch (e) {}
+  /* WHAT THE EVIDENCE SAID, in the run's own note: how many listings the running events NAMED and
+     how many of those the price record, an order or eBay itself actually showed discounted. The
+     fault of 6 November would have been visible here from the first run — named 150, on sale 12 —
+     so the note now carries both figures and never one. */
+  const C = adSaleCountMembership(Object.keys(memByItem).map(k => memByItem[k]));
+  try { await ctx_setSync(env, 'adtoolSaleSnapshot', '', 'accounts ' + accounts.length + ' (' + Object.keys(acctEvents).length + ' with a running event) · listings ' + items.length + ' · named ' + C.added_n + ' · on sale ' + C.on_sale_n + ' · skipped ' + C.skipped_n + ' (' + adSaleReasonText(C.reasons) + ') · changed ' + changed.length + ' · timelines ' + tlN + ' · tasks ' + (taskN + endTasks.length) + (backlog > 0 ? ' · backlog ' + backlog + ' (cursor ' + (newCursor || 'start') + ', next run)' : ' · backlog clear') + ' in ' + (Date.now() - t0) + ' ms'); } catch (e) {}
 }
 
 /* ---- the Friday batch's own reads (the owner's request, 6 November 2026) ---------------------
@@ -11889,7 +12452,7 @@ async function adtoolSalesCompute(env, acct) {
   const tlById = {}, memById = {};
   { const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, account, promo_id, added_on, removed_on, restriction_end, eligible_on, eligible_basis, status, updated_at FROM adtool_sale_timeline WHERE item_id IN ' + adtInList(ch, 0)).bind(...ch));
     for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) { const k = String(r.item_id); if (!tlById[k] || String(r.updated_at || '') > String(tlById[k].updated_at || '')) tlById[k] = r; } }
-  { const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, promo_id, in_sale, basis, discount_pct, disc_src, price FROM adtool_sale_membership_day WHERE day = ?1 AND item_id IN ' + adtInList(ch, 1)).bind(today, ...ch));
+  { const stmts = adtChunks(ids).map(ch => env.DB.prepare('SELECT item_id, promo_id, in_sale, added, basis, discount_pct, disc_src, price, proof_basis, skip_reason FROM adtool_sale_membership_day WHERE day = ?1 AND item_id IN ' + adtInList(ch, 1)).bind(today, ...ch));
     for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) memById[String(r.item_id)] = r; }
   /* the money per unit, as the advertising tool already works it out for every listing: the portal's
      own recorded figure, else the listing's own orders, else the supplier cost, else the fleet's
@@ -11913,9 +12476,17 @@ async function adtoolSalesCompute(env, acct) {
     const steadyFromPrice = (priceDays >= 14 && r.price_since) ? daysBetween(String(r.price_since), today) : null;
     const est = adtSaleEligibility(Object.assign({}, r, { price_steady_days: steadyFromPrice }), today, daysBetween);
     const inSale = m ? Number(m.in_sale) === 1 : false;
+    /* 10 Nov (§1): NAMED BY AN EVENT AND ON SALE ARE TWO DIFFERENT FACTS, and this is where the page
+       stopped confusing them. `added` is the event's own list; `in_sale` is the truth rule's answer,
+       written by the snapshot from the price record, an order or eBay's own word. A row from before
+       the column carries no `added`, so the event's coverage stands in for it rather than reading
+       as "not named". */
+    const added = m ? (m.added == null ? (String(m.basis || '') === 'list' || String(m.basis || '') === 'any') : Number(m.added) === 1) : false;
     /* only a MEMBER of a running event carries a discount: for a listing not in the sale, do not borrow the
        account's event and fabricate an "original → sale price". evForItem, pct and sale stay null unless in_sale. */
     const evForItem = inSale ? ((m && m.promo_id ? runs.find(e => String(e.promo_id) === String(m.promo_id)) : null) || runs[0] || null) : null;
+    /* the event that NAMED it, in sale or not: a skipped listing still belongs to an event's block */
+    const evNamed = added ? ((m && m.promo_id ? runs.find(e => String(e.promo_id) === String(m.promo_id)) : null) || evForItem || runs[0] || null) : null;
     const observedDisc = m ? String(m.disc_src || '') === 'observed' : false;
     const pct = !inSale ? null : ((m && m.discount_pct != null) ? Number(m.discount_pct) : (evForItem ? adtParseDiscountPct(evForItem.discount) : null));
     const orig = r.price == null ? null : round2(r.price);
@@ -11928,6 +12499,7 @@ async function adtoolSalesCompute(env, acct) {
     const dpNum = m && m.discount_pct != null ? Number(m.discount_pct) : null;
     const observed_note = !m
       ? (priceDays >= 14 ? 'no snapshot for this listing yet' : 'an estimate: the observed price clock has ' + priceDays + ' of 14 days')
+      : (!inSale && added) ? ('the event names it, but nothing shows the discount: ' + (ADTOOL_SALE_SKIP_WORDS[String(m.skip_reason || '')] || 'eBay’s own reason is not known'))
       : !inSale ? 'not in a running sale event'
       : observedDisc
         ? (dpNum > 0 ? 'buyers paid ' + Math.round(dpNum * 100) + '% off (observed)' : 'an order today shows buyers paid full price')
@@ -11941,6 +12513,12 @@ async function adtoolSalesCompute(env, acct) {
       discount_pct: pct, ends: evForItem ? String(evForItem.ends || '') : (runs[0] ? String(runs[0].ends || '') : ''),
       starts: evForItem ? String(evForItem.starts || '') : (runs[0] ? String(runs[0].starts || '') : ''),
       basis: m ? String(m.basis) : (coveredAcct[String(r.account)] ? 'any' : 'none'),
+      /* §1 on the row itself: whether an event named it, which proof put it in the sale, and where
+         it was left out, the reason our own clocks give. */
+      added: added, added_promo_id: evNamed ? String(evNamed.promo_id || '') : '',
+      membership_basis: m ? String(m.proof_basis || '') : '',
+      skip_reason: (added && !inSale && m) ? String(m.skip_reason || '') : '',
+      skip_word: (added && !inSale && m) ? (ADTOOL_SALE_SKIP_WORDS[String(m.skip_reason || '')] || '') : '',
       in_sale: inSale, status, added_on: t ? (t.added_on || null) : null, removed_on: t ? (t.removed_on || null) : null,
       restriction_end: t ? (t.restriction_end || null) : null, eligible_on, eligible_basis: t ? String(t.eligible_basis || '') : (est.eligible_on ? 'estimate' : ''), timeline_pending: !t && !!m,
       original_price: orig, sale_price: sale, difference: (orig != null && sale != null) ? round2(orig - sale) : null,
@@ -11960,7 +12538,6 @@ async function adtoolSalesCompute(env, acct) {
       why: est.why || '',
     };
   });
-  const inSaleById = {}; for (const it of items) if (it.in_sale) inSaleById[it.item_id] = 1;
   /* counts keyed by the view's status buckets (live folds in added-unconfirmed; not-discounted/no-event fold
      into notinsale), kept because the probe and the limits panel both print them. */
   const saleBucket = s => { s = String(s || '').toLowerCase(); if (s === 'live' || s === 'added-unconfirmed') return 'live'; if (s === 'eligible') return 'eligible'; if (s === 'waiting') return 'waiting'; if (s === 'removed') return 'removed'; return 'notinsale'; };
@@ -11981,6 +12558,46 @@ async function adtoolSalesCompute(env, acct) {
       whole_shop: String(e.criterion) === 'INVENTORY_ANY',
       events: runByAcct[a].length,
     };
+  }
+  /* §1 AND §3: EVERY RUNNING EVENT, WITH WHAT IT ACTUALLY DID. Per event, not per account, because
+     Sir Hasib has two events with the same 150 listings in each and an account-level line would
+     average the pair into one meaningless figure. The membership rows the snapshot wrote carry the
+     answer, so these counts and the probe's cannot disagree. A listing with no membership row yet
+     is counted as not looked at, never as skipped. */
+  const eventMembers = {};
+  for (const e of running) {
+    const key = String(e.account) + '|' + String(e.promo_id);
+    const whole = String(e.criterion) === 'INVENTORY_ANY';
+    const named = whole
+      ? items.filter(it => it.account === String(e.account)).map(it => it.item_id)
+      : String(e.listing_ids || '').split(',').map(x => x.trim()).filter(Boolean);
+    eventMembers[key] = named;
+  }
+  const itemById = {}; for (const it of items) itemById[it.item_id] = it;
+  const eventCounts = {};
+  for (const key of Object.keys(eventMembers)) {
+    const promo = key.split('|')[1];
+    const list = [], ids2 = eventMembers[key];
+    let notLooked = 0, another = 0;
+    for (const id of ids2) {
+      const it = itemById[id];
+      if (!it) { notLooked++; continue; }                       /* not an active listing of ours today */
+      if (!it.added || !memById[id]) { notLooked++; continue; }  /* the snapshot has not reached it */
+      /* a listing in the sale through the OTHER event of a pair is not in this one. The membership
+         row's own promo id decides, not the timeline's, which can be a day behind. Sir Hasib's two
+         events name the same 150 listings, so for the second of the pair the listings the first one
+         got are left out of it, and the count SAYS so: they are not a clock failure, and putting
+         them under one of the four reasons would be a figure that did not add up. */
+      const mp = String((memById[id] || {}).promo_id || '');
+      const mine = !it.in_sale || !mp || mp === promo;
+      if (it.in_sale && !mine) { another++; list.push({ added: true, on_sale: false, basis: '', skip_reason: '', readable: true }); continue; }
+      list.push({ added: true, on_sale: !!it.in_sale, basis: it.membership_basis, skip_reason: it.skip_reason, readable: !!it.membership_basis });
+    }
+    const C = adSaleCountMembership(list);
+    eventCounts[key] = Object.assign({}, C, {
+      not_looked_at: notLooked, named_n: ids2.length, in_another_event: another,
+      reasons_text: adSaleReasonText(C.reasons) + (another > 0 ? ', ' + another + ' in another event' : ''),
+    });
   }
   const B = adSaleBatches(items, today, Object.assign({}, rules, { events: evByAcct }));
   /* §4: in the sale now, judged against itself. For each of those listings the days since its event
@@ -12029,17 +12646,22 @@ async function adtoolSalesCompute(env, acct) {
          day's membership snapshot says what eBay actually did with it. Until that snapshot has run
          the page says the record is not confirmed yet; after it, the two are compared and the
          difference is named rather than smoothed over. */
+      /* 10 Nov (§5): THE MORNING AFTER NAMES THE DIFFERENCE AND THE REASON FOR IT. "entered 94, on
+         sale 61, skipped 33 (cooldown 20, revised 9, too new 4)" — the reasons are our own clocks,
+         and a listing the snapshot has not reached is counted apart from the skipped so "eBay left
+         it out" is never printed over "we have not looked yet". */
       let check = null;
       if (rec) {
-        const recDay = String(rec.at || '').slice(0, 10);
-        const seen = rec.ids.filter(id => inSaleById[id]).length;
-        check = {
-          entered: rec.n, in_sale_now: seen, missing: Math.max(0, rec.n - seen), checked: !!recDay && recDay < today,
-          note: (!recDay || recDay >= today)
-            ? 'the next membership check, tomorrow, will confirm this record or disagree with it'
-            : seen === rec.n ? 'the membership check since then shows every one of them in a sale'
-            : 'the membership check since then shows ' + seen + ' of ' + rec.n + ' in a sale',
-        };
+        const byItem = {};
+        for (const id of rec.ids) {
+          const it = itemById[id];
+          if (!it || !memById[id]) continue;
+          byItem[id] = { on_sale: !!it.in_sale, basis: it.membership_basis, skip_reason: it.skip_reason, readable: !!it.membership_basis };
+        }
+        check = adSaleMorningAfter(rec, byItem, today);
+        /* the two older field names stay, so anything still reading them keeps working */
+        check.in_sale_now = check.on_sale;
+        check.missing = check.skipped;
       }
       return { account: a, rows: blk.rows, counts: blk.counts, entered: rec, entered_check: check, entered_key: key };
     }),
@@ -12051,6 +12673,25 @@ async function adtoolSalesCompute(env, acct) {
   const obsSince = await env.DB.prepare('SELECT MIN(day) AS d FROM adtool_sale_membership_day' + (acct ? ' WHERE account = ?1' : '')).bind(...(acct ? [acct] : [])).first();
   const observed_since = obsSince && obsSince.d ? String(obsSince.d) : null;
   const byAcctMap = {}; for (const a of B.accounts) byAcctMap[a.account] = a;
+  /* §3 THE ACCOUNT STRIP, which is the one part of this page that does NOT narrow to the account
+     pressed: the owner has to see the shape of every account before he presses one, the way the
+     strip on Where each listing advertises works. Three grouped reads and no per-account compute,
+     so showing the shape of the fleet costs the same whichever account is open. */
+  const stripActive = (await env.DB.prepare("SELECT account, COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE' GROUP BY account").all().catch(() => ({ results: [] }))).results || [];
+  const stripMem = (await env.DB.prepare('SELECT account, SUM(CASE WHEN in_sale = 1 THEN 1 ELSE 0 END) AS on_sale, SUM(CASE WHEN COALESCE(added, 0) = 1 THEN 1 ELSE 0 END) AS added FROM adtool_sale_membership_day WHERE day = ?1 GROUP BY account').bind(today).all().catch(() => ({ results: [] }))).results || [];
+  const stripEv = (await env.DB.prepare("SELECT account, COUNT(*) AS n FROM promotions WHERE type = 'MARKDOWN_SALE' AND status LIKE '%RUNNING%' GROUP BY account").all().catch(() => ({ results: [] }))).results || [];
+  const stripMap = {};
+  const stripRow = a => stripMap[a] || (stripMap[a] = { account: a, active: null, added: null, on_sale: null, events: 0 });
+  for (const r of stripActive) stripRow(String(r.account)).active = Number(r.n) || 0;
+  for (const r of stripMem) { const x = stripRow(String(r.account)); x.on_sale = Number(r.on_sale) || 0; x.added = Number(r.added) || 0; }
+  for (const r of stripEv) stripRow(String(r.account)).events = Number(r.n) || 0;
+  const account_strip = Object.keys(stripMap).sort().map(a => stripMap[a]);
+  /* §4 THE TWO COHORTS. The pool is what can actually go in on the nearer batch day; the listings
+     the clock has already dated to the batch after it are held there and never pulled forward. */
+  const COH = adSaleCohorts2(
+    (B.groups.this_friday || []).concat(B.groups.next_friday || []),
+    { f0: B.calendar.f0, f1: B.calendar.f1, days: rules.days, weekday: rules.batch_weekday, restriction_days: rules.restriction_days }
+  );
   return {
     today, fresh: await adtFresh(env, 'day'), account: acct || 'all', accounts: Object.keys(byAcctMap).sort(),
     settings: SET, calendar: B.calendar,
@@ -12062,13 +12703,37 @@ async function adtoolSalesCompute(env, acct) {
     covers_whole_shop: anyCover,
     estimate_banner: priceDays < 14 ? ('dates are estimated until 14 days of price history exist (' + priceDays + ' so far)' + (observed_since ? '; observed removal begins from ' + observed_since : '')) : null,
     rules: ['14 days at the same price', 'not in another sale for 14 days before', 'an event runs 1 to 45 days'],
-    running_events: running.map(e => ({ account: String(e.account), name: String(e.name || ''), promo_id: String(e.promo_id || ''), discount: String(e.discount || ''), criterion: String(e.criterion || ''), starts: String(e.starts || ''), ends: String(e.ends || ''), covers: String(e.criterion) === 'INVENTORY_ANY' ? 'whole shop' : 'listed items' })),
+    /* §1 and §3: every running event with what it actually did, named one event at a time. Two
+       events on one account with the same listings in both get a line each, because that is the
+       only way to see that eBay put 11 in one of them and 1 in the other. */
+    running_events: running.map(e => {
+      const key = String(e.account) + '|' + String(e.promo_id), C = eventCounts[key] || null;
+      const pct = adtParseDiscountPct(e.discount), ends = String(e.ends || '');
+      return {
+        account: String(e.account), name: String(e.name || ''), promo_id: String(e.promo_id || ''),
+        discount: String(e.discount || ''), discount_pct: pct,
+        discount_text: pct != null ? adSalePctText(pct) : (String(e.discount || '') || 'not known'),
+        criterion: String(e.criterion || ''), starts: String(e.starts || ''), ends: ends,
+        days_left: /^\d{4}-\d{2}-\d{2}$/.test(ends) ? daysBetween(today, ends) : null,
+        covers: String(e.criterion) === 'INVENTORY_ANY' ? 'whole shop' : 'listed items',
+        whole_shop: String(e.criterion) === 'INVENTORY_ANY',
+        added_n: C ? C.added_n : null, on_sale_n: C ? C.on_sale_n : null, skipped_n: C ? C.skipped_n : null,
+        named_n: C ? C.named_n : null, not_looked_at: C ? C.not_looked_at : null, in_another_event: C ? C.in_another_event : null,
+        reasons: C ? C.reasons : null, reasons_text: C ? C.reasons_text : null,
+        basis_counts: C ? C.basis_counts : null, unreadable_n: C ? C.unreadable_n : null,
+        line: C ? ('named ' + C.named_n + ', on sale ' + C.on_sale_n + ', skipped ' + C.skipped_n + (C.skipped_n > 0 ? ' (' + C.reasons_text + ')' : '') + (C.not_looked_at > 0 ? ', ' + C.not_looked_at + ' not looked at yet' : '')) : null,
+      };
+    }),
+    cohorts: COH,
+    account_strip: account_strip,
     status_filter, active_total: items.length, rows_total: items.length,
     windows: { units_and_profit: { from_7d: WIN.from_7d, from_30d: WIN.from_30d, to: WIN.to }, in_sale_listings_read: SINCE.rows_read, in_sale_cap: ADTOOL_SALE_COHORT_CAP },
     tasks,
     honest_limits: [
       'dates are observed at one-day granularity from ' + (observed_since || 'the first snapshot'),
-      'for a sale that covers the whole shop, eBay never tells us one listing has left it, so the listing counts as in the sale while the event runs and the listing is active, with a dip in the daily price record as corroboration',
+      'a listing counts as being in a sale only where the daily price record shows the discount against the price it held before the event began, or a buyer paid that price, or eBay itself named the event on the listing. An event naming a listing is not on its own a listing in a sale: eBay silently leaves out everything it judges ineligible',
+      'where a listing was left out, the reason beside it is OUR OWN clock reading and not eBay’s word: eBay gives no reason per listing, so a listing with every clock clear says its reason is not known rather than being given one',
+      'for a sale that covers the whole shop, eBay never tells us which listings it put in, so the price record and the orders are the only evidence there is; a listing with no price record from before the event cannot be judged either way and says so',
       'the profit at the sale price is this listing’s own profit per unit, less the discount on the price and the percentage fees that come off with it; the supplier cost does not move',
       'nothing on this page is ever sent to eBay. The only thing it writes is our own record of who entered a batch',
     ],
@@ -29386,6 +30051,16 @@ const ROUTES = {
       for (const blk of (D.this_batch.accounts || [])) for (const r of blk.rows) if (first.length < show) first.push(slim(r));
       return {
         asked: { account: acct || null, rows: show },
+        /* EBAY'S OWN WORD IS NOT READ FROM HERE. This route touches no eBay endpoint, which is the
+           whole stance of the evidence routes, so what it carries instead is the one read that
+           settles a listing by hand: GetItem through ebayTradeCall with that one output selector.
+           Its reply is parsed by adSalePromoSaleFromXml, which is the same parse the truth rule
+           accepts as the final word, so what a person runs by hand is what the rule reads. */
+        ebay_word: {
+          route: 'ebayTradeCall', call: 'GetItem', output_selector: 'Item.SellingStatus.PromotionalSaleDetails',
+          xml: '<?xml version="1.0" encoding="utf-8"?><GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ItemID>ITEM</ItemID><OutputSelector>Item.SellingStatus.PromotionalSaleDetails</OutputSelector></GetItemRequest>',
+          note: 'eBay answers with the original price and the event’s own start and end where it is discounting the listing, and with nothing at all where it is not. Nothing on a clock makes that read, so nothing new reaches eBay of its own accord.',
+        },
         today: D.today, flags: flags,
         settings: D.settings,                       /* the rows as stored, and the figures they parse to */
         calendar: D.calendar,
@@ -29406,6 +30081,37 @@ const ROUTES = {
           first_rows: first,
         },
         in_sale: (D.in_sale || []).map(b => ({ account: b.account, n: b.n, event: b.event, first_rows: b.rows.slice(0, 3).map(slim) })),
+        /* 10 Nov (§6): EVERY RUNNING EVENT, ONE LINE EACH. Sir Hasib's pair of events name the same
+           150 listings, and only a per-event line can show that eBay discounted 11 under one of them
+           and 1 under the other. "named 150, on sale 11, skipped 139 (cooldown 49, revised 46, too
+           new 8, reason not known 36)" is the answer this route exists to give by key. */
+        events: (D.running_events || []).map(e => ({
+          account: e.account, event: e.name, promo_id: e.promo_id, covers: e.covers,
+          discount_text: e.discount_text, starts: e.starts, ends: e.ends, days_left: e.days_left,
+          named_n: e.named_n, added_n: e.added_n, on_sale_n: e.on_sale_n, skipped_n: e.skipped_n,
+          not_looked_at: e.not_looked_at, in_another_event: e.in_another_event,
+          reasons: e.reasons, reasons_text: e.reasons_text,
+          basis_counts: e.basis_counts, unreadable_n: e.unreadable_n, line: e.line,
+        })),
+        /* which proof each on-sale listing rests on, over the whole answer: the price record, a
+           buyer's order, or eBay's own word. 'event-text' is the count of listings an event names
+           and NOTHING proves, which is the figure that used to be reported as in the sale. */
+        membership_basis_counts: (() => {
+          const out = { ebay: 0, ledger: 0, order: 0, 'event-text': 0, none: 0 };
+          for (const g of [D.batches.groups.this_friday, D.batches.groups.next_friday, D.batches.groups.in_sale_now, D.batches.groups.no_date]) {
+            for (const r of (g || [])) { const b = String(r.membership_basis || ''); if (out[b] != null) out[b]++; else out.none++; }
+          }
+          for (const blk of (D.batches.groups.later || [])) for (const r of (blk.rows || [])) { const b = String(r.membership_basis || ''); if (out[b] != null) out[b]++; else out.none++; }
+          return out;
+        })(),
+        cohorts: D.cohorts ? {
+          in_days: D.cohorts.in_days, out_days: D.cohorts.out_days, cycle_days: D.cohorts.cycle_days,
+          cycle_text: D.cohorts.cycle_text, split_rule: D.cohorts.split_rule, freeze_rule: D.cohorts.freeze_rule,
+          eligible: D.cohorts.eligible, split: D.cohorts.split, held: D.cohorts.held,
+          cohorts: (D.cohorts.cohorts || []).map(c => ({ cohort: c.cohort, batch_on: c.batch_on, ends_on: c.ends_on, returns_on: c.returns_on, freeze_from: c.freeze_from, n: c.n, first_ids: c.item_ids.slice(0, 5) })),
+        } : null,
+        account_strip: D.account_strip,
+        morning_after: (D.this_batch.accounts || []).filter(b => b.entered_check).map(b => ({ account: b.account, line: b.entered_check.line, checked: b.entered_check.checked, reasons: b.entered_check.reasons })),
         whole_shop_running: D.whole_shop_running,
         later_days: (D.batches.groups.later || []).map(g => ({ batch_on: g.batch_on, n: g.n })),
         no_date_reasons: (() => {
@@ -30625,14 +31331,27 @@ const ROUTES = {
       if (TRADE_CALLS.indexOf(call) < 0) {
         throw new Error('SAY: call must be one of ' + TRADE_CALLS.join(', ') + ' or taxonomyAspects');
       }
+      /* 10 Nov: THE REQUEST BODY IS CHECKED BEFORE IT GOES, and an empty one is never sent. See
+         adTradeRequestXml for the whole story: GetItem answered eBay error 21359 on every account
+         for four days because this line was `String(p.xml || '')` and the XML was arriving under
+         another name, so a zero-length POST went to ws/api.dll and eBay timed out waiting for the
+         request it had been told to expect. The body is now taken from any of the names a caller
+         uses, trimmed, and refused here with a message that says what is missing. */
+      const REQ = adTradeRequestXml(p);
+      if (!REQ.ok) throw new Error(REQ.error);
       const tok = await ebayAccessToken(ctx.env, String(p.account || ''));
       const r = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1477', 'X-EBAY-API-CALL-NAME': call,
           'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' },
-        body: String(p.xml || ''),
+        body: REQ.xml,
       });
-      return { status: r.status, xml: await r.text() };
+      const xml = await r.text();
+      /* WHAT EBAY SAID, NAMED. A Trading refusal arrives as HTTP 200 with Ack Failure, which is the
+         shape that let the fault above read as a success for days: the caller saw a 200. The ack and
+         the error codes now come back beside the body, and `sent_bytes` says what we actually
+         posted, so an empty body can never again look like an eBay problem. */
+      return Object.assign({ status: r.status, xml: xml, sent_bytes: REQ.bytes, sent_as: REQ.named }, adTradeAckOf(xml));
     },
   },
 

@@ -59,7 +59,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS, ADTOOL_PATTERN_KINDS, ADTOOL_PATTERN_MONTHS, ADTOOL_PATTERN_DATES_CAP, adListingDayWords, adListingMonthWords, adListingMonthEnd, adListingPattern, adListingPatternKey, adListingPatternWindow, adListingSlots, adListingWeekday, adListingHourWeekday, adListingDates };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, adSaleDayGap, adSaleNearPrice, adSaleLedgerRead, adSalePaidPerUnit, adSalePromoSaleFromXml, adSaleEventNamed, adSaleMembership, adSaleSkipReason, adSaleCountMembership, adSaleReasonText, adSaleMorningAfter, adSalePriceSteps, adSalePriceClocks, adSaleCohorts2, adTradeRequestXml, adTradeAckOf, ADTOOL_SALE_PENNY, ADTOOL_SALE_SKIP_REASONS, ADTOOL_SALE_SKIP_WORDS, ADTOOL_SALE_SKIP_SHORT, ADTOOL_TRADE_XML_FIELDS, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS, ADTOOL_PATTERN_KINDS, ADTOOL_PATTERN_MONTHS, ADTOOL_PATTERN_DATES_CAP, adListingDayWords, adListingMonthWords, adListingMonthEnd, adListingPattern, adListingPatternKey, adListingPatternWindow, adListingSlots, adListingWeekday, adListingHourWeekday, adListingDates };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -1603,6 +1603,311 @@ function run(argv) {
       const r = rgAll.filter(x => x.id === id);
       return r.length === 1 && r[0].name && r[0].formula && r[0].sources && r[0].recompute && r[0].recheck && !/\b5 ?%|\bFriday\b|£1\b/.test(r[0].formula);
     }), ['SALE_BATCH', 'SALE_PROFIT_AFTER', 'SALE_NEXT_ELIGIBLE'].map(id => rgAll.filter(x => x.id === id).length));
+
+  /* ══ THE SALE PAGE REBUILT ON EVIDENCE (the owner's brief, 10 November 2026) ════════════════
+     Sir Hasib has two events both called "Sale event ending 16 Nov 2026", created on 3 November
+     with the SAME 150 listings in each. eBay enrolled 11 under one and 1 under the other and
+     marked the rest "Skipped: in recent sale". The page said 150 in sale on each. Everything below
+     holds the five rules that replaced that: what being in a sale means, clocks that ignore the
+     sale's own price moves, the two cohorts, the morning-after check, and the request shape behind
+     eBay's own word. */
+  const smEv = { promo_id: 'H1', discount_pct: 0.05, starts: '2026-11-03', ends: '2026-11-16', added: true };
+  const smDay = '2026-11-09';
+  const smLedger = (before, after) => {
+    const out = [];
+    for (const d of ['2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02']) out.push({ day: d, price: before });
+    for (const d of ['2026-11-03', '2026-11-05', '2026-11-07', smDay]) out.push({ day: d, price: after });
+    return out;
+  };
+  const smClear = { item_id: '1', listed_on: '2026-01-01', exited_on: '', last_change_on: '' };
+  const smLedgerOn = F.adSaleMembership(smClear, smEv, smLedger(9.99, 9.49), [], smDay);
+  t('sale truth: the price record settles it — today 9.49 against the 9.99 the record held before the event began is the 5 % discount to the penny, so the listing is in the sale on the ledger',
+    smLedgerOn.added === true && smLedgerOn.on_sale === true && smLedgerOn.basis === 'ledger' &&
+    smLedgerOn.pre_sale_price === 9.99 && smLedgerOn.price_today === 9.49 && smLedgerOn.expected_sale_price === 9.49 && smLedgerOn.readable === true, smLedgerOn);
+  const smLooks = F.adSaleMembership(smClear, smEv, smLedger(9.49, 9.49), [], smDay);
+  t('sale truth: a listing whose EVERYDAY price merely looks sale-shaped is not in a sale — 9.49 before the event and 9.49 now is 9.49, not 9.99 less the discount, which is the whole reason the pre-sale price comes out of the record',
+    smLooks.added === true && smLooks.on_sale === false && smLooks.basis === 'event-text' && smLooks.expected_sale_price === 9.02 && smLooks.skip_reason === 'eligible_but_skipped', smLooks);
+  const smPenny = [9.48, 9.49, 9.50].map(p => F.adSaleMembership(smClear, smEv, smLedger(9.99, p), [], smDay).on_sale);
+  t('sale truth: "within a penny" means within a penny — 9.48, 9.49 and 9.50 all read as the discount, 9.40 does not',
+    smPenny.join(',') === 'true,true,true' && F.adSaleMembership(smClear, smEv, smLedger(9.99, 9.4), [], smDay).on_sale === false, smPenny);
+  const smOrder = F.adSaleMembership(smClear, smEv, smLedger(9.99, 9.99), [{ qty: 2, sale_price: 18.98, status: 'ACTIVE' }], smDay);
+  t('sale truth: a buyer settles it where the listed price never dipped — two units at 18.98 is 9.49 each against a 9.99 listing, which is the discount, so the basis is the order',
+    smOrder.on_sale === true && smOrder.basis === 'order' && smOrder.paid_per_unit === 9.49 && smOrder.orders === 1, smOrder);
+  const smOrderFull = F.adSaleMembership(smClear, smEv, smLedger(9.99, 9.99), [{ qty: 1, sale_price: 9.99, status: 'ACTIVE' }], smDay);
+  t('sale truth: a buyer who paid the FULL price proves the opposite, and the listing reads as left out rather than as in the sale',
+    smOrderFull.on_sale === false && smOrderFull.paid_per_unit === 9.99 && smOrderFull.readable === true, smOrderFull);
+  const smCancel = F.adSaleMembership(smClear, smEv, smLedger(9.99, 9.99), [{ qty: 2, sale_price: 18.98, status: 'CANCELLED' }], smDay);
+  t('sale truth: a cancelled order proves nothing, so it is left out of the paid price altogether',
+    smCancel.paid_per_unit === null && smCancel.orders === 0 && smCancel.on_sale === false, smCancel);
+  const smEbayYes = F.adSaleMembership(Object.assign({}, smClear, { ebay_promo: { readable: true, in_sale: true, original_price: 9.99, starts: '2026-11-03', ends: '2026-11-16' } }), smEv, smLedger(9.49, 9.49), [], smDay);
+  t('sale truth: eBay\'s own word on the listing outranks ours — PromotionalSaleDetails naming this event puts the listing in the sale even where our own price record shows nothing',
+    smEbayYes.on_sale === true && smEbayYes.basis === 'ebay' && smEbayYes.ebay.original_price === 9.99, smEbayYes);
+  const smEbayNo = F.adSaleMembership(Object.assign({}, smClear, { ebay_promo: { readable: true, in_sale: false, original_price: null, starts: null, ends: null } }), smEv, smLedger(9.99, 9.49), [], smDay);
+  t('sale truth: and it outranks ours the OTHER way — eBay answering that it is discounting nothing leaves the listing out, whatever a sale-shaped price record says',
+    smEbayNo.on_sale === false && smEbayNo.basis === 'event-text' && /not in a sale/.test(smEbayNo.why), smEbayNo);
+  const smEbayOther = F.adSaleMembership(Object.assign({}, smClear, { ebay_promo: { readable: true, in_sale: true, original_price: 9.99, starts: '2026-12-01', ends: '2026-12-14' } }), smEv, smLedger(9.99, 9.49), [], smDay);
+  t('sale truth: a listing eBay has in SOME OTHER sale is not in this event, and says so rather than being counted under it',
+    smEbayOther.on_sale === false && /different sale/.test(smEbayOther.why), smEbayOther);
+  t('sale truth: eBay\'s answer is matched to the event on its own start and end, a day either side, because eBay sends timestamps in its zone and we keep days',
+    F.adSaleEventNamed({ starts: '2026-11-03', ends: '2026-11-16' }, smEv) === true &&
+    F.adSaleEventNamed({ starts: '2026-11-04', ends: '2026-11-17' }, smEv) === true &&
+    F.adSaleEventNamed({ starts: '2026-11-20', ends: '2026-12-04' }, smEv) === false &&
+    F.adSaleEventNamed({ starts: null, ends: '2026-11-16' }, smEv) === true, null);
+  const smNotAdded = F.adSaleMembership(smClear, Object.assign({}, smEv, { added: false }), smLedger(9.99, 9.49), [], smDay);
+  t('sale truth: a listing the event does not name is not judged at all, and carries no proof and no reason',
+    smNotAdded.added === false && smNotAdded.on_sale === false && smNotAdded.basis === '' && smNotAdded.skip_reason === '', smNotAdded);
+  const smBlind = F.adSaleMembership({ item_id: '1', listed_on: '2026-01-01' }, smEv, [{ day: smDay, price: 9.49 }], [], smDay);
+  t('sale truth: with no price from before the event and no order since, the discount cannot be looked for, and the row says that rather than claiming eBay left it out for a reason',
+    smBlind.readable === false && smBlind.on_sale === false && /cannot be looked for/.test(smBlind.why) && smBlind.skip_reason === 'eligible_but_skipped', smBlind);
+  const smCool = F.adSaleMembership({ item_id: '1', listed_on: '2026-01-01', exited_on: '2026-10-25', last_change_on: '2026-10-28' }, smEv, smLedger(9.99, 9.99), [], smDay);
+  const smRev = F.adSaleMembership({ item_id: '1', listed_on: '2026-01-01', exited_on: '', last_change_on: '2026-10-28' }, smEv, smLedger(9.99, 9.99), [], smDay);
+  const smNew = F.adSaleMembership({ item_id: '1', listed_on: '2026-10-30', exited_on: '', last_change_on: '' }, smEv, smLedger(9.99, 9.99), [], smDay);
+  t('sale truth: the four reasons, in the order they are reported — a cooldown beats a revision, a revision beats a listing that is too new, and every clock clear says eBay\'s reason is not known',
+    smCool.skip_reason === 'cooldown' && smRev.skip_reason === 'revised' && smNew.skip_reason === 'too_new' && smLooks.skip_reason === 'eligible_but_skipped' &&
+    smCool.skip_word === F.ADTOOL_SALE_SKIP_WORDS.cooldown, [smCool.skip_reason, smRev.skip_reason, smNew.skip_reason]);
+  t('sale truth: the clocks are read on the day EBAY judged, which is the day the event began and not today, because that is the day it decided',
+    smCool.judged_on === '2026-11-03' && smCool.days_since_exit === 9 && smRev.days_since_change === 6 && smNew.days_listed === 4, [smCool.judged_on, smCool.days_since_exit]);
+  t('sale truth: a clock we cannot read never passes as 0 days, which would read as today and clear every rule',
+    F.adSaleDayGap('', '2026-11-03') === null && F.adSaleDayGap('not a date', '2026-11-03') === null &&
+    F.adSaleMembership({ item_id: '1', listed_on: '', exited_on: '', last_change_on: '' }, smEv, smLedger(9.99, 9.99), [], smDay).skip_reason === 'eligible_but_skipped', null);
+  /* THE 150 OF 3 NOVEMBER, counted. The other session's reading of Sir Hasib's pair: 11 enrolled,
+     49 in the cooldown, 46 revised inside the fortnight, 8 too new, 36 eligible and skipped. */
+  const smHasib = [];
+  for (let i = 0; i < 11; i++) smHasib.push({ added: true, on_sale: true, basis: 'ledger', skip_reason: '', readable: true });
+  for (const pair of [['cooldown', 49], ['revised', 46], ['too_new', 8], ['eligible_but_skipped', 36]]) {
+    for (let i = 0; i < pair[1]; i++) smHasib.push({ added: true, on_sale: false, basis: 'event-text', skip_reason: pair[0], readable: true });
+  }
+  const smCount = F.adSaleCountMembership(smHasib);
+  t('sale truth: the 150 listings of Sir Hasib\'s event count out as 11 on sale and 139 left out, with the reasons adding to the 139 and not one of them attributed to eBay',
+    smHasib.length === 150 && smCount.added_n === 150 && smCount.on_sale_n === 11 && smCount.skipped_n === 139 &&
+    smCount.reasons.cooldown === 49 && smCount.reasons.revised === 46 && smCount.reasons.too_new === 8 && smCount.reasons.eligible_but_skipped === 36 &&
+    smCount.basis_counts.ledger === 11 && smCount.unreadable_n === 0, smCount);
+  t('sale truth: the reasons print in that order, only where they happened, and an empty set says nothing to say why rather than showing an empty bracket',
+    F.adSaleReasonText(smCount.reasons) === 'cooldown 49, revised 46, too new 8, reason not known 36' &&
+    F.adSaleReasonText({ cooldown: 20, revised: 9, too_new: 4, eligible_but_skipped: 0 }) === 'cooldown 20, revised 9, too new 4' &&
+    F.adSaleReasonText({}) === 'nothing to say why' && F.adSaleReasonText(null) === 'nothing to say why', F.adSaleReasonText(smCount.reasons));
+  t('sale truth: eBay\'s reply is read for what it says and for what it does not — the block present is a sale, the block absent on an answered reply is NOT a sale, and an unanswered reply is neither',
+    (() => {
+      const yes = F.adSalePromoSaleFromXml('<GetItemResponse><Ack>Success</Ack><Item><SellingStatus><PromotionalSaleDetails><OriginalPrice currencyID="GBP">9.99</OriginalPrice><StartTime>2026-11-03T13:03:34.000Z</StartTime><EndTime>2026-11-16T23:59:00.000Z</EndTime></PromotionalSaleDetails></SellingStatus></Item></GetItemResponse>');
+      const no = F.adSalePromoSaleFromXml('<GetItemResponse><Ack>Success</Ack><Item><SellingStatus></SellingStatus></Item></GetItemResponse>');
+      const bad = F.adSalePromoSaleFromXml('<GetItemResponse><Ack>Failure</Ack><Errors><ErrorCode>21359</ErrorCode></Errors></GetItemResponse>');
+      return yes.readable === true && yes.in_sale === true && yes.original_price === 9.99 && yes.starts === '2026-11-03' && yes.ends === '2026-11-16' &&
+        no.readable === true && no.in_sale === false && bad.readable === false && bad.in_sale === false;
+    })(), null);
+  /* ---- §2: the sale's own price moves are not price changes ---- */
+  const psDisc = [0.05];
+  const psOne = (a, b) => F.adSalePriceSteps([{ day: '2026-10-20', price: a }, { day: '2026-10-21', price: b }], psDisc)[0];
+  t('sale clocks: eBay\'s own moves are labelled joining and leaving, a real move is a change, and a price that holds is no step at all',
+    psOne(10, 9.5).kind === 'enrol' && psOne(9.5, 10).kind === 'exit' && psOne(10, 8.99).kind === 'change' && psOne(10, 10).kind === 'same' &&
+    psOne(10, 9.5).discount_pct === 0.05, [psOne(10, 9.5).kind, psOne(9.5, 10).kind, psOne(10, 8.99).kind, psOne(10, 10).kind]);
+  t('sale clocks: a one-penny repricing is still a change, because "no change" is judged to the exact penny while eBay\'s own rounding is allowed a penny either way',
+    psOne(10, 9.99).kind === 'change' && psOne(10, 9.51).kind === 'enrol' && psOne(10, 9.49).kind === 'enrol' && psOne(10, 9.4).kind === 'change', [psOne(10, 9.99).kind, psOne(10, 9.51).kind]);
+  t('sale clocks: with no readable discount to compare against, every move is a change — the cautious reading, and the one the clocks had before this existed',
+    F.adSalePriceSteps([{ day: '2026-10-20', price: 10 }, { day: '2026-10-21', price: 9.5 }], [])[0].kind === 'change' &&
+    F.adSalePriceSteps([{ day: '2026-10-20', price: 10 }, { day: '2026-10-21', price: 9.5 }], [null, 'nonsense'])[0].kind === 'change', null);
+  const psRun = F.adSalePriceSteps([{ day: '2026-10-18', price: 10 }, { day: '2026-10-21', price: 9.5 }, { day: '2026-10-25', price: 8.99 }, { day: '2026-11-04', price: 9.46 }], psDisc);
+  const psClk = F.adSalePriceClocks(psRun);
+  t('sale clocks: over a whole run the labels come out in order, and the clocks keep the last real change, the last leaving and the days the sale itself moved the price',
+    psRun.map(s => s.kind).join(',') === 'enrol,change,exit' && psClk.last_change === '2026-10-25' && psClk.last_exit === '2026-11-04' &&
+    psClk.last_enrol === '2026-10-21' && psClk.move_days.join(',') === '2026-10-21,2026-11-04' && psClk.steps_read === 3, [psRun.map(s => s.kind), psClk]);
+  t('sale clocks: the first day on record is not a step, so a listing with one price day has no change to restart anything',
+    F.adSalePriceSteps([{ day: '2026-10-20', price: 10 }], psDisc).length === 0 && F.adSalePriceClocks([]).last_change === null, null);
+  /* THE ABRT SHAPE OF 21 OCTOBER: a whole account's price moved by the event itself on one day. */
+  const tlEnrolOnly = F.adtSaleTimeline([{ day: '2026-10-28', in_sale: 0, basis: 'none', promo_id: '', event_promo: '' }],
+    [{ day: '2026-10-20', price: 10 }, { day: '2026-10-21', price: 9.5 }, { day: '2026-10-28', price: 9.5 }], '2026-10-28', { discounts: [0.05] });
+  const tlEnrolBlind = F.adtSaleTimeline([{ day: '2026-10-28', in_sale: 0, basis: 'none', promo_id: '', event_promo: '' }],
+    [{ day: '2026-10-20', price: 10 }, { day: '2026-10-21', price: 9.5 }, { day: '2026-10-28', price: 9.5 }], '2026-10-28');
+  t('sale clocks: the 21 October shape — told the discount, the timeline reads that day as joining a sale and no price clock runs; told nothing, it reads it as a price change and makes the listing wait, which is what it used to do',
+    tlEnrolOnly.last_price_change === null && tlEnrolOnly.price_clock === null && tlEnrolOnly.last_enrol === '2026-10-21' &&
+    tlEnrolBlind.last_price_change === '2026-10-21' && tlEnrolBlind.eligible_on === '2026-11-04', [tlEnrolOnly.last_price_change, tlEnrolBlind.eligible_on]);
+  const tlMidChange = F.adtSaleTimeline([{ day: '2026-10-28', in_sale: 0, basis: 'none', promo_id: '', event_promo: '' }],
+    [{ day: '2026-10-20', price: 10 }, { day: '2026-10-21', price: 9.5 }, { day: '2026-10-25', price: 8.99 }], '2026-10-28', { discounts: [0.05] });
+  t('sale clocks: a TRUE change made during a live event still restarts the price clock, because that one really is somebody repricing the listing',
+    tlMidChange.last_price_change === '2026-10-25' && tlMidChange.eligible_on === '2026-11-08' && tlMidChange.eligible_basis === 'price clock', tlMidChange);
+  const tlListed = F.adtSaleTimeline([], [], '2026-11-09', { listed_on: '2026-11-05' });
+  t('sale clocks: the listing clock is the third of them — a listing that went up inside the restriction cannot join a sale, and the date says which clock set it',
+    tlListed.eligible_on === '2026-11-19' && tlListed.eligible_basis === 'listing clock' && tlListed.listed_clock === '2026-11-19', tlListed);
+  const tlExitClock = F.adtSaleTimeline([{ day: '2026-11-09', in_sale: 0, basis: 'none', promo_id: '', event_promo: '' }],
+    [{ day: '2026-11-01', price: 9.5 }, { day: '2026-11-02', price: 10 }], '2026-11-09', { discounts: [0.05] });
+  t('sale clocks: the day the sale put the price back is a leaving we can see, so it starts the restriction even where the membership days never flipped',
+    tlExitClock.last_exit === '2026-11-02' && tlExitClock.exit_clock === '2026-11-16' && tlExitClock.eligible_on === '2026-11-16', tlExitClock);
+  t('sale clocks: eligible_on is the LATEST of the three clocks, never the first one that answers',
+    F.adtSaleTimeline([], [{ day: '2026-11-01', price: 10 }, { day: '2026-11-03', price: 8.99 }], '2026-11-09', { discounts: [0.05], listed_on: '2026-10-01' }).eligible_on === '2026-11-17' &&
+    F.adtSaleTimeline([], [{ day: '2026-11-01', price: 10 }, { day: '2026-11-03', price: 8.99 }], '2026-11-09', { discounts: [0.05], listed_on: '2026-11-08' }).eligible_on === '2026-11-22', null);
+  const elBump = F.adtSaleEligibility({ last_revised: '2026-10-21', start_time: '2026-01-01', sale_move_days: ['2026-10-21'] }, '2026-10-28', (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000));
+  const elReal = F.adtSaleEligibility({ last_revised: '2026-10-21', start_time: '2026-01-01' }, '2026-10-28', (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000));
+  t('sale clocks: a revision stamp eBay moved on the day it enrolled the listing is NOT counted as a revision, and the row says it was set aside; the same stamp on an ordinary day still counts',
+    elBump.eligible === true && elBump.revision_ignored === true && /the sale itself moved the price/.test(elBump.revision_note) &&
+    elReal.eligible === false && elReal.revision_ignored === false && /revised 7 days ago/.test(elReal.why), [elBump, elReal]);
+  /* ---- §4: the two cohorts ---- */
+  const cohCal = { f0: '2026-11-13', f1: '2026-11-20', days: 14, weekday: 5, restriction_days: 14 };
+  const cohRows = [
+    { item_id: '101', batch_on: '2026-11-13', units_30d: 2 },
+    { item_id: '102', batch_on: '2026-11-13', units_30d: 10 },
+    { item_id: '103', batch_on: '2026-11-13', units_30d: 6 },
+    { item_id: '104', batch_on: '2026-11-13', units_30d: null },
+    { item_id: '105', batch_on: '2026-11-13', units_30d: 8 },
+    { item_id: '206', batch_on: '2026-11-20', units_30d: 99 },
+    { item_id: '307', batch_on: '2026-12-04', units_30d: 50 },
+    { item_id: '408', batch_on: '', units_30d: 1 }
+  ];
+  const COH = F.adSaleCohorts2(cohRows, cohCal);
+  t('sale cohorts: the better-selling half of what can go in on the nearer batch day is cohort A, best seller first, and the rest are cohort B a batch later',
+    COH.A.item_ids.join(',') === '102,105,103' && COH.B.item_ids.indexOf('101') >= 0 && COH.B.item_ids.indexOf('104') >= 0 &&
+    COH.A.n === 3 && COH.split === 5, [COH.A.item_ids, COH.B.item_ids]);
+  t('sale cohorts: units we do not know sort LAST rather than as nought, so a listing nobody has counted never displaces a seller from the nearer batch day',
+    COH.A.item_ids.indexOf('104') < 0 && COH.B.item_ids.indexOf('104') > COH.B.item_ids.indexOf('101'), COH.B.item_ids);
+  t('sale cohorts: a listing whose own clock already dates it to the later batch day is HELD there and never pulled forward of its clock, and the ones further out are in no cohort at all',
+    COH.B.item_ids.indexOf('206') >= 0 && COH.held === 1 && COH.later === 1 && COH.no_date === 1 &&
+    COH.by_item['307'] === undefined && COH.by_item['408'] === undefined, [COH.held, COH.later, COH.no_date]);
+  t('sale cohorts: the dates are worked out from the rules and not typed — in for the event\'s length, out for the restriction, and back on the first batch day after that',
+    COH.A.batch_on === '2026-11-13' && COH.A.ends_on === '2026-11-26' && COH.A.free_on === '2026-12-11' && COH.A.returns_on === '2026-12-11' &&
+    COH.A.freeze_from === '2026-10-30' && COH.B.batch_on === '2026-11-20' && COH.B.returns_on === '2026-12-18' &&
+    COH.in_days === 14 && COH.out_days === 14 && COH.cycle_days === 28, [COH.A.returns_on, COH.B.returns_on]);
+  t('sale cohorts: the freeze rule and the cycle are sentences built from the rules in force, with no figure typed into either, and every cohort listing is in the lookup',
+    /no price change and no listing change in the 14 days before/.test(COH.freeze_rule) && /while it is in the sale/.test(COH.freeze_rule) &&
+    COH.cycle_text === 'in for 14 days, then out for 14, so at most 14 days of every 28' &&
+    COH.by_item['102'] === 'A' && COH.by_item['101'] === 'B' && COH.by_item['206'] === 'B', [COH.cycle_text, COH.freeze_rule]);
+  t('sale cohorts: the same listing lands in the same cohort every run, because the item number breaks every tie',
+    (() => {
+      const tied = [{ item_id: '900', batch_on: '2026-11-13', units_30d: 5 }, { item_id: '800', batch_on: '2026-11-13', units_30d: 5 }];
+      const a = F.adSaleCohorts2(tied, cohCal), b = F.adSaleCohorts2(tied.slice().reverse(), cohCal);
+      return a.A.item_ids.join(',') === '800' && b.A.item_ids.join(',') === '800';
+    })(), null);
+  t('sale cohorts: nothing eligible is an empty pair of cohorts and not a crash, and a calendar with no batch day gives no dates rather than invented ones',
+    F.adSaleCohorts2([], cohCal).eligible === 0 && F.adSaleCohorts2(null, cohCal).cohorts.length === 2 &&
+    F.adSaleCohorts2(cohRows, {}).A.batch_on === null && F.adSaleCohorts2(cohRows, {}).A.returns_on === null, null);
+  /* ---- §5: the morning after ---- */
+  const maIds = [], maMap = {};
+  for (let i = 0; i < 61; i++) { const id = 'on' + i; maIds.push(id); maMap[id] = { on_sale: true, basis: 'ledger', skip_reason: '', readable: true }; }
+  for (const pair of [['cooldown', 20], ['revised', 9], ['too_new', 4]]) {
+    for (let i = 0; i < pair[1]; i++) { const id = pair[0] + i; maIds.push(id); maMap[id] = { on_sale: false, basis: 'event-text', skip_reason: pair[0], readable: true }; }
+  }
+  const MA = F.adSaleMorningAfter({ n: 94, ids: maIds, at: '2026-11-13T09:00:00.000Z' }, maMap, '2026-11-14');
+  t('sale morning after: the owner\'s own sentence, word for word — entered 94, on sale 61, skipped 33 (cooldown 20, revised 9, too new 4)',
+    maIds.length === 94 && MA.line === 'entered 94, on sale 61, skipped 33 (cooldown 20, revised 9, too new 4)' &&
+    MA.entered === 94 && MA.on_sale === 61 && MA.skipped === 33 && MA.checked === true && MA.recorded_on === '2026-11-13', MA);
+  t('sale morning after: a listing nothing has checked yet is counted APART from the ones eBay left out, because "eBay left it out" and "we have not looked" are different statements',
+    (() => {
+      const MB = F.adSaleMorningAfter({ n: 3, ids: ['a', 'b', 'c'], at: '2026-11-13T09:00:00.000Z' }, { a: { on_sale: true, basis: 'order', readable: true } }, '2026-11-14');
+      return MB.entered === 3 && MB.on_sale === 1 && MB.skipped === 0 && MB.not_looked_at === 2 && /2 not looked at yet/.test(MB.line);
+    })(), null);
+  t('sale morning after: a record written today is not yet checked and says so, and a batch every listing of which went in says that instead of naming a difference',
+    (() => {
+      const today = F.adSaleMorningAfter({ n: 1, ids: ['a'], at: '2026-11-14T09:00:00.000Z' }, { a: { on_sale: true, basis: 'ledger', readable: true } }, '2026-11-14');
+      const allIn = F.adSaleMorningAfter({ n: 2, ids: ['a', 'b'], at: '2026-11-13T09:00:00.000Z' }, { a: { on_sale: true, basis: 'ledger', readable: true }, b: { on_sale: true, basis: 'ledger', readable: true } }, '2026-11-14');
+      return today.checked === false && /will confirm this record or disagree/.test(today.note) &&
+        allIn.checked === true && allIn.line === 'entered 2, on sale 2, skipped 0' && /every listing entered is in the sale/.test(allIn.note);
+    })(), null);
+  /* ---- the snapshot writes in_sale from the rule, and from nothing else ---- */
+  const snapFn = src.slice(src.indexOf('async function adtSaleSnapshot(env) {'), src.indexOf('/* ---- the Friday batch\'s own reads'));
+  t('sale snapshot: not one listed id is marked as being in a sale from the event\'s list alone any more — `added` is the list, `in_sale` is the rule\'s answer, and the rule is the only thing that sets it',
+    snapFn.length > 2000 && !/\{ inSale = 1; basis = 'list'/.test(snapFn) && !/\{ inSale = 1; basis = 'any'/.test(snapFn) &&
+    /let added = 0, basis = 'none', promo = '', ev = null;/.test(snapFn) &&
+    /if \(s && s\.listMap\[id\]\) \{ added = 1; basis = 'list';/.test(snapFn) &&
+    /const M = adSaleMembership\(/.test(snapFn) && /const inSale = M\.on_sale \? 1 : 0;/.test(snapFn), [snapFn.length, /const inSale = M\.on_sale \? 1 : 0;/.test(snapFn)]);
+  t('sale snapshot: the proof and the reason are written down beside the answer, so the page and the probe read the same row rather than each deciding again',
+    /proof_basis: added \? String\(M\.basis \|\| ''\) : ''/.test(snapFn) && /skip_reason: \(added && !inSale\) \? String\(M\.skip_reason \|\| ''\) : ''/.test(snapFn) &&
+    /ALTER TABLE adtool_sale_membership_day ADD COLUMN proof_basis/.test(src) && /ALTER TABLE adtool_sale_membership_day ADD COLUMN skip_reason/.test(src) &&
+    /ALTER TABLE adtool_sale_membership_day ADD COLUMN added/.test(src), null);
+  t('sale snapshot: the price record is read for the listings an event names and over a bounded window, and the orders window is widened to yesterday so a buyer\'s price can be looked for at all',
+    /const ledgerFrom = adtAddDays\(firstStart && firstStart < today \? firstStart : today, -\(ADTOOL_SALE_RESTRICTION_DAYS \+ 2\)\);/.test(snapFn) &&
+    /SELECT item_id, day, price FROM adtool_price_day WHERE day >= \?1 AND item_id IN/.test(snapFn) &&
+    /WHERE local_date >= \?1 AND local_date <= \?2 AND item_id IN/.test(snapFn) && /const yday = adtAddDays\(today, -1\);/.test(snapFn), null);
+  t('sale snapshot: both clocks are cut off at the day eBay judged, so the account-wide repricing of 7 November is not put beside a listing eBay had already left out of an event filled on the 3rd',
+    /const judge = \(ev && \/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(String\(ev\.starts \|\| ''\)\) && String\(ev\.starts\) <= today\) \? String\(ev\.starts\) : today;/.test(snapFn) &&
+    /const changeDays = steps\.filter\(st => st\.kind === 'change' && st\.day <= judge\)\.map\(st => st\.day\);/.test(snapFn) &&
+    /revDay <= judge\) \? revDay : ''/.test(snapFn) && /\.filter\(d => d && d <= judge\)/.test(snapFn), null);
+  t('sale truth: eBay rounds the discounted price itself, so 9.90 under a 5 % markdown reads as the 9.41 eBay actually charges rather than being refused for the half penny',
+    (() => {
+      const on = F.adSaleMembership(smClear, smEv, smLedger(9.9, 9.41), [], smDay);
+      const alsoOn = F.adSaleMembership(smClear, smEv, smLedger(5.95, 5.65), [], smDay);
+      return on.on_sale === true && on.basis === 'ledger' && on.pre_sale_price === 9.9 &&
+        alsoOn.on_sale === true && alsoOn.pre_sale_price === 5.95 && alsoOn.expected_sale_price === 5.65;
+    })(), null);
+  t('sale snapshot: its own note carries BOTH figures, so the fault of 6 November would have been visible in the job list from the first run',
+    /· named ' \+ C\.added_n \+ ' · on sale ' \+ C\.on_sale_n \+ ' · skipped ' \+ C\.skipped_n/.test(snapFn) && /adSaleReasonText\(C\.reasons\)/.test(snapFn), null);
+  /* ---- the GetItem fix: the request shape ---- */
+  t('GetItem fix: a request with no XML at all is refused HERE, with a message that says an empty body is what makes eBay answer 21359, rather than being posted as a zero-length body for eBay to time out on',
+    (() => {
+      const empty = F.adTradeRequestXml({}), nul = F.adTradeRequestXml(null), blank = F.adTradeRequestXml({ xml: '   ' });
+      return empty.ok === false && empty.bytes === 0 && /21359/.test(empty.error) && /^SAY: /.test(empty.error) &&
+        nul.ok === false && blank.ok === false;
+    })(), null);
+  t('GetItem fix: the body is taken from any of the names a caller uses, and which one it came from travels back so a mis-named field can be seen rather than guessed at',
+    (() => {
+      const decl = '<?xml version="1.0" encoding="utf-8"?><GetItemRequest><ItemID>1</ItemID></GetItemRequest>';
+      const byXml = F.adTradeRequestXml({ xml: decl }), byBody = F.adTradeRequestXml({ body: decl }), byReq = F.adTradeRequestXml({ request_xml: decl });
+      return byXml.ok === true && byXml.named === 'xml' && byBody.ok === true && byBody.named === 'body' && byReq.named === 'request_xml' &&
+        byXml.bytes === decl.length && F.ADTOOL_TRADE_XML_FIELDS.indexOf('xml') === 0;
+    })(), null);
+  t('GetItem fix: a byte-order mark and the whitespace a copied heredoc leaves are trimmed off, and a body with no declaration is refused with eBay\'s own reason named',
+    (() => {
+      const decl = '<?xml version="1.0" encoding="utf-8"?><GetItemRequest><ItemID>1</ItemID></GetItemRequest>';
+      const messy = F.adTradeRequestXml({ xml: '﻿\n  ' + decl + '\n' });
+      const noDecl = F.adTradeRequestXml({ xml: '<GetItemRequest><ItemID>1</ItemID></GetItemRequest>' });
+      return messy.ok === true && messy.xml === decl && noDecl.ok === false && /XML Parse error/.test(noDecl.error);
+    })(), null);
+  t('GetItem fix: what eBay said comes back named, so a refusal that arrives as HTTP 200 with Ack Failure can never read as a success again',
+    (() => {
+      const fail = F.adTradeAckOf('<GetItemResponse><Ack>Failure</Ack><Errors><ShortMessage>Input transfer has been terminated because your request timed out.</ShortMessage><ErrorCode>21359</ErrorCode></Errors></GetItemResponse>');
+      const good = F.adTradeAckOf('<GetItemResponse><Ack>Success</Ack></GetItemResponse>');
+      return fail.ack === 'Failure' && fail.ok === false && fail.error_codes.join(',') === '21359' && /Input transfer/.test(fail.first_message) &&
+        good.ack === 'Success' && good.ok === true && good.error_codes.length === 0;
+    })(), null);
+  t('GetItem fix: the key route itself no longer posts whatever arrived under one name, and it carries the ack and the bytes it sent back out with the reply',
+    (() => {
+      const route = src.slice(src.indexOf('  ebayTradeCall: {'), src.indexOf('  ebayConsentLinkKey: {'));
+      return route.length > 500 && route.indexOf("body: String(p.xml || '')") < 0 && /const REQ = adTradeRequestXml\(p\);/.test(route) &&
+        /if \(!REQ\.ok\) throw new Error\(REQ\.error\);/.test(route) && /body: REQ\.xml,/.test(route) &&
+        /sent_bytes: REQ\.bytes, sent_as: REQ\.named \}, adTradeAckOf\(xml\)\)/.test(route) &&
+        /zero-length POST/.test(src) && /21359/.test(src);
+    })(), null);
+  /* ---- §3 and §6: the page's account strip and its new blocks, and the probe ---- */
+  t('sale page: the account buttons are the same control as the one on Where each listing advertises, pressing one asks the engine again for that account, and the counts on them are the whole fleet\'s',
+    /\.sv-filters\{/.test(svSrc) && /function accountStrip\(\)/.test(svCode) && /h \+= accountStrip\(\)/.test(svCode) &&
+    /account_strip/.test(svCode) && /SV\.account = want;/.test(svCode) && /if \(SV\.account\) \{ p\.account = SV\.account; \}/.test(svCode) &&
+    /All accounts/.test(svSrc), null);
+  t('sale page: the running-events block prints what each event really did, one line per event, with the reason counts beside the ones eBay left out',
+    /function runningEvents\(\)/.test(svCode) && /h \+= runningEvents\(\)/.test(svCode) &&
+    /e\.named_n/.test(svCode) && /e\.on_sale_n/.test(svCode) && /e\.skipped_n/.test(svCode) && /function reasonsCell\(/.test(svCode) &&
+    /An event naming a listing is not a listing in a sale/.test(svSrc), null);
+  t('sale page: the morning-after check and the two cohorts each have a block of their own, and the freeze rule is printed where the cohorts are',
+    /function morningAfter\(\)/.test(svCode) && /h \+= morningAfter\(\)/.test(svCode) && /entered_check/.test(svCode) &&
+    /function cohortView\(\)/.test(svCode) && /h \+= cohortView\(\)/.test(svCode) && /C\.freeze_rule/.test(svCode) && /The freeze rule/.test(svSrc), null);
+  t('sale page: every row carries its cohort and, where an event already names it and eBay left it out, says so on the row itself',
+    /function cohortTag\(id\)/.test(svCode) && /function cohortOf\(id\)/.test(svCode) && /cohort_reason|by_item/.test(svCode) &&
+    /function skipNote\(r\)/.test(svCode) && /r\.skip_word/.test(svCode) && /eBay left it out/.test(svSrc), null);
+  t('sale page: it re-reads itself inside five minutes through the shared poller, which waits on a hidden tab and stops for good on a lapsed session',
+    /adtPoll\('svBody', 300000, function \(\) \{ return load\(true\); \}\);/.test(svCode) && /function load\(quiet\)/.test(svCode) &&
+    /if \(!quiet && \$\('svBody'\)\)/.test(svCode), null);
+  t('sale page: the proof behind every listing in a sale is printed, and the event\'s list alone is shown as the weak answer it is rather than as a proof',
+    /function proofWords\(b\)/.test(svCode) && /PROOF_WORDS/.test(svCode) && /r\.membership_basis/.test(svCode) &&
+    /the event’s list alone/.test(svSrc), null);
+  t('sale pair: the second of two events naming the SAME listings counts the ones the first event got as in another event rather than under one of the four reasons, so the figures on its line add up',
+    (() => {
+      const comp = src.slice(src.indexOf('  const eventCounts = {};'), src.indexOf('  const B = adSaleBatches(items, today,'));
+      const page = svCode;
+      return /if \(it\.in_sale && !mine\) \{ another\+\+;/.test(comp) &&
+        /in_another_event: another,/.test(comp) &&
+        /reasons_text: adSaleReasonText\(C\.reasons\) \+ \(another > 0 \? ', ' \+ another \+ ' in another event' : ''\)/.test(comp) &&
+        /e\.in_another_event/.test(page) && /are in another event/.test(svSrc);
+    })(), null);
+  t('sale probe: it carries a line for every running event and the count of what each proof actually proved, which is how Sir Hasib\'s pair can be read by key',
+    (() => {
+      const pr = src.slice(src.indexOf('  adsSaleProbe: {'), src.indexOf('  adsVideoProbe: {'));
+      return /events: \(D\.running_events \|\| \[\]\)\.map/.test(pr) && /named_n: e\.named_n, added_n: e\.added_n, on_sale_n: e\.on_sale_n, skipped_n: e\.skipped_n/.test(pr) &&
+        /membership_basis_counts: \(\(\) => \{/.test(pr) && /cohorts: D\.cohorts \?/.test(pr) && /morning_after:/.test(pr) &&
+        /account_strip: D\.account_strip/.test(pr) && !/fetch\(/.test(pr) && /ebay_word: \{/.test(pr);
+    })(), null);
+  t('sale payload: the engine sends a line per running event, the cohorts, the account strip and the morning-after check, and every one of them is read by the page',
+    (() => {
+      const sends = f => new RegExp('\\b' + f + '\\b').test(src);
+      const reads = f => new RegExp('\\b' + f + '\\b').test(svCode);
+      return ['running_events', 'cohorts', 'account_strip', 'entered_check', 'membership_basis', 'skip_word', 'reasons_text'].every(f => sends(f) && reads(f));
+    })(), null);
+  t('sale payload: the honest limits now say that an event naming a listing is not a listing in a sale, and that the reason beside a skipped one is our reading and not eBay\'s word',
+    /An event naming a listing is not on its own a listing in a sale/.test(src) && /OUR OWN clock reading and not eBay’s word/.test(src), null);
 
   /* (l) the fields the three pages read, against the ones the engine actually sends. A field the page
      reads and the engine never sends is an EMPTY CELL, and an empty cell where a number belongs is
@@ -6380,7 +6685,7 @@ function run(argv) {
       src.indexOf('await adtBatch(env, ddl.map(s => env.DB.prepare(s)))') < 0;
     /* every guarded ALTER left in the families goes through adtDdlOne, and the only raw guarded
        ALTER left in the engine is the rollup's own repair of sales_daily, which is no family's */
-    const alters = (src.match(/await adtDdlOne\(env, /g) || []).length === 19 &&
+    const alters = (src.match(/await adtDdlOne\(env, /g) || []).length === 22 &&
       (src.match(/env\.DB\.prepare\('ALTER |env\.DB\.prepare\("ALTER /g) || []).length === 1 &&
       /catch \(e\) \{ try \{ await env\.DB\.prepare\('ALTER TABLE sales_daily ADD COLUMN pri_est INTEGER DEFAULT 0'\)/.test(src);
     /* the truth family keeps the KV tag it already had: an edge-cached read is cheaper still, and it
@@ -6576,7 +6881,10 @@ function run(argv) {
     const moved = v !== '2026-11-05.1' && h !== '199-4f19ee92' && /^\d{4}-\d{2}-\d{2}\.\d+$/.test(v);
     /* 199 statements plus exactly these nine. The hash itself is pinned by the fingerprint test
        further up this file, which recomputes it from the source. */
-    const grew = String(h).split('-')[0] === '208';
+    /* 10 Nov: the sale truth rule added three guarded ALTERs, so the count moved on from 208.
+       It must never go BACKWARDS, which is what this holds; the fingerprint test above is what
+       pins the hash itself to the file. */
+    const grew = Number(String(h).split('-')[0] || 0) >= 208;
     return moved && grew;
   })(), null);
   t('night baseline: alertAckWatch asks its once-a-day gate BEFORE the candidate read, so the 23 runs a day with nothing to do cost one row instead of 12.8 million', (() => {
