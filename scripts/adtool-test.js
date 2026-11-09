@@ -6676,7 +6676,7 @@ function run(argv) {
   })(), null);
   t('peak campaign fill: the job runs by key and sits on no cron slot, because a once-over of a list people keep must not re-name rows somebody cleared on purpose', (() => {
     const rk = src.slice(src.indexOf('  runJobKey: {'), src.indexOf('  asRunJob: {'));
-    const byKey = rk.length > 200 && /adtoolPeakCampaignFill, adtoolPeakHoursSet \};/.test(rk);
+    const byKey = rk.length > 200 && /adtoolPeakCampaignFill, adtoolPeakHoursSet, adtoolPeakPlan \};/.test(rk);
     const cm = src.slice(src.indexOf('function cronMap() {'), src.indexOf('export default {'));
     const noCron = cm.length > 1000 && cm.indexOf('adtoolPeakCampaignFill') < 0;
     /* it keeps its own row in the job trail, under its own name, like every other job here */

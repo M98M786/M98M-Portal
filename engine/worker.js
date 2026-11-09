@@ -29466,7 +29466,7 @@ const ROUTES = {
         adtoolRollupsCatchup, adtoolRollupOwedSeed,
         /* a once-over of the peak list, run by hand and on no cron slot: it names the campaign a
            listing is already wholly switched in, and never chooses for one in two (2 Nov) */
-        adtoolPeakCampaignFill, adtoolPeakHoursSet };
+        adtoolPeakCampaignFill, adtoolPeakHoursSet, adtoolPeakPlan };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);
