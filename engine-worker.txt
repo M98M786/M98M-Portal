@@ -29229,7 +29229,8 @@ const ROUTES = {
     auth: 'sync', fn: async (p, ctx) => {
       const iid = String((p && p.item_id) || '').replace(/\D/g, '').slice(0, 24);
       if (!iid) throw new Error('SAY: give an item id');
-      const d = await adtoolListingCompute(ctx.env, iid, null);
+      /* the probe forwards the reader's window and nothing else, so the pattern blocks can be checked by key */
+      const d = await adtoolListingCompute(ctx.env, iid, (p && p.pattern) ? { pattern: p.pattern } : null);
       const hw = d.hours_window || {}, pw = (d.patterns && d.patterns.window) || {};
       return {
         item_id: iid,

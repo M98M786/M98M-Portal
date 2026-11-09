@@ -6022,7 +6022,7 @@ function run(argv) {
     const gated = /auth: 'sync', fn: async \(p, ctx\) => \{/.test(pr);
     /* THE SAME COMPOSITION, through the same function, with the memo bypassed: a probe that answered
        out of the cache would be timing the cache */
-    const same = /const d = await adtoolListingCompute\(ctx\.env, iid, null\);/.test(pr) && pr.indexOf('adtKvMemo') < 0;
+    const same = /const d = await adtoolListingCompute\(ctx\.env, iid, \(p && p\.pattern\) \? \{ pattern: p\.pattern \} : null\);/.test(pr) && pr.indexOf('adtKvMemo') < 0;
     /* the clock and the sizes and nothing else: no money, no profit, no listing text. A key is not a
        role, so this route must never be a way round the profit law or round the page flag. */
     const only = /timings: d\.timings,/.test(pr) && /rows: \{ days: \(d\.days \|\| \[\]\)\.length, hours: \(d\.hours \|\| \[\]\)\.length, hour_profile: Number\(hw\.profile_rows\) \|\| 0, weeks: \(d\.weeks \|\| \[\]\)\.length, months: \(d\.months \|\| \[\]\)\.length,/.test(pr) &&
