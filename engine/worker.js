@@ -6997,8 +6997,17 @@ async function adtoolListingCompute(env, iid, p) {
       env.DB.prepare('SELECT day, json FROM adtool_descriptors WHERE item_id = ?1 ORDER BY day').bind(iid).all().then(r => (r && r.results) || []).catch(() => null),
     ])),
     clock('fresh_ms', () => Promise.all([adtFresh(env, 'day'), adtFresh(env, 'today')])),
+    /* 9 Nov (owner: "in product history show if the item is in peak time or not"): the listing's row on
+       the peak list, its stored schedule for today and tomorrow, and the account switches, read the way
+       the Peak page reads them. Guarded as one: a database without the peak tables answers "not known"
+       for the whole block rather than half of it. Appended LAST so the indexes above do not move. */
+    clock('peak_ms', () => Promise.all([
+      env.DB.prepare("SELECT account, hours, COALESCE(auto, 0) AS auto, COALESCE(hold, '') AS hold, COALESCE(campaign_id, '') AS campaign_id, added_by, added_at, removed_at FROM adtool_peak_items WHERE item_id = ?1").bind(iid).first(),
+      adtPeakSchedulesRead(env, [iid], [today, adtAddDays(today, 1)]),
+      adtPeakLiveSwitches(env),
+    ]).catch(() => null)),
   ]));
-  const cr = G[0], tRowRaw = G[1], saleRows = G[2], where = G[3], profile = G[4], notes = G[5], freshPair = G[6];
+  const cr = G[0], tRowRaw = G[1], saleRows = G[2], where = G[3], profile = G[4], notes = G[5], freshPair = G[6], peakRead = G[7];
   const L = (cr[0] || [])[0];
   if (!L) throw new Error('SAY: no listing with that id in the tool yet (the rollup has not seen it)');
   const days = cr[1] || [], hours = cr[2] || [], hourProfile = cr[3] || [], weeks = cr[4] || [], months = cr[5] || [], actions = cr[6] || [];
@@ -7007,6 +7016,31 @@ async function adtoolListingCompute(env, iid, p) {
   const saleField = saleRows
     ? { in_sale: sm ? Number(sm.in_sale) === 1 : false, eligible_on: st && st.eligible_on ? String(st.eligible_on) : null }
     : { in_sale: false, eligible_on: null };
+  /* the peak-time facts for the header: on the list or not, the typed hours, who switches it, the
+     account's live-apply switch, and the next change under the stored schedule (the same pure walk the
+     Peak page uses). null = the peak tables could not be read, which the page prints as not known. */
+  let peakField = null;
+  if (peakRead) {
+    const pr = peakRead[0] || null, sched = peakRead[1] || {}, sw = peakRead[2] || {};
+    const onList = !!(pr && !String(pr.removed_at || '').trim());
+    const uk = adtUkParts(Date.now());
+    const schT = sched[iid + '|' + today] || null, schM = sched[iid + '|' + adtAddDays(today, 1)] || null;
+    peakField = {
+      on_list: onList,
+      hours: onList ? String(pr.hours || '') : '',
+      auto: onList ? (Number(pr.auto) ? 1 : 0) : 0,
+      hold: onList ? String(pr.hold || '') : '',
+      campaign_id: onList ? String(pr.campaign_id || '') : '',
+      added_by: onList ? String(pr.added_by || '') : '', added_at: onList ? String(pr.added_at || '') : '',
+      removed_at: pr && String(pr.removed_at || '').trim() ? String(pr.removed_at) : '',
+      live_switch_on: L.account in sw ? !!sw[L.account] : null,
+      next_switch: onList ? adPeakNextSwitch({
+        today: schT && schT.readable ? Object.assign({ day: today }, schT) : null,
+        tomorrow: schM && schM.readable ? Object.assign({ day: adtAddDays(today, 1) }, schM) : null,
+        uk: uk,
+      }) : null,
+    };
+  }
   const tRow = adtTodayRowHonest(tRowRaw, todayUtc);
   const kpis = { yesterday: adtWindowSums(days, yday, yday), d7: adtWindowSums(days, adtAddDays(today, -7), yday), d30: adtWindowSums(days, adtAddDays(today, -30), yday) };
   kpis.today = tRow
@@ -7057,7 +7091,7 @@ async function adtoolListingCompute(env, iid, p) {
   T.total_ms = Date.now() - t0;
   return {
     item_id: iid,   /* the whole response is this one listing's: profit keys below are item-level by construction */
-    header: { item_id: iid, account: L.account, title: L.title, image: img && img.image ? String(img.image) : null, category: L.m98m_category, category_source: L.category_source, is_case: !!L.is_case, case_type: L.case_type, ebay_category_path: L.ebay_category_path, price: L.price, margin: L.margin_before_ads, margin_source: L.margin_source, breakeven_roas: L.breakeven_roas, start_time: L.start_time, age_days: age, status: L.status, first_ad_day: L.first_ad_day, first_order_day: L.first_order_day, last_ad_day: L.last_ad_day, stage: null, in_sale: saleField.in_sale, eligible_on: saleField.eligible_on },
+    header: { item_id: iid, account: L.account, title: L.title, image: img && img.image ? String(img.image) : null, category: L.m98m_category, category_source: L.category_source, is_case: !!L.is_case, case_type: L.case_type, ebay_category_path: L.ebay_category_path, price: L.price, margin: L.margin_before_ads, margin_source: L.margin_source, breakeven_roas: L.breakeven_roas, start_time: L.start_time, age_days: age, status: L.status, first_ad_day: L.first_ad_day, first_order_day: L.first_order_day, last_ad_day: L.last_ad_day, stage: null, in_sale: saleField.in_sale, eligible_on: saleField.eligible_on, peak: peakField },
     period: w, kpis, fresh, fresh_today: freshToday, campaigns: camps, where, profile, forecast, decision, narrative, days, hours, weeks, weeks_note: 'the week and month grains hold finished days only — the current ISO week / month run Monday / the 1st to yesterday; today lives on the today grain (kpis.today)', weeks_behaviour, months, weekday: wd, heat, slots, dom, actions,
     /* WHAT THE HOURS IN THIS ANSWER COVER, said in the answer rather than left to be guessed: the
        `hours` rows are one day, the day the hour chart draws, and the profile behind the heat map,
@@ -14461,6 +14495,7 @@ const ADTOOL_ACTIONS_P15 = {
         }
       }
       await adtPeakCacheClear(env, a);
+      await adtListingCacheClear(env, iid);   /* Product history's header names the peak list */
       const sw = await adtPeakLiveSwitches(env);
       /* the add is the act that arms a listing, so it is written to the audit trail with who did it (28 Oct:
          three live sends on AZHAR ABRT had no readable record of who had added the listings) */
@@ -14488,6 +14523,7 @@ const ADTOOL_ACTIONS_P15 = {
       await env.DB.prepare("UPDATE adtool_peak_items SET removed_by = ?2, removed_at = datetime('now') WHERE item_id = ?1 AND removed_at = ''").bind(iid, by).run();
       const a = String(row.account || '');
       await adtPeakCacheClear(env, a);
+      await adtListingCacheClear(env, iid);   /* Product history's header names the peak list */
       return { ok: true, item_id: iid, account: a, removed_by: by, kept: true, sent_to_ebay: false };
     },
   },
@@ -14519,6 +14555,7 @@ const ADTOOL_ACTIONS_P15 = {
       catch (e) { throw new Error('SAY: this database cannot record a hold against a peak listing yet. Try again in a minute'); }
       const a = String(row.account || '');
       await adtPeakCacheClear(env, a);
+      await adtListingCacheClear(env, iid);   /* Product history's header names the peak list */
       try { await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_PEAK_HOLD', ?2, ?3, ?4, datetime('now'))").bind(by, iid, was, asked).run(); } catch (e) { /* the trail must never block the hold */ }
       const sw = await adtPeakLiveSwitches(env);
       const nowUkH = adtUkParts(Date.now());

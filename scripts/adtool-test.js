@@ -5970,7 +5970,7 @@ function run(argv) {
       /clock\('core_ms', \(\) => adtBatchRead\(env, core\)\),/.test(plSrc);
     /* the core group is ONE batch of eight statements, read back in the order they were sent */
     const eight = (plSrc.slice(plSrc.indexOf('const core = ['), plSrc.indexOf("const G = await clock('reads_ms'")).match(/env\.DB\.prepare\(/g) || []).length === 8 &&
-      /const cr = G\[0\], tRowRaw = G\[1\], saleRows = G\[2\], where = G\[3\], profile = G\[4\], notes = G\[5\], freshPair = G\[6\];/.test(plSrc);
+      /const cr = G\[0\], tRowRaw = G\[1\], saleRows = G\[2\], where = G\[3\], profile = G\[4\], notes = G\[5\], freshPair = G\[6\](?:, peakRead = G\[7\])?;/.test(plSrc);
     /* the campaign map went from four trips to one, and the pattern bundle from five to one */
     const wr = (src.slice(src.indexOf('const WR = await adtBatchRead(env, ['), src.indexOf('const rows = WR[0] || [];')).match(/env\.DB\.prepare\(/g) || []).length === 4;
     const pb = (src.slice(src.indexOf('const PB = await adtBatchRead(env, ['), src.indexOf('const st = (PB[0] || [])[0];')).match(/env\.DB\.prepare\(/g) || []).length === 5;
@@ -6981,6 +6981,21 @@ function run(argv) {
     const keyed = /adtoolPeakCampaignFill, adtoolPeakHoursSet/.test(src);
     const form = /\['Evening', \[\{ from: 17, to: 22 \}\]\],/.test(pk) && /PK\.ranges = \[\{ from: 17, to: 22 \}\];/.test(pk) && !/from: 17, to: 23/.test(pk);
     return std && job && cron && keyed && form;
+  })(), null);
+
+  /* 9 Nov: Product history says whether the listing is on the peak-time list, and what that means now */
+  t('product history: the header carries the peak-time facts from the peak tables, read as one guarded block, and the page prints them with a link to the Peak page', (() => {
+    const lc = src.slice(src.indexOf('async function adtoolListingCompute('), src.indexOf('async function adtListingCacheClear('));
+    const read = /clock\('peak_ms', \(\) => Promise\.all\(\[/.test(lc) && /FROM adtool_peak_items WHERE item_id = \?1"\)\.bind\(iid\)\.first\(\)/.test(lc) &&
+      /adtPeakSchedulesRead\(env, \[iid\], \[today, adtAddDays\(today, 1\)\]\)/.test(lc) && /adtPeakLiveSwitches\(env\),\n\s*\]\)\.catch\(\(\) => null\)\)/.test(lc);
+    const compose = /let peakField = null;/.test(lc) && /next_switch: onList \? adPeakNextSwitch\(\{/.test(lc) && /live_switch_on: L\.account in sw \? !!sw\[L\.account\] : null/.test(lc) &&
+      /eligible_on: saleField\.eligible_on, peak: peakField \}/.test(lc);
+    const pv = readFile('frontend/view-adtool-product.js');
+    const page = /function peakLines\(P\) \{/.test(pv) && /peakLines\(H\.peak\) \+ '<\/div><\/div><\/div>';/.test(pv) &&
+      /not known<\/b>/.test(pv) && /not on the list<\/b>/.test(pv) && /href="#adtoolPeak"/.test(pv) && /live apply off, written down only/.test(pv);
+    /* and the three peak actions drop this page's memo, so a change on the list shows here at once */
+    const clears = (src.match(/await adtListingCacheClear\(env, iid\);   \/\* Product history's header names the peak list \*\//g) || []).length === 3;
+    return read && compose && page && clears;
   })(), null);
 
   const passed = results.filter(r => r.ok).length;

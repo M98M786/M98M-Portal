@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261109-1035';
+var BUILD = '20261109-1702';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9759,6 +9759,26 @@ VIEW_CSS.push(
   function kpi(k, v, d, c) { return '<div class="at-kpi"><div class="k">' + esc(k) + '</div><div class="v ' + (c || '') + '">' + v + '</div><div class="d">' + d + '</div></div>'; }
   /* the stage badge's hover, in words. It used to read "confidence 0.82 · 28-day slope 3.1 %/day ·
      level 1.4/day vs peak 2.1", which is notation, not a sentence a seller can act on. */
+  /* THE PEAK-TIME LINE. On the list: its hours, who switches it (the system, or left to a person), whether
+     the account's live-apply switch is on (otherwise the hours are written down only), and the next change
+     under its schedule. Off the list: says so, with the day it was taken off if it ever was. Null = the
+     peak tables could not be read, which is "not known", never "no". Links to the Peak page. */
+  function peakLines(P) {
+    var link = ' <a href="#adtoolPeak" style="color:var(--gold-a);font-weight:700">Peak time listings</a>';
+    if (P == null) return '<div>Peak time: <b style="color:var(--text)">not known</b></div>';
+    if (!P.on_list) {
+      return '<div>Peak time: <b style="color:var(--text)">not on the list</b>' +
+        (P.removed_at ? ' <span class="at-src">taken off ' + esc(String(P.removed_at).slice(0, 10)) + '</span>' : '') + link + '</div>';
+    }
+    var who = P.hold === 'on' ? 'held on by hand' : P.hold === 'off' ? 'held off by hand'
+      : (Number(P.auto) ? 'the system switches it' : 'left to a person');
+    var live = P.live_switch_on == null ? '' : (P.live_switch_on ? ' · live apply on' : ' · live apply off, written down only');
+    var nx = P.next_switch;
+    var next = nx && nx.at ? '<div class="at-src">next: ' + esc(nx.to === 'ON' ? 'on' : 'off') + ' at ' + esc(String(nx.at).slice(11, 16)) +
+      (nx.day ? ' on ' + esc(String(nx.day).slice(5)) : '') + (nx.source ? ' · ' + esc(nx.source) : '') + '</div>' : '';
+    return '<div>Peak time: <b style="color:var(--text)">on the list' + (P.hours ? ' · ' + esc(P.hours) + ' UK' : '') + '</b>' +
+      ' <span class="at-src">' + esc(who) + esc(live) + '</span>' + link + next + '</div>';
+  }
   function stageWhy(st) {
     var c = Number(st && st.confidence);
     var word = isNaN(c) ? 'we cannot say how sure we are' : (c >= 0.8 ? 'we are confident' : c >= 0.5 ? 'we are fairly confident' : 'we are not very confident');
@@ -9795,7 +9815,9 @@ VIEW_CSS.push(
       '<div>First ad day ' + esc(H.first_ad_day || '—') + ' · last ' + esc(H.last_ad_day || '—') + '</div>' +
       /* Phase 5 sale-event fields — observed at one-day granularity; null → not known yet */
       '<div>Currently in Sale Event: <b style="color:var(--text)">' + (H.in_sale == null ? '—' : (H.in_sale ? 'YES' : 'NO')) + '</b></div>' +
-      '<div>Eligible for Sale Event On <b style="color:var(--text)">' + esc(H.eligible_on ? String(H.eligible_on).slice(0, 10) : '—') + '</b></div></div></div></div>';
+      '<div>Eligible for Sale Event On <b style="color:var(--text)">' + esc(H.eligible_on ? String(H.eligible_on).slice(0, 10) : '—') + '</b></div>' +
+      /* 9 Nov (owner): is this listing on the peak-time list, and what does that mean for it right now */
+      peakLines(H.peak) + '</div></div></div>';
     /* The five periods print ONCE. This page used to show them as a tile strip and then AGAIN, lower
        down, as a "Profit & loss" table carrying the same measures over the same five periods. The table
        is the home: it holds orders, units and units-not-from-ads as well, so nothing was lost when the
