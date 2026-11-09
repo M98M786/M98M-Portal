@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261109-1957';
+var BUILD = '20261109-2006';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -4206,7 +4206,27 @@ VIEW_CSS.push(
     '.cpc-age{display:block;font-size:10px;color:var(--text-3);font-weight:600;line-height:1.5;margin-top:2px;white-space:normal}',
     '.cpc-age.old{color:var(--text-2)}',
     '.cpc-empty{color:var(--text-3);font-size:13px;padding:10px 0}',
-    '.cpc-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}'
+    '.cpc-src{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:700;margin-left:8px;border-bottom:1px dotted var(--gold-line);cursor:pointer}',
+    /* the By period block under every listing row (owner, 10 Nov). The Peak page draws the same
+       table; these rules are its rules written out again under THIS page's prefix, because one
+       page's class names are not another page's to borrow. They come after the table rules above on
+       purpose: an inner table sits inside a .cpc-tbl cell and has to win the padding. */
+    '.cpc-rules{background:var(--panel-2);border:1px dashed var(--gold-line);border-radius:12px;padding:11px 14px;margin:0 0 12px;color:var(--text-2);font-size:12px;line-height:1.6}',
+    '.cpc-rules b{color:var(--text)}',
+    '.cpc-bad{color:' + LOSS + ';font-weight:700}',
+    '.cpc-sm2{font-size:10.5px;color:var(--text-3);line-height:1.45}',
+    '.cpc-perk{font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:800}',
+    '.cpc-per{border:1px solid var(--gold-line);border-radius:12px;padding:9px 11px;margin:0;background:var(--panel-2)}',
+    '.cpc-perhead{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;justify-content:space-between;margin:0 0 6px}',
+    '.cpc-open{font-size:10.5px;font-weight:800;color:var(--gold-a);text-decoration:underline;text-underline-offset:2px;white-space:nowrap}',
+    '.cpc-moving{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:800;color:var(--gold-a);border:1px solid rgba(242,176,53,.4);white-space:nowrap}',
+    '.cpc-htbl{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums}',
+    '.cpc-htbl th{text-align:left;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:4px 6px;border-bottom:1px solid var(--gold-line);white-space:nowrap;cursor:default}',
+    '.cpc-htbl td{padding:4px 6px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text-2);vertical-align:top}',
+    '.cpc-htbl td.hr{color:var(--text);font-weight:700;white-space:nowrap}',
+    '.cpc-htbl th.r,.cpc-htbl td.r{text-align:right;white-space:nowrap}',
+    '.cpc-tbl tr.cpc-sub2 td{padding:0 8px 10px;border-bottom:1px solid var(--gold-line)}',
+    '.cpc-tbl tr.cpc-sub2:hover td{background:transparent}'
   ].join(''));
 
   function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
@@ -4559,10 +4579,89 @@ VIEW_CSS.push(
      period. A second units figure on a different window, in a column of dashes, would have read as
      "sold nothing". How many campaigns a listing sits in takes its place, which the answer does
      carry and which nothing else on this page prints as a number. */
+  /* ══ EVERY LISTING'S OWN BY PERIOD FIGURES (owner, 10 Nov) ═══════════════════════════════════
+     "On entire listings page I need product history numbers added, with the item details and item
+     ids, so that I can see the items that are running are currently working nicely." This is the By
+     period table Product history draws and the Peak page draws under its rows: the same columns in
+     the same order, the same wording and the same numbers, because the engine builds all three out
+     of ONE function. Nothing here adds anything up — every figure is printed as the answer carries
+     it — and nothing here reaches eBay.
+     Today and all time are marked as still updating, because today's ad spend is a part-day reading
+     and all time has today spliced into it. A window the answer holds no day for says so rather
+     than printing noughts nobody earned. ROAS goes through this page's own roasTxt, which prints
+     the same two places Product history prints. */
+  var PERIODS = [['today', 'Today so far'], ['yesterday', 'Yesterday'], ['d7', 'Last 7 days'], ['d30', 'Last 30 days'], ['all', 'All time']];
+  /* which rows are still moving: today, and any window the engine says today is spliced into */
+  function perMoving(key, p) { return key === 'today' || !!(p && p.includes_today); }
+  function perRow(key, label, p) {
+    var mark = perMoving(key, p) ? ' <span class="cpc-moving">still updating</span>' : '';
+    if (!p || typeof p !== 'object') {
+      return '<tr><td class="hr">' + esc(label) + mark + '</td><td colspan="7"><span class="cpc-sm2">not available yet</span></td></tr>';
+    }
+    /* the orders the profit could not price: the Ali cost not typed in yet, or eBay's fee not landed.
+       Counted beside the figure and never folded into it, which is how the law works everywhere else. */
+    var pc = n0(p.pending_cost_orders), pf = n0(p.pending_fee_orders), un = pc + pf;
+    return '<tr><td class="hr">' + esc(label) + mark + '</td>' +
+      '<td class="r">' + gbp(p.spend) + '</td>' +
+      '<td class="r">' + cnt(p.attr_units) + '</td>' +
+      '<td class="r">' + roasTxt(num(p.roas)) + '</td>' +
+      '<td class="r">' + cnt(p.orders) + '</td>' +
+      '<td class="r">' + cnt(p.units) + '</td>' +
+      '<td class="r">' + cnt(p.units_not_from_ads) + '</td>' +
+      '<td class="r">' + adtProfitCell(p.actual_profit, 0, 0) +
+      (un > 0 ? '<div class="cpc-sm2" title="' + esc(pc + ' without a cost, ' + pf + ' without fees') + '">' +
+        cnt(un) + ' ' + plural(un, 'order', 'orders') + ' not costed yet</div>' : '') + '</td></tr>';
+  }
+  function periodsBlock(r) {
+    var id = String((r && r.item_id) || ''), P = r && r.periods;
+    var h = '<div class="cpc-per"><div class="cpc-perhead"><span class="cpc-perk">By period</span>' +
+      (id ? '<a class="cpc-open" href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener"' +
+        ' title="open this listing&#39;s full Product history in a new tab">the full Product history ↗</a>' : '') +
+      '</div>';
+    if (!P || typeof P !== 'object') {
+      return h + '<div class="cpc-sm2">This answer carries no figures by period for this listing, so none is shown.</div></div>';
+    }
+    var any = PERIODS.filter(function (x) { return P[x[0]] && typeof P[x[0]] === 'object'; }).length;
+    if (!any) {
+      return h + '<div class="cpc-sm2">We hold no day and no sales for this listing yet, so there is nothing to show by period.</div></div>';
+    }
+    return h + '<div class="cpc-scroll"><table class="cpc-htbl"><thead><tr><th>Period</th>' +
+      '<th class="r">Ad spend</th><th class="r">Units from ads</th><th class="r">ROAS</th>' +
+      '<th class="r">Orders</th><th class="r">Units</th><th class="r">Units not from ads</th>' +
+      '<th class="r">Profit</th></tr></thead><tbody>' +
+      PERIODS.map(function (x) { return perRow(x[0], x[1], P[x[0]]); }).join('') +
+      '</tbody></table></div></div>';
+  }
+  /* WHERE THOSE FIGURES COME FROM, said ONCE above the first table and not under each of hundreds
+     of rows. The sentence is the engine's, so it cannot drift from what the engine actually read. */
+  function periodsNote() {
+    var D = CP.split || null;
+    var t = String((D && D.periods_note) || '').trim();
+    var bad = String((D && D.periods_problem) || '').trim();
+    if (!t && !bad) return '';
+    return '<div class="cpc-rules"><b>The figures by period under each row.</b> ' + (t ? esc(t) + '.' : '') +
+      (bad ? ' <span class="cpc-bad">' + esc(bad) + '.</span>' : '') + '</div>';
+  }
+  /* THE SEVEN-DAY PROFIT EACH LIST SORTS ON. The engine sends it on the row and inside the table
+     under the row, and they are one number: the row's copy is lifted straight out of that table so
+     a sort never has to walk into it. The row's copy is read first and the table second, so an
+     older answer that carries only the table still sorts. NULL is "not known", never nought: a
+     listing we hold no day for in that window is not a listing that earned nothing. */
+  function per7(r) {
+    if (!r || typeof r !== 'object') return null;
+    if (r.profit_7d != null) return num(r.profit_7d);
+    var P = r.periods, d = (P && typeof P === 'object') ? P.d7 : null;
+    return (d && typeof d === 'object') ? num(d.actual_profit) : null;
+  }
+  function profit7Cell(r) {
+    var v = per7(r);
+    return v == null ? '<span class="cpc-sub">not known</span>' : adtProfitCell(v, 0, 0);
+  }
   var SPLIT_COLS = [
     { key: 'listing', label: 'Listing', cell: function (r) { return adtProductCell(r); }, sortVal: function (r) { return String(r.title || r.item_id || ''); } },
     { key: 'campaigns', label: 'Where its ad sits', cell: campaignsCell, sortVal: function (r) { var c = (r.campaigns || [])[0] || {}; return c.campaign_name || c.name || ''; } },
     { key: 'spend_7d', label: 'Spent over 7 days', cls: 'r', title: 'ad spend over the last 7 finished days', cell: function (r) { return gbp(r.spend_7d); }, sortVal: function (r) { return num(r.spend_7d); } },
+    { key: 'profit_7d', label: 'Profit over 7 days', cls: 'r', title: 'this listing\'s own profit over the last 7 finished days, after eBay fees, product cost, ad spend and returns. Sort on it to see which of the running listings are working and which are not.', cell: profit7Cell, sortVal: per7 },
     { key: 'campaigns_count', label: 'Campaigns', cls: 'r', title: 'how many campaigns this listing is live in. More than one means each of them charges for the same listing.', cell: function (r) { var n = num(r.campaigns_count); if (n == null) n = (r.campaigns || []).length; return n > 1 ? '<span class="cpc-neg">' + cnt(n) + '</span>' : cnt(n); }, sortVal: function (r) { return num(r.campaigns_count) == null ? (r.campaigns || []).length : num(r.campaigns_count); } }
   ];
   /* only the "without CPC" list carries `split_detail`, so only that tab gets the column: a column
@@ -4591,7 +4690,8 @@ VIEW_CSS.push(
       /* the two halves of this state are counted once, under the No CPC column of the table above,
          and told row by row in the "Which kind" column below. Not a third time here. */
       (key === 'no_cpc' ? ' The Which kind column says which of the two each listing is.' : '') +
-      (list && list.length ? ' ' + esc(adPanelNote(list)) : '') + '</div>';
+      (list && list.length ? ' ' + esc(adPanelNote(list)) : '') +
+      ' Each row carries that listing\'s own figures by period under it, and the Profit over 7 days column sorts the list on the one you are after.</div>';
     if (!list) {
       return h + '<div class="cpc-empty">This list is not in the answer yet, so there is nothing to show here. It is not that no listing is in this state.</div></div>';
     }
@@ -4607,7 +4707,10 @@ VIEW_CSS.push(
         (on ? '<span class="ar">' + (CP.splitSort.dir < 0 ? '▼' : '▲') + '</span>' : '') + '</th>';
     }).join('') + '</tr></thead><tbody>' +
       rows.map(function (r) {
-        return '<tr>' + cols.map(function (c) { return '<td class="' + (c.cls || '') + '">' + c.cell(r) + '</td>'; }).join('') + '</tr>';
+        /* every row of EVERY one of the three lists carries the same By period table, in a second
+           row of its own under it, spanning whatever columns this list has. */
+        return '<tr>' + cols.map(function (c) { return '<td class="' + (c.cls || '') + '">' + c.cell(r) + '</td>'; }).join('') + '</tr>' +
+          '<tr class="cpc-sub2"><td colspan="' + cols.length + '">' + periodsBlock(r) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
     if (held != null && held > 0) {
       h += '<div class="cpc-sub" style="margin-top:8px">' + cnt(held) + ' more ' + plural(held, 'listing is', 'listings are') +
@@ -4815,6 +4918,8 @@ VIEW_CSS.push(
       } else {
         h += countsPanel();
         h += invariantLine();
+        /* where the By period figures come from, ONCE, above the list that carries them */
+        h += periodsNote();
         h += splitPanel(CP.tab);
       }
     }

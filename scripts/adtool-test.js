@@ -59,7 +59,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, adSaleDayGap, adSaleNearPrice, adSaleLedgerRead, adSalePaidPerUnit, adSalePromoSaleFromXml, adSaleEventNamed, adSaleMembership, adSaleSkipReason, adSaleCountMembership, adSaleReasonText, adSaleMorningAfter, adSalePriceSteps, adSalePriceClocks, adSaleCohorts2, adTradeRequestXml, adTradeAckOf, ADTOOL_SALE_PENNY, ADTOOL_SALE_SKIP_REASONS, ADTOOL_SALE_SKIP_WORDS, ADTOOL_SALE_SKIP_SHORT, ADTOOL_TRADE_XML_FIELDS, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS, ADTOOL_PATTERN_KINDS, ADTOOL_PATTERN_MONTHS, ADTOOL_PATTERN_DATES_CAP, adListingDayWords, adListingMonthWords, adListingMonthEnd, adListingPattern, adListingPatternKey, adListingPatternWindow, adListingSlots, adListingWeekday, adListingHourWeekday, adListingDates };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, adSaleDayGap, adSaleNearPrice, adSaleLedgerRead, adSalePaidPerUnit, adSalePromoSaleFromXml, adSaleEventNamed, adSaleMembership, adSaleSkipReason, adSaleCountMembership, adSaleReasonText, adSaleMorningAfter, adSalePriceSteps, adSalePriceClocks, adSaleCohorts2, adTradeRequestXml, adTradeAckOf, ADTOOL_SALE_PENNY, ADTOOL_SALE_SKIP_REASONS, ADTOOL_SALE_SKIP_WORDS, ADTOOL_SALE_SKIP_SHORT, ADTOOL_TRADE_XML_FIELDS, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS, ADTOOL_PATTERN_KINDS, ADTOOL_PATTERN_MONTHS, ADTOOL_PATTERN_DATES_CAP, adListingDayWords, adListingMonthWords, adListingMonthEnd, adListingPattern, adListingPatternKey, adListingPatternWindow, adListingSlots, adListingWeekday, adListingHourWeekday, adListingDates, ADTOOL_PERIODS_NOTE, adPeakPeriodChunks };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -2251,7 +2251,27 @@ function run(argv) {
   })(), null);
   t('split: each of the three places has a name a reader would say out loud', F.ADTOOL_LIVE_SPLIT_CLASSES.every(k => /^[A-Z]/.test(F.ADTOOL_LIVE_SPLIT_NAMES[k])) && F.ADTOOL_LIVE_SPLIT_NAMES.on_cpc === 'On CPC now', F.ADTOOL_LIVE_SPLIT_NAMES);
   t('one home per number: the fourth tab points at the page that already answers it instead of a second copy', /archive_action: 'adtoolCpcListings', archive_payload: \{ mode: 'post' \}/.test(src), null);
-  t('hard rule: neither new page returns a profit figure of any kind, so there is nothing above item level to strip', !/profit/i.test(src.slice(src.indexOf('async function adtoolLiveSplitCompute'), src.indexOf('const ADTOOL_ACTIONS_P16 = {'))), null);
+  /* 10 Nov: Entire live listings now carries each listing's own By period table, so this page does
+     return a profit figure where it used to return none. The law did not change: profit leaves the
+     engine PER ITEM. So the test changed from "no profit at all" to the thing actually required —
+     every profit figure in both new computes is read on a row keyed by its own item id, and the
+     collective objects (the three counts, the totals, the invariant) carry none. */
+  t('hard rule: the only profit either new page returns is one LISTING\'s own, on a row keyed by its item id, so the collective strip has nothing above item level to take', (() => {
+    const blk = src.slice(src.indexOf('async function adtoolLiveSplitCompute'), src.indexOf('const ADTOOL_ACTIONS_P16 = {'));
+    const code = blk.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    const hits = code.match(/[A-Za-z0-9_.]*profit[A-Za-z0-9_.]*/gi) || [];
+    /* exactly two, and both of them are read off one listing's own By period row */
+    const onlyItem = hits.length === 2 && hits[0] === 'r.profit_7d' && hits[1] === 'per.d7.actual_profit';
+    /* and the rows they are written onto are the ones that carry the item id */
+    const onRows = /r\.profit_7d = per && per\.d7 \? per\.d7\.actual_profit : null;/.test(blk) && /item_id: id, account: a, title: String\(it\.title \|\| ''\)/.test(blk);
+    /* the collective objects are counts and nothing else */
+    const blank = /const blank = \(\) => \(\{ on_cpc: 0, dynamic: 0, no_cpc: 0, no_cpc_general: 0, no_cpc_unadvertised: 0, active: 0 \}\);/.test(blk);
+    /* and the strip really keeps an item-keyed profit while taking a collective one away */
+    const pay = { totals: { on_cpc: 3 }, fleet_profit: 9, on_cpc: [{ item_id: '336798586123', profit_7d: 4.5, periods: { d7: { actual_profit: 4.5 } } }] };
+    const out = F.adtStripCollectiveProfit(JSON.parse(JSON.stringify(pay)), { keepCollective: false });
+    const strip = out.on_cpc[0].profit_7d === 4.5 && out.on_cpc[0].periods.d7.actual_profit === 4.5 && out.fleet_profit === undefined && out.totals.on_cpc === 3;
+    return onlyItem && onRows && blank && strip;
+  })(), (() => { const blk = src.slice(src.indexOf('async function adtoolLiveSplitCompute'), src.indexOf('const ADTOOL_ACTIONS_P16 = {')); const code = blk.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, ''); return code.match(/[A-Za-z0-9_.]*profit[A-Za-z0-9_.]*/gi) || []; })());
 
   /* (2) the dynamic ad rate, all three sources */
   t('dynamic rate: eBay saying so is the answer, and the answer says eBay said it', JSON.stringify(F.adDynamicRate({ ad_rate_strategy: 'DYNAMIC', name: 'General' })) === JSON.stringify({ dynamic: true, source: 'ebay' }), F.adDynamicRate({ ad_rate_strategy: 'DYNAMIC', name: 'General' }));
@@ -6137,8 +6157,10 @@ function run(argv) {
     const q = F.adPeakItemsSql(many, cap);
     const bound = (q.match(/\{"i":/g) || []).length === cap && cap > 0;
     /* the figures read is handed the list read's own rows and the list read's own ceiling, so one
-       cannot be wider than the other and the page cannot carry a figure for a row it is not showing */
-    const route = /adPeakItemsSql\(manualRows\.map\(r => String\(r\.item_id \|\| ''\)\), ADTOOL_PEAK_MANUAL_CAP\)/.test(src);
+       cannot be wider than the other and the page cannot carry a figure for a row it is not showing.
+       10 Nov: through the shared helper, which chunks the cohort at the ceiling it is handed. */
+    const route = /adtPeriodsForItems\(env, manualRows\.map\(r => String\(r\.item_id \|\| ''\)\), ADTOOL_PEAK_MANUAL_CAP, today, todayUtc\)/.test(src) &&
+      /const perSql = adPeakItemsSql\(ch, chunkN\);/.test(src);
     const listCap = /ORDER BY p\.added_at DESC LIMIT ' \+ ADTOOL_PEAK_MANUAL_CAP/.test(src) && !/ORDER BY p\.added_at DESC LIMIT 500/.test(src);
     return bound && route && listCap;
   })(), null);
@@ -6170,12 +6192,17 @@ function run(argv) {
     return grain && honest && toYesterday && union && one;
   })(), null);
   t('by period: the answer says where each figure comes from, in a sentence carrying no setting and no em-dash, and says so plainly when the read failed', (() => {
-    const i = src.indexOf("periods_note: '");
-    const say = src.slice(i, src.indexOf('periods_problem', i));
+    /* 10 Nov: ONE const, printed by both pages that show the table, so one set of numbers is
+       described one way and the sentence cannot drift between them. */
+    const i = src.indexOf("const ADTOOL_PERIODS_NOTE = '");
+    const say = src.slice(i, src.indexOf('\n', i));
     return i > 0 && /advertising report/.test(say) && /order book/.test(say) && /still filling/.test(say) &&
       !/—/.test(say) && !/\d/.test(say) && /periods_problem: periodsProblem,/.test(src) &&
       /catch \(e\) \{ periodsProblem = 'the figures by period could not be read just now'; \}/.test(src) &&
-      /periods_windows: ADTOOL_PEAK_PERIOD_KEYS,/.test(src);
+      (src.match(/periods_windows: ADTOOL_PEAK_PERIOD_KEYS,/g) || []).length === 2 &&
+      (src.match(/periods_note: periods\.note,/g) || []).length === 2 &&
+      (src.match(/periods_problem: periodsProblem,/g) || []).length === 2 &&
+      F.ADTOOL_PERIODS_NOTE === F.ADTOOL_PERIODS_NOTE.trim() && F.ADTOOL_PERIODS_NOTE.length > 120;
   })(), null);
 
   /* ---- and the page: the same table, inside the row's own details block ---- */
@@ -6217,6 +6244,169 @@ function run(argv) {
     /* where the money comes from is said ONCE for the list, not under each of five hundred rows */
     const noteOnce = (pkSrc.match(/periodsNote\(\)/g) || []).length === 2 && /PK\.data && PK\.data\.periods_note/.test(pkSrc);
     return mark && prof && unp && nul && noMaths && noteOnce;
+  })(), null);
+
+  /* ══ EVERY ROW OF ENTIRE LIVE LISTINGS CARRIES THE SAME TABLE (owner, 10 Nov) ══════════════════
+     "On entire listings page I need product history numbers added, with the item details and item
+     ids, so that I can see the items that are running are currently working nicely."
+     The danger in granting that is a SECOND piece of period arithmetic: two pages each summing the
+     same days their own way is how one listing comes to read two ways, and the owner acts on these
+     figures. So the Peak page's aggregate was lifted into one function and both pages call it. These
+     tests hold that there is exactly one of it, that it is bounded to the rows a page returns, and
+     that the page really draws the table under every row of all three lists. ══ */
+  t('shared: there is ONE period aggregate in the engine and both pages call it, so no second piece of this arithmetic exists to disagree with the first', (() => {
+    /* declared once, called twice, and the two callers are the two computes */
+    const decl = (src.match(/async function adtPeriodsForItems\(env, ids, cap, today, todayUtc\) \{/g) || []).length === 1;
+    const calls = (src.match(/adtPeriodsForItems\(/g) || []).length === 3;
+    const pkBlk = src.slice(src.indexOf('async function adtoolPeakCompute'), src.indexOf('/* ---- which campaigns a listing’s peak hours could switch ----'));
+    const lsBlk = src.slice(src.indexOf('async function adtoolLiveSplitCompute'), src.indexOf('/* ---- Potential CPC'));
+    const both = /const periods = await adtPeriodsForItems\(env, manualRows\.map/.test(pkBlk) && /const periods = await adtPeriodsForItems\(env, perIdsShown, ADTOOL_LIVE_SPLIT_LIST_CAP, today, todayUtc\)/.test(lsBlk);
+    /* and the arithmetic itself is in that one place: each of the five windows is built exactly once
+       in the whole engine, and neither compute builds any of it for itself */
+    const onceEach = ["adPeakPeriodSpliceToday(adPeakPeriodFromAgg(agg, 'all'), tRow)", "today: adPeakPeriodToday(tRow),", "yesterday: adPeakPeriodOrNull(agg, 'yesterday'),", "d7: adPeakPeriodOrNull(agg, 'd7'),", "d30: adPeakPeriodOrNull(agg, 'd30'),"]
+      .every(x => src.split(x).length === 2);
+    const noneInComputes = !/adPeakPeriodOrNull\(|adPeakPeriodToday\(|adPeakPeriodFromAgg\(|adPeakPeriodSpliceToday\(/.test(pkBlk) && !/adPeakPeriodOrNull\(|adPeakPeriodToday\(|adPeakPeriodFromAgg\(|adPeakPeriodSpliceToday\(/.test(lsBlk);
+    /* one day-aggregate statement and one today-grain statement in the whole engine for this table */
+    const oneQuery = src.split("FROM adtool_listing_day d JOIN ' + perSql + ' pkc ON pkc.pk_item = d.item_id").length === 2 &&
+      src.split("FROM adtool_listing_today t JOIN ' + perSql + ' pkc ON pkc.pk_item = t.item_id").length === 2;
+    return decl && calls && both && onceEach && noneInComputes && oneQuery;
+  })(), [(src.match(/adtPeriodsForItems\(/g) || []).length]);
+  t('shared: the cohort is CHUNKED at the cap the caller passes, so a thousand listings is a handful of bounded reads and never one unbounded one', (() => {
+    const cap = 500;
+    const many = []; for (let k = 0; k < 1030; k++) many.push(String(300000000000 + k));
+    const ch = F.adPeakPeriodChunks(many, cap);
+    /* 1,030 listings at five hundred a piece: three pieces, none of them over the cap, and every
+       listing in exactly one of them */
+    const shape = ch.length === 3 && ch.every(c => c.length <= cap) && ch[0].length === cap && ch[2].length === 30 &&
+      ch.reduce((a2, c) => a2 + c.length, 0) === many.length;
+    const flat = [].concat.apply([], ch);
+    const sameOrder = flat.length === many.length && flat.every((v, i) => v === many[i]);
+    /* and the rows the three lists really return — 217 on pay-per-click, the dynamic list at its own
+       cap of five hundred, 87 without — are two pieces, which is four statements */
+    const page = F.adPeakPeriodChunks(many.slice(0, 217 + 500 + 87), cap);
+    const cost = page.length === 2 && page.length * 2 === 4;
+    /* each piece is one cohort literal of its own, cut to the same cap */
+    const perChunk = /const perSql = adPeakItemsSql\(ch, chunkN\);/.test(src) && /const chunks = adPeakPeriodChunks\(ids, chunkN\);/.test(src) &&
+      /for \(const ch of chunks\) \{/.test(src) && /reads: chunks\.length \* 2/.test(src);
+    /* nothing anybody typed reaches it, and one listing twice is one listing */
+    const clean = F.adPeakPeriodChunks(['336798586123', '336798586123', "4' OR 1 = 1 --", '', null, 'abc'], cap);
+    const safe = clean.length === 1 && clean[0].length === 1 && clean[0][0] === '336798586123';
+    const none = F.adPeakPeriodChunks([], cap);
+    return shape && sameOrder && cost && perChunk && safe && none.length === 0;
+  })(), [F.adPeakPeriodChunks(['1', '1', 'x'], 500)]);
+  t('live listings: every row of all THREE lists gets its figures, only the rows the page returns are read for, and what the read cost is said out loud', (() => {
+    const b = src.slice(src.indexOf('async function adtoolLiveSplitCompute'), src.indexOf('/* ---- Potential CPC'));
+    /* the ids are the rows of the three lists after the caps, not the universe the page classified:
+       a figure for a row the page is not showing is a read nobody asked for */
+    const ids = /const perIdsShown = \[\];\s*\n\s*for \(const k of ADTOOL_LIVE_SPLIT_CLASSES\) for \(const r of lists\[k\]\) perIdsShown\.push\(r\.item_id\);/.test(b);
+    const cap = /adtPeriodsForItems\(env, perIdsShown, ADTOOL_LIVE_SPLIT_LIST_CAP, today, todayUtc\)/.test(b) && /const ADTOOL_LIVE_SPLIT_LIST_CAP = 500;/.test(src);
+    /* every row of every list carries it, and a listing we hold nothing for carries five nulls
+       rather than a row of noughts nobody earned */
+    const every = /for \(const k of ADTOOL_LIVE_SPLIT_CLASSES\) for \(const r of lists\[k\]\) \{/.test(b) && /r\.periods = per \|\| adPeakPeriodsEmpty\(\);/.test(b);
+    /* attached BEFORE the sort, because the sort reads the seven-day spend and that figure now comes
+       off this table */
+    const before = b.indexOf('r.periods = per || adPeakPeriodsEmpty();') < b.indexOf('lists[k].sort((x, y) => (y.spend_7d - x.spend_7d)');
+    /* the answer says which windows it carries, where they come from, whether the read failed, and
+       what it cost */
+    const says = /periods_windows: ADTOOL_PEAK_PERIOD_KEYS,/.test(b) && /periods_note: periods\.note,/.test(b) && /periods_problem: periodsProblem,/.test(b) &&
+      /periods_reads: \{ listings: periods\.listings, chunks: periods\.chunks, reads: periods\.reads, chunk_size: ADTOOL_LIVE_SPLIT_LIST_CAP \}/.test(b);
+    /* the today grain is read for these rows too, and under the same UTC report day rule */
+    const utc = /const today = ukDate\(''\), todayUtc = utcDate\(\), yday = adtAddDays\(today, -1\), d7from = adtAddDays\(today, -7\);/.test(b);
+    return ids && cap && every && before && says && utc;
+  })(), null);
+  t('live listings: the 7-day spend column and the table’s own 7-day row are ONE number, and the 7-day profit the list sorts on is lifted straight out of that table', (() => {
+    const b = src.slice(src.indexOf('async function adtoolLiveSplitCompute'), src.indexOf('/* ---- Potential CPC'));
+    /* the same rule the Peak page keeps: the column is taken off the table where the table has that
+       window, and the separate aggregate stands in only where no day in it is on record */
+    const one = /if \(per && per\.d7 && per\.d7\.spend != null\) r\.spend_7d = per\.d7\.spend;/.test(b);
+    /* and both really are one source: adtool_listing_day over the seven finished days to yesterday */
+    const oneSource = /ROUND\(SUM\(spend\), 2\) AS spend FROM adtool_listing_day WHERE day >= \?1 AND day <= \?2/.test(b) && /d7from = adtAddDays\(today, -7\)/.test(b) && /\['d7', 'd\.day >= \?2'\]/.test(src);
+    /* the profit the sort uses is the table's own d7 figure, and NULL stays null: a listing we hold
+       no day for in that window is not a listing that earned nothing */
+    const prof = /r\.profit_7d = per && per\.d7 \? per\.d7\.actual_profit : null;/.test(b);
+    /* and it is one LISTING's profit, on a row keyed by its item id, which is all this portal allows */
+    const perItem = /item_id: id, account: a, title: String\(it\.title \|\| ''\)/.test(b) && !/fleet_profit|profit_total|total_profit/.test(b);
+    return one && oneSource && prof && perItem;
+  })(), null);
+
+  /* ---- and the page: the same table, under every row of all three lists ---- */
+  t('live listings page: the By period table is drawn under EVERY row of all three lists, in a second row spanning that list’s own columns', (() => {
+    /* one function, called from the one place that builds a row — and that place is splitPanel,
+       which draws all three lists, so the table cannot reach one list and miss another */
+    const once = (cpcSrc.match(/periodsBlock\(/g) || []).length === 2 && /function periodsBlock\(r\) \{/.test(cpcSrc);
+    const under = /'<tr class="cpc-sub2"><td colspan="' \+ cols\.length \+ '">' \+ periodsBlock\(r\) \+ '<\/td><\/tr>';/.test(cpcSrc);
+    /* the row map it is in is splitPanel's, and splitPanel is what every one of the three tabs draws */
+    const i = cpcSrc.indexOf('function splitPanel(key) {'), j = cpcSrc.indexOf('/* ── 3 · the money', i);
+    const inPanel = i > 0 && j > i && cpcSrc.slice(i, j).indexOf('periodsBlock(r)') > 0;
+    const threeTabs = /function isSplitTab\(\) \{ return CP\.tab === 'on_cpc' \|\| CP\.tab === 'dynamic' \|\| CP\.tab === 'no_cpc'; \}/.test(cpcSrc) && /h \+= splitPanel\(CP\.tab\);/.test(cpcSrc);
+    /* the listing cell stays the shared product cell, which is what carries the title, the item id,
+       the account and the two links the owner asked for */
+    const cell = /\{ key: 'listing', label: 'Listing', cell: function \(r\) \{ return adtProductCell\(r\); \}/.test(cpcSrc);
+    const link = /href="#adtoolProduct\/' \+ esc\(id\) \+ '" target="_blank" rel="noopener"/.test(cpcSrc) && /the full Product history/.test(cpcSrc);
+    /* this page's own prefix throughout: not one class borrowed from the Peak page or from Product
+       history, and every class it draws with is defined in its own sheet */
+    const prefix = !/pkt-/.test(cpcSrc) && !/\bat-tbl|\bat-src/.test(cpcSrc) && /'\.cpc-per\{/.test(cpcSrc) && /'\.cpc-moving\{/.test(cpcSrc) &&
+      /'\.cpc-open\{/.test(cpcSrc) && /'\.cpc-htbl\{/.test(cpcSrc) && /'\.cpc-tbl tr\.cpc-sub2 td\{/.test(cpcSrc) && /'\.cpc-sm2\{/.test(cpcSrc) && /'\.cpc-rules\{/.test(cpcSrc) && /'\.cpc-bad\{/.test(cpcSrc) && /'\.cpc-perk\{/.test(cpcSrc);
+    return once && under && inPanel && threeTabs && cell && link && prefix;
+  })(), null);
+  t('live listings page: its columns, their wording and their order are Product history’s own, so one listing reads the same on all three pages', (() => {
+    const cols = (s) => {
+      const i = s.indexOf('<th>Period</th>'); if (i < 0) return '';
+      const j = s.indexOf('Profit</th>', i); if (j < 0) return '';
+      return s.slice(i, j + 11).replace(/'\s*\+\s*'/g, '').replace(/\s+/g, ' ');
+    };
+    const a = cols(bpProd), b = cols(cpcSrc), c = cols(pkSrc);
+    const order = /\[\['today', 'Today so far'\], \['yesterday', 'Yesterday'\], \['d7', 'Last 7 days'\], \['d30', 'Last 30 days'\], \['all', 'All time'\]\]/.test(cpcSrc);
+    return a.length > 100 && a === b && b === c && order;
+  })(), [cpcSrc.indexOf('<th>Period</th>') >= 0]);
+  t('live listings page: today and all time are marked as still updating, the profit is the shared per-item cell, the orders it could not cost are counted beside it, and nothing is worked out on the page', (() => {
+    const mark = /function perMoving\(key, p\) \{ return key === 'today' \|\| !!\(p && p\.includes_today\); \}/.test(cpcSrc) && /<span class="cpc-moving">still updating<\/span>/.test(cpcSrc);
+    const prof = /adtProfitCell\(p\.actual_profit, 0, 0\)/.test(cpcSrc);
+    const unp = /var pc = n0\(p\.pending_cost_orders\), pf = n0\(p\.pending_fee_orders\), un = pc \+ pf;/.test(cpcSrc) && /not costed yet/.test(cpcSrc);
+    /* a window with nothing behind it says so, and the page never turns a nothing into a nought */
+    const nul = /<td colspan="7"><span class="cpc-sm2">not available yet<\/span><\/td><\/tr>/.test(cpcSrc) &&
+      /This answer carries no figures by period for this listing/.test(cpcSrc) && /there is nothing to show by period/.test(cpcSrc);
+    /* every figure is printed as the answer carries it: no subtraction, no ratio, no sum */
+    const noMaths = !/p\.units\s*-\s*p\.attr_units/.test(cpcSrc) && /cnt\(p\.units_not_from_ads\)/.test(cpcSrc) && /roasTxt\(num\(p\.roas\)\)/.test(cpcSrc);
+    return mark && prof && unp && nul && noMaths;
+  })(), null);
+  t('live listings page: where the figures come from is said ONCE, above the first table, in the engine’s own words', (() => {
+    const once = (cpcSrc.match(/periodsNote\(\)/g) || []).length === 2 && /function periodsNote\(\) \{/.test(cpcSrc);
+    /* the engine's sentence, never the page's own, and the failure said plainly beside it */
+    const engines = /var t = String\(\(D && D\.periods_note\) \|\| ''\)\.trim\(\);/.test(cpcSrc) && /var bad = String\(\(D && D\.periods_problem\) \|\| ''\)\.trim\(\);/.test(cpcSrc);
+    /* above the list that carries it, and after the two panels that were always there */
+    const i = cpcSrc.indexOf('h += periodsNote();');
+    const where = i > 0 && cpcSrc.indexOf('h += invariantLine();') < i && i < cpcSrc.indexOf('h += splitPanel(CP.tab);');
+    /* and nothing of it is typed into the page: no sentence of its own about fees or costs */
+    const noCopy = !/after eBay fees, product cost, ad spend and returns\.<\/div>/.test(cpcSrc);
+    return once && engines && where && noCopy;
+  })(), null);
+  t('live listings page: the 7-day profit sort sits beside the 7-day spend sort on every list, and a figure we do not hold reads "not known" and never nought', (() => {
+    /* the column is in SPLIT_COLS, which is what all three lists are drawn from, so the sort reaches
+       every list rather than one of them */
+    const col = /\{ key: 'profit_7d', label: 'Profit over 7 days', cls: 'r', title: 'this listing\\'s own profit over the last 7 finished days/.test(cpcSrc) &&
+      /cell: profit7Cell, sortVal: per7 \}/.test(cpcSrc);
+    const beside = cpcSrc.indexOf("key: 'spend_7d'") < cpcSrc.indexOf("key: 'profit_7d'") &&
+      cpcSrc.indexOf("key: 'profit_7d'") < cpcSrc.indexOf('var NO_CPC_COL =');
+    /* the three lists are drawn from SPLIT_COLS, the third adding its own column INSIDE it */
+    const allThree = /function splitColsFor\(key\) \{ return key === 'no_cpc' \? SPLIT_COLS\.slice\(0, 2\)\.concat\(\[NO_CPC_COL\], SPLIT_COLS\.slice\(2\)\) : SPLIT_COLS; \}/.test(cpcSrc);
+    /* and it really is clickable: the heading carries this page's own sort attribute and the handler
+       sorts numbers the heavy way first */
+    const clickable = /data-cps="' \+ esc\(c\.key\) \+ '"/.test(cpcSrc) && /CP\.splitSort = \{ key: k, dir: \(k === 'listing' \|\| k === 'campaigns' \|\| k === 'split_detail'\) \? 1 : -1 \}/.test(cpcSrc);
+    /* NOT KNOWN, NEVER NOUGHT: the cell says so and the sort value stays null, which sinks the row */
+    const notKnown = /return v == null \? '<span class="cpc-sub">not known<\/span>' : adtProfitCell\(v, 0, 0\);/.test(cpcSrc) &&
+      /if \(r\.profit_7d != null\) return num\(r\.profit_7d\);/.test(cpcSrc) && /return \(d && typeof d === 'object'\) \? num\(d\.actual_profit\) : null;/.test(cpcSrc);
+    /* nulls sink whichever way the list is sorted, so a listing we know nothing about never heads it */
+    const sink = /if \(va == null\) return 1; if \(vb == null\) return -1;/.test(cpcSrc);
+    /* and the page keeps its own five-minute poller: this change adds a figure, not a second clock */
+    const poll = /adtPoll\('cpcBody', 300000, function \(\) \{ CP\.money = null; CP\.archive = null; CP\.split = null; return loadTab\(true\); \}\);/.test(cpcSrc);
+    return col && beside && allThree && clickable && notKnown && sink && poll;
+  })(), null);
+  t('live listings page: no reader copy on it carries an em-dash, and the one dash it prints is the empty-figure mark every advertising page prints', (() => {
+    /* a dash as a FIGURE is this portal's "nothing to divide by" and stays; a dash in a SENTENCE is
+       the thing the owner reads as a mistake. The new copy is checked line by line. */
+    const lines = cpcSrc.split('\n').filter(l => /cpc-sm2|cpc-rules|cpc-psub|not known|still updating|not available yet/.test(l));
+    return lines.length > 4 && lines.every(l => !/—/.test(l)) && !/—/.test(cpcSrc.slice(cpcSrc.indexOf('function periodsBlock(r) {'), cpcSrc.indexOf('var SPLIT_COLS = [')));
   })(), null);
 
   /* ══ PRODUCT HISTORY MUST OPEN FAST, AND NO FIGURE ON IT MAY MOVE (owner, 2 Nov) ═══════════════
