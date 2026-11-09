@@ -7279,6 +7279,13 @@ function run(argv) {
     return heads && cells && caveat && eng;
   })(), null);
 
+  /* 10 Nov: the page died with "pm is not a function" because a local `var pm = $('atPatM')` in the selector
+     wiring shadowed the money formatter pm(v, d) for the whole function. No local may reuse a helper's name. */
+  t('product history: no local variable shadows a page-level helper (pm, gbp, roas, esc, nk, cnt)', (() => {
+    const pv = readFile('frontend/view-adtool-product.js');
+    return !/\bvar (pm|gbp|roas|esc|nk|cnt) = /.test(pv) && !/\b(let|const) (pm|gbp|roas|esc|nk|cnt) = /.test(pv) && /function pm\(v, d\)/.test(pv);
+  })(), null);
+
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
   return lines.join('\n') + '\n' + (passed === results.length ? 'PASS ' : 'FAIL ') + passed + '/' + results.length;
