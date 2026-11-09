@@ -653,7 +653,7 @@
     var wsel = document.querySelectorAll('.at-wsel button');
     for (var wi = 0; wi < wsel.length; wi++) wsel[wi].onclick = function () { setPattern({ kind: this.getAttribute('data-pat') }); };
     var patM = $('atPatM');
-    if (pm) pm.onchange = function () { if (/^\d{4}-(0[1-9]|1[0-2])$/.test(this.value)) setPattern({ kind: 'month', month: this.value }); };
+    if (patM) patM.onchange = function () { if (/^\d{4}-(0[1-9]|1[0-2])$/.test(this.value)) setPattern({ kind: 'month', month: this.value }); };
     var pw = $('atPatW');
     if (pw) pw.onchange = function () { if (/^\d{4}-\d{2}-\d{2}$/.test(this.value)) setPattern({ kind: 'week', week_start: this.value }); };
     $('atNoteBtn').onclick = function () {
