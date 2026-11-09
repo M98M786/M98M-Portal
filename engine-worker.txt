@@ -16726,11 +16726,14 @@ function adPeakReconcile(input) {
    AND NOTHING NEW REACHES EBAY. Every function here decides a WANTED STATE and writes it down. The one
    place a state leaves this worker is the quarter-hourly switch job, through the account's own live
    switch, the daily caps and the refusal rule it has always had, none of which this section touches. */
-const ADTOOL_PEAK_PLAN_DEFAULTS = { lookback_days: 28, min_days: 14, dead_min_clicks: 5, proven_share: 60, proven_min_orders: 5, min_block_h: 2, plan_time: '23:30' };
+/* pattern_apply (10 Nov, owner: "all peak time listings will get run from 5pm-10pm uk time now"): 'on' lets a
+   proven dead window switch an ad off inside its typed hours; 'off' runs every peak listing through its typed
+   hours whole and puts the dead hours forward as a proposal only. The stored setting governs; nothing prints it. */
+const ADTOOL_PEAK_PLAN_DEFAULTS = { lookback_days: 28, min_days: 14, dead_min_clicks: 5, proven_share: 60, proven_min_orders: 5, min_block_h: 2, plan_time: '23:30', pattern_apply: 'on' };
 const ADTOOL_PEAK_PLAN_CONFIG_KEYS = {
   lookback_days: 'adtool_peak_lookback_days', min_days: 'adtool_peak_min_days', dead_min_clicks: 'adtool_peak_dead_min_clicks',
   proven_share: 'adtool_peak_proven_share', proven_min_orders: 'adtool_peak_proven_min_orders',
-  min_block_h: 'adtool_peak_min_block_h', plan_time: 'adtool_peak_plan_time',
+  min_block_h: 'adtool_peak_min_block_h', plan_time: 'adtool_peak_plan_time', pattern_apply: 'adtool_peak_pattern_apply',
 };
 /* the three cuts between the four parts of the day, which are adtSlot's own cuts and not a second set:
    the re-evaluation happens where the shape of the day changes. */
@@ -16754,7 +16757,9 @@ function adPeakPlanRules(cfg) {
      the range it means something in rather than refused, because a mistyped figure must not be the thing
      that stops a job that saves money. */
   const share = Math.min(100, Math.max(0, Math.round(num(c[K.proven_share], D.proven_share))));
+  const patternApply = String(c[K.pattern_apply] == null ? D.pattern_apply : c[K.pattern_apply]).trim().toLowerCase() === 'off' ? 'off' : 'on';
   return {
+    pattern_apply: patternApply,
     lookback_days: Math.min(120, Math.max(1, Math.round(num(c[K.lookback_days], D.lookback_days)))),
     min_days: Math.max(1, Math.round(num(c[K.min_days], D.min_days))),
     dead_min_clicks: Math.max(0, Math.round(c[K.dead_min_clicks] === undefined || c[K.dead_min_clicks] === null || c[K.dead_min_clicks] === '' || isNaN(Number(c[K.dead_min_clicks])) ? D.dead_min_clicks : Number(c[K.dead_min_clicks]))),
@@ -17079,6 +17084,8 @@ function adPeakSchedule(input) {
   const hold = ADTOOL_PEAK_HOLDS.indexOf(String(i.hold == null ? 'auto' : i.hold)) >= 0 ? String(i.hold == null ? 'auto' : i.hold) : 'auto';
   const wins = (i.dead_windows || []).filter(w => w && isFinite(Number(w.from)) && isFinite(Number(w.to)) && Number(w.from) !== Number(w.to));
   const ok = !!i.min_days_ok, tracking = i.tracking === undefined || i.tracking === null ? true : !!i.tracking;
+  /* the fleet rule: with apply_dead false every listing runs its typed hours whole and the windows are a proposal */
+  const applyDead = i.apply_dead === undefined || i.apply_dead === null ? true : !!i.apply_dead;
   const states = [], reasons = [];
   const all = (st, text) => { for (let h = 0; h < 24; h++) { states.push(st); reasons.push(text); } };
   const runs = pickFn => {
@@ -17103,7 +17110,7 @@ function adPeakSchedule(input) {
     all('OFF', 'no hours on the list the system can read');
     return { states: states, source: 'none', reasons: reasons, hold: hold, applied: false, proposal: [], off_windows: [], why: 'this listing has no hours the system can read, so there is nothing to schedule and nothing is switched' };
   }
-  const applied = ok && tracking && wins.length > 0;
+  const applied = ok && tracking && applyDead && wins.length > 0;
   const deadAt = h => applied ? wins.filter(w => adInPeakRanges(h, [[Number(w.from), Number(w.to)]]))[0] || null : null;
   /* THE HOURS GIVEN BACK, named in the reason for the hour itself and in the reason for the stretch
      that gave them up. They are dead hours the ad still runs through, so a reader looking at the day
@@ -17362,7 +17369,7 @@ function adPeakListingProfile(row, inp) {
   const dead = adPeakDeadHours(profile, Object.assign({}, rules, { typed_ranges: hours.ranges || [] }));
   const track = adPeakTracking(profile.today, profile.hours, { drift_detected_day: c.drift_day || '' });
   const hold = adtPeakHoldOf(row);
-  const plan = adPeakSchedule({ typed_ranges: hours.ranges || [], dead_windows: dead.windows, hold: hold, min_days_ok: profile.days_observed >= rules.min_days, tracking: track.tracking });
+  const plan = adPeakSchedule({ typed_ranges: hours.ranges || [], dead_windows: dead.windows, hold: hold, min_days_ok: profile.days_observed >= rules.min_days, tracking: track.tracking, apply_dead: String(rules.pattern_apply || 'on') !== 'off' });
   /* the day's own hours, summed, beside the day eBay finally published for it */
   const perDay = [];
   for (let k = days - 1; k >= 0; k--) {
@@ -18454,6 +18461,7 @@ async function adtPeakPlanOne(env, row, ctxIn) {
   const sch = adPeakSchedule({
     typed_ranges: hours.ranges, dead_windows: dead.windows, hold: adtPeakHoldOf(row),
     min_days_ok: profile.days_observed >= c.rules.min_days, tracking: track.tracking,
+    apply_dead: String((c.rules || {}).pattern_apply || 'on') !== 'off',
   });
   return {
     account: String(row.account || ''), item_id: id, day: c.day,

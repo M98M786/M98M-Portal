@@ -7826,6 +7826,23 @@ function run(argv) {
     return hand.on_sale === false && real.on_sale === true;
   })(), null);
 
+  /* 10 Nov (owner): "all peak time listings will get run from 5pm-10pm uk time now". A fleet setting stops the
+     pattern switching an ad off inside its typed hours; the dead hours stay a proposal on the row. */
+  t('peak schedule: with the fleet rule off, a proven dead window no longer pauses the ad inside its typed hours and comes back as a proposal', (() => {
+    const base = { typed_ranges: [[17, 22]], dead_windows: [{ from: 20, to: 22 }], hold: 'auto', min_days_ok: true, tracking: true };
+    const on = F.adPeakSchedule(Object.assign({}, base, { apply_dead: true }));
+    const off = F.adPeakSchedule(Object.assign({}, base, { apply_dead: false }));
+    const dflt = F.adPeakSchedule(base);
+    const onStates = on.states.slice(17, 22).join(','), offStates = off.states.slice(17, 22).join(',');
+    return on.applied === true && /OFF/.test(onStates) && off.applied === false && offStates === 'ON,ON,ON,ON,ON' && (off.proposal || []).length === 1 && dflt.applied === true;
+  })(), null);
+  t('peak schedule: the fleet rule is a stored setting read by the planner and the probe alike, never a typed figure', (() => {
+    return /pattern_apply: 'adtool_peak_pattern_apply'/.test(src) && /pattern_apply: patternApply,/.test(src) &&
+      /apply_dead: String\(\(c\.rules \|\| \{\}\)\.pattern_apply \|\| 'on'\) !== 'off',/.test(src) &&
+      /apply_dead: String\(rules\.pattern_apply \|\| 'on'\) !== 'off' \}\);/.test(src) &&
+      /const applied = ok && tracking && applyDead && wins\.length > 0;/.test(src);
+  })(), null);
+
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
   return lines.join('\n') + '\n' + (passed === results.length ? 'PASS ' : 'FAIL ') + passed + '/' + results.length;
