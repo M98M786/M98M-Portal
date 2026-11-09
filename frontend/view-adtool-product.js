@@ -322,15 +322,22 @@
     }).catch(function (e) { $('atBody').innerHTML = '<div class="at-empty">' + esc(e.message || 'The search could not run.') + '</div>'; });
   }
 
-  function load(id) {
+  /* 10 Nov (owner: every advertising figure up to date every five minutes). A quiet reload re-reads the
+     same listing and redraws without blanking the page; the poller below asks for one every five
+     minutes while the tab is visible, through the shell's adtPoll (hidden tabs skipped, stops on an
+     expired sign-in). The engine's today grain is rebuilt every five minutes, so the Today so far row
+     moves on that clock; finished days still move once an hour and the header says so. */
+  function load(id, quiet) {
     AT.item = id;
     /* nothing is stored: the hash is the only record of which listing this tab is showing */
-    $('atBody').innerHTML = '<div class="at-empty">Loading ' + esc(id) + '…</div>';
+    if (!quiet) $('atBody').innerHTML = '<div class="at-empty">Loading ' + esc(id) + '…</div>';
     var t0 = Date.now();
-    Promise.all([api('adtoolListing', { item_id: id, pattern: AT.pattern }), loadECharts().catch(function () { return null; })]).then(function (res) {
+    return Promise.all([api('adtoolListing', { item_id: id, pattern: AT.pattern }), loadECharts().catch(function () { return null; })]).then(function (res) {
+      if (quiet && AT.item !== id) return;                  /* the reader moved to another listing meanwhile */
       AT.data = res[0]; AT.ms = Date.now() - t0;
       draw();
-    }).catch(function (e) { $('atBody').innerHTML = '<div class="at-panel"><h3>Not available</h3><div class="at-sub">' + esc(e.message || 'This listing could not load.') + '</div></div>'; });
+      if (!quiet) adtPoll('atBody', 300000, function () { return load(AT.item, true); });
+    }).catch(function (e) { if (!quiet) $('atBody').innerHTML = '<div class="at-panel"><h3>Not available</h3><div class="at-sub">' + esc(e.message || 'This listing could not load.') + '</div></div>'; if (quiet) throw e; });
   }
 
   /* HOW LONG THE ANSWER TOOK TO WORK OUT, beside how long it took to arrive (2 Nov). The engine
@@ -519,7 +526,9 @@
 
   function draw() {
     var D = AT.data, H = D.header, K = D.kpis || {};
-    adtFreshShow('atFresh', D.fresh);
+    /* two clocks on one page: today's orders and spend every five minutes, finished days every hour */
+    var fs = $('atFresh');
+    if (fs) fs.innerHTML = (D.fresh_today ? adtFreshTag(D.fresh_today) : '') + (D.fresh ? ' <span class="at-src" style="margin-left:6px">finished days: </span>' + adtFreshTag(D.fresh) : '');
     var h = '';
     /* header */
     h += '<div class="at-panel"><div class="at-head"><div style="flex:1 1 420px"><div style="font-size:15px">' + adtProductCell({ item_id: H.item_id, account: H.account, title: H.title, image: H.image }, { open: false }) + '</div>' +

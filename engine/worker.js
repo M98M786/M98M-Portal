@@ -7111,7 +7111,7 @@ async function adtoolTodayPrewarm(env, rebuild) {
    windows behind it end yesterday, so nothing in its answer can move between two rollups. Half an
    hour is therefore generous without ever being a day stale, and it is short enough that an owner
    who edits one of the eight numbers sees the page follow within the half hour. */
-const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunToday: 60000, adtoolCpcListings: 120000, adtoolOverview: 120000, adtoolDepts: 1800000,
+const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunToday: 60000, adtoolCpcListings: 120000, adtoolOverview: 120000, adtoolDepts: 300000,   /* 10 Nov: every advertising figure moves within five minutes */
   /* the campaign pages read the campaign map, which the sync refreshes every few minutes, and the finished
      day figures behind it, which move once an hour. Two minutes keeps a page flag switched off honoured
      inside the ceiling the gate above states, and still spares the owner the whole compute on every click. */

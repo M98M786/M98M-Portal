@@ -89,7 +89,7 @@
       load(false).catch(function () {});
       /* nothing on this page moves until the next daily roll-up, so the re-read is hourly; adtPoll
          skips hidden tabs and stops for good on an 'auth' refusal (the session-expiry law) */
-      adtPoll('nwlBody', 3600000, function () { return load(true); });
+      adtPoll('nwlBody', 300000, function () { return load(true); });
     }
   };
 

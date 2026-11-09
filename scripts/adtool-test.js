@@ -923,7 +923,7 @@ function run(argv) {
   const dpAt = needle => dpRoute.indexOf(needle);
   t('depts route: the role check, then the page gate, then the cache. In that order, never the other way round.', dpAt('await adtGate(ctx, null)') > 0 && dpAt('await adtGate(ctx, null)') < dpAt("ensureAdtoolPhaseDeptsRegister") && dpAt('ensureAdtoolPhaseDeptsRegister') < dpAt("await adtGate(ctx, 'adtool_page_depts')") && dpAt("await adtGate(ctx, 'adtool_page_depts')") < dpAt('adtKvMemo(') && dpAt('adtKvMemo(') > 0, [dpAt('await adtGate(ctx, null)'), dpAt('ensureAdtoolPhaseDeptsRegister'), dpAt("await adtGate(ctx, 'adtool_page_depts')"), dpAt('adtKvMemo(')]);
   t('depts route: a caller who may not be here writes nothing, because the role check precedes the seed', /await adtGate\(ctx, null\);\s*\n\s*await ensureAdtoolPhaseDeptsRegister\(ctx\.env\);/.test(dpRoute), null);
-  t('depts route: the cache is keyed by the caller\'s profit class and holds for half an hour', /adtKvMemo\(ctx\.env, 'adtoolDepts', adtProfitClass\(ctx\.user\)/.test(src) && /adtoolDepts: 1800000/.test(src), null);
+  t('depts route: the cache is keyed by the caller\'s profit class and holds for five minutes (10 Nov: every advertising figure within five minutes)', /adtKvMemo\(ctx\.env, 'adtoolDepts', adtProfitClass\(ctx\.user\)/.test(src) && /adtoolDepts: 300000/.test(src), null);
   t('depts route: the name starts with adtool, so the no-collective-profit strip wraps it', 'adtoolDepts'.indexOf('adtool') === 0 && /ADTOOL_ACTIONS_P11 = \{[\s\S]*?adtoolDepts:/.test(src), null);
   t('depts: the spend read is `spend` alone, never spend plus cpc_spend (that would count the clicks twice)', /ADTOOL-P13-BEGIN[\s\S]*?ADTOOL-P13-END/.test(src) && !/cpc_spend/.test(src.slice(src.indexOf('/* ADTOOL-P13-BEGIN'), src.indexOf('/* ADTOOL-P13-END'))), null);
   t('depts: impressions are declared but never written, so the page never reads them', !/impressions/.test(src.slice(src.indexOf('/* ADTOOL-P13-BEGIN'), src.indexOf('/* ADTOOL-P13-END'))), null);
@@ -7284,6 +7284,21 @@ function run(argv) {
   t('product history: no local variable shadows a page-level helper (pm, gbp, roas, esc, nk, cnt)', (() => {
     const pv = readFile('frontend/view-adtool-product.js');
     return !/\bvar (pm|gbp|roas|esc|nk|cnt) = /.test(pv) && !/\b(let|const) (pm|gbp|roas|esc|nk|cnt) = /.test(pv) && /function pm\(v, d\)/.test(pv);
+  })(), null);
+
+  /* 10 Nov (owner): "product history, overview page, and all facts and figures of advertising department should
+     get up to date after every 5 minutes". Every advertising page re-reads itself within five minutes while it is
+     open, no advertising memo outlives five minutes, and Product history's header carries the five-minute clock. */
+  t('advertising pages: every poller runs within five minutes, every memo expires within five minutes, and Product history polls quietly and shows both clocks', (() => {
+    const files = ['view-adtool-product.js', 'view-adtool-overview.js', 'view-adtool-departments.js', 'view-adtool-newlistings.js', 'view-adtool-cpc.js', 'view-adtool-campaignboard.js', 'view-adtool-spendingtoday.js', 'view-adtool-runtoday.js', 'view-adtool-stopped.js', 'view-adtool-peak.js'];
+    let polls = true;
+    for (const f of files) { const s = readFile('frontend/' + f); for (const m of s.matchAll(/adtPoll\('[A-Za-z]+', (\d+),/g)) if (Number(m[1]) > 300000) polls = false; }
+    const pv = readFile('frontend/view-adtool-product.js');
+    const prod = /adtPoll\('atBody', 300000, function \(\) \{ return load\(AT\.item, true\); \}\);/.test(pv) && /function load\(id, quiet\) \{/.test(pv) && /if \(!quiet\) \$\('atBody'\)\.innerHTML = /.test(pv) &&
+      /adtFreshTag\(D\.fresh_today\)/.test(pv) && /finished days: /.test(pv);
+    const ttl = src.slice(src.indexOf('const ADTOOL_KV_TTL_MS = {'), src.indexOf('};', src.indexOf('const ADTOOL_KV_TTL_MS = {')));
+    let memos = true; for (const m of ttl.matchAll(/adtool[A-Za-z]+: (\d+)/g)) if (Number(m[1]) > 300000) memos = false;
+    return polls && prod && memos;
   })(), null);
 
   const passed = results.filter(r => r.ok).length;

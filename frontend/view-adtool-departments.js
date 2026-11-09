@@ -220,7 +220,7 @@
       load(false).catch(function () {});
       /* nothing moves until the next daily roll-up, so the re-read is hourly. adtPoll carries the
          hidden-tab guard and stops for good on an expired session. */
-      adtPoll('dpBody', 3600000, function () { return load(true); });
+      adtPoll('dpBody', 300000, function () { return load(true); });
     }
   };
 
