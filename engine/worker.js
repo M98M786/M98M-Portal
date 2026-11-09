@@ -31560,6 +31560,16 @@ const ROUTES = {
            CPC-only listing as unpromoted and put 27 ABRT listings into the General campaign too —
            the red-line duplicate (and double billing). Removing a General ad restores CPC-only. */
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_delete_ads_by_listing_id$/,
+        /* 10 Nov (owner, SQR listing desk: "launch campaign for all"): a keyword campaign built from a
+           listing's own Search Query Report — the ad group, its keywords and negative keywords, and the
+           pause of the listing's old ad so the two never compete. Same account token, same host; a
+           negative keyword only ever narrows where our own ad shows. */
+        /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/ad_group(\?|$)/,
+        /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_create_keyword$/,
+        /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/keyword(\?|$)/,
+        /^\/sell\/marketing\/v1\/bulk_create_negative_keyword$/,
+        /^\/sell\/marketing\/v1\/negative_keyword(\?|$)/,
+        /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_update_ads_status_by_listing_id$/,
         /* 3 Nov (owner): "move them to dynamic with 15% cap" — the campaign-level settings updates
            (update_ad_rate_strategy sets dynamicAdRatePreferences.adRateCapPercent). Config only;
            an update_* subpath can change a campaign's own settings, never another seller's data. */
