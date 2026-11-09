@@ -11787,10 +11787,36 @@ function adSaleMembership(row, event, ledger, orders, today) {
   /* 2. THE LEDGER. The day's price is the pre-sale price less the discount, to the penny. */
   if (expected != null && out.price_today != null) {
     out.readable = true;
-    if (adSaleNearPrice(out.price_today, expected)) {
+    /* 10 Nov: the price matching the discount is NOT enough on its own. Sir Hasib's 130 skipped
+       listings were repriced about five per cent down BY HAND on 7 November, four days after eBay had
+       filled the event with eleven, and that cut reads exactly like eBay's own x(1 - d). The ledger
+       proof therefore needs the x(1 - d) step to be eBay's: dated the day the event began or the day
+       after (the ledger is daily), with no real price change since. A step on any other day is a
+       repricing, which restarts the clock rather than proving the sale. */
+    /* the step is dated from the LEDGER itself: the first day on or after the event began that the
+       record holds the sale price, with the record not already at that price the day before. A step
+       on the start day or the day after is eBay's; a step later than that is a repricing (the snapshot
+       also hands in the clocks' own enrol day, which wins where it is later than the fill). */
+    const ledgerRows = (ledger || []).filter(x => x && x.day && isFinite(Number(x.price))).map(x => ({ day: String(x.day).slice(0, 10), price: round2(Number(x.price)) })).sort((a, b) => a.day < b.day ? -1 : a.day > b.day ? 1 : 0);
+    let stepDay = null, heldSince = true;
+    for (let i = 0; i < ledgerRows.length; i++) {
+      const row = ledgerRows[i];
+      if (starts && row.day < starts) continue;
+      if (adSaleNearPrice(row.price, expected) && (i === 0 || !adSaleNearPrice(ledgerRows[i - 1].price, expected))) { stepDay = row.day; break; }
+    }
+    if (stepDay) for (const row of ledgerRows) if (row.day > stepDay && !adSaleNearPrice(row.price, expected)) heldSince = false;
+    const enrolOn = String(r.enrol_on || '').slice(0, 10);
+    const stepOn = (enrolOn && (!stepDay || enrolOn > stepDay)) ? enrolOn : stepDay;
+    const lastAny = String(r.last_change_any || '').slice(0, 10);
+    const enrolMatchesFill = !!(stepOn && starts && stepOn >= starts && stepOn <= adtAddDays(starts, 1));
+    const changedSince = !heldSince || !!(stepOn && lastAny && lastAny > stepOn);
+    if (adSaleNearPrice(out.price_today, expected) && enrolMatchesFill && !changedSince) {
       out.on_sale = true; out.basis = 'ledger';
-      out.why = 'the price record shows the discount against the price it held before the event began';
+      out.why = 'the price record shows the discount, stepped on the day eBay filled the event, and it has not moved since';
       return out;
+    }
+    if (adSaleNearPrice(out.price_today, expected) && !enrolMatchesFill) {
+      out.why = stepOn ? 'the price is down by the discount, but it stepped on ' + stepOn + ', not when eBay filled the event: a repricing, not the sale' : 'the price matches the discount but the record holds no step on the day eBay filled the event';
     }
   }
   /* 3. AN ORDER. A buyer paid the sale figure for a unit. Two shapes are accepted because the two
@@ -11807,7 +11833,7 @@ function adSaleMembership(row, event, ledger, orders, today) {
     }
   }
   if (!out.readable) out.why = 'no price record from before the event and no order since, so the discount cannot be looked for';
-  else out.why = 'the event names it and neither the price nor an order shows the discount';
+  else if (!out.why) out.why = 'the event names it and neither the price nor an order shows the discount';
   return adSaleSkipReason(out, r, starts && t && starts <= t ? starts : (t || starts));
 }
 function adSaleSkipReason(out, row, judgeDay) {
@@ -12217,7 +12243,7 @@ async function adtSaleSnapshot(env) {
     const lastChange = changeDays.concat(realRev ? [realRev] : []).sort().pop() || null;
     const exitedOn = [leftOn[id] || '', clocks.last_exit || ''].filter(d => d && d <= judge).sort().pop() || null;
     const M = adSaleMembership(
-      { item_id: id, price: it.price, listed_on: String(it.start_time || '').slice(0, 10), exited_on: exitedOn, last_change_on: lastChange },
+      { item_id: id, price: it.price, listed_on: String(it.start_time || '').slice(0, 10), exited_on: exitedOn, last_change_on: lastChange, enrol_on: clocks.last_enrol || null, last_change_any: clocks.last_change || null },
       { promo_id: promo, discount_pct: evDisc, starts: ev ? String(ev.starts || '') : '', ends: ev ? String(ev.ends || '') : '', added: !!added, whole_shop: basis === 'any' },
       ledger[id] || [], ordMap2[id] || [], today
     );
@@ -12462,7 +12488,7 @@ async function adtoolSalesCompute(env, acct) {
     for (const rs of await adtBatchRead(env, stmts)) for (const r of rs) mgById[String(r.item_id)] = r; }
   const WIN = await adtSaleWindowSums(env, ids, today);
   const running = (await env.DB.prepare(
-    "SELECT account, name, promo_id, status, COALESCE(discount,'') AS discount, item_n, COALESCE(criterion_type,'') AS criterion, substr(start_at,1,10) AS starts, substr(end_at,1,10) AS ends " +
+    "SELECT account, name, promo_id, status, COALESCE(discount,'') AS discount, item_n, COALESCE(criterion_type,'') AS criterion, substr(start_at,1,10) AS starts, substr(end_at,1,10) AS ends, COALESCE(listing_ids,'') AS listing_ids " +
     "FROM promotions WHERE type = 'MARKDOWN_SALE' AND status LIKE '%RUNNING%'" + (acct ? ' AND account = ?1' : '') + ' ORDER BY account'
   ).bind(...(acct ? [acct] : [])).all()).results || [];
   /* INVENTORY_ANY covers the WHOLE SHOP: eBay returns no listing list and enrols each listing itself, so item_n=0

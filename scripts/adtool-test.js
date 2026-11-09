@@ -7799,6 +7799,24 @@ function run(argv) {
     return polls && prod && memos;
   })(), null);
 
+  /* 10 Nov: the Sale page's first live run called 143 of Sir Hasib's 150 on sale where eBay had eleven, because 130
+     were repriced five per cent down by hand on 7 Nov and that reads like eBay's own step. The ledger proof now
+     needs the step on the fill day and nothing changed since; and the running-events read must carry listing_ids
+     or every event names nothing (both events read named 0 on the first run). */
+  t('sale truth: a discount step on the day eBay filled the event proves the sale; the same step four days later is a repricing, not a sale', (() => {
+    const ev = { promo_id: 'P1', discount_pct: 0.05, starts: '2026-11-03', ends: '2026-11-16', added: true, whole_shop: false };
+    const ledgerOk = [{ day: '2026-11-02', price: 9.99 }, { day: '2026-11-03', price: 9.49 }, { day: '2026-11-09', price: 9.49 }];
+    const ledgerHand = [{ day: '2026-11-02', price: 9.99 }, { day: '2026-11-06', price: 9.99 }, { day: '2026-11-07', price: 9.49 }, { day: '2026-11-09', price: 9.49 }];
+    const a = F.adSaleMembership({ item_id: '1', price: 9.49, listed_on: '2026-03-01' }, ev, ledgerOk, [], '2026-11-09');
+    const b = F.adSaleMembership({ item_id: '2', price: 9.49, listed_on: '2026-03-01' }, ev, ledgerHand, [], '2026-11-09');   /* the record alone dates the step to the 7th */
+    const c = F.adSaleMembership({ item_id: '3', price: 9.49, listed_on: '2026-03-01', last_change_any: '2026-11-07' }, ev, ledgerOk, [], '2026-11-09');   /* the clocks say it moved after */
+    return a.on_sale === true && a.basis === 'ledger' && b.on_sale === false && /repricing, not the sale/.test(b.why) && c.on_sale === false;
+  })(), null);
+  t('sale events: the running-events read carries listing_ids and the snapshot hands the rule the enrol day', (() => {
+    const sc = src.slice(src.indexOf('async function adtoolSalesCompute('), src.indexOf('async function adtoolSalesCompute(') + 60000);
+    return /substr\(end_at,1,10\) AS ends, COALESCE\(listing_ids,''\) AS listing_ids " \+/.test(sc) && /enrol_on: clocks\.last_enrol \|\| null, last_change_any: clocks\.last_change \|\| null/.test(src);
+  })(), null);
+
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
   return lines.join('\n') + '\n' + (passed === results.length ? 'PASS ' : 'FAIL ') + passed + '/' + results.length;
