@@ -11784,6 +11784,9 @@ function adSaleMembership(row, event, ledger, orders, today) {
     out.why = eb.in_sale ? 'eBay has this listing in a different sale, not this event' : 'eBay answered, and this listing is not in a sale';
     return adSaleSkipReason(out, r, starts && t && starts <= t ? starts : (t || starts));
   }
+  /* set by the ledger branch: today's price matches the discount but stepped later than the fill day, so
+     it is a repricing, and an order at that price proves the repricing rather than the sale */
+  let laterStep = false;
   /* 2. THE LEDGER. The day's price is the pre-sale price less the discount, to the penny. */
   if (expected != null && out.price_today != null) {
     out.readable = true;
@@ -11810,6 +11813,7 @@ function adSaleMembership(row, event, ledger, orders, today) {
     const lastAny = String(r.last_change_any || '').slice(0, 10);
     const enrolMatchesFill = !!(stepOn && starts && stepOn >= starts && stepOn <= adtAddDays(starts, 1));
     const changedSince = !heldSince || !!(stepOn && lastAny && lastAny > stepOn);
+    laterStep = adSaleNearPrice(out.price_today, expected) && !!stepOn && !enrolMatchesFill;
     if (adSaleNearPrice(out.price_today, expected) && enrolMatchesFill && !changedSince) {
       out.on_sale = true; out.basis = 'ledger';
       out.why = 'the price record shows the discount, stepped on the day eBay filled the event, and it has not moved since';
@@ -11826,7 +11830,9 @@ function adSaleMembership(row, event, ledger, orders, today) {
   if (d != null && out.paid_per_unit != null) {
     out.readable = true;
     const fromToday = out.price_today == null ? null : round2(out.price_today * (1 - d));
-    if ((expected != null && adSaleNearPrice(out.paid_per_unit, expected)) || (fromToday != null && adSaleNearPrice(out.paid_per_unit, fromToday))) {
+    /* 10 Nov: a buyer paying today's price proves nothing when today's price is itself a repricing made
+       after eBay filled the event (Sir Hasib, 7 Nov): the ledger's dating of the step governs here too */
+    if (!laterStep && ((expected != null && adSaleNearPrice(out.paid_per_unit, expected)) || (fromToday != null && adSaleNearPrice(out.paid_per_unit, fromToday)))) {
       out.on_sale = true; out.basis = 'order';
       out.why = 'a buyer paid the sale price for a unit';
       return out;
