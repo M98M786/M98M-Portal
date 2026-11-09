@@ -18535,6 +18535,10 @@ async function adtoolPeakPlan(env) {
         work.push({ row: r, day: tomorrow });
         const h = have[id + '|' + today];
         if (!h || !h.readable) work.push({ row: r, day: today });
+        /* 10 Nov: a fleet rule change must reach the rest of TODAY, not only tomorrow. A stored day still
+           written on the pattern while the rule says typed hours only is re-planned now, so the next tick
+           switches on what a dead window had paused rather than waiting for midnight. */
+        else if (String(rules.pattern_apply || 'on') === 'off' && String(h.source || '') === 'pattern') work.push({ row: r, day: today });
       } else if (drift[id]) {
         work.push({ row: r, day: today });
       }

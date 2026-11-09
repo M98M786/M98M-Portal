@@ -7843,6 +7843,11 @@ function run(argv) {
       /const applied = ok && tracking && applyDead && wins\.length > 0;/.test(src);
   })(), null);
 
+  t('peak planner: a nightly or by-key run re-plans TODAY as well where a stored day was written on the pattern and the fleet rule now says typed hours only', (() => {
+    const pl = src.slice(src.indexOf('async function adtoolPeakPlan('), src.indexOf('async function adtoolPeakPlan(') + 8000);
+    return /else if \(String\(rules\.pattern_apply \|\| 'on'\) === 'off' && String\(h\.source \|\| ''\) === 'pattern'\) work\.push\(\{ row: r, day: today \}\);/.test(pl);
+  })(), null);
+
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
   return lines.join('\n') + '\n' + (passed === results.length ? 'PASS ' : 'FAIL ') + passed + '/' + results.length;
