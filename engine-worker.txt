@@ -6599,6 +6599,235 @@ function adtWindowSums(rows, from, to) {
   return s;
 }
 /* ADTOOL-WINDOWSUMS-PURE-END */
+/* ADTOOL-PATTERN-PURE-BEGIN */
+/* THE FOUR PATTERN BLOCKS OVER A WINDOW THE READER CHOOSES (owner, 9 Nov 2026: "I need time slots
+   of all time; weekly profile of all time; hour x weekday of all time; need best dates of the month
+   with proper dates, and date selection option of month and week").
+   Until today those four blocks on Product history were FIXED and their headings said so in typed
+   words: the time slots and the hour grid over the last 28 days, the weekday profile over the last
+   30, the dates of the month over everything held. The windows were not a choice anybody had made,
+   they were the windows the once-a-day profile job happened to compute. The four blocks are now
+   summed ON REQUEST from the two grains, by these functions and nothing else, over the window named
+   in the answer, so every heading can print the window it really covers and a reader can ask for all
+   time, a month or a week.
+   `profile.*` is untouched by all of this: the stage badge, the smoothed weekday rates and the
+   regime machinery read that, none of them asked for a window, and a window is not theirs to carry.
+   PURE ON PURPOSE. A window is arithmetic over dates and the month and week boundaries are exactly
+   where an off-by-one hides, so the arithmetic is held by tests rather than by a page that looks
+   about right. The read bounds come out of the same function as the heading: a window that is summed
+   over one range and printed as another is the fault this shape exists to make impossible. */
+const ADTOOL_PATTERN_KINDS = ['all', 'd28', 'this_month', 'last_month', 'this_week', 'last_week', 'month', 'week'];
+const ADTOOL_PATTERN_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const ADTOOL_PATTERN_DATES_CAP = 40;   /* a calendar span is a month or a week, never more */
+function adListingDayWords(ymd, withYear) {
+  const s = String(ymd || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  const m = ADTOOL_PATTERN_MONTHS[Number(s.slice(5, 7)) - 1] || '';
+  return Number(s.slice(8, 10)) + ' ' + m.slice(0, 3) + (withYear ? ' ' + s.slice(0, 4) : '');
+}
+function adListingMonthWords(ym) {
+  const s = String(ym || '');
+  if (!/^\d{4}-\d{2}$/.test(s)) return '';
+  return (ADTOOL_PATTERN_MONTHS[Number(s.slice(5, 7)) - 1] || '') + ' ' + s.slice(0, 4);
+}
+function adListingMonthEnd(ym) {
+  const y = Number(String(ym).slice(0, 4)), m = Number(String(ym).slice(5, 7));
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);   /* day 0 of the next month is the last of this one */
+}
+function adListingPattern(pat) {
+  /* what the reader asked for, normalised, and THE MEMO KEY FOR IT. The page's own default is all
+     time and it keys to the empty string on purpose: the stored answer for a reader who asked for
+     nothing and one who asked for all time is the same answer, so it is the same entry.
+     A week snaps to its Monday HERE and not in the window, so that two dates in one week share one
+     key instead of filling the cache with seven copies of the same week. */
+  const p = pat || {};
+  const kind = String(p.kind == null ? '' : p.kind).trim() || 'all';
+  if (ADTOOL_PATTERN_KINDS.indexOf(kind) < 0) throw new Error('SAY: unknown pattern window ' + kind);
+  let month = '', week = '';
+  if (kind === 'month') {
+    month = String(p.month == null ? '' : p.month).trim().slice(0, 7);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('SAY: give the month as YYYY-MM');
+  }
+  if (kind === 'week') {
+    const d = String(p.week_start == null ? '' : p.week_start).trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || isNaN(Date.parse(d + 'T12:00:00Z'))) throw new Error('SAY: give the week as a date (YYYY-MM-DD)');
+    week = adtAddDays(d, -adtWeekdayOf(d));
+  }
+  const key = kind === 'all' ? '' : kind === 'month' ? 'm:' + month : kind === 'week' ? 'w:' + week : kind;
+  return { kind, month, week_start: week, key };
+}
+function adListingPatternKey(pat) { return adListingPattern(pat).key; }
+function adListingPatternWindow(pat, todayUk, firstDay, historyFrom) {
+  /* THE WINDOW, AND THE READ BOUNDS, FROM ONE PLACE. Called twice on one answer and that is
+     deliberate: once before the reads with no first day, which gives the hour read a floor it can be
+     bounded by, and once after them with the first day the listing actually holds, which is what the
+     heading prints. The second call can only narrow `from`, never widen it, so the rows read the
+     first time are always a superset of the window summed the second.
+     `to` IS NEVER PAST YESTERDAY. The day grain's own today row carries no ad columns and the hour
+     grain's today is still filling (contract §3), so a finished day is the smallest unit here and a
+     month or a week still running is answered as far as it has run. */
+  const today = String(todayUk || ''), yday = adtAddDays(today, -1);
+  const a = adListingPattern(pat);
+  const hist = /^\d{4}-\d{2}-\d{2}$/.test(String(historyFrom || '')) ? String(historyFrom) : '2000-01-01';
+  const first = /^\d{4}-\d{2}-\d{2}$/.test(String(firstDay || '')) ? String(firstDay) : '';
+  let kind = a.kind, month = a.month, week = a.week_start, name = '', spanFrom = '', spanTo = '', mode = 'average';
+  if (kind === 'this_month' || kind === 'last_month' || kind === 'month') {
+    if (kind === 'this_month') month = today.slice(0, 7);
+    else if (kind === 'last_month') month = adtAddDays(today.slice(0, 8) + '01', -1).slice(0, 7);
+    name = a.kind === 'this_month' ? 'this month' : a.kind === 'last_month' ? 'last month' : adListingMonthWords(month);
+    spanFrom = month + '-01'; spanTo = adListingMonthEnd(month); mode = 'calendar'; kind = 'month';
+  } else if (kind === 'this_week' || kind === 'last_week' || kind === 'week') {
+    if (kind === 'this_week') week = adtAddDays(today, -adtWeekdayOf(today));
+    else if (kind === 'last_week') week = adtAddDays(adtAddDays(today, -adtWeekdayOf(today)), -7);
+    name = a.kind === 'this_week' ? 'this week' : a.kind === 'last_week' ? 'last week' : 'week of Monday ' + adListingDayWords(week);
+    spanFrom = week; spanTo = adtAddDays(week, 6); mode = 'calendar'; kind = 'week';
+  } else if (kind === 'd28') {
+    name = 'last 28 days'; spanFrom = adtAddDays(today, -28); spanTo = yday;
+  } else {
+    name = 'all time'; spanFrom = first || hist; spanTo = yday;
+  }
+  const from = spanFrom, to = spanTo < yday ? spanTo : yday;
+  const days = from > to ? 0 : Math.round((Date.parse(to + 'T12:00:00Z') - Date.parse(from + 'T12:00:00Z')) / 86400000) + 1;
+  const yr = days ? from.slice(0, 4) !== to.slice(0, 4) : false;
+  const label = days
+    ? name + ', ' + adListingDayWords(from, yr) + ' to ' + adListingDayWords(to, yr) + ', ' + days + (days === 1 ? ' day' : ' days')
+    : name + ', no finished day in it yet';
+  return { kind, preset: a.kind, key: a.key, name, label, mode, from, to, days,
+    month: kind === 'month' ? month : '', week_start: kind === 'week' ? week : '',
+    span_from: spanFrom, span_to: spanTo, complete: !!days && to >= spanTo,
+    history_from: hist, first_day: first, before_history: !!days && to < hist };
+}
+function adListingSlots(rows, win) {
+  /* THE FOUR UK SLOTS over the window: the share of units, and per day in the window the orders, the
+     units and the revenue. The AD half is the hour grain's own readings, reconciled where the final
+     report has landed and sampled where it has not, so it is null where the window holds no reading
+     at all and says how many days did hold one. Per day means per day WITH A READING, never per day
+     in the window: an average that divides sampled money by unsampled days reads as a collapse in
+     spend that never happened. */
+  const days = Number(win && win.days) || 0;
+  const from = String((win && win.from) || ''), to = String((win && win.to) || '');
+  const out = [0, 1, 2, 3].map(s => ({ slot: s, orders: 0, units: 0, revenue: 0, spend: 0, clicks: 0, sampled_hours: 0, sampled_days: 0 }));
+  const seen = [{}, {}, {}, {}];
+  let units = 0;
+  for (const r of (rows || [])) {
+    const day = String((r && r.day) || ''); if (!day || !from || day < from || day > to) continue;
+    const si = adtSlot(Number(r.hour) || 0), s = out[si];
+    s.orders += Number(r.orders) || 0; s.units += Number(r.units) || 0; s.revenue += Number(r.revenue) || 0;
+    units += Number(r.units) || 0;
+    const read = (Number(r.samples) || 0) > 0 || r.hourly_status === 'sampled' || r.hourly_status === 'partial' || r.hourly_status === 'reconciled';
+    if (!read) continue;
+    s.sampled_hours++;
+    if (!seen[si][day]) { seen[si][day] = 1; s.sampled_days++; }
+    const sp = r.spend_r != null ? Number(r.spend_r) : (r.spend_s != null ? Number(r.spend_s) : null);
+    const cl = r.clicks_r != null ? Number(r.clicks_r) : (r.clicks_s != null ? Number(r.clicks_s) : null);
+    if (sp != null && !isNaN(sp)) s.spend += sp;
+    if (cl != null && !isNaN(cl)) s.clicks += cl;
+  }
+  for (const s of out) {
+    s.share = units > 0 ? round2(s.units / units) : null;
+    s.orders_day = days ? round2(s.orders / days) : null;
+    s.units_day = days ? round2(s.units / days) : null;
+    s.revenue_day = days ? round2(s.revenue / days) : null;
+    s.spend_day = s.sampled_days ? round2(s.spend / s.sampled_days) : null;
+    s.revenue = round2(s.revenue); s.spend = round2(s.spend);
+  }
+  return { rows: out, units, days, sampled_days: out.reduce((t, s) => Math.max(t, s.sampled_days), 0) };
+}
+function adListingWeekday(rows, win) {
+  /* EACH WEEKDAY OVER THE WINDOW, from the day grain: the dates it had, and per date the units, the
+     units from ads, the ad spend and the profit. Item-level profit under the law, which is what this
+     whole page is. `thin` is true when some weekday has fewer than three dates behind it, and it is
+     the only reason the page shows the smoothed all-history rate beside these averages: a rate
+     smoothed over months is not this window's figure and must not be printed as if it were. */
+  const from = String((win && win.from) || ''), to = String((win && win.to) || '');
+  const out = ADTOOL_DOW.map((n, i) => ({ day: n, weekday: i, dates: 0, orders: 0, units: 0, attr_units: 0, spend: 0, actual_profit: 0, pending_cost_orders: 0, pending_fee_orders: 0 }));
+  for (const r of (rows || [])) {
+    const day = String((r && r.day) || ''); if (!day || !from || day < from || day > to) continue;
+    const wi = r.weekday == null ? adtWeekdayOf(day) : Number(r.weekday);
+    const w = out[wi]; if (!w) continue;
+    w.dates++;
+    w.orders += Number(r.orders) || 0; w.units += Number(r.units) || 0; w.attr_units += Number(r.attr_units) || 0;
+    w.spend += Number(r.spend) || 0; w.actual_profit += Number(r.actual_profit) || 0;
+    w.pending_cost_orders += Number(r.pending_cost_orders) || 0; w.pending_fee_orders += Number(r.pending_fee_orders) || 0;
+  }
+  let min = null;
+  for (const w of out) {
+    w.units_day = w.dates ? round2(w.units / w.dates) : null;
+    w.orders_day = w.dates ? round2(w.orders / w.dates) : null;
+    w.attr_units_day = w.dates ? round2(w.attr_units / w.dates) : null;
+    w.spend_day = w.dates ? round2(w.spend / w.dates) : null;
+    w.actual_profit = round2(w.actual_profit);
+    w.profit_day = w.dates ? round2(w.actual_profit / w.dates) : null;
+    w.spend = round2(w.spend);
+    min = min == null ? w.dates : Math.min(min, w.dates);
+  }
+  return { rows: out, dates_min: min == null ? 0 : min, thin: (min == null ? 0 : min) < 3, days: Number(win && win.days) || 0 };
+}
+function adListingHourWeekday(rows, win) {
+  /* THE 7 × 24 GRID over the window, units and orders, plus the dates each weekday contributed. The
+     dates are counted off the CALENDAR of the window and not off the rows: an hour with no order and
+     no ad reading has no row at all, so counting rows would make a quiet Tuesday look like a Tuesday
+     that never happened and divide by the wrong number. */
+  const from = String((win && win.from) || ''), to = String((win && win.to) || '');
+  const units = [], orders = [];
+  for (let d = 0; d < 7; d++) { units.push(new Array(24).fill(0)); orders.push(new Array(24).fill(0)); }
+  const dates = new Array(7).fill(0), seen = {};
+  let max = 0, rowsIn = 0;
+  for (const r of (rows || [])) {
+    const day = String((r && r.day) || ''); if (!day || !from || day < from || day > to) continue;
+    const w = adtWeekdayOf(day), h = Number(r.hour) || 0;
+    if (!units[w] || h < 0 || h > 23) continue;
+    units[w][h] += Number(r.units) || 0; orders[w][h] += Number(r.orders) || 0;
+    if (units[w][h] > max) max = units[w][h];
+    seen[day] = 1; rowsIn++;
+  }
+  let d = from, guard = 0;
+  while (from && d && d <= to && guard < 4000) { dates[adtWeekdayOf(d)]++; d = adtAddDays(d, 1); guard++; }
+  return { units, orders, dates, max, days: Number(win && win.days) || 0, days_seen: Object.keys(seen).length, rows_read: rowsIn };
+}
+function adListingDates(rows, win) {
+  /* THE DATES BLOCK, TWO SHAPES, AND THE WINDOW DECIDES WHICH. A month or a week gets THE REAL DATES
+     in order across the whole month or the whole week, each with its own units, orders, revenue, ad
+     spend and profit, and a date the day grain does not hold is null and drawn as no day held: a
+     nought there would read as a day that sold nothing, which is a different fact.
+     All time and the last 28 days get the average per calendar date 1 to 31, as the block always did,
+     with the count of dates behind each average so a 31st built from two dates cannot be read beside
+     a 15th built from three months of them. */
+  const from = String((win && win.from) || ''), to = String((win && win.to) || '');
+  const held = {};
+  for (const r of (rows || [])) {
+    const day = String((r && r.day) || ''); if (!day || !from || day < from || day > to) continue;
+    held[day] = r;
+  }
+  const num = (r, k) => (r && r[k] != null && !isNaN(Number(r[k]))) ? Number(r[k]) : null;
+  if (String(win && win.mode) === 'calendar') {
+    const out = [];
+    let d = String((win && win.span_from) || ''), end = String((win && win.span_to) || ''), guard = 0;
+    while (d && end && d <= end && guard < ADTOOL_PATTERN_DATES_CAP) {
+      const r = held[d];
+      out.push({ day: d, dom: adtDom(d), weekday: adtWeekdayOf(d), label: adListingDayWords(d), held: !!r, future: !to || d > to,
+        units: r ? Number(r.units) || 0 : null, orders: r ? Number(r.orders) || 0 : null,
+        revenue: r ? round2(Number(r.revenue) || 0) : null, spend: r ? round2(Number(r.spend) || 0) : null,
+        actual_profit: r ? (num(r, 'actual_profit') == null ? null : round2(num(r, 'actual_profit'))) : null,
+        pending_cost_orders: r ? Number(r.pending_cost_orders) || 0 : null, pending_fee_orders: r ? Number(r.pending_fee_orders) || 0 : null });
+      d = adtAddDays(d, 1); guard++;
+    }
+    const got = out.filter(x => x.held).length;
+    return { mode: 'calendar', rows: out, from: String((win && win.span_from) || ''), to: end, held: got, missing: out.length - got };
+  }
+  const out = []; for (let i = 1; i <= 31; i++) out.push({ dom: i, dates: 0, units: 0, orders: 0, revenue: 0 });
+  for (const day of Object.keys(held)) {
+    const r = held[day], x = out[adtDom(day) - 1]; if (!x) continue;
+    x.dates++; x.units += Number(r.units) || 0; x.orders += Number(r.orders) || 0; x.revenue += Number(r.revenue) || 0;
+  }
+  for (const x of out) {
+    x.units_day = x.dates ? round2(x.units / x.dates) : null;
+    x.orders_day = x.dates ? round2(x.orders / x.dates) : null;
+    x.revenue = round2(x.revenue);
+  }
+  return { mode: 'average', rows: out, from, to, held: Object.keys(held).length, missing: 0 };
+}
+/* ADTOOL-PATTERN-PURE-END */
 async function adtProductCells(env, rows) {
   /* image + title (+ account) from items_api for item-keyed rows built in JS — one IN (…) query per 90 ids,
      never one per row (D1 allows 100 binds). A row that already carries `image` is left alone. */
@@ -6960,6 +7189,13 @@ async function adtoolListingCompute(env, iid, p) {
      figure on the page moves. The 28-day floor is on the drawn day as well, because a listing whose
      last day row is older than that drew an empty hour chart before and must still draw one. */
   const hourFrom = adtAddDays(today, -28);
+  /* 9 Nov (owner: "I need time slots of all time ... and date selection option of month and week"):
+     THE WINDOW THE READER CHOSE for the four pattern blocks, worked out BEFORE the reads so the one
+     read it costs can be bounded by it. The first day this listing holds is not known yet, so this
+     call answers with the floor the engine's own figures begin at and the window is worked out again
+     below, with that first day, for the heading. The same function both times: a window summed over
+     one range and printed as another is what that shape exists to make impossible. */
+  const patBounds = adListingPatternWindow(p && p.pattern, today, '', ADTOOL_HISTORY_START);
   /* ---- the groups ---- */
   const core = [
     env.DB.prepare('SELECT * FROM adtool_listings WHERE item_id = ?1').bind(iid),
@@ -7006,8 +7242,14 @@ async function adtoolListingCompute(env, iid, p) {
       adtPeakSchedulesRead(env, [iid], [today, adtAddDays(today, 1)]),
       adtPeakLiveSwitches(env),
     ]).catch(() => null)),
+    /* 9 Nov: THE ONE READ THE FOUR PATTERN BLOCKS COST, bounded by the window above. The hour grain
+       answers the time slots and the hour × weekday grid; the weekday profile and the dates of the
+       month are summed from the day rows the core group already reads, so they cost no read at all.
+       Null on a failure, which the page prints as not known rather than as an empty grid. Appended
+       LAST so the indexes above do not move. */
+    clock('pattern_ms', () => env.DB.prepare('SELECT day, hour, orders, units, revenue, spend_s, spend_r, clicks_s, clicks_r, samples, hourly_status FROM adtool_listing_hour WHERE item_id = ?1 AND day >= ?2 AND day <= ?3 ORDER BY day, hour').bind(iid, patBounds.from, patBounds.to).all().then(r => (r && r.results) || []).catch(() => null)),
   ]));
-  const cr = G[0], tRowRaw = G[1], saleRows = G[2], where = G[3], profile = G[4], notes = G[5], freshPair = G[6], peakRead = G[7];
+  const cr = G[0], tRowRaw = G[1], saleRows = G[2], where = G[3], profile = G[4], notes = G[5], freshPair = G[6], peakRead = G[7], patHours = G[8];
   const L = (cr[0] || [])[0];
   if (!L) throw new Error('SAY: no listing with that id in the tool yet (the rollup has not seen it)');
   const days = cr[1] || [], hours = cr[2] || [], hourProfile = cr[3] || [], weeks = cr[4] || [], months = cr[5] || [], actions = cr[6] || [];
@@ -7068,6 +7310,25 @@ async function adtoolListingCompute(env, iid, p) {
   const dom = []; for (let d = 1; d <= 31; d++) dom.push({ dom: d, dates: 0, units: 0 });
   for (const r of days) { const x = dom[r.dom - 1]; if (x) { x.dates++; x.units += r.units; } }
   for (const x of dom) x.units_day = x.dates ? round2(x.units / x.dates) : null;
+  /* ---- 9 Nov: THE SAME FOUR BLOCKS, OVER THE WINDOW THE READER CHOSE ----
+     `weekday`, `heat`, `slots` and `dom` above are the FIXED windows the page drew until today, 30
+     and 28 days and everything held, and they are left exactly as they were: the probe counts them,
+     the tests hold them, and a frontend older than this engine still draws them rather than nothing.
+     `patterns` is what the page draws now. The window is worked out a second time, with the first day
+     this listing really holds, so the heading can print "all time, 13 Aug to 8 Nov, 88 days" instead
+     of a typed phrase. The hour half is null when its read failed, which the page prints as not
+     known; the two halves summed from the day rows always have an answer, even if it is an empty
+     one, because those rows are the core group's and the core group cannot have failed by here. */
+  const patWin = adListingPatternWindow(p && p.pattern, today, days.length ? String(days[0].day) : '', ADTOOL_HISTORY_START);
+  const patterns = {
+    window: patWin,
+    slots: patHours ? adListingSlots(patHours, patWin) : null,
+    weekday: adListingWeekday(days, patWin),
+    hour_weekday: patHours ? adListingHourWeekday(patHours, patWin) : null,
+    dates: adListingDates(days, patWin),
+    hours_read: patHours ? patHours.length : null,
+    note: 'the time slots and the hour grid are summed from the hour grain over the window named here; the weekday profile and the dates are summed from the finished day rows, which is why a part month or a part week stops at yesterday',
+  };
   const camps = JSON.parse(L.campaigns_json || '[]');
   /* 28 Oct spec: forecasting left the portal and nothing renders this field, so the two reads behind it are gone. */
   const forecast = null;
@@ -7092,7 +7353,7 @@ async function adtoolListingCompute(env, iid, p) {
   return {
     item_id: iid,   /* the whole response is this one listing's: profit keys below are item-level by construction */
     header: { item_id: iid, account: L.account, title: L.title, image: img && img.image ? String(img.image) : null, category: L.m98m_category, category_source: L.category_source, is_case: !!L.is_case, case_type: L.case_type, ebay_category_path: L.ebay_category_path, price: L.price, margin: L.margin_before_ads, margin_source: L.margin_source, breakeven_roas: L.breakeven_roas, start_time: L.start_time, age_days: age, status: L.status, first_ad_day: L.first_ad_day, first_order_day: L.first_order_day, last_ad_day: L.last_ad_day, stage: null, in_sale: saleField.in_sale, eligible_on: saleField.eligible_on, peak: peakField },
-    period: w, kpis, fresh, fresh_today: freshToday, campaigns: camps, where, profile, forecast, decision, narrative, days, hours, weeks, weeks_note: 'the week and month grains hold finished days only — the current ISO week / month run Monday / the 1st to yesterday; today lives on the today grain (kpis.today)', weeks_behaviour, months, weekday: wd, heat, slots, dom, actions,
+    period: w, kpis, fresh, fresh_today: freshToday, campaigns: camps, where, profile, forecast, decision, narrative, days, hours, weeks, weeks_note: 'the week and month grains hold finished days only — the current ISO week / month run Monday / the 1st to yesterday; today lives on the today grain (kpis.today)', weeks_behaviour, months, weekday: wd, heat, slots, dom, patterns, actions,
     /* WHAT THE HOURS IN THIS ANSWER COVER, said in the answer rather than left to be guessed: the
        `hours` rows are one day, the day the hour chart draws, and the profile behind the heat map,
        the slots and the note below was summed over the 28 days named here. */
@@ -7108,12 +7369,19 @@ async function adtoolListingCompute(env, iid, p) {
    page's clearer names its own: the key carries the listing and the reader's profit class and
    nothing else, so both classes' entries for this one listing go and no other listing is touched.
    It never throws: a memo that survives this is a page up to two minutes behind, which is the
-   ceiling the action states anyway, and that is not worth failing somebody's note over. */
-async function adtListingCacheClear(env, iid) {
+   ceiling the action states anyway, and that is not worth failing somebody's note over.
+   9 Nov: the key can now carry the pattern window a reader chose, so the entry a note has to drop
+   depends on which window that reader is looking at. The caller passes it (the page sends the window
+   it is showing with the note) and BOTH the window's entry and the default one go: the default is
+   the entry the next open of the page will read, and the reader's own is the entry their own reload
+   will read. An entry for a window nobody is looking at is left to the two-minute ceiling. */
+async function adtListingCacheClear(env, iid, patKey) {
   const id = String(iid || '').replace(/\D/g, '');
   if (!id) return;
+  const pat = String(patKey || '').slice(0, 40);
   for (const cls of ['p', 'np']) {
     try { await env.HOT.delete(adtKvKey('adtoolListing', cls, { item_id: id })); } catch (e) { /* the read window catches it */ }
+    if (pat) { try { await env.HOT.delete(adtKvKey('adtoolListing', cls, { item_id: id, pattern: pat })); } catch (e) { /* as above: the read window catches it */ } }
   }
 }
 const ADTOOL_ACTIONS = {
@@ -7165,9 +7433,16 @@ const ADTOOL_ACTIONS = {
          not their role, so a stored answer can never be the thing that decides who may read it.
          A CALLER THAT ASKS FOR A WINDOW OF ITS OWN IS ANSWERED FRESH (the contract's §1 window): the
          key names no window, so holding a windowed answer under it would hand the next reader
-         somebody else's window. The page itself never sends one. */
+         somebody else's window. The page itself never sends one.
+         9 Nov: THE PATTERN WINDOW IS DIFFERENT, AND IT IS PART OF THE KEY. The page does send that
+         one, on every open, so answering it fresh would have taken the memo away from the one page
+         it was written for. The key carries the window's own canonical key instead, and all time
+         keys to nothing at all: a reader who asks for nothing and a reader who asks for all time are
+         asking the same question and must share one entry. The key is built by the same function
+         that builds the window, so a window the engine would refuse cannot be stored under a key. */
       if (p && (p.period || p.from)) return adtoolListingCompute(ctx.env, iid, p);
-      return adtKvMemo(ctx.env, 'adtoolListing', adtProfitClass(ctx.user), { item_id: iid }, ADTOOL_KV_TTL_MS.adtoolListing,
+      const patKey = adListingPatternKey(p && p.pattern);
+      return adtKvMemo(ctx.env, 'adtoolListing', adtProfitClass(ctx.user), patKey ? { item_id: iid, pattern: patKey } : { item_id: iid }, ADTOOL_KV_TTL_MS.adtoolListing,
         () => adtoolListingCompute(ctx.env, iid, p),
         (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
     },
@@ -7181,8 +7456,12 @@ const ADTOOL_ACTIONS = {
       await ctx.env.DB.prepare("INSERT INTO adtool_actions (account, item_id, type, note, by_email, at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))").bind(L ? L.account : '', iid, type, note, String((ctx.user || {}).email || '')).run();
       /* the page reloads itself straight after this, and the answer it reloads is now a memoised
          one: drop this listing's entry or the note somebody just logged is missing from the log
-         they are looking at for up to two minutes. */
-      await adtListingCacheClear(ctx.env, iid);
+         they are looking at for up to two minutes. The page sends the pattern window it is showing,
+         so the entry ITS OWN reload will read is dropped as well as the default one. A window that
+         cannot be read is not a reason to refuse a note: the key falls back to the default. */
+      let patKey = '';
+      try { patKey = adListingPatternKey(p && p.pattern); } catch (e) { patKey = ''; }
+      await adtListingCacheClear(ctx.env, iid, patKey);
       return { ok: true };
     },
   },
@@ -7418,12 +7697,17 @@ async function adtWhereRows(env, iid) {
   await ensureAdtoolPhase2Schema(env);
   const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
   const d7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  /* 9 Nov (owner: "in product history page I need all time and 30 days campaign data too"). The
+     grouped read below already asked for every row this listing has in adtool_ads_daily, grouped by
+     campaign, and threw all but the last seven days of it away in the SUM. The 30-day and all-time
+     sums are therefore the same one statement with more CASE columns, not another trip. */
+  const d30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
   /* 2 Nov: the four reads below are independent of one another and used to wait on one another, four
      trips to the database for one panel. They go in ONE batch now, in the order the results are read
      back in. Not one of them is a different query. */
   const WR = await adtBatchRead(env, [
     env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.ad_id, ca.bid_pct AS ad_bid, ca.ad_status, ca.synced_at, ca.ad_records, c.ads_synced_at, c.name, c.status AS c_status, c.funding_model, c.budget, c.bid_pct AS c_bid, c.start_date, c.end_date, a.name AS a_name, a.status_last AS a_status, a.funding AS a_funding, a.gone_at, ia.status AS l_status FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = ca.account AND a.campaign_id = ca.campaign_id LEFT JOIN items_api ia ON ia.item_id = ca.listing_id WHERE ca.listing_id = ?1 ORDER BY (c.campaign_id IS NULL), c.status, c.name").bind(iid),
-    env.DB.prepare('SELECT campaign_id, SUM(CASE WHEN day = ?2 THEN spend ELSE 0 END) AS sp_y, SUM(CASE WHEN day = ?2 THEN units ELSE 0 END) AS un_y, SUM(CASE WHEN day = ?2 THEN revenue ELSE 0 END) AS rv_y, SUM(CASE WHEN day >= ?3 THEN spend ELSE 0 END) AS sp_7, SUM(CASE WHEN day >= ?3 THEN revenue ELSE 0 END) AS rv_7, SUM(CASE WHEN day >= ?3 THEN units ELSE 0 END) AS un_7, MAX(day) AS last_day FROM adtool_ads_daily WHERE item_id = ?1 GROUP BY campaign_id').bind(iid, yday, d7),
+    env.DB.prepare('SELECT campaign_id, SUM(CASE WHEN day = ?2 THEN spend ELSE 0 END) AS sp_y, SUM(CASE WHEN day = ?2 THEN units ELSE 0 END) AS un_y, SUM(CASE WHEN day = ?2 THEN revenue ELSE 0 END) AS rv_y, SUM(CASE WHEN day >= ?3 THEN spend ELSE 0 END) AS sp_7, SUM(CASE WHEN day >= ?3 THEN revenue ELSE 0 END) AS rv_7, SUM(CASE WHEN day >= ?3 THEN units ELSE 0 END) AS un_7, SUM(CASE WHEN day >= ?4 THEN spend ELSE 0 END) AS sp_30, SUM(CASE WHEN day >= ?4 THEN revenue ELSE 0 END) AS rv_30, SUM(CASE WHEN day >= ?4 THEN units ELSE 0 END) AS un_30, SUM(CASE WHEN day >= ?4 THEN 1 ELSE 0 END) AS n_30, SUM(spend) AS sp_all, SUM(revenue) AS rv_all, SUM(units) AS un_all, COUNT(*) AS n_all, MIN(day) AS first_day, MAX(day) AS last_day FROM adtool_ads_daily WHERE item_id = ?1 GROUP BY campaign_id').bind(iid, yday, d7, d30),
     env.DB.prepare('SELECT campaign_id, MAX(seen_at) AS at FROM adtool_campaign_ad_events WHERE item_id = ?1 GROUP BY campaign_id').bind(iid),
     env.DB.prepare('SELECT e.campaign_id, e.from_status, e.to_status, e.seen_at, e.source, COALESCE(c.name, a.name, e.campaign_id) AS name FROM adtool_campaign_ad_events e LEFT JOIN campaigns c ON c.account = e.account AND c.campaign_id = e.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = e.account AND a.campaign_id = e.campaign_id WHERE e.item_id = ?1 ORDER BY e.seen_at DESC LIMIT 20').bind(iid),
   ]);
@@ -7440,6 +7724,15 @@ async function adtWhereRows(env, iid) {
     const live = resolved ? liveMembershipRow({ c_status: r.c_status, l_status: r.l_status, funding_model: r.funding_model, ad_status: r.ad_status }) : false;
     const s = spend[r.campaign_id] || {};
     return { campaign_id: r.campaign_id, name: resolved ? r.name : (archived ? r.a_name + ' (gone from eBay ' + String(r.gone_at || '').slice(0, 10) + ')' : 'unresolved id ' + r.campaign_id), resolved, archived, funding, campaign_status: resolved ? r.c_status : (archived ? r.a_status + ' (archived)' : 'unknown'), ad_state: st.state, live, ad_bid: r.ad_bid || '', campaign_bid: r.c_bid || '', budget: r.budget == null ? null : Number(r.budget), start_date: r.start_date || '', end_date: r.end_date || '', spend_yesterday: s.sp_y == null ? null : round2(s.sp_y), units_yesterday: s.un_y == null ? null : Number(s.un_y), revenue_yesterday: s.rv_y == null ? null : round2(s.rv_y), spend_7d: s.sp_7 == null ? null : round2(s.sp_7), roas_7d: (s.sp_7 > 0) ? round2(s.rv_7 / s.sp_7) : null, units_7d: s.un_7 == null ? null : Number(s.un_7), campaign_rows_to: s.last_day || '', last_change: lastEv[r.campaign_id] || '', synced_at: r.synced_at,
+      /* 9 Nov: the same money over thirty days and over everything this listing has in this campaign.
+         A WINDOW WITH NO ROW IN IT IS NULL AND NOT A NOUGHT, which is why the counts are summed
+         beside the money: a campaign the listing joined last week has no row in the month before it,
+         and £0.00 there would read as a month of free advertising rather than as a month that is not
+         this campaign's to answer for. A window that HAS rows and spent nothing is a real nought.
+         ROAS stays null wherever the spend is nought, because nothing divided by nothing is not 0×. */
+      spend_30d: Number(s.n_30) > 0 ? round2(s.sp_30) : null, roas_30d: Number(s.sp_30) > 0 ? round2(s.rv_30 / s.sp_30) : null, units_30d: Number(s.n_30) > 0 ? Number(s.un_30) : null,
+      spend_all: Number(s.n_all) > 0 ? round2(s.sp_all) : null, roas_all: Number(s.sp_all) > 0 ? round2(s.rv_all / s.sp_all) : null, units_all: Number(s.n_all) > 0 ? Number(s.un_all) : null,
+      all_from: s.first_day || '',
       /* 24 Oct, fix 6: ad status is NOT "every 15 minutes" for every row. Only a RUNNING or
          ENDING_SOON campaign is ever re-read, so for anything else this is the last time eBay was
          asked and the page must say "last seen" rather than present it as current. */
@@ -28937,7 +29230,7 @@ const ROUTES = {
       const iid = String((p && p.item_id) || '').replace(/\D/g, '').slice(0, 24);
       if (!iid) throw new Error('SAY: give an item id');
       const d = await adtoolListingCompute(ctx.env, iid, null);
-      const hw = d.hours_window || {};
+      const hw = d.hours_window || {}, pw = (d.patterns && d.patterns.window) || {};
       return {
         item_id: iid,
         /* ms per read group and the total. The groups ran at the same time, so they overlap and must
@@ -28950,7 +29243,12 @@ const ROUTES = {
            the marker unwritten and the skip from ever arriving. */
         timings: d.timings,
         /* how many rows came back, which is the other half of why a page is slow */
-        rows: { days: (d.days || []).length, hours: (d.hours || []).length, hour_profile: Number(hw.profile_rows) || 0, weeks: (d.weeks || []).length, months: (d.months || []).length, hours_window: [hw.from || '', hw.to || ''], hours_day: hw.hours_day || '' },
+        /* 9 Nov: and the one read the four pattern blocks cost, with the window it was bounded by.
+           All time over a listing with a year of history is the biggest read on this page, and
+           "the page is slow" can now be answered with that row count rather than guessed at. */
+        rows: { days: (d.days || []).length, hours: (d.hours || []).length, hour_profile: Number(hw.profile_rows) || 0, weeks: (d.weeks || []).length, months: (d.months || []).length, hours_window: [hw.from || '', hw.to || ''], hours_day: hw.hours_day || '',
+          pattern_hours: (d.patterns && d.patterns.hours_read != null) ? Number(d.patterns.hours_read) : null,
+          pattern_window: [(pw.from) || '', (pw.to) || ''], pattern_days: Number(pw.days) || 0, pattern_kind: String(pw.preset || '') },
       };
     },
   },
