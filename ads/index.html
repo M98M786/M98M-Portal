@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261108-0036';
+var BUILD = '20261109-1035';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -14895,6 +14895,18 @@ function enterApp(user){
       ? 'adtoolOverview'
       : (((viewList()[0] || {}).key) || 'home');
   }
+  /* 9 Nov (owner, on Abdul's screen): an Item Lister's sidebar came up mixed - Management (Signals,
+     Staff reviews, Meetings, Daily agenda...) and Advertising (Live listings) sat beside Listings,
+     because those pages are open to every role and every group lists whatever passes canSee. A
+     lister's sidebar is their own desk and the Listings department, nothing else. A page Management
+     granted on the Access desk (a key in their modules) still shows wherever it lives, and nothing
+     is blocked: the other pages stay routable by hash, this only decides what the sidebar lists. */
+  var ROLE_NAV_GROUPS = { 'Item Lister': ['My desk', 'Listings'] };
+  var navOnly = window.M98M_ADS_ONLY ? null : ROLE_NAV_GROUPS[(STATE.user && STATE.user.role) || ''];
+  var navMods = (STATE.user && STATE.user.modules) || [];
+  function navKeep(groupName, v){
+    return !navOnly || navOnly.indexOf(groupName) >= 0 || navMods.indexOf(v.key) >= 0;
+  }
   var placed = {};
   function navLink(v){
     var a=document.createElement('a'); if(v.key===landing) a.className='on'; a.dataset.key=v.key;
@@ -14935,14 +14947,15 @@ function enterApp(user){
     members.forEach(function(v){ if(!pinned){ placed[v.key]=1; groupOf[v.key]=name; } sec.appendChild(navLink(v)); });
   }
   NAV_DEPTS.forEach(function(dept){
-    var members = dept.keys.filter(function(k){ return byKey[k]; }).map(function(k){ return byKey[k]; });
+    var members = dept.keys.filter(function(k){ return byKey[k]; }).map(function(k){ return byKey[k]; })
+      .filter(function(v){ return navKeep(dept.name, v); });
     if(members.length) buildGroup(dept.name, members);
     if(dept.name === 'My desk'){
       var pins = pinnedViews();
       if(pins.length) buildGroup('Pinned', pins, true);
     }
   });
-  var rest = visible.filter(function(v){ return !placed[v.key]; });
+  var rest = visible.filter(function(v){ return !placed[v.key] && navKeep('More', v); });
   if(rest.length){ buildGroup('More', rest); }
   /* navigating into a closed group opens it (hash nav, in-page links) */
   window.__navReveal = function(key){
