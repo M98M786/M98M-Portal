@@ -7834,7 +7834,7 @@ function run(argv) {
     const off = F.adPeakSchedule(Object.assign({}, base, { apply_dead: false }));
     const dflt = F.adPeakSchedule(base);
     const onStates = on.states.slice(17, 22).join(','), offStates = off.states.slice(17, 22).join(',');
-    return on.applied === true && /OFF/.test(onStates) && off.applied === false && offStates === 'ON,ON,ON,ON,ON' && (off.proposal || []).length === 1 && dflt.applied === true;
+    return on.applied === true && /OFF/.test(onStates) && off.applied === false && offStates === 'ON,ON,ON,ON,ON' && (off.proposal || []).length === 1 && off.source === 'proposal' && dflt.applied === true;
   })(), null);
   t('peak schedule: the fleet rule is a stored setting read by the planner and the probe alike, never a typed figure', (() => {
     return /pattern_apply: 'adtool_peak_pattern_apply'/.test(src) && /pattern_apply: patternApply,/.test(src) &&

@@ -17128,7 +17128,8 @@ function adPeakSchedule(input) {
     states.push('ON');
     reasons.push(backSet[h] ? 'inside its hours, left running so the ad is not switched twice for one hour' : 'inside its hours');
   }
-  const source = !ok ? 'proposal' : (!tracking ? 'typed' : (wins.length ? 'pattern' : 'typed'));
+  /* with the fleet rule off the windows are a proposal whatever the days behind them, and the label says so */
+  const source = (!ok || !applyDead) ? 'proposal' : (!tracking ? 'typed' : (wins.length ? 'pattern' : 'typed'));
   const why = source === 'pattern'
     ? 'inside its own hours, with the hours it has never sold in switched off'
     : source === 'proposal'
