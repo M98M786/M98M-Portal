@@ -844,6 +844,16 @@
     if (P && P.dead_hours && P.dead_hours.note) h += '<div class="pkt-sm2">' + esc(String(P.dead_hours.note)) + '</div>';
     if (P && P.tracking && P.tracking.note) h += '<div class="pkt-sm2">' + esc(String(P.tracking.note)) + '</div>';
     if (P && P.note) h += '<div class="pkt-sm2">' + esc(String(P.note)) + '</div>';
+    /* THE SPEND RULE'S OWN TWO SETTINGS, printed from the answer and never typed: whether the rule is
+       running, and the limit it runs on. They belong here because this panel is where a reader comes to
+       ask what the figures beside a listing were decided on. */
+    var SR = stopRules();
+    h += '<div class="pkt-sm" style="margin-top:6px"><b>The spend rule:</b> ' +
+      (!SR ? 'not in this answer'
+        : (String(SR.on) === 'on' ? 'running' : 'switched off') +
+          ' · <b>limit</b> ' + (stopLimit() || 'not in this answer') +
+          (num(SR.stopped_today) == null ? '' : ' · <b>stopped today</b> ' + cnt(SR.stopped_today))) + '</div>' +
+      (SR && SR.note ? '<div class="pkt-sm2">' + esc(String(SR.note)) + '</div>' : '');
     h += windowsLine('Switched off today by the pattern', r.dead_windows, 'nothing today');
     h += windowsLine('Put forward and not acted on', r.dead_proposal, 'nothing put forward');
     /* the four parts of the day, where the suggestion list has judged this listing: that row carries
@@ -1300,6 +1310,67 @@
     }
     return '<b>' + esc(txt) + '</b><div class="pkt-sm2">the system has not said whether it can read these yet</div>';
   }
+  /* ── THE SPEND RULE (owner, 10 Nov) ──────────────────────────────────────────
+     "Every listing that is in peak time, and crosses 3 pounds without a sale at that specific day,
+     automatically stop it via system." Every figure here comes off the record the rule wrote, and the
+     limit is printed from the settings the answer carries: not one of these sentences types it. */
+  function stopRules() { var R = PK.data && PK.data.stoploss_rules; return R && typeof R === 'object' ? R : null; }
+  function stopLimit() {
+    var R = stopRules();
+    if (!R) return '';
+    var t = String(R.threshold_text || '').trim();
+    if (t) return t;
+    var n = num(R.threshold);
+    return n == null ? '' : gbp(n);
+  }
+  /* WHAT THE STOP WAS: live, written down, or held at the ceiling. Said in the live-apply cell, which
+     is where a reader already looks to find out whether anything was really sent. */
+  function stopModeWords(S) {
+    if (!S) return '';
+    if (String(S.mode) === 'live' && Number(S.sent)) return 'the stop went to eBay through live apply';
+    if (String(S.mode) === 'live') return 'the stop was sent and eBay did not accept it' + (num(S.http_status) ? ' (HTTP ' + cnt(S.http_status) + ')' : '');
+    if (String(S.mode) === 'blocked') return 'the stop was held at this account\u2019s daily ceiling, so nothing was sent';
+    if (String(S.mode)) return 'the stop was written down only, because live apply is off for this account';
+    return 'how the stop was handled was not recorded';
+  }
+  /* THE ROW'S OWN LINE: when it was stopped, what it had spent, and what has gone out since — which on
+     a stop that reached eBay should read nothing at all. Null is never nought: a figure the answer does
+     not carry says so instead of printing a pound sign and a zero. */
+  function stoppedLine(r) {
+    var S = r && r.stopped_today;
+    if (!S || typeof S !== 'object') return '';
+    var at = String(S.at_uk || '').trim(), sp = num(S.spend), since = num(S.spend_since);
+    return '<div class="pkt-sm" style="margin-top:4px"><span class="pkt-tag off">stopped today</span> ' +
+      (at ? '<b>' + esc(at) + '</b>' : '<span class="pkt-sm2">time not recorded</span>') +
+      (sp == null ? ' · <span class="pkt-sm2">what it had spent was not recorded</span>' : ' · <b>' + gbp(sp) + '</b> spent with no sale') + '</div>' +
+      '<div class="pkt-sm2">' + (since == null ? 'what it has spent since is not in this answer' : gbp(since) + ' spent since') + '</div>';
+  }
+  /* ONE LINE AT THE TOP OF THE LIST: how many the rule stopped today, and the limit it ran on. The
+     count is the engine's own, over the record, so a listing taken off the list after it was stopped is
+     still counted — it happened. */
+  function stopLine() {
+    var R = stopRules();
+    if (!R) return '';
+    var lim = stopLimit(), n = num(R.stopped_today);
+    if (String(R.on) !== 'on') {
+      return '<div class="pkt-rules"><b>' + reg('stopped by the spend rule', 'The spend rule is off') + '.</b> ' +
+        'Nothing on this list is stopped for spending' + (lim ? ' ' + esc(lim) : '') + ' on ads in a day without selling; the hours alone decide.</div>';
+    }
+    var h = '<div class="pkt-recon"><b>' + reg('stopped by the spend rule', 'Stopped today by the rule') + ': ' +
+      (n == null ? 'not in this answer' : cnt(n)) + '</b>. ';
+    h += 'A listing inside its own hours that has spent' + (lim ? ' <b>' + esc(lim) + '</b>' : ' its limit') +
+      ' on ads today with nothing sold is paused for the rest of the UK day, once a day at most.';
+    var since = num(R.spend_since), sentN = num(R.sent_today), only = num(R.written_only_today);
+    if (n != null && n > 0) {
+      var parts = [];
+      if (sentN != null && sentN > 0) { parts.push(cnt(sentN) + ' went to eBay'); }
+      if (only != null && only > 0) { parts.push(cnt(only) + ' ' + plural(only, 'was', 'were') + ' written down only'); }
+      if (parts.length) { h += ' ' + parts.join(' and ') + '.'; }
+      h += since == null ? ' What they have spent since is not in this answer.' : ' <b>' + gbp(since) + '</b> has gone out on them since.';
+    }
+    if (R.problem) { h += ' <span class="pkt-bad">' + esc(String(R.problem)) + '.</span>'; }
+    return h + '</div>';
+  }
   function nextCell(r) {
     var t = String(r.next_change == null ? '' : r.next_change).trim();
     if (!t) return '<span class="pkt-sm2">nothing due</span>';
@@ -1307,7 +1378,9 @@
   }
   function lastCell(r) {
     var L = r.last_switch;
-    if (!L || typeof L !== 'object') return '<span class="pkt-sm2">never switched</span>';
+    /* a stop is a change too, so the line goes on the row whether or not the apply record has caught
+       up with it yet: the two readings come from different tables and the row must not look untouched */
+    if (!L || typeof L !== 'object') return '<span class="pkt-sm2">never switched</span>' + stoppedLine(r);
     var to = String(L.to || '').toUpperCase(), mode = String(L.mode || '').toLowerCase();
     /* a would-send row changed nothing on eBay, so it cannot be reported in the past tense: the
        row used to read "switched on 2 Nov 17:01" for an account whose switch is off (owner, 3 Nov) */
@@ -1323,7 +1396,7 @@
       : mode === 'blocked' ? 'held back, so nothing was sent'
       : mode ? 'written down, not sent to eBay' : 'mode not recorded';
     return '<div class="pkt-sm"><b>' + esc(word) + '</b> ' + esc(whenTxt(L.at)) + '</div>' +
-      '<div class="pkt-sm2">' + esc(how) + '</div>';
+      '<div class="pkt-sm2">' + esc(how) + '</div>' + stoppedLine(r);
   }
   /* THE ACCOUNT SWITCH IS NOT THE WHOLE ANSWER. `switch_state` is what this row would actually do
      on this tick, and it has a third value the account switch on its own cannot show: 'blocked', an
@@ -1350,6 +1423,10 @@
     var st = String((r && r.switch_state) || '').toLowerCase().trim();
     var acct = String((r && r.account) || '').trim();
     var who = acct ? '<div class="pkt-sm2">' + esc(acct) + '</div>' : '';
+    /* and where the spend rule stopped this listing today, whether that stop really went through live
+       apply or was only written down: the same question this chip answers for the hours. */
+    var S = (r && r.stopped_today) || null;
+    if (S) { who += '<div class="pkt-sm2">' + esc(stopModeWords(S)) + '</div>'; }
     var S = SWITCH_STATE[st];
     if (S) {
       var note = String((r && r.switch_note) || '').trim();
@@ -1369,7 +1446,7 @@
     var h = '<div class="pkt-panel"><h3>Management\'s list' + reg('the peak hours work list', 'how') + '</h3>' +
       '<div class="pkt-sub">The list the team keeps by hand, and the one the system switches. A removal keeps the ' +
       'row as a record, so the list stays a history of what was decided.</div>' +
-      campaignLine(counts()) + periodsNote() + campaignsNowNote();
+      campaignLine(counts()) + stopLine() + periodsNote() + campaignsNowNote();
     /* ONE PICKER ON THE PAGE AT A TIME. The add form stands down while a row's campaign form is
        open, exactly as it does while a row's hours form is open: both forms carry the same picker
        container, and two of that container on one page would leave whichever repainted second

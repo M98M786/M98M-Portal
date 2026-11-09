@@ -90,7 +90,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
    this file cannot matter. */
 function cronMap() {
   return {
-    '*/5 * * * *': [orderSync, adsSync, cpcAudit, adsIntraday, openSync],
+    '*/5 * * * *': [orderSync, adsSync, cpcAudit, openSync],
     /* trafficNow LEFT this slot on 2 Nov, the same day it joined it. It rode LAST, behind four heavy
        API syncs, and this file's own law is that a job queued after them can silently never run once
        the invocation's subrequest budget is gone. It is also the one job here that must not be
@@ -106,6 +106,22 @@ function cronMap() {
        than eight. That is why the sampler did not simply move to a slower slot: a quota that rises
        should speed it up without a cron change, and a quota that falls should slow it down. */
     '4-59/5 * * * *': [trafficNow],
+    /* THE SAMPLER'S OWN TWO-MINUTE SLOT (owner, 10 Nov: "that system should get updated every 2
+       minutes"). adsIntraday LEFT the five-minute slot above, where it rode fourth behind three API
+       syncs. Two reasons, and the second is the one that matters: a turn every two minutes is a turn
+       the old slot could not offer, and the spend rule that now runs after every sample it takes can
+       PAUSE AN AD ON EBAY, so it is the second job in this map that writes there. A job that writes to
+       eBay must never be the one a packed slot starves, which is the whole reason the peak switch has a
+       slot of its own. Own slot, own invocation, own subrequest budget, and nothing else on it.
+       THE SLOT IS NOT THE CADENCE, exactly as it is not the traffic sampler's. The slot only offers a
+       turn every two minutes; whether the job takes it is adtSamplerDue's answer, from the peak envelope
+       and a spacing a manager sets, so the quiet hours of the day cost eBay no more calls than they did
+       on the slower slot. runJob's own per-name lock is THE ONE LOCK: a run still in flight when the
+       next turn comes round is never doubled, because that lock is held for the whole of it.
+       It is deliberately NOT on the KV heartbeat below, for the same reason the five-minute slot is
+       not: a beat every two minutes is 720 writes a day on its own, and the whole worker has a
+       thousand. The per-slot row in the database below carries it instead. */
+    '*/2 * * * *': [adsIntraday],
     /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
        carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
     /* adsItems LEFT this slot on 24 Oct. It used to read 2 campaigns per account per tick, which
@@ -420,7 +436,10 @@ export default {
         /* The heartbeat is the black-box recorder: it proves in KV — a channel independent of
            D1 — that the tick fired, BEFORE any job runs. Kept to the quarter-hour slots so it
            stays far inside KV's 1k-writes/day budget. */
-        if (event.cron !== '*/5 * * * *') {
+        /* 10 Nov: the sampler's own two-minute slot joins the five-minute one in being left off this
+           beat. KV carries a thousand writes a day for the whole worker and a two-minute beat is 720
+           of them; the per-slot row written below is in D1 and costs nothing of that budget. */
+        if (event.cron !== '*/5 * * * *' && event.cron !== '*/2 * * * *') {
           try { await env.HOT.put('cron:beat', JSON.stringify({ cron: event.cron, at: new Date().toISOString() })); } catch (e) {}
         }
         /* 5 Nov: one shared key cannot say WHICH slot stopped firing. Three watches sat dead for two
@@ -1052,9 +1071,9 @@ function pvTokens(s) {
    every DDL statement in the file, which is wider than these families on purpose: a CREATE put
    anywhere is a reason to look. That is deliberate: a marker that could go stale by accident is a
    column that never lands. */
-const ADTOOL_SCHEMA_VERSION = '2026-11-10.1';
+const ADTOOL_SCHEMA_VERSION = '2026-11-10.2';
 /* the fingerprint of every DDL statement in engine/worker.js, held to this value by the suite */
-const ADTOOL_SCHEMA_DDL_HASH = '211-62a7d27a';
+const ADTOOL_SCHEMA_DDL_HASH = '213-d9cc864c';
 const ADTOOL_SCHEMA_KEY = 'adtool_schema_version';
 let ADTOOL_SCHEMA_MARK = null;      /* the one marker read per isolate */
 let ADTOOL_SCHEMA_SETTLE = null;    /* the one apply pass per isolate, and the proof DDL ran here */
@@ -4884,9 +4903,9 @@ async function ensureAdtoolPhase1bSchema(env) {
   await adtSeedRun(env, seed, 'register p1b');   /* the register is documentation; never let it stop a job */
 }
 const ADTOOL_REGISTER_P1B = [
-  ['TODAY_GRAIN', 'Today\'s figures per listing', 'Today\'s spend, clicks, sales from ads and orders for each listing, refreshed every five minutes. eBay publishes no ad figures for today until around 08:00 UK, so before then a listing shows its orders only.', 'adtool_intraday_latest, orders → adtool_listing_today', 'Every five minutes, and skipped when nothing has changed', 'The newest reading is under ten minutes old through the day'],
+  ['TODAY_GRAIN', 'Today\'s figures per listing', 'Today\'s spend, clicks, sales from ads and orders for each listing, read again every ' + ADTOOL_SAMPLER_EVERY_MIN + ' minutes while a listing on the peak list is inside its own hours and more slowly the rest of the time, at a spacing a manager sets. eBay publishes no ad figures for today until around 08:00 UK, so before then a listing shows its orders only.', 'adtool_intraday_latest, orders → adtool_listing_today', 'With every reading the sampler takes, and skipped when nothing has changed', 'The newest reading is under ten minutes old through the day'],
   ['PERIOD_PARAM', 'The period a page is showing', 'Today, yesterday, the last 7, 14, 30 or 90 days, this or last week, this or last month, or dates you pick. A period that includes today uses today\'s live figures for today and the finished figures for every earlier day.', 'adtool_listing_day, adtool_listing_today, ad_report_tasks', 'Read on every request, and every page says which period it used', 'Tested on all eleven choices and on the week and month edges'],
-  ['KV_PAGE_CACHE', 'Page cache', 'A page\'s answer is kept for a short while so opening it again is quick. What a page may show depends on who is asking, so an answer is kept separately for each kind of reader and is never shared across them. Nothing you act on is ever kept.', 'HOT (KV), sync_state', 'On every read, and the busiest pages are prepared in advance every five minutes', 'The first open of a page after a quiet spell comes back from the cache'],
+  ['KV_PAGE_CACHE', 'Page cache', 'A page\'s answer is kept for a short while so opening it again is quick. What a page may show depends on who is asking, so an answer is kept separately for each kind of reader and is never shared across them. Nothing you act on is ever kept.', 'HOT (KV), sync_state', 'On every read, and the busiest pages are prepared in advance with each reading of today\'s figures', 'The first open of a page after a quiet spell comes back from the cache'],
   ['CARRY_HOUR', 'The first ad reading of the day', 'eBay\'s first reading of the day is a running total since midnight, so it is booked against the hour it arrived rather than spread back over the night. Days rolled up before this was fixed still show that first reading sitting inside the 08:00 hour.', 'adtool_ads_intraday → adtool_listing_hour.carry_spend', 'With the hourly roll-up', 'The hours of a day add back up to the day\'s own total'],
 ];
 async function adtFlag(env, key) {
@@ -4921,7 +4940,22 @@ async function ensureAdtoolFreshConfig(env) {
   const one = (key, value) => env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key, String(value));
   /* the defaults already answer for an unseeded key, so a seed that did not land is not fatal; it
      is written down, which keeps the marker unwritten, and the next call tries again */
-  if (await adtSeedRun(env, [one(K.amber_min, D.amber_min), one(K.red_min, D.red_min)], 'freshness config')) ADTOOL_FRESH_CFG_OK = true;
+  /* 10 Nov: the sampler's quiet-hours spacing is seeded here too, beside the two figures the same
+     badges are judged on. It is one setting in the same store, read by its own helper because its
+     name is the sampler's and not the freshness law's, and seeded in this family so a database the
+     marker has already stamped is given it with everything else. */
+  if (await adtSeedRun(env, [one(K.amber_min, D.amber_min), one(K.red_min, D.red_min), one(ADTOOL_SAMPLER_CONFIG_KEYS.quiet_min, ADTOOL_SAMPLER_QUIET_DEFAULT_MIN)], 'freshness config')) ADTOOL_FRESH_CFG_OK = true;
+}
+/* HOW OFTEN THE SAMPLER READS, as the engine will actually run it: the cron slot for the peak hours
+   and the manager's figure for the rest of the day, through the ONE pure function every sentence
+   about the timer is written from. Seeded before it is read, exactly as the thresholds are, so a
+   blank is never printed for a spacing that is in force. */
+async function adtSamplerCadenceFor(env) {
+  await ensureAdtoolFreshConfig(env);
+  const cfg = {};
+  const row = await env.DB.prepare('SELECT key, value FROM portal_config WHERE key = ?1').bind(ADTOOL_SAMPLER_CONFIG_KEYS.quiet_min).first().catch(() => null);
+  if (row && row.key) cfg[String(row.key)] = row.value;
+  return adtSamplerCadence(cfg);
 }
 /* THE SAMPLER'S OWN RUNS, ASSEMBLED ONCE (31 Oct, §6.7). The Data health panel prints these and the
    freshness probe answers with them by key, and evidence two readers can disagree about is not
@@ -4945,6 +4979,9 @@ async function adtSamplerPanel(env, rules, nowD) {
   return Object.assign({
     runs: adtSamplerRuns(tickRows, { limit: ADTOOL_SAMPLER_RUNS_SHOWN, rules: R }),
     runs_shown: ADTOOL_SAMPLER_RUNS_SHOWN, every_min: ADTOOL_SAMPLER_EVERY_MIN,
+    /* THE CADENCE IN FORCE, in the words the page prints and from the settings rather than typed
+       beside the panel: fast inside the peak hours, slower outside them. */
+    cadence: await adtSamplerCadenceFor(env).catch(() => adtSamplerCadence(null)),
     ticks_read: tickRows.length, last_sample: lastSample,
     /* the page badge's own verdict, which goes amber before the alert goes red: amber is a page
        telling somebody who is already looking, red is the point at which somebody is told. */
@@ -6849,19 +6886,23 @@ async function adtProductCells(env, rows) {
 
 /* ---- Phase 1B: the today grain, the window splice, freshness, the KV page cache ---- */
 async function adtFresh(env, grain) {
-  /* {grain, sampled_at | rolled_at, cadence} for a page header: "updated HH:MM · every 5 min". Outside the sampling
-     window the tag carries in_window = false and the next sample time, so the shell prints "no samples until
-     07:05 UTC" instead of a red stale mark against yesterday's last tick. */
+  /* {grain, sampled_at | rolled_at, cadence} for a page header: "updated HH:MM · <the cadence>". Outside the
+     sampling window the tag carries in_window = false and the next sample time, so the shell prints "no samples
+     until 07:05 UTC" instead of a red stale mark against yesterday's last tick.
+     10 Nov: `cadence` is no longer a phrase typed here. The sampler reads fast inside the peak hours and slower
+     outside them, both figures live in the settings, and this header reads them back through the one pure
+     function, so a manager changing the spacing changes this line with it. */
   if (grain === 'today') {
     /* 2 Nov: two reads with nothing to say to each other, so they go at the same time rather than
        one after the other. Every page header in the tool waits on this pair. */
     const TO = await Promise.all([
       env.DB.prepare('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks').first().catch(() => null),
       env.DB.prepare("SELECT MAX(last_ok) AS t FROM sync_state WHERE job = 'orderSync'").first().catch(() => null),
+      adtSamplerCadenceFor(env).catch(() => adtSamplerCadence(null)),
     ]);
-    const t = TO[0], o = TO[1];
+    const t = TO[0], o = TO[1], cad = TO[2];
     const now = new Date(), inWin = adtInSamplingWindow(now), fromTxt = adtSamplingFromText(now);
-    return { grain: 'adtool_listing_today', sampled_at: t && t.t ? String(t.t) : null, orders_at: o && o.t ? String(o.t) : null, cadence: 'every 5 min', ads_window: adtSamplingWindowText(now), provisional: true,
+    return { grain: 'adtool_listing_today', sampled_at: t && t.t ? String(t.t) : null, orders_at: o && o.t ? String(o.t) : null, cadence: cad.text, cadence_rules: cad, ads_window: adtSamplingWindowText(now), provisional: true,
       in_window: inWin, next_sample_at: inWin ? null : fromTxt, note: inWin ? null : 'no ad figures from eBay until ' + fromTxt + ', orders are live now' };
   }
   /* 'cut' counts as a finish (1 Nov): a run that stopped itself inside its budget committed today's
@@ -6985,7 +7026,7 @@ async function adtoolTodayCompute(env, opts) {
     totals: all, totals_by_account: byAccount, items, items_total: items.length,
     hour_curve: curve.hour_curve, carry_spend: curve.carry_spend, carry_units: curve.carry_units, carry_hour_uk: curve.carry_hour_uk,
     profit_label: 'Profit (Sales Analysis law) — priced orders only, cpc spend sampled',
-    note: all.ads_sampled ? 'ad figures sampled, provisional: eBay\'s report for the UTC day, read every 5 minutes; orders by UK day' : 'no same-day ad sample yet (eBay dates report tasks in Pacific time; the first lands about ' + adtSamplingFromText() + ') — orders only',
+    note: all.ads_sampled ? 'ad figures sampled, provisional: eBay\'s report for the UTC day, ' + fresh.cadence + '; orders by UK day' : 'no same-day ad sample yet (eBay dates report tasks in Pacific time; the first lands about ' + adtSamplingFromText() + ') — orders only',
     computed_at: new Date().toISOString(), source: 'adtool_listing_today (adtool_intraday_latest + orders), adtool_ads_intraday (hour curve)',
   };
 }
@@ -8820,13 +8861,13 @@ const ADTOOL_ALERT_RULES = {
      an account that only writes down what it would have sent the finding is still the right one to fix
      before that switch is ever turned on. */
   A22: { sev: 'medium', cool: 1, text: 'peak hours: the ad was off through an hour this listing would normally sell in', action: 'check', why_matters: 'The pattern says this listing sells in that hour and the schedule, or a hold somebody set, had the ad off through it, so a sale that would have come was paid for with a saving nobody wanted.' },
-  /* 31 Oct, §5. The five-minute reading of today's figures, going quiet. Every figure on this tool
+  /* 31 Oct, §5. The reading of today's figures, going quiet. Every figure on this tool
      that says "today" stands on it, and nothing else in the portal would ever have said so: a page
      whose stamp quietly stopped moving reads exactly like a quiet trading hour. High, because while
      it is quiet nobody is looking at today at all, and the switching is deciding on a stale picture.
      The limit is the red one from the freshness settings, so the alert and every badge on every page
      cross at the same minute and the figure is never written into these words. */
-  A23: { sev: 'high', cool: 1, text: 'today\'s figures: the five-minute reading of eBay\'s running total has gone past its own limit without a single sample landing', action: 'check', why_matters: 'Everything this tool says about today is that reading, so while none is landing the spend, the hour curve, the peak figures and the switching are all deciding on a picture older than the clock printed beside it, and nobody is being told.' },
+  A23: { sev: 'high', cool: 1, text: 'today\'s figures: the reading of eBay\'s running total has gone past its own limit without a single sample landing', action: 'check', why_matters: 'Everything this tool says about today is that reading, so while none is landing the spend, the hour curve, the peak figures and the switching are all deciding on a picture older than the clock printed beside it, and nobody is being told.' },
 };
 function adtAlertUrgency(sev, hoursOpen) {
   /* how loudly the card should read: a high alert open more than 24 h is 'overdue'; otherwise urgency is derived
@@ -9090,6 +9131,9 @@ async function adtoolAlerts(env) {
        create it: a database without it must still show every other rule. */
     try {
       const FRa = await adtoolFreshnessRules(env);
+      /* the cadence in force, read once for this rule, so the sentence the alert carries says how
+         often a sample is really asked for rather than repeating a figure typed beside it */
+      const cadA = await adtSamplerCadenceFor(env).catch(() => adtSamplerCadence(null));
       const nowD = new Date(), nowMins = nowD.getUTCHours() * 60 + nowD.getUTCMinutes();
       if (adtInSamplingWindow(nowD) && nowMins >= adtSamplingFromMin(nowD) + ADTOOL_SAMPLER_ALERT_GRACE_MIN) {
         const tk = await env.DB.prepare('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks').first();
@@ -9101,9 +9145,9 @@ async function adtoolAlerts(env) {
           put('A23', 'all', {
             last_sample: lastS || null, age_min: ageS,
             limit_min: Number(FRa.red_min), amber_min: Number(FRa.amber_min),
-            every_min: ADTOOL_SAMPLER_EVERY_MIN, sampling_window: adtSamplingWindowText(nowD),
+            every_min: ADTOOL_SAMPLER_EVERY_MIN, cadence: cadA, sampling_window: adtSamplingWindowText(nowD),
             note: lastS
-              ? 'the newest reading landed ' + ageS + ' minutes ago, and the sampler is asked for one every ' + ADTOOL_SAMPLER_EVERY_MIN + ' minutes'
+              ? 'the newest reading landed ' + ageS + ' minutes ago, and the sampler is ' + cadA.words
               : 'no reading has ever landed, so there is no figure for today behind anything on the pages',
             where_to_look: 'Data health, under Sampler runs',
           });
@@ -9682,8 +9726,12 @@ const ADTOOL_ACTIONS_P5 = {
   adtoolHealthPage: {
     auth: 'any', fn: async (p, ctx) => {
       await adtGate(ctx, 'adtool_page_health'); const env = ctx.env; await ensureAdtoolPhase5Schema(env);
+      /* the sampler's cadence in force, read once for this page: both the job schedule above and the
+         today-grain row below print it, and two copies of one timer is how a page comes to contradict
+         itself the day somebody changes the spacing. */
+      const dhCad = await adtSamplerCadenceFor(env).catch(() => adtSamplerCadence(null));
       const jobs = (await env.DB.prepare("SELECT job, MAX(started_at) AS last_start, MAX(finished_at) AS last_end, SUM(CASE WHEN status IN ('error', 'FAIL', 'killed') THEN 1 ELSE 0 END) AS bad, COUNT(*) AS runs, (SELECT status FROM adtool_jobs j2 WHERE j2.job = j.job ORDER BY started_at DESC LIMIT 1) AS last_status, (SELECT note FROM adtool_jobs j3 WHERE j3.job = j.job ORDER BY started_at DESC LIMIT 1) AS last_note, (SELECT rows_written FROM adtool_jobs j4 WHERE j4.job = j.job ORDER BY started_at DESC LIMIT 1) AS last_rows FROM adtool_jobs j GROUP BY job ORDER BY job").all()).results || [];
-      const schedules = { adtoolRollups: 'hourly :20 (+ profiles / forecast catch-up)', adtoolTruth: '05:20 UTC', adtoolProfiles: '05:20 UTC chain', adtoolForecast: '05:20 UTC chain', adtoolReport: '05:20 UTC chain', adtoolRoas: '05:20 UTC chain', adtoolAlerts: 'hourly :25', adsIntraday: 'every 5 min (samples)', adsReportPoll: 'every 15 min', adsSync: 'every 5 min', adsItems: 'every 15 min (:08 :23 :38 :53, its own slot)', listingSync: 'hourly :40 (category fill)' };
+      const schedules = { adtoolRollups: 'hourly :20 (+ profiles / forecast catch-up)', adtoolTruth: '05:20 UTC', adtoolProfiles: '05:20 UTC chain', adtoolForecast: '05:20 UTC chain', adtoolReport: '05:20 UTC chain', adtoolRoas: '05:20 UTC chain', adtoolAlerts: 'hourly :25', adsIntraday: dhCad.text + ' (samples)', adsReportPoll: 'every 15 min', adsSync: 'every 5 min', adsItems: 'every 15 min (:08 :23 :38 :53, its own slot)', listingSync: 'hourly :40 (category fill)' };
       const gaps = {
         missing_report_days: (await env.DB.prepare("SELECT c.account, COUNT(*) AS days FROM (SELECT DISTINCT account FROM campaigns) c JOIN (SELECT DISTINCT date FROM ads_daily WHERE date >= '2026-08-13') d LEFT JOIN ad_report_tasks t ON t.account = c.account AND t.report_date = d.date AND t.status = 'INGESTED' WHERE t.task_id IS NULL GROUP BY c.account").all()).results || [],
         unresolved_campaign_ids: await env.DB.prepare('SELECT COUNT(DISTINCT ca.campaign_id) AS n FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = ca.account AND a.campaign_id = ca.campaign_id WHERE c.campaign_id IS NULL AND a.campaign_id IS NULL').first(),
@@ -9713,7 +9761,7 @@ const ADTOOL_ACTIONS_P5 = {
       let todayGrain = null; try { const pr = await env.DB.prepare("SELECT cursor, last_ok FROM sync_state WHERE job = 'adtoolToday' AND account = ''").first(); todayGrain = pr ? Object.assign({ last_ok: pr.last_ok }, JSON.parse(pr.cursor || '{}')) : null; } catch (e) { todayGrain = null; }
       const profilesCur = String(await adtFlag(env, 'adtool_profiles_cursor') || ''), forecastCur = String(await adtFlag(env, 'adtool_forecast_cursor') || '');
       const freshnessMap = [
-        { family: 'today grain (adtool_listing_today)', cadence: 'every 5 min, ads sampled ' + adtSamplingWindowText() + ' (no same-day report task before Pacific midnight); orders all day', last_at: await maxOf('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks'), rebuilt_at: todayGrain && todayGrain.last_ok ? String(todayGrain.last_ok) + 'Z' : null, flag: await adtFlag(env, 'adtool_today'), truth: todayFresh ? { status: todayFresh.status, ran_at: todayFresh.ran_at, evidence: todayFresh.evidence } : null },
+        { family: 'today grain (adtool_listing_today)', cadence: dhCad.text + ', ads sampled ' + adtSamplingWindowText() + ' (no same-day report task before Pacific midnight); orders all day', last_at: await maxOf('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks'), rebuilt_at: todayGrain && todayGrain.last_ok ? String(todayGrain.last_ok) + 'Z' : null, flag: await adtFlag(env, 'adtool_today'), truth: todayFresh ? { status: todayFresh.status, ran_at: todayFresh.ran_at, evidence: todayFresh.evidence } : null },
         { family: 'orders', cadence: 'every 5 min (orderSync)', last_at: await lastOk('orderSync') },
         { family: 'eBay fees', cadence: 'hourly :00 (financeSync)', last_at: await lastOk('financeSync') },
         { family: 'Ali cost', cadence: 'when a day tab is posted (Apps Script → syncCosts)', last_at: await lastOk('costSync') },
@@ -15146,6 +15194,12 @@ async function adtoolPeakCompute(env, acct) {
      makes it one chunk and the same two reads it always was. */
   const periods = await adtPeriodsForItems(env, manualRows.map(r => String(r.item_id || '')), ADTOOL_PEAK_MANUAL_CAP, today, todayUtc);
   const periodsBy = periods.by_item, periodsProblem = periods.problem;
+  /* TODAY'S DAY-STOPS (owner, 10 Nov), through the one reader the command centre and the evidence
+     route ask as well, so the count in the strip, the line on the centre and the row under a listing
+     are one answer and not three. */
+  const stopsToday = await adtPeakStopsRead(env, today, acct);
+  const stopBy = {};
+  for (const r of (stopsToday.rows || [])) stopBy[String(r.item_id)] = r;
   const manual = manualRows.map(r => {
     const id = String(r.item_id), u = slots[id] || [0, 0, 0, 0];
     const a = String(r.account || '');
@@ -15249,6 +15303,11 @@ async function adtoolPeakCompute(env, acct) {
       /* THE FIVE WINDOWS Product history draws for this listing, for the details block under the
          row. Each is null where we hold no day in it, because nought is a figure a reader acts on.
          This is one LISTING’S profit, which is what the law on this portal allows. */
+      /* STOPPED TODAY BY THE SPEND RULE, or null where it has not been: the figures the rule acted on,
+         the money that has gone out since, and whether the stop really reached eBay or was only
+         written down. Null and never a nought-filled shape, because "not stopped" is not "stopped
+         having spent nothing". */
+      stopped_today: stopBy[id] || null,
       periods: per || adPeakPeriodsEmpty(),
       /* AND THE 7-DAY SPEND IS NOW ONE NUMBER, not two. The column and the table’s own 7-day row
          are both the sum of adtool_listing_day.spend over the same seven finished days, so the
@@ -15292,7 +15351,22 @@ async function adtoolPeakCompute(env, acct) {
          says against the row itself rather than a bucket of its own. */
       campaign_named: manual.filter(m => m.campaign_id).length,
       campaign_all: manual.filter(m => !m.campaign_id && m.campaigns_n > 0).length,
-      campaign_none: manual.filter(m => !m.campaign_id && m.campaigns_n === 0).length },
+      campaign_none: manual.filter(m => !m.campaign_id && m.campaigns_n === 0).length,
+      /* how many the spend rule stopped today, straight off the one read rather than counted again
+         over the rows: a listing taken off the list after it was stopped is still a stop that
+         happened, so the count is the record's and not this list's. */
+      stopped_today: stopsToday.count },
+    /* THE SPEND RULE: whether it is running, the limit in force, and today's stops. Every sentence on
+       the page reads the limit back out of here, so changing it in Management changes the words too. */
+    stoploss_rules: {
+      on: adPeakPlanRules(cfg).stoploss, threshold: adPeakPlanRules(cfg).stoploss_gbp,
+      threshold_text: adPeakPlanRules(cfg).stoploss_text,
+      keys: { on: ADTOOL_PEAK_PLAN_CONFIG_KEYS.stoploss, threshold: ADTOOL_PEAK_PLAN_CONFIG_KEYS.stoploss_gbp },
+      stopped_today: stopsToday.count, sent_today: stopsToday.sent, written_only_today: stopsToday.written_only,
+      spend_since: stopsToday.spend_since, problem: stopsToday.problem,
+      note: 'a listing on this list that has spent its limit on ads today with nothing sold is paused for the rest of the UK day, inside its own hours and once a day at most; a hold somebody sets by hand outranks it',
+    },
+    stops_today: stopsToday.rows,
     plan_rules: adPeakPlanRules(cfg),
     plan_rules_text: 'the pattern is read over the last ' + adPeakPlanRules(cfg).lookback_days + ' days and only acted on from ' + adPeakPlanRules(cfg).min_days +
       ' days of hours onwards; an hour counts as dead only after it has spent money or drawn ' + adPeakPlanRules(cfg).dead_min_clicks +
@@ -15825,6 +15899,85 @@ function adPeakNextChange(ranges, hour) {
   }
   return '';
 }
+/* ---- THE PEAK ENVELOPE, and the spend rule that runs inside it (owner, 10 Nov) --------------
+   "Every listing that is in peak time, and crosses 3 pounds without a sale at that specific day,
+   automatically stop it via system. But for this, that system should get updated every 2 minutes."
+   Two pure answers, and they are deliberately apart: WHEN the fast reading is worth taking, and
+   WHETHER one listing has earned a stop. The first decides how often eBay is asked for figures and
+   nothing else; the second decides whether an ad is paused, and it is the only thing in this file
+   that can take a peak listing off the air inside hours somebody chose for it. */
+/* a minute either side of every boundary belongs to the envelope: the reading that decides a 17:00
+   stop has to be in hand AT 17:00, and the one that closes the evening has to cover 21:59. */
+const ADTOOL_PEAK_ENVELOPE_EDGE_MIN = 1;
+function adPeakEnvelopeHours(rows) {
+  /* THE UNION OF THE HOURS SOMEBODY TYPED, over every row set to switch itself whose hours can be
+     read. Rows with switching off are out of it, and so are hours that cannot be read: neither is a
+     listing the system acts on, so neither is a reason to ask eBay for figures oftener.
+     An empty list is an empty envelope, which is the honest answer and the cheap one: with nothing
+     armed the sampler runs at the quiet spacing all day, exactly as it did before any of this. */
+  const hours = new Array(24).fill(false);
+  let armed = 0, unreadable = 0, counted = 0;
+  for (const r of (rows || [])) {
+    if (!r) continue;
+    if (!Number(r.auto == null ? 0 : r.auto)) continue;
+    armed++;
+    const p = adPeakHoursParse(r.hours);
+    if (!p.ranges) { unreadable++; continue; }
+    counted++;
+    for (const h of (p.hours || [])) { const n = Number(h); if (isFinite(n) && n >= 0 && n <= 23) hours[n] = true; }
+  }
+  const list = [];
+  for (let h = 0; h < 24; h++) if (hours[h]) list.push(h);
+  return { hours: hours, list: list, armed: armed, counted: counted, unreadable: unreadable, any: list.length > 0 };
+}
+function adPeakInEnvelope(uk, envelope, edgeMin) {
+  /* IS THIS MINUTE INSIDE THE ENVELOPE. The hour itself, or a minute either side of a boundary, so a
+     reading is already in hand when the hour turns. `edge` is held to a sane minute rather than
+     refused, and nought is allowed: that is a manager saying the boundaries need no run-up. */
+  const u = uk || {}, E = envelope || {};
+  const hrs = Array.isArray(E.hours) ? E.hours : null;
+  const h = Math.round(Number(u.hour)), m = Math.round(Number(u.minute));
+  const edge = Math.min(30, Math.max(0, Math.round(Number(edgeMin == null ? ADTOOL_PEAK_ENVELOPE_EDGE_MIN : edgeMin) || 0)));
+  const none = { inside: false, why: '', hour: isFinite(h) ? h : null, edge_min: edge };
+  if (!hrs || hrs.length !== 24 || !isFinite(h) || h < 0 || h > 23) return Object.assign({}, none, { why: 'nothing on the peak list is set to switch itself, so there is no envelope to be inside' });
+  const at = x => !!hrs[((x % 24) + 24) % 24];
+  if (at(h)) return { inside: true, why: 'this hour is inside the typed hours of a listing on the list', hour: h, edge_min: edge };
+  if (isFinite(m) && edge > 0 && m >= 60 - edge && at(h + 1)) return { inside: true, why: 'the next hour opens a listing’s own hours, so the reading for it is taken now', hour: h, edge_min: edge };
+  if (isFinite(m) && edge > 0 && m < edge && at(h - 1)) return { inside: true, why: 'the hour just gone closed a listing’s own hours, so its last reading is taken now', hour: h, edge_min: edge };
+  return Object.assign({}, none, { why: 'no listing on the list has typed hours covering this hour' });
+}
+function adPeakStopLoss(input) {
+  /* ONE LISTING, ONE READING: has it earned a stop today. The owner's rule in full, and nothing else
+     in it: money out, nothing sold, inside its own hours, not already stopped today, and nobody
+     holding it by hand.
+     input: { spend_today, orders_today, threshold, already_stopped_today, inside_hours, hold }.
+     NULL IS NOT NOUGHT ANYWHERE HERE, and this is the function where that matters most. A spend
+     nobody could read is not a spend of nothing, and an order count nobody could read is NOT proof
+     that nothing sold: either one unknown and the answer is no, because the cost of a wrong yes is a
+     live ad paused in the hours it was put on the air for.
+     THE LIMIT IS NEVER TYPED. It arrives as `threshold` from the stored setting, and the sentence
+     this returns prints that same figure, so changing it in Management changes the words with it.
+     The comparison is in pennies, so a reading of exactly the limit stops and a penny under it does
+     not, whatever rounding the money went through on the way here. */
+  const i = input || {};
+  const n = v => (v === undefined || v === null || v === '' || isNaN(Number(v))) ? null : Number(v);
+  const thr = n(i.threshold);
+  const spend = n(i.spend_today);
+  const orders = n(i.orders_today);
+  const money = v => (v == null ? null : '£' + v.toFixed(2));
+  const base = { spend: spend, orders: orders == null ? null : Math.round(orders), threshold: thr };
+  const no = why => Object.assign({ stop: false, why: why }, base);
+  const hold = String(i.hold == null ? 'auto' : i.hold);
+  if (thr == null || thr <= 0) return no('no spending limit is set for the peak list, so nothing is stopped');
+  if (ADTOOL_PEAK_HOLDS.indexOf(hold) >= 0 && hold !== 'auto') return no('somebody is holding this listing ' + hold + ' by hand, and a hold set by a person outranks this rule');
+  if (!i.inside_hours) return no('it is outside its own hours just now, so the hours decide and this rule does not');
+  if (i.already_stopped_today) return no('it has already been stopped today, and a listing is stopped once a day at most');
+  if (spend == null) return no('there is no reading of what it has spent today, and no reading is not the same as nothing spent');
+  if (orders == null) return no('nothing could be read about today’s orders, so a sale cannot be ruled out');
+  if (Math.round(orders) > 0) return no('it has sold today, so the money went somewhere');
+  if (Math.round(spend * 100) < Math.round(thr * 100)) return no('it has spent ' + money(spend) + ' of ' + money(thr) + ' today with no sale');
+  return Object.assign({ stop: true, why: 'it has spent ' + money(spend) + ' today, which is the limit of ' + money(thr) + ', and nothing has sold' }, base);
+}
 function adPeakApplyCaps(state) {
   /* the peak switch's own daily ceiling: twenty switches per account per day, counted over the rows
      THIS job wrote and no others.
@@ -16179,9 +16332,18 @@ const ADTOOL_PEAK_COHORT_CAP = 500;
    mistyped pair must not be the thing that stops a badge from reading. */
 const ADTOOL_FRESH_DEFAULTS = { amber_min: 15, red_min: 60 };
 const ADTOOL_FRESH_CONFIG_KEYS = { amber_min: 'adtool_fresh_amber_min', red_min: 'adtool_fresh_red_min' };
-/* the sampler's own cadence, from the five-minute cron slot it actually sits on, so every sentence
-   about it is written from the timer rather than typed beside it. */
-const ADTOOL_SAMPLER_EVERY_MIN = 5;
+/* THE SAMPLER'S OWN CADENCE, and from 10 November it is TWO figures and not one (the owner: "that
+   system should get updated every 2 minutes"). This one is the cron slot the job actually sits on,
+   so every sentence about the fast half is written from the timer rather than typed beside it. */
+const ADTOOL_SAMPLER_EVERY_MIN = 2;
+/* AND THE SPACING OUT OF THE PEAK HOURS, which is a figure a manager sets and this is only its
+   fallback. The slot offers a turn every two minutes all day; outside the peak envelope the job
+   takes one only when the last sample is at least this old, so the quiet hours cost eBay no more
+   calls than they did on the five-minute slot the sampler left. A figure nobody has set falls back
+   to the one the sampler ran on for three months, so a database that has never been written to
+   behaves exactly as it did the day before. */
+const ADTOOL_SAMPLER_QUIET_DEFAULT_MIN = 5;
+const ADTOOL_SAMPLER_CONFIG_KEYS = { quiet_min: 'adtool_intraday_every_min_quiet' };
 /* WHAT MAKES TWO SAMPLES ONE RUN. The sampler writes one tick per account per family, seconds apart
    inside the one invocation, and the invocations themselves are five minutes apart. So a tick more
    than half the cadence after the one before it begins a new run, and everything closer belongs to
@@ -16195,6 +16357,45 @@ const ADTOOL_SAMPLER_RUNS_SHOWN = 12;
    reason. A23 waits this long before it judges, and now the probe says whether it is judging yet from
    the same figure rather than a second copy of it. */
 const ADTOOL_SAMPLER_ALERT_GRACE_MIN = 15;
+/* HOW OFTEN THE SAMPLER REALLY READS, in both halves of the day and in the words every sentence
+   about it is written from. Pure, so the page header, the stale alert, the probe and the job's own
+   note cannot come to say different things about one timer.
+   `peak_min` is the cron slot and cannot be set: a slot change is a deploy, which is the honest place
+   for it. `quiet_min` is the manager's figure, held to a range it means something in rather than
+   refused, for the same reason every other setting on this tool is: a figure somebody mistyped must
+   not be the thing that stops the reading everything about today stands on. Never below the slot
+   itself, because asking for a sample oftener than the timer fires is not a cadence, it is a wish. */
+function adtSamplerCadence(cfg) {
+  const c = cfg || {}, K = ADTOOL_SAMPLER_CONFIG_KEYS;
+  const peak = Math.max(1, Math.round(ADTOOL_SAMPLER_EVERY_MIN));
+  const v = Number(c[K.quiet_min]);
+  const asked = (c[K.quiet_min] === undefined || c[K.quiet_min] === null || c[K.quiet_min] === '' || isNaN(v) || v <= 0)
+    ? ADTOOL_SAMPLER_QUIET_DEFAULT_MIN : v;
+  const quiet = Math.min(120, Math.max(peak, Math.round(asked)));
+  return {
+    peak_min: peak, quiet_min: quiet, key: K.quiet_min,
+    /* THE SENTENCE, written once here and printed everywhere, so no page types a figure of its own */
+    text: 'every ' + peak + ' min during the peak hours, every ' + quiet + ' min otherwise',
+    words: 'read every ' + peak + ' minutes while a listing on the peak list is inside its own hours, and every ' + quiet + ' minutes the rest of the time',
+  };
+}
+/* MAY THIS TURN TAKE A SAMPLE? One tick of the two-minute slot, and the only question it answers.
+   input: { inside_peak, last_sample_age_min, quiet_min }.
+   Inside the peak envelope every turn samples, which is the whole of what the owner asked for.
+   Outside it, a turn is taken only once the newest sample is as old as the spacing in force.
+   AN AGE OF NULL IS NOT AN AGE OF NOUGHT. Nothing sampled, or a stamp nobody could read, is the one
+   state where the reading matters most, so it samples rather than waits: a sampler that treated "no
+   reading at all" as "read this very minute" would go quiet for good on the day it mattered. */
+function adtSamplerDue(input) {
+  const i = input || {};
+  const quiet = Math.max(1, Math.round(Number(i.quiet_min) || ADTOOL_SAMPLER_QUIET_DEFAULT_MIN));
+  if (i.inside_peak) return { due: true, why: 'a listing on the peak list is inside its own hours, so every turn of the timer takes a sample', inside_peak: true, quiet_min: quiet, age_min: i.last_sample_age_min == null ? null : Math.round(Number(i.last_sample_age_min)) };
+  const raw = i.last_sample_age_min;
+  const age = (raw == null || raw === '' || isNaN(Number(raw))) ? null : Math.round(Number(raw));
+  if (age == null) return { due: true, why: 'no sample is on record to date this turn against, so it takes one', inside_peak: false, quiet_min: quiet, age_min: null };
+  if (age >= quiet) return { due: true, why: 'the newest sample is ' + age + ' minutes old and the spacing out of the peak hours is ' + quiet + ', so it takes one', inside_peak: false, quiet_min: quiet, age_min: age };
+  return { due: false, why: 'the newest sample is ' + age + ' minutes old and nothing on the peak list is inside its hours, so the next turn is left to the spacing of ' + quiet + ' minutes', inside_peak: false, quiet_min: quiet, age_min: age };
+}
 function adtFreshRules(cfg) {
   /* the two figures as the engine will actually judge on them. Held to a range they mean something
      in rather than refused, for the same reason the pattern engine holds its own: a figure somebody
@@ -16729,11 +16930,17 @@ function adPeakReconcile(input) {
 /* pattern_apply (10 Nov, owner: "all peak time listings will get run from 5pm-10pm uk time now"): 'on' lets a
    proven dead window switch an ad off inside its typed hours; 'off' runs every peak listing through its typed
    hours whole and puts the dead hours forward as a proposal only. The stored setting governs; nothing prints it. */
-const ADTOOL_PEAK_PLAN_DEFAULTS = { lookback_days: 28, min_days: 14, dead_min_clicks: 5, proven_share: 60, proven_min_orders: 5, min_block_h: 2, plan_time: '23:30', pattern_apply: 'on' };
+/* stoploss / stoploss_gbp (10 Nov, the owner: "every listing that is in peak time, and crosses 3 pounds
+   without a sale at that specific day, automatically stop it via system"). The limit is a stored figure
+   and this is only its fallback: every sentence about the rule reads it back out of adPeakPlanRules, so
+   changing it in Management changes the words beside it. 'off' leaves the peak list switching on its
+   hours alone and stops nothing. */
+const ADTOOL_PEAK_PLAN_DEFAULTS = { lookback_days: 28, min_days: 14, dead_min_clicks: 5, proven_share: 60, proven_min_orders: 5, min_block_h: 2, plan_time: '23:30', pattern_apply: 'on', stoploss: 'on', stoploss_gbp: 3 };
 const ADTOOL_PEAK_PLAN_CONFIG_KEYS = {
   lookback_days: 'adtool_peak_lookback_days', min_days: 'adtool_peak_min_days', dead_min_clicks: 'adtool_peak_dead_min_clicks',
   proven_share: 'adtool_peak_proven_share', proven_min_orders: 'adtool_peak_proven_min_orders',
   min_block_h: 'adtool_peak_min_block_h', plan_time: 'adtool_peak_plan_time', pattern_apply: 'adtool_peak_pattern_apply',
+  stoploss: 'adtool_peak_stoploss', stoploss_gbp: 'adtool_peak_stoploss_gbp',
 };
 /* the three cuts between the four parts of the day, which are adtSlot's own cuts and not a second set:
    the re-evaluation happens where the shape of the day changes. */
@@ -16758,8 +16965,19 @@ function adPeakPlanRules(cfg) {
      that stops a job that saves money. */
   const share = Math.min(100, Math.max(0, Math.round(num(c[K.proven_share], D.proven_share))));
   const patternApply = String(c[K.pattern_apply] == null ? D.pattern_apply : c[K.pattern_apply]).trim().toLowerCase() === 'off' ? 'off' : 'on';
+  /* THE SPEND RULE'S OWN TWO (10 Nov). Born on, because the owner asked for it in automation; 'off'
+     and the peak list goes back to switching on its hours alone. The limit is read the way every
+     money figure on this tool is read: a blank, a negative or an unreadable edit falls back to the
+     figure in force rather than blanking the rule, because a mistyped number must not be the thing
+     that leaves an ad spending all evening. */
+  const stopOn = String(c[K.stoploss] == null ? D.stoploss : c[K.stoploss]).trim().toLowerCase() === 'off' ? 'off' : 'on';
+  const stopGv = Number(c[K.stoploss_gbp]);
+  const stopG = Math.round(Math.min(1000, Math.max(0.01, (c[K.stoploss_gbp] === undefined || c[K.stoploss_gbp] === null || c[K.stoploss_gbp] === '' || isNaN(stopGv) || stopGv <= 0) ? D.stoploss_gbp : stopGv)) * 100) / 100;
   return {
     pattern_apply: patternApply,
+    stoploss: stopOn, stoploss_gbp: stopG,
+    /* the limit in the words a page prints, so no sentence anywhere types it */
+    stoploss_text: '\u00a3' + stopG.toFixed(2),
     lookback_days: Math.min(120, Math.max(1, Math.round(num(c[K.lookback_days], D.lookback_days)))),
     min_days: Math.max(1, Math.round(num(c[K.min_days], D.min_days))),
     dead_min_clicks: Math.max(0, Math.round(c[K.dead_min_clicks] === undefined || c[K.dead_min_clicks] === null || c[K.dead_min_clicks] === '' || isNaN(Number(c[K.dead_min_clicks])) ? D.dead_min_clicks : Number(c[K.dead_min_clicks]))),
@@ -17161,6 +17379,15 @@ function adPeakWantFor(input) {
   const none = { want_override: '', want_source: '', from: 'hours', schedule_source: '', reason: '' };
   if (hold === 'on') return { want_override: 'ACTIVE', want_source: 'hold on', from: 'hold', schedule_source: '', reason: 'held on by hand' };
   if (hold === 'off') return { want_override: 'PAUSED', want_source: 'hold off', from: 'hold', schedule_source: '', reason: 'held off by hand' };
+  /* A DAY-STOP OUTRANKS TODAY'S SCHEDULE AND THE TYPED HOURS BOTH (owner, 10 Nov). The spend rule has
+     stopped this listing today, so for the rest of that UK day the wanted state is paused: without this
+     the next tick would read 'inside its peak hours', want it running and send the ad straight back on.
+     It sits BELOW the two holds on purpose. A hold is a person overruling the system, and a person must
+     be able to put a listing back on the air after the rule has taken it off; the rule itself never
+     fires on a held row, so the two can only meet where somebody has reached in deliberately.
+     It is a DAY stop and nothing longer: tomorrow there is no row for tomorrow, so tomorrow runs on the
+     schedule and the hours exactly as it would have. */
+  if (i.day_stop) return { want_override: 'PAUSED', want_source: 'stopped today by the spend rule', from: 'day_stop', schedule_source: '', reason: 'stopped today by the spend rule' };
   const s = i.schedule || null;
   const states = s && s.states;
   const h = Math.round(Number(i.hour));
@@ -17880,9 +18107,18 @@ async function ensureAdtoolPhase16Schema(env) {
      and a day with no row here means the listing runs on its typed hours exactly as it did before any
      of this existed. states_json is 24 of 'ON' / 'OFF'; reasons_json is 24 short lines saying why each
      hour reads the way it does; dead_json is what the pattern found, applied or only proposed. */
+  /* AND THE DAY-STOPS (owner, 10 Nov): one row per listing per UK day, written the moment the spend
+     rule stops a listing and read by the switch on its next tick so the listing is held off for the rest
+     of that day. `spend`, `orders` and `threshold` are the figures the rule acted on, kept so the row
+     beside the listing can print what happened rather than re-deriving it; `sent` says whether a change
+     really reached eBay and `mode` which of live, would-send or blocked it was. None of the three money
+     columns carries a DEFAULT, because a figure nobody wrote must read as nothing written and never as
+     nought. One row per day is the rule: a listing is stopped once a day at most. */
   await adtDdlRun(env, [
     'CREATE TABLE IF NOT EXISTS adtool_peak_schedule (account TEXT, item_id TEXT NOT NULL, day TEXT NOT NULL, states_json TEXT, source TEXT, reasons_json TEXT, dead_json TEXT, profile_days INTEGER, computed_at TEXT, PRIMARY KEY (account, item_id, day))',
     'CREATE INDEX IF NOT EXISTS idx_adtpksch_day ON adtool_peak_schedule(day, item_id)',
+    "CREATE TABLE IF NOT EXISTS adtool_peak_stops (account TEXT NOT NULL, item_id TEXT NOT NULL, day TEXT NOT NULL, at TEXT, spend REAL, orders INTEGER, threshold REAL, sent INTEGER DEFAULT 0, http_status INTEGER DEFAULT 0, mode TEXT DEFAULT '', campaign_id TEXT DEFAULT '', reason TEXT DEFAULT '', PRIMARY KEY (account, item_id, day))",
+    'CREATE INDEX IF NOT EXISTS idx_adtpkstop_day ON adtool_peak_stops(day, item_id)',
   ]);
   ADTOOL_P16_SCHEMA_OK = true;
 }
@@ -17918,6 +18154,12 @@ async function ensureAdtoolPeakPlanConfig(env) {
   for (const k of ['lookback_days', 'min_days', 'dead_min_clicks', 'proven_share', 'proven_min_orders', 'min_block_h', 'plan_time']) {
     stmts.push(one(K[k], String(D[k])));
   }
+  /* AND THE SPEND RULE'S OWN PAIR (10 Nov): whether it runs at all, and the limit it runs on. Seeded
+     here with everything else the peak list decides on, so the rule and its figure exist on a database
+     whose only visitor is the sampler, and a manager opening the settings sees the figure in force
+     rather than a blank. Written the same way as the rest: never over one somebody has set. */
+  stmts.push(one(K.stoploss, String(D.stoploss)));
+  stmts.push(one(K.stoploss_gbp, Number(D.stoploss_gbp).toFixed(2)));
   /* a default; never let it stop a job. A seed that did not land is written down, which keeps the
      marker unwritten, and the next run tries again. */
   if (await adtSeedRun(env, stmts, 'peak plan config')) ADTOOL_PEAK_CFG_OK = true;
@@ -17949,9 +18191,11 @@ const ADTOOL_REGISTER_P16 = [
   ['VIDEO_ADDED_ON', 'The day a video went on a listing', 'eBay publishes no upload date, so the day comes from its own record of the video, which names that moment twice. First the thumbnail’s picture address: sixteen characters decoding to twelve bytes whose ninth to twelfth are the second the file was stored, verified on 1,246 photos and all 102 thumbnails of the 18 October study. Second the expiry date, eBay’s own upload moment plus a year. Agreeing to within the minute, the day is marked cross-checked; where one answers it is named; where they differ the thumbnail wins and the gap sits beside it. The item page’s uploadDate is the listing’s start time and is never read. Failing that, the lister’s record date, marked as such, otherwise blank.', 'adtool_listing_video, listing_ladder', 'With the sweep, and only for a listing whose day is not known yet', 'The decoded day read back against the 102 dates the 18 October study recovered, the two signals read back against one another on three accounts’ live videos, and unit tests on both decodes and on the rule that picks between them'],
   ['VIDEO_BEFORE_AFTER', 'Sales before and after the video', 'Equal windows each side of the upload day, with that day itself in neither of them because the video went on part way through it. The window is the shorter of three: the days since the video, the history before it, and the ceiling asked for, which is ' + ADTOOL_VIDEO_WINDOWS.join(' days and then ') + ' days once that many exist either side. Units and takings come from the order book, cancelled and lost orders left out, on London dates; the ad spend is the click fee already booked against the listing’s day. Beside each listing sits the rest of its account over the same dates, so a fortnight when the whole account fell is not read as the video’s doing.', 'adtool_listing_day, orders, adtool_listing_video, adtool_listings', 'Worked out when the page is opened, over finished days only', 'The same arithmetic as the 18 October workbook, unit tested against three of its own listings'],
   /* the 31 Oct brief, §5: how old a figure may be before the tile beside it says so, and the
-     five-minute reading everything about today stands on */
+     reading everything about today stands on */
   ['FRESHNESS', 'How old a figure is allowed to be before the tile says so', 'Every tile carrying an “as of” time ages it against two figures a manager sets: the first turns the badge beside it amber, the second turns it red and raises an alert. Both are read off the answer the tile is drawn from, and every answer reads them out of one place, so changing either in Management moves every badge and the alert together. A figure nobody has set falls back to the owner’s own, both are held to a range they mean something in, and amber is never allowed past red, because a tile cannot be both at once. A tile with no reading behind it says so rather than printing a time.', 'portal_config', 'Read with every answer that carries a stamp', 'Unit tests on a key nobody has set, on a mistyped figure, on amber past red, and on a stamp nobody could read'],
-  ['SAMPLER_RUNS', 'The five-minute reading of today\'s figures, run by run', 'eBay publishes no hourly ad figures, so the portal reads its running total every ' + ADTOOL_SAMPLER_EVERY_MIN + ' minutes, and every figure about today stands on that reading. The sampler keeps no run record of its own: what it writes is one row per account per family for each sample that LANDED, and the runs are grouped back out of those rows, the same record the badges and the stale alert are judged on. Each run shows when it started, how long its samples spread over, how many rows it carried and the gap back to the one before it, so a stall reads as one long gap. A run that landed nothing wrote nothing and is part of that gap.', 'adtool_intraday_ticks, portal_config', 'Read every time the Data health page is opened', 'Unit tests on samples seconds apart counting as one run, on a missed run showing as a longer gap, on the oldest run shown carrying no gap it cannot know, and the gaps read back against the five-minute timer'],
+  ['SAMPLER_RUNS', 'The reading of today\'s figures, run by run', 'eBay publishes no hourly ad figures, so the portal reads its running total every ' + ADTOOL_SAMPLER_EVERY_MIN + ' minutes while a peak listing is inside its own hours, and more slowly otherwise, at a spacing a manager sets. Every figure about today stands on that reading. The sampler keeps no run record of its own: it writes a row per account and family for each sample that LANDED, and the runs are grouped out of those rows, which is what the badges and the stale alert are judged on. Each run shows when it started, how far its samples spread, how many rows it carried and the gap back to the one before, so a stall reads as one long gap.', 'adtool_intraday_ticks, portal_config', 'Read every time the Data health page is opened', 'Unit tests on samples seconds apart counting as one run, on a missed run showing as a longer gap, on the oldest run shown carrying no gap it cannot know, and the gaps read back against the timer in force'],
+  /* the 10 Nov rule: a peak listing that spends its limit without selling is stopped for the day */
+  ['PEAK_STOPLOSS', 'Stopping a peak listing that spends without selling', 'A listing on the by-hand peak list that has spent its day limit on ads today and sold nothing is paused for the rest of the UK day. It is judged only inside the hours somebody typed for it, only while nobody is holding it on or off by hand, and once a day at most. The limit, and whether the rule runs at all, are figures a manager sets and the page prints them. The sale is counted from both order records and the greater taken, so a sale seen in either lifts the listing. The pause goes out through the same sender, live switch and daily ceiling as the hours do, and is written down either way.', 'adtool_peak_items, adtool_intraday_latest, adtool_orders, orders, portal_config, adtool_peak_stops, adtool_apply_log', 'After every reading of today\'s figures taken while a listing on the peak list is inside its own hours', 'Unit tests on the limit either side of a penny, on a sale lifting it, on a stop already recorded, on an hour it is outside and on a hold somebody set; and the stop read back against what was sent and against the listing\'s own ad on eBay'],
   ['VIDEO_VS_NO_VIDEO', 'With a video against without one', 'The same aggregate twice over the same dates, once over the listings that carry a video and once over the listings of the same account that do not, per account and per case type. Views and the click-through rate come from eBay’s traffic report, which is per listing over a 7-day and a 30-day window and never per video play; everything else is daily. Each side is divided by its own number of listings, because an account with four videos and four hundred other listings would otherwise read as a collapse. A group with nothing on one side is blank and says so, because a comparison against nought is not a comparison.', 'traffic_listing, adtool_listing_day, adtool_listings, adtool_listing_video', 'Worked out when the page is opened', 'Unit tests on the per-listing division, on a group with one side empty, and the figures read back against the Overview for the same window'],
 ];
 let ADTOOL_P16_REG_OK = false;
@@ -18444,6 +18688,62 @@ async function adtPeakListRows(env, acct) {
     }
   }
 }
+/* ---- TODAY'S DAY-STOPS, READ ONCE FOR EVERY READER (owner, 10 Nov) --------------------------
+   The peak page prints these against their rows, the command centre prints one line of them and the
+   evidence route answers with the lot, so all three ask THIS: a count two screens can disagree about
+   is not a count. Read-only, and it creates nothing.
+   WHAT IT ADDS to the stored row is the one thing the row cannot know: what the listing has spent
+   SINCE it was stopped. The stored `spend` is the reading the rule acted on; the newest reading is
+   what the sampler has written since; the difference is the money the stop held back, and on a stop
+   that really reached eBay it should read nought. Null where there is no newer reading at all, never
+   nought, because "nothing more has gone out" and "nobody has looked" are different claims. */
+async function adtPeakStopsRead(env, day, acct) {
+  const d = String(day || ''), a = String(acct || '');
+  const out = { day: d, rows: [], count: 0, sent: 0, written_only: 0, spend_at_stop: null, spend_since: null, problem: '' };
+  let rows = [];
+  try {
+    rows = ((await env.DB.prepare(
+      'SELECT account, item_id, day, at, spend, orders, threshold, sent, http_status, mode, campaign_id, reason FROM adtool_peak_stops WHERE day = ?1' +
+      (a ? ' AND account = ?2' : '') + ' ORDER BY at DESC LIMIT 500'
+    ).bind(...(a ? [d, a] : [d])).all()).results) || [];
+  } catch (e) { out.problem = 'the stops recorded today could not be read'; return out; }
+  if (!rows.length) return Object.assign(out, { spend_at_stop: 0, spend_since: 0 });
+  const ids = rows.map(r => String(r.item_id));
+  const todayUtc = utcDate(), nowBy = {};
+  let readNow = true;
+  try {
+    for (const ch of adtChunks(ids)) {
+      for (const r of ((await env.DB.prepare("SELECT item_id, ROUND(SUM(cum_spend), 2) AS sp FROM adtool_intraday_latest WHERE family = 'cpc' AND report_day = ?1 AND item_id IN " + adtInList(ch, 1) + ' GROUP BY item_id').bind(todayUtc, ...ch).all()).results || [])) {
+        nowBy[String(r.item_id)] = r.sp == null ? null : Number(r.sp);
+      }
+    }
+  } catch (e) { readNow = false; }
+  let atSum = 0, sinceSum = 0, sinceKnown = false;
+  for (const r of rows) {
+    const id = String(r.item_id);
+    const at = r.spend == null ? null : round2(Number(r.spend));
+    const now = (!readNow || nowBy[id] === undefined) ? null : nowBy[id];
+    const since = (at == null || now == null) ? null : round2(now - at);
+    if (at != null) atSum += at;
+    if (since != null) { sinceSum += since; sinceKnown = true; }
+    out.rows.push({
+      account: String(r.account || ''), item_id: id, day: String(r.day || ''), at: String(r.at || ''),
+      /* the UK clock a reader sees, in the one stamp shape every "as of" on this tool uses */
+      at_uk: adPeakUkClock(r.at), spend: at, spend_now: now, spend_since: since,
+      orders: r.orders == null ? null : Math.round(Number(r.orders)),
+      threshold: r.threshold == null ? null : round2(Number(r.threshold)),
+      sent: r.sent == null ? null : (Number(r.sent) ? 1 : 0),
+      http_status: r.http_status == null ? null : Number(r.http_status),
+      mode: String(r.mode || ''), campaign_id: String(r.campaign_id || ''), reason: String(r.reason || ''),
+    });
+    if (String(r.mode || '') === 'live' && Number(r.sent)) out.sent++; else out.written_only++;
+  }
+  out.count = out.rows.length;
+  out.spend_at_stop = round2(atSum);
+  out.spend_since = sinceKnown ? round2(sinceSum) : null;
+  if (!readNow) out.problem = 'what these listings have spent since could not be read';
+  return out;
+}
 async function adtPeakPlanOne(env, row, ctxIn) {
   /* ONE LISTING, ONE DAY: profile, dead hours, tracking, schedule. Pure functions do all four; this
      only hands them what they need and gives back the row to store. */
@@ -18652,6 +18952,17 @@ async function adtoolPeakSwitch(env) {
     const schedToday = await adtPeakSchedulesRead(env, ids, [today]);
     const switches = await adtPeakLiveSwitches(env);
     const last = await adtPeakLastSwitch(env, today);
+    /* TODAY'S DAY-STOPS (owner, 10 Nov). A listing the spend rule stopped today is held OFF for the
+       rest of that UK day, and that outranks today's schedule and its typed hours both: without this
+       read the next tick would see 'inside its peak hours', want ACTIVE and switch straight back on
+       the ad the rule had just paused, every quarter hour until the stretch ended. Tomorrow the row is
+       yesterday's and the listing runs normally again, which is the whole of what a DAY-stop means.
+       Behind a try: on a database that has not taken the table yet nothing has been stopped, so
+       nothing is held, which is exactly how this job behaved the day before the table existed. */
+    const stoppedToday = {};
+    try {
+      for (const r of ((await env.DB.prepare('SELECT item_id FROM adtool_peak_stops WHERE day = ?1 LIMIT 2000').bind(today).all()).results || [])) stoppedToday[String(r.item_id)] = 1;
+    } catch (e) { /* no table yet: no stop has ever been recorded */ }
     const doneToday = {};
     for (const r of ((await env.DB.prepare("SELECT account, COUNT(*) AS n FROM adtool_apply_log WHERE decision_id = 'peak' AND mode = 'live' AND day = ?1 GROUP BY account").bind(today).all()).results || [])) doneToday[String(r.account)] = Number(r.n) || 0;
     /* the listing-and-campaign pairs already written down as blocked today. The mismatch below is a
@@ -18664,7 +18975,7 @@ async function adtoolPeakSwitch(env) {
       for (const r of ((await env.DB.prepare("SELECT item_id, campaign_id FROM adtool_apply_log WHERE decision_id = 'peak' AND mode = 'blocked' AND day = ?1 LIMIT 2000").bind(today).all()).results || [])) blockedToday[String(r.item_id) + '|' + String(r.campaign_id)] = 1;
     } catch (e) { /* no log table yet: nothing has been written down, so nothing is a repeat */ }
     const stmts = [];
-    let sent = 0, shadow = 0, held = 0, unparseable = 0, idle = 0, mismatched = 0, campaignGone = 0, bySchedule = 0, byHold = 0;
+    let sent = 0, shadow = 0, held = 0, unparseable = 0, idle = 0, mismatched = 0, campaignGone = 0, bySchedule = 0, byHold = 0, byStop = 0;
     for (const row of manual) {
       const id = String(row.item_id), acct = String(row.account || '');
       const parsed = adPeakHoursParse(row.hours);
@@ -18678,12 +18989,12 @@ async function adtoolPeakSwitch(env) {
          neither is the common case and the safe one, because it leaves the typed hours deciding exactly
          as they did yesterday. Worked out once per listing, because a hold and a schedule are about the
          listing and not about one of its campaigns. */
-      const wantFor = adPeakWantFor({ hold: row.hold, schedule: schedToday[id + '|' + today] || null, hour: uk.hour });
+      const wantFor = adPeakWantFor({ hold: row.hold, schedule: schedToday[id + '|' + today] || null, hour: uk.hour, day_stop: !!stoppedToday[id] });
       const rows = switchable[id] || [];
       if (!rows.length) { idle++; continue; }               // no pay-per-click ad on it to switch
       /* counted only once there is an ad this row could act on, so the note says how many listings the
          schedule and the holds really decided rather than how many carried one */
-      if (wantFor.from === 'hold') byHold++; else if (wantFor.from === 'schedule') bySchedule++;
+      if (wantFor.from === 'hold') byHold++; else if (wantFor.from === 'day_stop') byStop++; else if (wantFor.from === 'schedule') bySchedule++;
       /* THE CAMPAIGN THE ROW NAMES, and only that one. The ads this row may touch are narrowed here,
          once, by the one filter the page shows the reader the same answer from: a row naming no
          campaign still touches every pay-per-click ad the listing has, which is what this list has
@@ -18752,36 +19063,20 @@ async function adtoolPeakSwitch(env) {
           want_override: wantFor.want_override, want_source: wantFor.want_source,
         });
         if (!d.send) { idle++; continue; }
-        const cap = adPeakApplyCaps({ account_switches_today: doneToday[macct] || 0 });
-        const mode = d.mode === 'live' && !cap.allowed ? 'blocked' : d.mode;
-        const step = { op: 'status', campaign_id: cid, listing_id: id, to: d.send, peak: true, hours: adPeakHoursText(parsed.ranges), why: 'peak hours: ' + d.why, undo: { op: 'status', campaign_id: cid, listing_id: id, to: d.send === 'ACTIVE' ? 'PAUSED' : 'ACTIVE' } };
-        let status = 0, resp = mode === 'live' ? '' : (mode === 'would-send' ? 'account switch off, nothing sent' : cap.reason || 'held back');
-        if (mode === 'live') {
-          /* the ceiling counts REQUESTS, counted the moment this row commits to being a live one.
-             The count the job starts from is every live row of the day whatever eBay answered or
-             whether it answered at all, so counting successes here instead would let an account
-             whose every request fails go on sending for the rest of the tick, and the one run a cap
-             exists for is the one where something is going wrong. */
-          doneToday[macct] = (doneToday[macct] || 0) + 1;
-          try {
-            const tok = await ebayAccessToken(env, macct);
-            const r = await fetch(ADTOOL_APPLY_ENDPOINTS.bulk_status_by_listing(cid), { method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' }, body: JSON.stringify({ requests: [{ listingId: String(id), adStatus: d.send }] }) });
-            status = r.status; resp = (await r.text()).slice(0, 400);
-            if (r.ok || r.status === 204) { sent++; }
-            await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES ('adtool (peak switch)', 'ADTOOL_PEAK_SWITCH', ?1, ?2, ?3, datetime('now'))").bind(id + '|' + cid, believed || '(not known)', d.send + ' (' + status + ')').run();
-          } catch (e) { status = 0; resp = String(e && e.message || e).slice(0, 200); }
-        } else if (mode === 'blocked') held++; else shadow++;
-        /* op stays 'status' and never a name of its own: the Activated and Stopped page puts a change
-           down to the portal only where an apply row with op 'status' points the same way, so a name
-           of its own would make every peak switch read as "changed on eBay by somebody we cannot
-           see". decision_id 'peak' is what tells these rows apart.
-           A LIVE row is committed HERE, one statement, before the loop can reach the next send: an
-           invocation cut short after a change has gone to eBay must never leave that change without
-           its log row, because the row is the undo and the record of who did it. Would-send and
-           blocked rows sent nothing, so they are batched at the end where they cost one round trip. */
-        const logRow = env.DB.prepare("INSERT INTO adtool_apply_log (day, account, item_id, campaign_id, decision_id, op, payload_json, mode, http_status, response, undo_json, at) VALUES (?1, ?2, ?3, ?4, 'peak', 'status', ?5, ?6, ?7, ?8, ?9, datetime('now'))")
-          .bind(today, macct, id, cid, JSON.stringify(step), mode, status, resp, JSON.stringify(step.undo));
-        if (mode === 'live') { await logRow.run(); written++; } else { stmts.push(logRow); }
+        /* THE ONE SENDER (10 Nov). Everything about what leaves this worker is adPeakSendStatus's: the
+           account's own live switch decided the mode above, and the ceiling, the request, the audit row
+           and the apply row that carries the undo are all inside that one function. It was lifted out
+           of this loop unchanged, because the spend rule that stops a listing on the day it crosses its
+           limit sends through the very same function. A second copy of this block would be a second
+           path to eBay that nobody is watching, which is the one thing this job may not have. */
+        const out = await adPeakSendStatus(env, {
+          day: today, account: macct, item_id: id, campaign_id: cid, to: d.send, mode: d.mode,
+          hours: adPeakHoursText(parsed.ranges), why: 'peak hours: ' + d.why,
+          believed: believed, done: doneToday, audit: 'ADTOOL_PEAK_SWITCH',
+        });
+        if (out.mode === 'live') { if (out.sent) sent++; written++; }
+        else if (out.mode === 'blocked') held++; else shadow++;
+        if (out.statement) stmts.push(out.statement);
       }
     }
     await adtBatch(env, stmts); written += stmts.length;
@@ -18792,9 +19087,236 @@ async function adtoolPeakSwitch(env) {
       (mismatched ? ', ' + mismatched + ' blocked because the list and the ad name different accounts' : '') +
       (campaignGone ? ', ' + campaignGone + ' blocked because the campaign the list names has no ad to switch' : '') +
       (bySchedule ? '; ' + bySchedule + ' read their hour off today\'s schedule' : '') +
-      (byHold ? (bySchedule ? ' and ' : '; ') + byHold + ' off a hold somebody set' : ''));
+      (byHold ? (bySchedule ? ' and ' : '; ') + byHold + ' off a hold somebody set' : '') +
+      (byStop ? '; ' + byStop + ' held off for the rest of the day by the spend rule' : ''));
   } catch (e) { await adtJobEnd(env, 'adtoolPeakSwitch', t, written, 'error', String(e && e.message || e)); throw e; }
 }
+/* ---- THE ONE SENDER FOR EVERYTHING THE PEAK LIST DOES TO EBAY -------------------------------
+   Lifted out of the quarter-hourly switch on 10 November, line for line, so the spend rule that stops
+   a listing the day it crosses its limit without a sale can send THROUGH IT rather than beside it.
+   Two callers, one path: adtoolPeakSwitch at every boundary, and adtPeakStopLossRun after a reading.
+   WHAT IT OWNS, and the caller owns none of it:
+     · the account's own daily ceiling, counted over the live rows of the day in `done`, and a row the
+       ceiling holds back is written down as blocked and nothing is sent;
+     · the one request, through the endpoint table and never a URL of its own;
+     · the audit row, with the action the caller names so a switch and a stop can be told apart;
+     · the apply row, op 'status' and decision_id 'peak' exactly as before, carrying the undo that puts
+       the ad back, committed HERE while the request is still the newest thing that happened.
+   WHAT THE CALLER OWNS: the wanted state and the MODE. 'live' only ever comes from the account's own
+   live-apply switch being on, which is the one gate that decides whether anything leaves this worker,
+   and this function never upgrades a mode, only holds one back.
+   A would-send or blocked row sent nothing, so its statement comes back for the caller to batch with
+   the others: one round trip instead of one each. */
+async function adPeakSendStatus(env, s) {
+  const o = s || {};
+  const day = String(o.day || ''), acct = String(o.account || ''), id = String(o.item_id || ''), cid = String(o.campaign_id || '');
+  const to = String(o.to || '').toUpperCase();
+  const asked = String(o.mode || '');
+  const done = o.done || {};
+  const cap = adPeakApplyCaps({ account_switches_today: done[acct] || 0 });
+  const mode = asked === 'live' && !cap.allowed ? 'blocked' : asked;
+  const step = { op: 'status', campaign_id: cid, listing_id: id, to: to, peak: true, hours: String(o.hours || ''), why: String(o.why || ''), undo: { op: 'status', campaign_id: cid, listing_id: id, to: to === 'ACTIVE' ? 'PAUSED' : 'ACTIVE' } };
+  let status = 0, resp = mode === 'live' ? '' : (mode === 'would-send' ? 'account switch off, nothing sent' : cap.reason || 'held back');
+  let ok = false;
+  if (mode === 'live') {
+    /* the ceiling counts REQUESTS, counted the moment this row commits to being a live one.
+       The count the caller starts from is every live row of the day whatever eBay answered or
+       whether it answered at all, so counting successes here instead would let an account
+       whose every request fails go on sending for the rest of the tick, and the one run a cap
+       exists for is the one where something is going wrong. */
+    done[acct] = (done[acct] || 0) + 1;
+    try {
+      const tok = await ebayAccessToken(env, acct);
+      const r = await fetch(ADTOOL_APPLY_ENDPOINTS.bulk_status_by_listing(cid), { method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' }, body: JSON.stringify({ requests: [{ listingId: String(id), adStatus: to }] }) });
+      status = r.status; resp = (await r.text()).slice(0, 400);
+      ok = r.ok || r.status === 204;
+      await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))")
+        .bind(String(o.actor || 'adtool (peak switch)'), String(o.audit || 'ADTOOL_PEAK_SWITCH'), id + '|' + cid, String(o.believed || '') || '(not known)', to + ' (' + status + ')').run();
+    } catch (e) { status = 0; resp = String(e && e.message || e).slice(0, 200); }
+  }
+  /* op stays 'status' and never a name of its own: the Activated and Stopped page puts a change
+     down to the portal only where an apply row with op 'status' points the same way, so a name
+     of its own would make every peak switch read as "changed on eBay by somebody we cannot
+     see". decision_id 'peak' is what tells these rows apart.
+     A LIVE row is committed HERE, one statement, before the caller can reach the next send: an
+     invocation cut short after a change has gone to eBay must never leave that change without
+     its log row, because the row is the undo and the record of who did it. Would-send and
+     blocked rows sent nothing, so they go back for the caller to batch. */
+  const logRow = env.DB.prepare("INSERT INTO adtool_apply_log (day, account, item_id, campaign_id, decision_id, op, payload_json, mode, http_status, response, undo_json, at) VALUES (?1, ?2, ?3, ?4, 'peak', 'status', ?5, ?6, ?7, ?8, ?9, datetime('now'))")
+    .bind(day, acct, id, cid, JSON.stringify(step), mode, status, resp, JSON.stringify(step.undo));
+  if (mode === 'live') { await logRow.run(); return { mode: mode, http_status: status, response: resp, sent: ok, step: step, statement: null, cap: cap }; }
+  return { mode: mode, http_status: status, response: resp, sent: false, step: step, statement: logRow, cap: cap };
+}
+
+/* ---- THE SPEND RULE, AFTER EVERY READING INSIDE THE PEAK (owner, 10 November 2026) -----------
+   "Every listing that is in peak time, and crosses 3 pounds without a sale at that specific day,
+   automatically stop it via system. But for this, that system should get updated every 2 minutes."
+   Run by the sampler, straight after a reading landed and only while a listing on the list is inside
+   its own hours, so the money it judges on is minutes old rather than a quarter of an hour.
+   WHAT IT DECIDES is adPeakStopLoss's and nothing else's: money out, nothing sold today, inside its
+   own hours, not already stopped today, nobody holding it by hand. WHAT IT SENDS is adPeakSendStatus's,
+   which is the switch's own sender: the account's live switch, the account's daily ceiling, the apply
+   row with its undo, the audit row. This function only joins the two and writes the day down.
+   THE LIMIT AND THE SALE SIGNAL:
+     · the spend is the reading the sampler has just written, pay-per-click and today's report day
+       alone, so the figure the rule acts on is the figure the page shows beside it;
+     · the sale is counted from BOTH order records and the GREATER is taken. The localised book is the
+       one that knows which UK day an order belongs to; the raw book is the one the five-minute sync
+       writes, and between them is the hour the roll-up has not run yet. A sale seen in either lifts
+       the listing, because the cost of missing one is pausing an ad that is working.
+     · a read that FAILED leaves the count null and null is never nought here: nothing is stopped on a
+       sale we could not look for. */
+async function adtPeakStopLossRun(env, opts) {
+  const O = opts || {};
+  await ensureAdtoolPhase16Schema(env);
+  await ensureAdtoolPhase8Schema(env);
+  /* the same two gates the switch job has, in the same order and read the same way: the page flag takes
+     the peak list away from everybody, the job flag stops the SENDING while the list stays readable.
+     Either one off and this decides nothing and writes nothing. */
+  if ((await adtFlag(env, 'adtool_page_peak')) !== 'on') return { ran: false, why: 'the peak page is switched off' };
+  if ((await adtFlag(env, 'adtool_job_peakswitch')) !== 'on') return { ran: false, why: 'the peak switching is switched off' };
+  await ensureAdtoolPeakPlanConfig(env);
+  const rules = await adtPeakPlanRulesFor(env);
+  if (rules.stoploss !== 'on') return { ran: false, why: 'the spend rule is switched off' };
+  const uk = O.uk || adtUkParts(Date.now());
+  const today = String(uk.date);
+  const rows = O.rows || await adtPeakListRows(env, '');
+  /* THE ROWS THIS HOUR CAN ACT ON: armed, readable hours, and this UK hour inside them. Narrowed first
+     so the money and the orders are read for those listings and no others. */
+  const inHours = [];
+  for (const r of (rows || [])) {
+    if (!r) continue;
+    if (!Number(r.auto == null ? 0 : r.auto)) continue;
+    const parsed = adPeakHoursParse(r.hours);
+    if (!parsed.ranges) continue;
+    if (!adInPeakRanges(uk.hour, parsed.ranges)) continue;
+    inHours.push({ row: r, ranges: parsed.ranges });
+  }
+  const base = { ran: true, threshold: rules.stoploss_gbp, considered: inHours.length, stops: 0, sent: 0, written: 0 };
+  if (!inHours.length) return Object.assign({}, base, { why: 'nothing on the list is inside its own hours this hour' });
+  const ids = inHours.map(x => String(x.row.item_id));
+  /* TODAY'S SPEND PER LISTING, pay-per-click only and today's report day only. A row left behind from
+     another day is not a reading of today, so it answers nothing rather than nought: the rule's own
+     first refusal is "there is no reading of what it has spent today". */
+  const todayUtc = utcDate(), spendBy = {};
+  let spendRead = true;
+  try {
+    for (const ch of adtChunks(ids)) {
+      for (const r of ((await env.DB.prepare("SELECT item_id, ROUND(SUM(cum_spend), 2) AS sp FROM adtool_intraday_latest WHERE family = 'cpc' AND report_day = ?1 AND item_id IN " + adtInList(ch, 1) + ' GROUP BY item_id').bind(todayUtc, ...ch).all()).results || [])) {
+        spendBy[String(r.item_id)] = r.sp == null ? null : Number(r.sp);
+      }
+    }
+  } catch (e) { spendRead = false; }
+  if (!spendRead) return Object.assign({}, base, { why: 'the reading of what these listings have spent today could not be read, so nothing is judged' });
+  /* TODAY'S ORDERS PER LISTING, from both books, grouped in one read each rather than per listing: the
+     whole of today is a few hundred rows and the day column is indexed on both. */
+  const ordersBy = {};
+  let bookRead = false, rawRead = false;
+  const bump = (iid, n) => { const k = String(iid || ''); if (!k) return; const v = Math.round(Number(n) || 0); if (!(ordersBy[k] >= v)) ordersBy[k] = v; };
+  try {
+    for (const r of ((await env.DB.prepare("SELECT item_id, COUNT(*) AS n FROM adtool_orders WHERE local_date = ?1 AND status <> 'CANCELLED' GROUP BY item_id").bind(today).all()).results || [])) bump(r.item_id, r.n);
+    bookRead = true;
+  } catch (e) { bookRead = false; }
+  try {
+    for (const r of ((await env.DB.prepare("SELECT item_id, COUNT(*) AS n FROM orders WHERE created_at >= ?1 AND status <> 'CANCELLED' GROUP BY item_id").bind(ukDayStartIso()).all()).results || [])) bump(r.item_id, r.n);
+    rawRead = true;
+  } catch (e) { rawRead = false; }
+  if (!bookRead && !rawRead) return Object.assign({}, base, { why: 'neither order record could be read, so a sale cannot be ruled out and nothing is stopped' });
+  /* already stopped today, so a listing is stopped once a day at most whatever the readings do after */
+  const already = {};
+  try {
+    for (const r of ((await env.DB.prepare('SELECT item_id FROM adtool_peak_stops WHERE day = ?1 LIMIT 2000').bind(today).all()).results || [])) already[String(r.item_id)] = 1;
+  } catch (e) { /* no table yet: nothing has been stopped */ }
+  /* THE RULE, over every row this hour could act on, BEFORE anything else is read. On a normal tick not
+     one listing has earned a stop, and the campaign memberships, the account switches and the day's
+     ceiling are reads worth nothing on such a tick: the rule runs every couple of minutes through the
+     whole peak, so what it costs when it finds nothing is most of what it costs at all. */
+  const owed = [];
+  for (const x of inHours) {
+    const row = x.row, id = String(row.item_id);
+    const verdict = adPeakStopLoss({
+      spend_today: spendBy[id] === undefined ? null : spendBy[id],
+      /* nought here is a real answer and not an unknown: a read that failed has already turned this
+         whole run back above, so reaching this line means both books were looked in and one of them
+         said none. Null would be the honest answer to "nobody could look", and the rule refuses on it. */
+      orders_today: ordersBy[id] === undefined ? 0 : ordersBy[id],
+      threshold: rules.stoploss_gbp,
+      already_stopped_today: !!already[id],
+      inside_hours: adInPeakRanges(uk.hour, x.ranges),
+      hold: adtPeakHoldOf(row),
+    });
+    if (verdict.stop) owed.push({ row: row, ranges: x.ranges, verdict: verdict });
+  }
+  if (!owed.length) {
+    const quiet = inHours.length + ' inside their hours at ' + adPeakPad(uk.hour) + ':' + adPeakPad(uk.minute) + ', limit ' + rules.stoploss_text + ': none has earned a stop';
+    try { await ctx_setSync(env, 'adtoolPeakStopLoss', '', quiet + ' @' + new Date().toISOString()); } catch (e) {}
+    return Object.assign({}, base, { why: quiet, note: quiet });
+  }
+  const owedIds = owed.map(x => String(x.row.item_id));
+  const switchable = await adtPeakSwitchable(env, owedIds);
+  const switches = await adtPeakLiveSwitches(env);
+  /* the SAME ceiling the switch job counts, over the same rows, so the two senders share one allowance
+     per account per day rather than each keeping its own twenty */
+  const doneToday = {};
+  for (const r of ((await env.DB.prepare("SELECT account, COUNT(*) AS n FROM adtool_apply_log WHERE decision_id = 'peak' AND mode = 'live' AND day = ?1 GROUP BY account").bind(today).all()).results || [])) doneToday[String(r.account)] = Number(r.n) || 0;
+  const stmts = [];
+  let stops = 0, sentN = 0, written = 0, nothingToSwitch = 0, mismatched = 0;
+  const details = [];
+  for (const x of owed) {
+    const row = x.row, id = String(row.item_id), acct = String(row.account || ''), verdict = x.verdict;
+    /* THE ADS THIS ROW MAY TOUCH, by the one filter the page and the switch both read: the campaign the
+       row names, or every pay-per-click campaign the listing is in. A named campaign with no ad left is
+       nothing to stop, and switching its other campaigns in its place would be the opposite of what
+       was asked for. */
+    const pick = adPeakCampaignPick(switchable[id] || [], row.campaign_id);
+    if (!pick.rows.length) { nothingToSwitch++; continue; }
+    const byCamp = {};
+    for (const m of pick.rows) (byCamp[String(m.campaign_id || '')] = byCamp[String(m.campaign_id || '')] || []).push(m);
+    const campsSent = [];
+    let mode = '', status = 0, ok = false, disagreed = false;
+    for (const cid of Object.keys(byCamp)) {
+      /* the account is taken from the AD and never from the typed row: where the two disagree nothing
+         is sent, exactly as the switch job refuses to, because gating on the typed one would mint a
+         token for an account nobody switched on. */
+      const macct = String((byCamp[cid][0] || {}).account || '');
+      if (!macct || macct !== acct) { disagreed = true; continue; }
+      const out = await adPeakSendStatus(env, {
+        day: today, account: macct, item_id: id, campaign_id: cid, to: 'PAUSED',
+        mode: switches[macct] ? 'live' : 'would-send',
+        hours: adPeakHoursText(x.ranges), why: 'peak spend rule: ' + verdict.why,
+        believed: '', done: doneToday, audit: 'ADTOOL_PEAK_STOPLOSS', actor: 'adtool (peak spend rule)',
+      });
+      campsSent.push(cid);
+      if (!mode || out.mode === 'live') mode = out.mode;
+      if (out.http_status) status = out.http_status;
+      if (out.sent) { ok = true; sentN++; }
+      if (out.statement) stmts.push(out.statement); else written++;
+    }
+    if (!campsSent.length) { if (disagreed) mismatched++; else nothingToSwitch++; continue; }
+    stops++;
+    /* THE DAY WRITTEN DOWN, one row per listing per UK day, and committed here rather than batched: the
+       switch job reads this table on its next tick to know the listing is held off, so a change that has
+       already gone to eBay must never be waiting in a batch for that. DO NOTHING on conflict, because a
+       stop already on the record for today is the record and must not be written over. */
+    await env.DB.prepare(
+      'INSERT INTO adtool_peak_stops (account, item_id, day, at, spend, orders, threshold, sent, http_status, mode, campaign_id, reason) ' +
+      "VALUES (?1, ?2, ?3, datetime('now'), ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) ON CONFLICT(account, item_id, day) DO NOTHING"
+    ).bind(acct, id, today, verdict.spend, verdict.orders, verdict.threshold, ok ? 1 : 0, status, mode, campsSent.join(','), String(verdict.why).slice(0, 300)).run().catch(() => {});
+    already[id] = 1;
+    details.push(id + ' ' + mode + (status ? ' (' + status + ')' : ''));
+  }
+  await adtBatch(env, stmts); written += stmts.length;
+  /* the trail, and only where the rule really judged something: through the peak this is one row every
+     couple of minutes and outside it nothing at all, which is what the sampler's own gate already is. */
+  const note = inHours.length + ' inside their hours at ' + adPeakPad(uk.hour) + ':' + adPeakPad(uk.minute) +
+    ', limit ' + rules.stoploss_text + ': ' + stops + ' stopped' + (sentN ? ', ' + sentN + ' sent to eBay' : '') +
+    (nothingToSwitch ? ', ' + nothingToSwitch + ' with no pay-per-click ad to stop' : '') +
+    (mismatched ? ', ' + mismatched + ' where the list and the ad name different accounts' : '') +
+    (details.length ? ' · ' + details.slice(0, 8).join(', ') : '');
+  try { await ctx_setSync(env, 'adtoolPeakStopLoss', '', note + ' @' + new Date().toISOString()); } catch (e) {}
+  return Object.assign({}, base, { stops: stops, sent: sentN, written: written, nothing_to_switch: nothingToSwitch, mismatched: mismatched, note: note });
+}
+
 /* ---- NAMING THE OBVIOUS ONES, ONCE (owner, 2 Nov, item 1) ------------------------------------
    "Select the current campaigns of all the items present in peak times as their selected
    campaigns." Every row on the by-hand list that names no campaign is read the way the page reads
@@ -19732,6 +20254,37 @@ async function adtoolAppendIntraday(env, acct, family, reportDay, agg, taskId, k
 async function adsIntraday(env) {
   const day = ukDate('');
   const adtoolOn = await adtoolIntradayOn(env);
+  /* ---- THE CADENCE GATE (owner, 10 Nov: "that system should get updated every 2 minutes") -------
+     The slot offers a turn every two minutes all day; this decides whether to take it. Inside the peak
+     envelope every turn is taken, because the spend rule below judges on the newest reading and a rule
+     that acts on a quarter-hour-old figure is not the rule the owner asked for. Outside it the turn is
+     taken only once the newest sample is as old as the spacing a manager has set, so the quiet hours
+     cost eBay no more calls than they did on the five-minute slot this job came off.
+     THE ENVELOPE IS THE TYPED HOURS AND NOTHING WIDER: the union of the hours of the rows set to switch
+     themselves, with a minute either side of each boundary so the reading that decides the opening hour
+     is already in hand when the hour turns. Nothing armed, no envelope, and the quiet spacing stands all
+     day, which is exactly how this job behaved the day before.
+     THE GATE IS NOT THE LOCK. runJob holds a lock on this job's own name for the whole of a run, so a
+     run still in flight when the next turn comes round is never doubled; this only decides whether a
+     turn that CAN start is worth starting.
+     Everything here is behind one try: a gate that cannot read its own settings must never be the thing
+     that stops the reading every figure about today stands on, so an unreadable gate samples. */
+  let cadence = null, envelope = null, peakRows = null, inEnvelope = null;
+  try {
+    cadence = await adtSamplerCadenceFor(env);
+    peakRows = await adtPeakListRows(env, '');
+    envelope = adPeakEnvelopeHours(peakRows);
+    const ukNow = adtUkParts(Date.now());
+    inEnvelope = adPeakInEnvelope(ukNow, envelope, ADTOOL_PEAK_ENVELOPE_EDGE_MIN);
+    const lastTick = await env.DB.prepare('SELECT MAX(sampled_at) AS t FROM adtool_intraday_ticks').first().catch(() => null);
+    const due = adtSamplerDue({
+      inside_peak: inEnvelope.inside, quiet_min: cadence.quiet_min,
+      last_sample_age_min: adtFreshAgeMin(lastTick && lastTick.t ? String(lastTick.t) : null, Date.now()),
+    });
+    if (!due.due) return;
+  } catch (e) {
+    try { await ctx_setSync(env, 'adtoolIntradayGate', '', 'the cadence gate could not be read, so this turn sampled: ' + String((e && e.message) || e).slice(0, 200) + ' @' + new Date().toISOString()); } catch (e2) {}
+  }
   /* ADTOOL: the day eBay reports on is the UTC day; ads_today keeps its UK-day meaning. */
   const reportDay = adtoolOn ? utcDate() : day;
   /* Rollover is a hard reset: rows from any other day are DELETED, not zeroed — so "today" on
@@ -19866,6 +20419,19 @@ async function adsIntraday(env) {
   if (adtoolOn && (await adtFlag(env, 'adtool_today')) === 'on') {
     try { await adtoolTodayPrewarm(env, await adtoolTodayRebuild(env, adtTicks)); }
     catch (e) { try { await ctx_setSync(env, 'adtoolTodayErr', '', String(e && e.message || e).slice(0, 300) + ' @' + new Date().toISOString()); } catch (e2) {} }
+  }
+  /* ---- THE SPEND RULE, AFTER THE READING AND ONLY INSIDE THE ENVELOPE (owner, 10 Nov) ----------
+     Last in this job, after the reading it judges on has been written and the today grain rebuilt from
+     it, so the money it acts on is the money the pages show. It runs for the same minutes the gate above
+     sampled fast for, and never outside them: outside its own hours a listing's ad is paused anyway and
+     there is nothing for this rule to stop.
+     It is the one thing in this job that can write to eBay, and it does so through the peak switch's own
+     sender, under that account's live-apply switch and daily ceiling. Behind its own try, because a rule
+     that throws must never cost the fleet its reading of today: the error is written down and the next
+     turn tries again. */
+  if (inEnvelope && inEnvelope.inside) {
+    try { await adtPeakStopLossRun(env, { uk: adtUkParts(Date.now()), rows: peakRows, envelope: envelope }); }
+    catch (e) { try { await ctx_setSync(env, 'adtoolPeakStopLossErr', '', String(e && e.message || e).slice(0, 300) + ' @' + new Date().toISOString()); } catch (e2) {} }
   }
   await wasteAlarm(env);
 }
@@ -23770,7 +24336,12 @@ const ROUTES = {
       }), { total_rev: 0, promoted_rev: 0, organic_rev: 0 });
       splitTotal.promoted_pct = splitTotal.total_rev ? round2(splitTotal.promoted_rev / splitTotal.total_rev * 100) : 0;
       splitTotal.organic_pct = splitTotal.total_rev ? round2(splitTotal.organic_rev / splitTotal.total_rev * 100) : 0;
+      /* THE PEAK LIST'S DAY-STOPS (owner, 10 Nov), through the one reader the peak page uses, so the
+         line here and the strip there are one answer. Behind a catch: a board that cannot read the
+         stops must still draw the board. */
+      const peakStops = await adtPeakStopsRead(ctx.env, day, acctF).catch(() => null);
       return { day, updated_at: updated, combined, days: histDays, from, to, account: acctF, period, window_source: windowSource,
+        peak_stops_today: peakStops,
         series: seriesOut,
         series_by_account: sbaOut,
         accounts: Object.values(accounts).sort((a, b) => b.spend - a.spend),
@@ -29911,11 +30482,24 @@ const ROUTES = {
 
       let switches = {};
       try { switches = await adtPeakLiveSwitches(env); } catch (e) { switches = {}; readErrors.push('switches: ' + String((e && e.message) || e).slice(0, 160)); }
+      /* THE SPEND RULE (owner, 10 Nov): the two settings as the engine will actually run on them, and
+         today's stops with the money each has held back since. Both read-only and both through the
+         same functions the page reads, so this route can confirm a stop rather than describe one. */
+      let stops = null, stopRules = null;
+      try { stops = await adtPeakStopsRead(env, today, ''); } catch (e) { readErrors.push('stops: ' + String((e && e.message) || e).slice(0, 160)); }
+      try { const R = await adtPeakPlanRulesFor(env); stopRules = { on: R.stoploss, threshold: R.stoploss_gbp, threshold_text: R.stoploss_text, keys: { on: ADTOOL_PEAK_PLAN_CONFIG_KEYS.stoploss, threshold: ADTOOL_PEAK_PLAN_CONFIG_KEYS.stoploss_gbp } }; }
+      catch (e) { readErrors.push('stop rule: ' + String((e && e.message) || e).slice(0, 160)); }
+      /* the sampler slot the rule rides, off the cron map itself and not a copy of it: a reading that
+         quietly went back to five minutes would make every list here read as healthy while the rule
+         judged on figures a quarter of an hour old. */
+      let samplerSlot = '';
+      for (const k of Object.keys(map)) if ((map[k] || []).indexOf(adsIntraday) >= 0) samplerSlot = k;
       return {
         now: new Date().toISOString(),
-        build: { crons: Object.keys(map), has_peak_job: !!peakSlot, peak_slot: peakSlot },
+        build: { crons: Object.keys(map), has_peak_job: !!peakSlot, peak_slot: peakSlot, sampler_slot: samplerSlot },
         window: { days, from_uk_day: fromDay, to_uk_day: today, item_id: item },
         switches, list, log, jobs, readings,
+        stops: stops, stoploss_rules: stopRules,
         read_errors: readErrors,
         sent_to_ebay: false,
       };
@@ -30542,6 +31126,11 @@ const ROUTES = {
       const span = ((await q('ticks', 'SELECT COUNT(*) AS samples, MIN(sampled_at) AS first, MAX(sampled_at) AS last FROM adtool_intraday_ticks')) || [])[0] || null;
       return {
         every_min: ADTOOL_SAMPLER_EVERY_MIN,
+        /* THE CADENCE IN FORCE (owner, 10 Nov): the cron slot for the peak hours and the manager's own
+           spacing for the rest of the day, through the one pure function every sentence about the timer
+           is written from, with the slot read off the cron map itself rather than a copy of it. */
+        cadence: await adtSamplerCadenceFor(env).catch(() => adtSamplerCadence(null)),
+        sampler_slot: (() => { const m = cronMap(); for (const k of Object.keys(m)) if ((m[k] || []).indexOf(adsIntraday) >= 0) return k; return ''; })(),
         freshness_rules: FR,
         freshness_keys: ADTOOL_FRESH_CONFIG_KEYS,
         sampler: sampler,

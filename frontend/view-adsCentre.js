@@ -197,6 +197,21 @@ VIEW_CSS.push(
         '<div class="ac-tile"><div class="k">Spend · ' + esc(acWin(d)) + '</div><div class="v">' + acGBP(c.spend_14d) + '</div></div>' +
       '</div>';
       if (d.window_source) { h += '<div class="ac-split-note" style="margin:-4px 0 10px">Window figures from ' + esc(String(d.window_source)) + '.</div>'; }
+      /* THE PEAK LIST'S DAY-STOPS (owner, 10 Nov): one line, and the figure that matters is the last
+         one — what those listings have spent SINCE they were stopped, which on a stop that reached eBay
+         should read nothing at all. Drawn only where the answer carries the count, because null is not
+         nought: an older engine says nothing here rather than "none stopped". */
+      var PS = d.peak_stops_today;
+      if (PS && acNum(PS.count) != null) {
+        h += '<div class="ac-split-note" style="margin:-4px 0 10px">Peak list, today: ' +
+          (Number(PS.count) === 0
+            ? 'nothing stopped by the spend rule'
+            : '<b>' + PS.count + '</b> ' + (Number(PS.count) === 1 ? 'listing' : 'listings') + ' stopped for spending without selling' +
+              (acNum(PS.spend_at_stop) == null ? '' : ', ' + acGBP(PS.spend_at_stop) + ' spent by then') +
+              (acNum(PS.spend_since) == null ? ' · what they have spent since is not in this answer'
+                : ' · <b>' + acGBP(PS.spend_since) + '</b> spent since')) +
+          (PS.problem ? ' · ' + esc(String(PS.problem)) : '') + '.</div>';
+      }
       /* R7-8 (Hasib): "organic vs promoted sales stats everywhere". Promoted = eBay-attributed
          ad revenue; organic = the rest. Combined bar + per-account split over the window. */
       var sp = d.split_total || {}, spl = d.split || [];

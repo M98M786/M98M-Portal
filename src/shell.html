@@ -1388,7 +1388,9 @@ var ADT_REG_MAP = [
   [/video revisions|sales after the video/i, ['VIDEO_BEFORE_AFTER', 'VIDEO_ADDED_ON', 'VIDEO_COHORT']],
   /* 31 Oct brief §5 */
   [/how old a figure may be|freshness|as of/i, ['FRESHNESS']],
-  [/sampler runs|five-minute reading/i, ['SAMPLER_RUNS', 'adtool_intraday_ticks']]
+  [/sampler runs|five-minute reading|the reading of today/i, ['SAMPLER_RUNS', 'adtool_intraday_ticks']],
+  /* the 10 Nov rule: a peak listing that spends its limit without selling is stopped for the day */
+  [/stopped by the spend rule/i, ['PEAK_STOPLOSS', 'adtool_peak_stops']]
 ];
 function adtRegClose(){ var w = document.getElementById('adtRegWrap'); if (w) w.remove(); }
 function adtRegOpen(label, shown){
