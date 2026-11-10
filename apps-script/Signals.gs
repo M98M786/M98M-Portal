@@ -1647,6 +1647,16 @@ function runLossEscalationSweep() {
       logActivity_('system', 'STAFF_REASSIGN_7NOV', '', '', 'run from the 5-minute sweep', staffReassign7Nov());
     }
   } catch (e) { logActivity_('trigger', 'ERROR:staffReassign7Nov', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  /* 10 Nov (owner): "make m98mfour@gmail.com as a proper product hunting page" — the modules column
+     cleared on 7 Nov left Muhammad Ahmad without Home, My tasks, Inbox and My reports. Same
+     flag-guarded one-shot shape; flag set BEFORE the call so a crash cannot loop it. */
+  try {
+    const p10n = PropertiesService.getScriptProperties();
+    if (p10n.getProperty('HUNTER_PORTAL_M98MFOUR') !== 'done' && typeof huntingPortalForM98mfour === 'function') {
+      p10n.setProperty('HUNTER_PORTAL_M98MFOUR', 'done');
+      logActivity_('system', 'HUNTER_PORTAL_M98MFOUR', 'm98mfour@gmail.com', '', 'run from the 5-minute sweep', huntingPortalForM98mfour());
+    }
+  } catch (e) { logActivity_('trigger', 'ERROR:hunterPortalM98mfour', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   /* 22 Oct: seed the "pending send" set from the activity log once, flag-guarded on this 5-minute
      clock so it lands without the editor Run button (the Approved archive needs it to show genuine
      new-flow approvals; without it the set is empty). Idempotent; delete at the next tidy-up. */

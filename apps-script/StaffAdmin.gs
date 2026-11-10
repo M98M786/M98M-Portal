@@ -585,6 +585,63 @@ function staffReassign7Nov() {
   return res;
 }
 
+/* 10 Nov (owner): "make m98mfour@gmail.com as a proper product hunting page."
+   Muhammad Ahmad took that mailbox on 7 Nov as a Product Hunter and its modules column was cleared
+   so the row would fall back to the role's defaults — but the access model is the ROLE'S SCREENS
+   PLUS the row's modules (§8/§24), and the Product Hunter role by itself carries only six: the
+   hunting dashboard, Product hunting, Hunt records, Revisions, Item risk and the calculator.
+   Home, My tasks, Inbox, My reports, Rules & instructions, the rota, My performance, Meetings,
+   the daily agenda and Tools ALL come from the modules column. That is why his portal opened
+   without the furniture every other hunter has, and it is the clearing on 7 Nov that did it.
+   He is given the SAME list the two working hunters carry — Irfan Hassan Khan on m98mfive and
+   Jahanzaib Ali on m98mseven — character for character, so the three hunting portals are one
+   portal rather than three different ones. Deliberately NOT inventing a better list for him: the
+   owner asked for a proper hunting page, and the proper hunting page is the one his colleagues use.
+   Idempotent; runs once from the 5-minute sweep under a property flag, or by hand from the editor. */
+var HUNTER_MODULES = 'agenda,tasks,hunting,huntQueue,inbox,meetings,reports,rota,rules,perf,tools,home,calculator';
+function huntingPortalForM98mfour() {
+  var TARGET = 'm98mfour@gmail.com';
+  var out = [];
+  var sh = sadmUsersSheet_();
+  var f;
+  try { f = sadmFind_(sh, TARGET); } catch (e) { return 'ABORT: ' + String(e && e.message || e); }
+  var col = function (k) { return f.head.indexOf(k); };
+  var val = function (k) { return String(f.rec[k] == null ? '' : f.rec[k]).trim(); };
+  if (val('role') !== 'Product Hunter') {
+    return 'ABORT: ' + TARGET + ' is "' + val('role') + '", not a Product Hunter — the hunting portal is not his to get';
+  }
+  if (val('status') !== SADM_STATUS_APPROVED) { out.push('NOTE: status is "' + val('status') + '"'); }
+  /* the two hunters this list is copied from, read live rather than trusted from a comment: if
+     their portal has moved on, say so instead of silently installing a stale list */
+  var peers = [], drift = [];
+  readTab_('USERS').forEach(function (u) {
+    var e = normalizeEmail(u.email);
+    if (e === 'm98mfive@gmail.com' || e === 'm98mseven@gmail.com') {
+      peers.push(e);
+      if (String(u.modules || '').trim() !== HUNTER_MODULES) { drift.push(e + ' carries "' + String(u.modules || '').trim() + '"'); }
+    }
+  });
+  if (drift.length) { out.push('WARNING: the hunters this list copies have drifted — ' + drift.join(' · ')); }
+  if (!peers.length) { out.push('WARNING: neither reference hunter was found in USERS'); }
+  var before = val('modules');
+  if (before === HUNTER_MODULES) { return 'no change — ' + TARGET + ' already carries the hunter module list' + (out.length ? ' · ' + out.join(' · ') : ''); }
+  var c = col('modules');
+  if (c < 0) { return 'ABORT: USERS has no modules column'; }
+  var cell = sh.getRange(f.row, c + 1);
+  cell.setNumberFormat('@');                      // a CSV of keys must stay text, never a date or a formula
+  cell.setValue(HUNTER_MODULES);
+  SpreadsheetApp.flush();
+  sadmForgetUsers_();
+  try { logActivity_('system', 'HUNTER_PORTAL_SET', TARGET, before || '(blank)', HUNTER_MODULES, 'owner 10 Nov — proper product hunting page'); } catch (e) {}
+  out.unshift(TARGET + ': modules "' + (before || '(blank)') + '" -> the hunter list (' + HUNTER_MODULES.split(',').length + ' screens)');
+  var mirror = 'mirror not pushed';
+  try { if (typeof pushEngineSync === 'function') mirror = String(pushEngineSync()); } catch (e) { mirror = 'mirror push failed: ' + (e && e.message || e); }
+  out.push('mirror: ' + mirror);
+  var res = out.join(' · ');
+  Logger.log(res);
+  return res;
+}
+
 function renameM98mfourToTahirAmin() {
   const r = staffRename({ email: 'm98mfour@gmail.com', name: 'Tahir Amin' });
   Logger.log(r);

@@ -327,6 +327,7 @@ const ENGINE_RUNNABLE = {
   repSheetAppend: function (args) { return typeof repSheetAppend_ === 'function' ? JSON.stringify(repSheetAppend_(args)) : 'absent'; },
   adminRenameUser: function (args) { return typeof adminRenameUser === 'function' ? String(adminRenameUser(args)) : 'absent'; },
   staffReassign7Nov: function () { return typeof staffReassign7Nov === 'function' ? String(staffReassign7Nov()) : 'absent'; },
+  huntingPortalForM98mfour: function () { return typeof huntingPortalForM98mfour === 'function' ? String(huntingPortalForM98mfour()) : 'absent'; },
   perfSnapshotPush: function () { return typeof perfSnapshotPush_ === 'function' ? (perfSnapshotPush_(), 'ok') : 'absent'; },
   reviewsDump: function () { return typeof reviewsDump === 'function' ? String(reviewsDump()) : 'absent'; },
   huntShadowScan: function () { try { return JSON.stringify(enginePost_('huntShadowScan', { limit: 500 })); } catch (x) { return 'ERR ' + String(x && x.message || x).slice(0,80); } },
