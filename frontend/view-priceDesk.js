@@ -12,7 +12,14 @@
 (function () {
   'use strict';
 
-  var PR_ROLES = ['Management', 'Ops Head', 'Pricing'];
+  /* 10 Nov (owner): the desk is pinned into Husnain's portal — "make them properly working ... go
+     with the privacy of calculation breakdown in profit in his portal". A Team Lead may work the
+     desk: which listings to revise, what to list them at, what sold, which supplier costs moved.
+     He is never sent an earning — the engine strips every one and sets spend_only, and prSpendOnly
+     below takes the profit columns, the calculator chain and the profit sorts off the screen so the
+     page reads as a complete page rather than one full of dashes. */
+  var PR_ROLES = ['Management', 'Ops Head', 'Pricing', 'Team Lead'];
+  function prSpendOnly() { return !!(PR.data && PR.data.spend_only); }
   var PR = { data: null, acct: '', tab: 'revise', q: '', seg: 'all', sort: 'gap', dir: 1, supSort: 'verdict', supDir: 1, decSort: 'at', decDir: -1, showKept: false, onlySold: true, detail: null, mode: prLoadMode() };
   var PR_SEG = {
     raise: ['Raise price', 'bad'], ads_high: ['Ads too high', 'warn'], reduce: ['Room to reduce', 'gold'], on_target: ['On target', 'ok'],
@@ -152,7 +159,13 @@
     var box = $('prBody');
     if (!box) { return; }
     if (!PR.data && !quiet) { box.innerHTML = '<div class="spinner"></div>'; }
-    api('priceRevisionBoard', PR.acct ? { account: PR.acct } : {}).then(function (d) { PR.data = d || {}; prPaint(); })
+    api('priceRevisionBoard', PR.acct ? { account: PR.acct } : {}).then(function (d) {
+      PR.data = d || {};
+      /* the board opens sorted by the gap to target; with no earnings on it there is no gap, so it
+         opens on what sells instead */
+      if (prSpendOnly() && (PR.sort === 'gap' || PR.sort === 'short' || PR.sort === 'actual')) { PR.sort = 'units30'; PR.dir = -1; }
+      prPaint();
+    })
       .catch(function (e) { if (!quiet) { box.innerHTML = '<div class="empty">The desk did not answer — ' + esc(e.message) + '</div>'; } });
   }
 
@@ -185,7 +198,7 @@
       '<div class="pr-t warn"><span class="k">Cost missing</span><b>' + prN(c.cost_missing) + '</b><span class="s">' + (srcLine ? 'filled: ' + esc(srcLine) : 'no Ali cost anywhere — cannot judge') + '</span></div>' +
       '<div class="pr-t' + (prN(c.alerts_open) ? ' bad' : '') + '"><span class="k">Supplier cost alerts</span><b>' + prN(c.alerts_open) + '</b><span class="s">' + esc(tierLine || 'nothing open') + '</span></div>' +
       '<div class="pr-t' + (prN(c.suppliers_downgrade) ? ' bad' : prN(c.suppliers_watch) ? ' warn' : '') + '"><span class="k">Suppliers</span><b>' + prN(c.suppliers_downgrade) + ' <span style="font-size:13px">downgrade</span></b><span class="s">' + prN(c.suppliers_watch) + ' to watch · ' + prN(c.suppliers) + ' assessed</span></div>' +
-      '<div class="pr-t gold"><span class="k">Short of target · month</span><b>' + prM(m.gap_month) + '</b><span class="s">' + esc(prModeLabel(true)) + ', at today\'s volume</span></div>' +
+      (prSpendOnly() ? '' : '<div class="pr-t gold"><span class="k">Short of target · month</span><b>' + prM(m.gap_month) + '</b><span class="s">' + esc(prModeLabel(true)) + ', at today\'s volume</span></div>') +
     '</div>';
     setHTML('prTiles', h);
   }
@@ -210,8 +223,8 @@
     var seg = F(r, 'segment'), h = prTag(PR_SEG, seg);
     var nl = F(r, 'new_list'), req = F(r, 'required');
     if (seg === 'raise' && nl) { h += '<div class="pr-sub">list at ' + prM(nl) + (Math.abs(prN(nl) - prN(req)) > 0.01 ? ' (buyers must pay ' + prM(req) + ')' : '') + '</div>'; }
-    else if (seg === 'ads_high') { h += '<div class="pr-sub">CPC may be at most ' + prM(F(r, 'cpc_max')) + ' a unit at this price' + (nl ? ' · or list at ' + prM(nl) : '') + '</div>'; }
-    else if (seg === 'reduce') { h += '<div class="pr-sub">' + prM(F(r, 'gap')) + ' above target</div>'; }
+    else if (seg === 'ads_high') { h += '<div class="pr-sub">' + (prSpendOnly() ? (nl ? 'list at ' + prM(nl) : 'the CPC is too high for this price') : 'CPC may be at most ' + prM(F(r, 'cpc_max')) + ' a unit at this price' + (nl ? ' · or list at ' + prM(nl) : '')) + '</div>'; }
+    else if (seg === 'reduce' && !prSpendOnly()) { h += '<div class="pr-sub">' + prM(F(r, 'gap')) + ' above target</div>'; }
     else if (seg === 'spending_no_sales') { h += '<div class="pr-sub">' + prM(r.spend_14d) + ' ads · 14d · ' + prN(r.clicks_14d) + ' clicks</div>'; }
     else if (seg === 'cost_missing') { h += '<div class="pr-sub">add the cost on the Main Sheet</div>'; }
     return h;
@@ -303,7 +316,8 @@
   function prSorted(rows) { return prSortRows(rows, PR_COLS, PR.sort, PR.dir); }
   function prTable(rows, withActions, kind) {
     var ads = PR.mode === 'ads';
-    var keys = ['item', 'paid', 'ali', 'actual', 'target', 'gap', 'units30', 'units14'].concat(ads ? ['cpc'] : []).concat(['spend14', 'verdict']);
+    var money = !prSpendOnly();
+    var keys = ['item', 'paid', 'ali'].concat(money ? ['actual', 'target', 'gap'] : []).concat(['units30', 'units14']).concat(ads ? ['cpc'] : []).concat(['spend14', 'verdict']);
     var h = '<div class="pr-scroll"><table class="pr-tbl"><thead><tr>' + prHead(PR_COLS, keys, PR.sort, PR.dir, 'pr-col') +
       (withActions ? '<th></th>' : '') + '</tr></thead><tbody>';
     var cols = keys.length + (withActions ? 1 : 0);
@@ -313,9 +327,9 @@
       h += '<tr' + (F(r, 'loss') ? ' class="hot"' : '') + ' data-pr-row="' + esc(prS(r.item_id)) + '"><td class="l w">' + prItemCell(r) + '</td>' +
         '<td>' + prM(r.paid) + (Math.abs(prN(r.paid) - prN(r.price)) > 0.01 ? '<div class="pr-sub">list ' + prM(r.price) + '</div>' : '') + '</td>' +
         '<td>' + (r.ali ? prM(r.ali) : '<span class="pr-sub">—</span>') + '</td>' +
-        '<td class="' + prTone(actual) + '">' + prM(actual) + (other !== null && other !== undefined && r.ali ? '<div class="pr-sub">' + (ads ? 'neutral ' : 'after ads ') + prM(other) + '</div>' : '') + '</td>' +
+        (money ? '<td class="' + prTone(actual) + '">' + prM(actual) + (other !== null && other !== undefined && r.ali ? '<div class="pr-sub">' + (ads ? 'neutral ' : 'after ads ') + prM(other) + '</div>' : '') + '</td>' +
         '<td>' + prM(r.target) + (r.target !== null && r.target !== undefined ? '<div class="pr-sub">tier ' + prM(r.target_tier) + ' · 15% ' + prM(r.target_pct) + '</div>' : '') + '</td>' +
-        '<td class="' + prTone(F(r, 'gap')) + '">' + prM(F(r, 'gap')) + '</td>' +
+        '<td class="' + prTone(F(r, 'gap')) + '">' + prM(F(r, 'gap')) + '</td>' : '') +
         '<td>' + (r.units_30d || '—') + '</td><td>' + (r.units_14d || '—') + '</td>' +
         (ads ? '<td' + (prN(r.cpc_per_unit_14d) >= 2 ? ' class="pr-neg"' : '') + '>' + (r.units_14d ? prM(r.cpc_per_unit_14d) : '—') + '</td>' : '') +
         '<td>' + (prN(r.spend_14d) ? prM(r.spend_14d) : '—') + '</td>' +
@@ -371,7 +385,7 @@
     if (PR.onlySold) { rows = rows.filter(function (r) { return r.units_30d > 0 || F(r, 'segment') === 'spending_no_sales'; }); }
     rows = prSorted(prFiltered(rows));
     var chip = function (k, l) { var p = PR_PRESETS[k]; return '<button class="pr-chip' + (PR.sort === p[0] && PR.dir === p[1] ? ' on' : '') + '" data-pr-sort="' + k + '">' + l + '</button>'; };
-    return '<div class="pr-tools"><span class="pr-sub">sort</span>' + chip('gap', 'Furthest from target') + chip('short', 'Most money short') + chip('actual', 'Lowest profit') + chip('units', 'Most sold') + (PR.mode === 'ads' ? chip('cpc', 'Highest CPC') : '') +
+    return '<div class="pr-tools"><span class="pr-sub">sort</span>' + (prSpendOnly() ? '' : chip('gap', 'Furthest from target') + chip('short', 'Most money short') + chip('actual', 'Lowest profit')) + chip('units', 'Most sold') + (PR.mode === 'ads' ? chip('cpc', 'Highest CPC') : '') +
       (unsold ? '<button class="pr-chip' + (PR.onlySold ? ' on' : '') + '" id="prSold">' + (PR.onlySold ? 'sold in 30 days only · ' + unsold + ' unsold hidden' : 'showing ' + unsold + ' unsold too') + '</button>' : '') +
       (hidden ? '<button class="pr-chip' + (PR.showKept ? ' on' : '') + '" id="prKept">' + (PR.showKept ? 'hide' : 'show') + ' ' + hidden + ' kept in the last 14 days</button>' : '') +
       '<span class="pr-sub" style="margin-left:auto">' + rows.length + ' listings</span></div>' +
@@ -392,7 +406,7 @@
     return '<div class="pr-tools">' + chip('all', 'All', (d.rows || []).length) +
       segs.map(function (k) { return chip(k, PR.mode === 'neutral' && k === 'raise' ? 'Below minimum profit' : PR_SEG[k][0], counts[k] || 0); }).join('') +
       chip('loss', 'Losing money', lossN) +
-      '<span class="pr-sub" style="margin-left:8px">sort</span>' + schip('gap', 'Gap') + schip('actual', 'Profit') + schip('units', 'Sold') + (PR.mode === 'ads' ? schip('cpc', 'CPC') : '') +
+      '<span class="pr-sub" style="margin-left:8px">sort</span>' + (prSpendOnly() ? '' : schip('gap', 'Gap') + schip('actual', 'Profit')) + schip('units', 'Sold') + (PR.mode === 'ads' ? schip('cpc', 'CPC') : '') +
       '<span class="pr-sub" style="margin-left:auto">' + rows.length + ' of ' + (d.rows || []).length + '</span></div>' +
       prTable(rows, true, 'row');
   }
@@ -614,8 +628,14 @@
       '<div class="pr-sub">Ads 14 days: CPC ' + prM(j.cpc_14d) + ' · general ' + prM(j.gen_14d) + ' · ' + prN(j.clicks_14d) + ' clicks · 30 days ' + prM(prN(j.cpc_30d) + prN(j.gen_30d)) + '</div>' +
       (d.campaign ? '<div class="pr-sub">Campaign: ' + esc(prS(d.campaign.name).slice(0, 40)) + ' · ' + esc(prS(d.campaign.status)) + (d.campaign.is_cpc ? ' · CPC' : ' · general') + (d.campaign.bid_pct ? ' · ' + esc(prS(d.campaign.bid_pct)) + '%' : '') + '</div>' : '<div class="pr-sub">Campaign: none</div>') +
       (j.fee_share_observed !== null && j.fee_share_observed !== undefined ? '<div class="pr-sub">eBay actually took ' + j.fee_share_observed + '% of the sale on the orders in 30 days (incl VAT)</div>' : '') + '</div>';
-    h += prChainBlock('Neutral · no ads', d.chain_neutral, j, 'n_', PR.mode === 'neutral');
-    h += prChainBlock('With ads · last 14 days', d.chain_ads, j, 'a_', PR.mode === 'ads');
+    if (d.spend_only) {
+      /* the owner's instruction for this portal, said in the page rather than left as a blank card */
+      h += '<div class="pr-note">The Order earning calculator breakdown is not shown on this portal. ' +
+        'Everything this listing costs and sells is above; what it earns is kept to management.</div>';
+    } else {
+      h += prChainBlock('Neutral · no ads', d.chain_neutral, j, 'n_', PR.mode === 'neutral');
+      h += prChainBlock('With ads · last 14 days', d.chain_ads, j, 'a_', PR.mode === 'ads');
+    }
     h += '<div class="pr-blk"><h3>Supplier cost history</h3>' +
       '<div class="pr-sub" style="margin-bottom:5px">30 days: ' + prN(fl.changes_30d) + ' moves (' + prN(fl.rises_30d) + ' up, ' + prN(fl.drops_30d) + ' down), drift ' + prM(fl.drift_30d) + (fl.worst_tier_30d ? ', worst ' + esc((PR_TIER[fl.worst_tier_30d] || [''])[0].toLowerCase()) : '') + '</div>' +
       ((d.history || []).length ? (d.history || []).slice(0, 15).map(function (x) {

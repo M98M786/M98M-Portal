@@ -21,7 +21,13 @@
      key carries it, so switching window is a normal request and not a page of its own. The window is
      deliberately NOT stashed anywhere: this page keeps nothing between tabs (see the note above). */
   var AT = { item: '', data: null, tab: 'week', pattern: { kind: 'all' }, echarts: null, charts: [] };
-  var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
+  /* 10 Nov (owner): pinned into Husnain's portal. A Team Lead may read one listing's history —
+     spend, clicks, orders, units, the campaign events — with every earning stripped by the engine
+     (it sets spend_only, and keys its own cache bucket so an Advertising Manager's answer, which
+     may carry per-item profit, is never handed to him). The written narrative stays closed to the
+     role: it is PROSE, and a figure inside a sentence is beyond the reach of a key-name strip. */
+  var ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'Team Lead'];
+  function atSpendOnly() { return !!(AT && AT.data && AT.data.spend_only); }
   var GOLD = '#f2b035', GOLD2 = '#ffd27a', LOSS = '#e0563f', WHITE55 = 'rgba(255,255,255,.55)', NEUTRAL = 'rgba(255,255,255,.28)', GRID = 'rgba(255,255,255,.08)', ZERO = 'rgba(255,255,255,.35)', BAND = 'rgba(242,176,53,.16)', PAUSED = 'rgba(224,86,63,.16)';
   var DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   var SLOTS = ['Night 00–06', 'Morning 06–12', 'Afternoon 12–17', 'Evening 17–24'];
@@ -471,14 +477,15 @@
     var S = P && P.slots;
     var h = '<div class="at-panel"><h3>Time slots · ' + esc(patLabel(P, 'slots')) + src('orders') + src('sampled', 'our own readings', true) + '</h3>' +
       '<div class="at-sub">Each UK time slot\'s share of the units, and what it does on an average day in this window. Ad spend by slot is our own hourly readings, so it is divided by the days that hold one rather than by every day in the window.</div>';
+    var money = !atSpendOnly();
     if (!S || !S.rows) return h + '<div class="at-empty">Not known: the hourly figures for this window could not be read.</div></div>';
-    return h + '<table class="at-tbl"><thead><tr><th>Slot</th><th class="r">Share of units</th><th class="r">Units / day</th><th class="r">Orders / day</th><th class="r">Revenue / day</th><th class="r">Ad spend / day</th></tr></thead><tbody>' +
+    return h + '<table class="at-tbl"><thead><tr><th>Slot</th><th class="r">Share of units</th><th class="r">Units / day</th><th class="r">Orders / day</th>' + (money ? '<th class="r">Revenue / day</th>' : '') + '<th class="r">Ad spend / day</th></tr></thead><tbody>' +
       S.rows.map(function (s) {
         return '<tr><td>' + SLOTS[s.slot] + '</td>' +
           '<td class="r">' + nk(s.share, function (v) { return Math.round(v * 100) + '%'; }) + '</td>' +
           '<td class="r">' + nk(s.units_day, plain) + '</td>' +
           '<td class="r">' + nk(s.orders_day, plain) + '</td>' +
-          '<td class="r">' + nk(s.revenue_day, gbp) + '</td>' +
+          (money ? '<td class="r">' + nk(s.revenue_day, gbp) + '</td>' : '') +
           '<td class="r">' + nk(s.spend_day, gbp) +
           (s.sampled_days ? '<div class="at-src" title="days in this window with an hourly reading in this slot">' + s.sampled_days + (s.sampled_days === 1 ? ' day read' : ' days read') + '</div>' : '') + '</td></tr>';
       }).join('') + '</tbody></table></div>';
@@ -488,7 +495,7 @@
     var h = '<div class="at-panel"><h3>Weekday profile · ' + esc(patLabel(P, 'weekday')) + src('orders') + src('eBay ads report') + '</h3>' +
       '<div class="at-sub">' + weekdayNote(D, WD) + '</div><div id="atWd" class="at-chart short"></div>';
     if (!rows.length) return h + '<div class="at-empty">No finished day in this window yet.</div></div>';
-    return h + '<table class="at-tbl"><thead><tr><th>Day</th><th class="r">Dates</th><th class="r">Units/day</th><th class="r">Units from ads/day</th><th class="r">Spend/day</th><th class="r">Profit/day</th></tr></thead><tbody>' +
+    return h + '<table class="at-tbl"><thead><tr><th>Day</th><th class="r">Dates</th><th class="r">Units/day</th><th class="r">Units from ads/day</th><th class="r">Spend/day</th>' + (atSpendOnly() ? '' : '<th class="r">Profit/day</th>') + '</tr></thead><tbody>' +
       rows.map(function (x, i) {
         /* the smoothed all-history rate rides beside the average ONLY where this window is too thin
            to stand on its own: it is not this window's figure and must not read as if it were */
@@ -496,7 +503,7 @@
         return '<tr><td>' + esc(x.day) + '</td><td class="r">' + (x.dates || 0) + '</td><td class="r">' + nk(x.units_day, plain) +
           (pr ? ' <span class="at-src" title="the smoothed average over all of this listing\'s history">' + (Math.round(pr.rate * 100) / 100) + '</span>' : '') + '</td>' +
           '<td class="r">' + nk(x.attr_units_day, plain) + '</td><td class="r">' + nk(x.spend_day, gbp) + '</td>' +
-          '<td class="r">' + adtProfitCell(x.profit_day, x.pending_cost_orders, x.pending_fee_orders) + '</td></tr>';
+          (atSpendOnly() ? '' : '<td class="r">' + adtProfitCell(x.profit_day, x.pending_cost_orders, x.pending_fee_orders) + '</td>') + '</tr>';
       }).join('') + '</tbody></table></div>';
   }
   function heatPanel(P) {
@@ -515,12 +522,12 @@
       '<div id="atDom" class="at-chart short"></div>';
     if (!cal) return h + '</div>';
     if (!rows.length) return h + '<div class="at-empty">No dates in this window.</div></div>';
-    return h + '<div style="overflow-x:auto;max-height:430px;overflow-y:auto"><table class="at-tbl"><thead><tr><th>Date</th><th>Day</th><th class="r">Units</th><th class="r">Orders</th><th class="r">Revenue</th><th class="r">Ad spend</th><th class="r">Profit</th></tr></thead><tbody>' +
+    return h + '<div style="overflow-x:auto;max-height:430px;overflow-y:auto"><table class="at-tbl"><thead><tr><th>Date</th><th>Day</th><th class="r">Units</th><th class="r">Orders</th>' + (atSpendOnly() ? '' : '<th class="r">Revenue</th>') + '<th class="r">Ad spend</th>' + (atSpendOnly() ? '' : '<th class="r">Profit</th>') + '</tr></thead><tbody>' +
       rows.map(function (r) {
-        if (!r.held) return '<tr><td>' + esc(r.label || r.day) + '</td><td>' + esc(DOW[r.weekday] || '') + '</td><td colspan="5" class="at-dt-none">' + (r.future ? 'not reached yet' : 'no day held') + '</td></tr>';
+        if (!r.held) return '<tr><td>' + esc(r.label || r.day) + '</td><td>' + esc(DOW[r.weekday] || '') + '</td><td colspan="' + (atSpendOnly() ? 3 : 5) + '" class="at-dt-none">' + (r.future ? 'not reached yet' : 'no day held') + '</td></tr>';
         return '<tr><td>' + esc(r.label || r.day) + '</td><td>' + esc(DOW[r.weekday] || '') + '</td><td class="r">' + (r.units || 0) + '</td><td class="r">' + (r.orders || 0) + '</td>' +
-          '<td class="r">' + gbp(r.revenue) + '</td><td class="r">' + gbp(r.spend) + '</td>' +
-          '<td class="r">' + adtProfitCell(r.actual_profit, r.pending_cost_orders, r.pending_fee_orders) + '</td></tr>';
+          (atSpendOnly() ? '' : '<td class="r">' + gbp(r.revenue) + '</td>') + '<td class="r">' + gbp(r.spend) + '</td>' +
+          (atSpendOnly() ? '' : '<td class="r">' + adtProfitCell(r.actual_profit, r.pending_cost_orders, r.pending_fee_orders) + '</td>') + '</tr>';
       }).join('') + '</tbody></table></div></div>';
   }
 
@@ -537,8 +544,8 @@
       (D.profile && D.profile.stage ? '<span class="at-tag ' + (/Decline|Dormant|Dead/.test(D.profile.stage.stage) ? 'loss' : 'gold') + '" title="' + esc(stageWhy(D.profile.stage)) + '">Stage: ' + esc(D.profile.stage.label || D.profile.stage.stage) + ' · ' + Math.round(Number(D.profile.stage.confidence) * 100) + '% · day ' + esc(String(D.profile.stage.days_in_stage)) + '</span>' : '<span class="at-tag">Stage: not worked out yet</span>') + '</div></div>' +
       '<div style="flex:0 0 auto;min-width:230px;font-size:12.5px;color:var(--text-2);line-height:1.7">' +
       '<div>Price <b style="color:var(--text)">' + gbp(H.price) + '</b></div>' +
-      '<div>Margin before ads <b style="color:var(--text)">' + gbp(H.margin) + '</b> <span class="at-src">' + esc(H.margin_source || '') + '</span></div>' +
-      '<div>Break-even ROAS <b style="color:var(--text)">' + roas(H.breakeven_roas) + '</b></div>' +
+      (atSpendOnly() ? '' : '<div>Margin before ads <b style="color:var(--text)">' + gbp(H.margin) + '</b> <span class="at-src">' + esc(H.margin_source || '') + '</span></div>' +
+      '<div>Break-even ROAS <b style="color:var(--text)">' + roas(H.breakeven_roas) + '</b></div>') +
       '<div>Listed ' + esc(H.start_time ? String(H.start_time).slice(0, 10) : '—') + (H.age_days != null ? ' · ' + H.age_days + ' days' : '') + '</div>' +
       '<div>First ad day ' + esc(H.first_ad_day || '—') + ' · last ' + esc(H.last_ad_day || '—') + '</div>' +
       /* Phase 5 sale-event fields — observed at one-day granularity; null → not known yet */
@@ -562,18 +569,18 @@
     var pcOf = function (s) { return Number(s.pending_cost_orders !== undefined ? s.pending_cost_orders : s.pending) || 0; };
     var pfOf = function (s) { return Number(s.pending_fee_orders !== undefined ? s.pending_fee_orders : s.pending_fee) || 0; };
     h += '<div class="at-panel"><h3>By period' + src('eBay ads report') + src('orders') + '</h3>' +
-      '<div class="at-sub">Today so far, yesterday, the last 7 and 30 days, and all time. Profit after eBay fees, product cost, ad spend and returns, the same way the Sales Analysis sheet works it out. Orders we cannot cost yet are left out and counted separately.</div>' +
-      '<div style="overflow-x:auto"><table class="at-tbl"><thead><tr><th>Period</th><th class="r">Ad spend</th><th class="r">Units from ads</th><th class="r">ROAS</th><th class="r">Orders</th><th class="r">Units</th><th class="r">Units not from ads</th><th class="r">Profit</th></tr></thead><tbody>' +
+      '<div class="at-sub">' + (atSpendOnly() ? 'Today so far, yesterday, the last 7 and 30 days, and all time: what this listing spent on ads and what it sold. What it earned is not shown on this portal.' : 'Today so far, yesterday, the last 7 and 30 days, and all time. Profit after eBay fees, product cost, ad spend and returns, the same way the Sales Analysis sheet works it out. Orders we cannot cost yet are left out and counted separately.') + '</div>' +
+      '<div style="overflow-x:auto"><table class="at-tbl"><thead><tr><th>Period</th><th class="r">Ad spend</th><th class="r">Units from ads</th>' + (atSpendOnly() ? '' : '<th class="r">ROAS</th>') + '<th class="r">Orders</th><th class="r">Units</th><th class="r">Units not from ads</th>' + (atSpendOnly() ? '' : '<th class="r">Profit</th>') + '</tr></thead><tbody>' +
       w.map(function (x) {
         var s = x[1], pc = pcOf(s), pf = pfOf(s);
         var notAds = Math.max(0, (Number(s.units) || 0) - (Number(s.attr_units) || 0));
         var moving = x[0] === 'Today so far' || !!s.includes_today;
         return '<tr><td>' + esc(x[0]) + (moving ? ' <span class="at-src s">still updating</span>' : '') + '</td>' +
           '<td class="r">' + gbp(s.spend) + '</td><td class="r">' + (s.attr_units || 0) + '</td>' +
-          '<td class="r">' + roas(s.roas != null ? s.roas : (Number(s.spend) > 0 && s.attr_revenue != null ? Number(s.attr_revenue) / Number(s.spend) : null)) + '</td>' +
+          (atSpendOnly() ? '' : '<td class="r">' + roas(s.roas != null ? s.roas : (Number(s.spend) > 0 && s.attr_revenue != null ? Number(s.attr_revenue) / Number(s.spend) : null)) + '</td>') +
           '<td class="r">' + (s.orders || 0) + '</td><td class="r">' + (s.units || 0) + '</td><td class="r">' + notAds + '</td>' +
-          '<td class="r">' + adtProfitCell(s.actual_profit !== undefined ? s.actual_profit : s.actual, 0, 0) +
-          (pc + pf > 0 ? '<div class="at-src" style="margin:2px 0 0" title="' + pc + ' without a cost, ' + pf + ' without fees">' + (pc + pf) + ' order' + (pc + pf === 1 ? '' : 's') + ' not costed yet</div>' : '') + '</td></tr>';
+          (atSpendOnly() ? '' : '<td class="r">' + adtProfitCell(s.actual_profit !== undefined ? s.actual_profit : s.actual, 0, 0) +
+          (pc + pf > 0 ? '<div class="at-src" style="margin:2px 0 0" title="' + pc + ' without a cost, ' + pf + ' without fees">' + (pc + pf) + ' order' + (pc + pf === 1 ? '' : 's') + ' not costed yet</div>' : '') + '</td>') + '</tr>';
       }).join('') + '</tbody></table></div></div>';
     /* where its ads sit — live rows when the campaign-truth phase has them, the refresh's snapshot otherwise */
     var Wr = D.where && D.where.rows ? D.where.rows : null; var C = D.campaigns || [];
@@ -588,8 +595,8 @@
          campaign, each with its window written in the header rather than left to be guessed. A
          campaign with no row in a window says so in words: £0.00 there would read as a month of free
          advertising instead of a month that campaign is not answerable for. */
-      (Wr ? (Wr.length ? '<div style="overflow-x:auto"><table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad, when last read</th><th class="r">Ad rate</th><th class="r">Daily budget</th><th class="r">Spend yesterday</th><th class="r">Sales yesterday</th><th class="r">Spend, last 7 days</th><th class="r">ROAS, last 7 days</th><th class="r">Units sold, last 7 days</th><th class="r">Spend, last 30 days</th><th class="r">ROAS, last 30 days</th><th class="r">Units sold, last 30 days</th><th class="r">Spend, all time</th><th class="r">ROAS, all time</th><th class="r">Units sold, all time</th><th>Last change</th></tr></thead><tbody>' +
-        Wr.map(function (c) { return '<tr><td>' + adtCampaignLink(c.campaign_id, c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td>' + adStateCell(c, c.ad_state, c.live) + '</td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td><td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td><td class="r">' + gbp(c.spend_7d) + '</td><td class="r">' + roas(c.roas_7d) + '</td><td class="r">' + nk(c.units_7d, cnt) + '</td><td class="r">' + nk(c.spend_30d, gbp) + '</td><td class="r">' + nk(c.roas_30d, roas) + '</td><td class="r">' + nk(c.units_30d, cnt) + '</td><td class="r">' + nk(c.spend_all, gbp) + (c.all_from ? '<div class="at-src" title="the first day this listing has a row in this campaign">from ' + esc(dfmt(String(c.all_from))) + '</div>' : '') + '</td><td class="r">' + nk(c.roas_all, roas) + '</td><td class="r">' + nk(c.units_all, cnt) + '</td><td>' + (c.last_change ? esc(String(c.last_change).replace('T', ' ').slice(0, 16)) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+      (Wr ? (Wr.length ? '<div style="overflow-x:auto"><table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad, when last read</th><th class="r">Ad rate</th><th class="r">Daily budget</th><th class="r">Spend yesterday</th>' + (atSpendOnly() ? '' : '<th class="r">Sales yesterday</th>') + '<th class="r">Spend, last 7 days</th>' + (atSpendOnly() ? '' : '<th class="r">ROAS, last 7 days</th>') + '<th class="r">Units sold, last 7 days</th><th class="r">Spend, last 30 days</th>' + (atSpendOnly() ? '' : '<th class="r">ROAS, last 30 days</th>') + '<th class="r">Units sold, last 30 days</th><th class="r">Spend, all time</th>' + (atSpendOnly() ? '' : '<th class="r">ROAS, all time</th>') + '<th class="r">Units sold, all time</th><th>Last change</th></tr></thead><tbody>' +
+        Wr.map(function (c) { return '<tr><td>' + adtCampaignLink(c.campaign_id, c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td>' + adStateCell(c, c.ad_state, c.live) + '</td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td>' + (atSpendOnly() ? '' : '<td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td>') + '<td class="r">' + gbp(c.spend_7d) + '</td>' + (atSpendOnly() ? '' : '<td class="r">' + roas(c.roas_7d) + '</td>') + '<td class="r">' + nk(c.units_7d, cnt) + '</td><td class="r">' + nk(c.spend_30d, gbp) + '</td>' + (atSpendOnly() ? '' : '<td class="r">' + nk(c.roas_30d, roas) + '</td>') + '<td class="r">' + nk(c.units_30d, cnt) + '</td><td class="r">' + nk(c.spend_all, gbp) + (c.all_from ? '<div class="at-src" title="the first day this listing has a row in this campaign">from ' + esc(dfmt(String(c.all_from))) + '</div>' : '') + '</td>' + (atSpendOnly() ? '' : '<td class="r">' + nk(c.roas_all, roas) + '</td>') + '<td class="r">' + nk(c.units_all, cnt) + '</td><td>' + (c.last_change ? esc(String(c.last_change).replace('T', ' ').slice(0, 16)) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
         (D.where.history && D.where.history.length ? '<div class="at-sub" style="margin-top:8px">Status changes: ' + D.where.history.slice(0, 6).map(function (x) { return esc(String(x.seen_at).replace('T', ' ').slice(0, 16)) + ' ' + esc(x.name) + ' ' + esc(x.from_status || '—') + ' → ' + esc(x.to_status); }).join(' · ') + '</div>' : '') : '<div class="at-empty">Not in any campaign we know about.</div>') :
       (C.length ? '<table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>Ad status, when last read</th><th class="r">Ad rate</th><th class="r">Daily budget</th></tr></thead><tbody>' +
         /* the snapshot rows come out of adtool_listings.campaigns_json, where the campaign id is
@@ -647,7 +654,7 @@
       + '</div>';
 
     h += '<div class="at-grid2">' +
-      '<div class="at-panel"><h3>Behaviour notes' + (D.narrative ? src('narrative', D.narrative.model === 'template' ? 'written from the numbers' : 'model, validated') : '') + '</h3><div class="at-note" id="atNarr">' + (D.narrative ? esc(D.narrative.text) + (D.narrative.validated ? '' : ' <b>(a figure in this text is not in the numbers behind it, so it is held back)</b>') : 'No notes yet. <a href="#" id="atNarrGo">Write some from the numbers</a>.') + '</div>' +
+      '<div class="at-panel"><h3>Behaviour notes' + (D.narrative ? src('narrative', D.narrative.model === 'template' ? 'written from the numbers' : 'model, validated') : '') + '</h3><div class="at-note" id="atNarr">' + (D.narrative ? esc(D.narrative.text) + (D.narrative.validated ? '' : ' <b>(a figure in this text is not in the numbers behind it, so it is held back)</b>') : (atSpendOnly() ? 'Behaviour notes are written from this listing\u2019s earnings, so they are not shown on this portal.' : 'No notes yet. <a href="#" id="atNarrGo">Write some from the numbers</a>.')) + '</div>' +
       '<h3 style="margin-top:12px">Today\'s decision</h3><div class="at-note">' + (D.decision ? '<b>' + esc(D.decision.decision) + '</b> · ' + esc(D.decision.confidence) + ' · ' + esc(D.decision.action) + '<div class="at-sub" style="margin:4px 0 0">' + esc(D.decision.why) + '</div><div class="at-sub" style="margin:2px 0 0">' + esc(D.decision.day) + ' ' + esc(D.decision.batch) + ' batch · expected gain ' + pm(D.decision.expected_value) + (D.decision.outcome_score != null ? ' · scored ' + (D.decision.outcome_score ? 'right' : 'wrong') + (Number(D.decision.outcome_provisional) === 1 ? ' (not final: some orders are not costed yet, so it will be scored again)' : '') : '') + ' · a suggestion only, nothing sent to eBay</div>' : 'No suggestion for this listing yet.') + '</div></div>' +
       '<div class="at-panel at-actions"><h3>Action log</h3><div class="at-sub">What the team did with this listing, with dates. Notes only. Nothing here reaches eBay.</div>' +
       '<ul class="at-list" id="atActs">' + (D.actions.length ? D.actions.map(function (a) { return '<li>' + esc(a.note) + '<div class="m">' + esc(a.type) + ' · ' + esc(a.by_email) + ' · ' + esc(String(a.at).slice(0, 16)) + '</div></li>'; }).join('') : '<li class="at-empty">No actions logged yet.</li>') + '</ul>' +

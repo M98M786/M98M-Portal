@@ -3,7 +3,13 @@
  * The waste rows (£3+ today, zero orders) lead the table, red, exactly per his rule. */
 (function () {
 
-  var AC_ROLES = ['Advertising Manager', 'Management', 'Ops Head']; /* review 4: ad revenue = earnings */
+  /* review 4: ad revenue = earnings. 10 Nov (owner): the centre is pinned into Husnain's portal,
+     so a Team Lead may open it — spend, clicks, CPC, which campaigns are live, and the waste alarm,
+     which is a loss alert and his to act on. Ad revenue is still earnings: the engine strips every
+     one and sets spend_only, and acSpendOnly below removes the blocks that were only ever revenue
+     (the organic/promoted split, the ad-revenue and ROAS columns) rather than drawing them empty. */
+  var AC_ROLES = ['Advertising Manager', 'Management', 'Ops Head', 'Team Lead'];
+  function acSpendOnly(d) { return !!(d && d.spend_only); }
   /* sort: {key:'', dir:-1} means "nothing chosen", which is the board's own order — the waste rows
      first, then the biggest spend today. A choice is remembered per browser under AC_SORT_KEY. */
   var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', sort: { key: '', dir: -1 } };
@@ -215,6 +221,7 @@ VIEW_CSS.push(
       /* R7-8 (Hasib): "organic vs promoted sales stats everywhere". Promoted = eBay-attributed
          ad revenue; organic = the rest. Combined bar + per-account split over the window. */
       var sp = d.split_total || {}, spl = d.split || [];
+      if (acSpendOnly(d)) { sp = {}; spl = []; }   // the split is sale revenue end to end
       if (d.split_incomplete) {
         h += '<div class="ac-split"><div class="ac-split-h">Organic vs promoted sales · ' + esc(acWin(d)) + '</div>' +
           '<div class="ac-split-note">The day\u2019s sales total has not been rolled up yet, so the split cannot be drawn honestly; the ads alone are credited with ' + acGBP((d.series && d.series[0] && Number(d.series[0].rev)) || sp.promoted_rev) + ' of revenue so far. It fills in once the sales roll-up and eBay\u2019s published report land.</div></div>';
@@ -244,12 +251,12 @@ VIEW_CSS.push(
       if (ser.length) {
         h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:4px 0 4px">Day by day · ' + esc(acWin(d)) + '</div>' +
           '<div class="scroll" style="max-height:220px;margin-bottom:14px"><table class="acc-tbl" style="min-width:520px"><thead><tr>' +
-          '<th>Date</th><th>Spend</th><th>Ad revenue</th><th>ROAS</th><th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th></tr></thead><tbody>';
+          '<th>Date</th><th>Spend</th>' + (acSpendOnly(d) ? '' : '<th>Ad revenue</th><th>ROAS</th>') + '<th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th></tr></thead><tbody>';
         ser.forEach(function (r) {
           h += '<tr><td style="text-align:left">' + esc(String(r.date)) + '</td>' +
             '<td>' + acGBP(r.spend) + '</td>' +
-            '<td>' + (Number(r.rev) ? acGBP(r.rev) : '\u2014') + '</td>' +
-            '<td>' + acROAS(r.rev, r.spend) + '</td>' +
+            (acSpendOnly(d) ? '' : '<td>' + (Number(r.rev) ? acGBP(r.rev) : '\u2014') + '</td>' +
+            '<td>' + acROAS(r.rev, r.spend) + '</td>') +
             '<td>' + (r.clicks || 0) + '</td>' +
             '<td>' + (Number(r.clicks) ? acGBP(Number(r.spend) / Number(r.clicks)) : '\u2014') + '</td>' +
             '<td>' + (r.sold || 0) + '</td></tr>';

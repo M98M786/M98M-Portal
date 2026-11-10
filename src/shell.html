@@ -1634,9 +1634,21 @@ function enterApp(user){
      routable", so pinning them here is the one place they are reachable from the main portal.
      A pinned entry is a SECOND link to the same page: it never removes that page from its own
      department, which is why buildGroup is told not to claim it. */
-  var PIN_EMAILS = ['zaidkaleem987@gmail.com', 'm98m786@gmail.com', 'mrhasibullah91@gmail.com', 'mrhasibullah@googlemail.com'];
-  var PIN_KEYS = ['traffic', 'overview', 'adtoolOverview', 'dashboard', 'signals', 'adsCentre', 'activeListings',
-                  'adtoolProduct', 'adtoolItemCampaigns', 'adtoolPeak', 'adtoolStopped', 'potentialCpc', 'goLive', 'huntQueue'];
+  /* 10 Nov (owner): "update these pages as pinned pages in husnain's portal and make them properly
+     working". Pinning is per PERSON now, not one list for everyone: management keeps its fourteen,
+     and Husnain (Team Lead) gets the four the owner named. Each group is {emails, keys} and the
+     first group a signed-in address matches is the one that paints. */
+  var PIN_GROUPS = [
+    { emails: ['zaidkaleem987@gmail.com', 'm98m786@gmail.com', 'mrhasibullah91@gmail.com', 'mrhasibullah@googlemail.com'],
+      keys: ['traffic', 'overview', 'adtoolOverview', 'dashboard', 'signals', 'adsCentre', 'activeListings',
+             'adtoolProduct', 'adtoolItemCampaigns', 'adtoolPeak', 'adtoolStopped', 'potentialCpc', 'goLive', 'huntQueue'] },
+    /* Husnain Naeem. Price revision and Product history are new to this role and open with every
+       earning stripped by the engine (the owner: "go with the privacy of calculation breakdown in
+       profit in his portal"); Ads command centre was already in his sidebar but the engine refused
+       the read, which is the "not properly working" he is pointing at; Active listings already worked. */
+    { emails: ['m98mtwo@gmail.com'],
+      keys: ['priceDesk', 'adsCentre', 'adtoolProduct', 'activeListings'] }
+  ];
   /* a label that reads right in a mixed list: "Overview" alone says nothing next to Business overview */
   var PIN_LABEL = { adtoolOverview: 'Advertising overview', dashboard: 'Sales analysis', adtoolStopped: 'Activated & stopped' };
   /* gmail treats dots and googlemail.com as the same mailbox, and Sir Hasib signs in under both
@@ -1649,13 +1661,15 @@ function enterApp(user){
     if (host === 'gmail.com') { local = local.replace(/\./g, ''); }
     return local + '@' + host;
   }
-  var PIN_SET = {}; PIN_EMAILS.forEach(function(e){ PIN_SET[pinNorm(e)] = 1; });
+  var PIN_OF = {};
+  PIN_GROUPS.forEach(function(g){ g.emails.forEach(function(e){ var k = pinNorm(e); if(!PIN_OF[k]) { PIN_OF[k] = g.keys; } }); });
   function pinnedViews(){
     /* the /ads/ portal carries only the advertising views, so this set would come out half-empty
        there — it belongs to the main portal's sidebar and nowhere else */
     if (window.M98M_ADS_ONLY) { return []; }
-    if (!STATE.user || !PIN_SET[pinNorm(STATE.user.email)]) { return []; }
-    return PIN_KEYS.map(function(k){
+    var keys = STATE.user ? PIN_OF[pinNorm(STATE.user.email)] : null;
+    if (!keys) { return []; }
+    return keys.map(function(k){
       var v = VIEWS[k];
       if (!v) { return null; }
       v.key = k;

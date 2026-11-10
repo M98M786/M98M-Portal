@@ -27,6 +27,57 @@ const PROFIT_ROLES = ['Management', 'Ops Head'];                 // collective p
    profit-bearing read; loss letters still reach them by role. */
 const ITEM_PROFIT_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'CS'];
 const CAMPAIGN_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'];
+/* 10 Nov (owner): "update these pages as pinned pages in husnain's portal and make them properly
+   working ... in price revision page, go with the privacy of calculation breakdown in profit in his
+   portal." Husnain is a Team Lead, so Review 4 above still governs all four pinned pages: the page
+   OPENS for the role, and each earning is taken out of the answer BEFORE it leaves the engine —
+   a page cannot show what it was never sent.
+   The strip is by KEY NAME across the whole payload, inside item-keyed rows as well (that is the
+   difference from adtStripCollectiveProfit, which spares them on purpose) — so a field added to one
+   of these reads later is hidden by default instead of quietly appearing on his screen.
+   WHAT STAYS, deliberately: money SPENT (ad spend, clicks, CPC, the AliExpress cost) and the price
+   buyers pay, because the work is run from those and ITEM_COST_ROLES already admits a Team Lead;
+   the verdict each listing is given; and the loss flags — Review 4 keeps loss alerts for this role.
+   WHAT THIS CANNOT DO: reach a figure written inside a SENTENCE. Generated prose is therefore left
+   closed to the role rather than stripped (see adtoolNarrative). */
+/* EARNINGS-PURE-BEGIN */
+const EARNINGS_SEE_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'CS', 'Pricing'];
+function canSeeEarnings(user) { const u = user || {}; return EARNINGS_SEE_ROLES.indexOf(String(u.role || '')) >= 0 || !!u.super; }
+/* An earning, or a step of the sum that makes one: the calculator chain (deduct / FVF / fee VAT /
+   net), the actual profit a unit, the gap to target, the CPC a listing could afford, the order
+   earning, revenue, margin, ROI and ROAS.
+   A PRICE IS NOT AN EARNING, and that distinction is the whole usefulness of the page: the price a
+   listing must sell at (n_required / a_required / n_new_list / a_new_list) and the price a recorded
+   decision aimed for (price_target) are what a Team Lead is being asked to go and DO, so they stay.
+   The profit TARGET a unit is an earning and goes — which is why 'target' is matched exactly here
+   and never as a suffix, or price_target would have gone with it. */
+/* The trailing ([0-9]*) is what catches revenue14 / revenue30 — the windowed names this codebase
+   uses — alongside revenue_14d and the bare rev. 'review'/'revised' do not match: a stem must be
+   followed by digits and then an underscore or the end of the key, never by another letter. */
+const EARNINGS_KEY_RE = /(^|_)(profit|margin|roi|earn|earning|earnings|rev|revenue|roas|actual|net|gross|gap|cpc_max|chain|deduct|fvf|oe)([0-9]*)($|_)/i;
+/* `narrative` is here because it is PROSE written from the numbers — "it made £212 last week" is
+   an earning that no key-name strip can see, so the whole block goes rather than its wrapper. The
+   adtoolNarrative route that writes a fresh one stays closed to the role for the same reason. */
+const EARNINGS_KEYS_EXACT = { target: 1, target_tier: 1, target_pct: 1, tier_targets: 1, promoted_pct: 1, organic_pct: 1, split: 1, split_total: 1, split_incomplete: 1, narrative: 1 };
+function isEarningsKey(k) { return EARNINGS_KEY_RE.test(k) || EARNINGS_KEYS_EXACT[k] === 1; }
+function stripEarnings(data) {
+  const walk = (v, seen) => {
+    if (Array.isArray(v)) { for (const x of v) walk(x, seen); return; }
+    if (!v || typeof v !== 'object' || seen.has(v)) return;
+    seen.add(v);
+    for (const k of Object.keys(v)) {
+      if (isEarningsKey(k)) { delete v[k]; continue; }
+      walk(v[k], seen);
+    }
+  };
+  walk(data, new Set());
+  /* The page is told outright, so it can say "this portal shows money spent, not money made"
+     rather than print dashes that read as missing data. The flag is NOT named for earnings on
+     purpose: it has to survive this very strip, including a second pass over the same object. */
+  if (data && typeof data === 'object' && !Array.isArray(data)) data.spend_only = true;
+  return data;
+}
+/* EARNINGS-PURE-END */
 const MGMT_ROLES = ['Management', 'Ops Head'];
 /* 14 Oct (owner): the 7-day revision board is read by everyone the revision passes through —
    the Advertising Manager who decides it, the Item Lister who does it, and Management who signs
@@ -4501,7 +4552,10 @@ const ADS_FAMILIES = {
 const ADTOOL_ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
 /* the role half of adtGate as a pure predicate: the route handler runs it BEFORE the KV page cache is consulted, so a
    cached advertising payload can never answer a role the gate would refuse (the page-flag half stays inside the action) */
-function adtRoleAllowed(user) { const u = user || {}; return ADTOOL_ROLES.indexOf(String(u.role || '')) >= 0 || !!u.super; }
+function adtRoleAllowed(user, extraRoles) {
+  const u = user || {}, r = String(u.role || '');
+  return ADTOOL_ROLES.indexOf(r) >= 0 || (!!extraRoles && extraRoles.indexOf(r) >= 0) || !!u.super;
+}
 const ADTOOL_TZ = 'Europe/London';
 const ADTOOL_DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -6618,8 +6672,11 @@ async function adtoolTruth(env) {
 }
 
 /* ---- actions (read rollups only; role + preview flag gated) ---- */
-async function adtGate(ctx, pageFlag) {
-  if (!adtRoleAllowed(ctx.user)) throw new AuthError('auth');
+async function adtGate(ctx, pageFlag, extraRoles) {
+  /* extraRoles opens ONE page to a role the advertising portal otherwise refuses — 10 Nov, Product
+     history, pinned into the Team Lead's portal by the owner, and answered with every earning
+     stripped on the way out. It is passed per call, so no other advertising page moves. */
+  if (!adtRoleAllowed(ctx.user, extraRoles)) throw new AuthError('auth');
   /* a page flag turned off is honoured within the KV TTL (≤ 60 s for live pages, ≤ 3 min otherwise): a cache hit does
      not re-read it, and nothing cached is served to a role the line above refuses */
   if (pageFlag && (await adtFlag(ctx.env, pageFlag)) !== 'on') throw new Error('SAY: this page is not enabled yet');
@@ -7063,7 +7120,15 @@ async function adtoolTodayFreshness(env) {
    5-minute job for the all-accounts payloads. The key carries the caller's PROFIT CLASS, which is the only thing the
    route-level strip depends on, so a stripped answer never reaches a profit role and vice versa. */
 /* ADTOOL-P12-PURE-BEGIN */
-function adtProfitClass(user) { const u = user || {}; return (PROFIT_ROLES.indexOf(String(u.role || '')) >= 0 || !!u.super) ? 'p' : 'np'; }
+/* 10 Nov: THREE classes, not two. 'np' meant "no collective profit" and was shared by the
+   Advertising Manager (who may see per-ITEM profit) with everyone else — so opening Product history
+   to a Team Lead would have served him an Advertising Manager's cached answer, per-item profit and
+   all. A reader who may see no earning at all now keys his own bucket, 'ne'. */
+function adtProfitClass(user) {
+  const u = user || {};
+  if (PROFIT_ROLES.indexOf(String(u.role || '')) >= 0 || !!u.super) return 'p';
+  return canSeeEarnings(u) ? 'np' : 'ne';
+}
 /* The window an action falls back to when the page sends none (adtPeriodOr's defaultKey per action). A payload
    that names exactly this window means the same request as an empty payload, so the two must hash alike — the
    hourly warm writes {} and the period bar always sends {period:'d30'}. Only actions listed here drop their default;
@@ -7451,7 +7516,7 @@ const ADTOOL_ACTIONS = {
   },
   adtoolSearch: {
     auth: 'any', fn: async (p, ctx) => {
-      await adtGate(ctx, 'adtool_page_product');
+      await adtGate(ctx, 'adtool_page_product', ['Team Lead']);   // Product history's own three reads
       const q = String((p && p.q) || '').trim().toLowerCase();
       const cols = 'l.item_id, l.account, l.title, l.price, l.status, l.last_ad_day, i.image AS image FROM adtool_listings l LEFT JOIN items_api i ON i.item_id = l.item_id';
       if (!q) {
@@ -7466,7 +7531,7 @@ const ADTOOL_ACTIONS = {
   },
   adtoolListing: {
     auth: 'any', fn: async (p, ctx) => {
-      await adtGate(ctx, 'adtool_page_product');
+      await adtGate(ctx, 'adtool_page_product', ['Team Lead']);   // Product history's own three reads
       const iid = String((p && p.item_id) || '').replace(/\D/g, '');
       if (!iid) throw new Error('SAY: give an item id');
       /* 2 Nov, the owner: "product history page takes a lot of time to get open, make it fast".
@@ -7494,7 +7559,7 @@ const ADTOOL_ACTIONS = {
   },
   adtoolActionLog: {
     auth: 'any', fn: async (p, ctx) => {
-      await adtGate(ctx, 'adtool_page_product');
+      await adtGate(ctx, 'adtool_page_product', ['Team Lead']);   // Product history's own three reads
       const iid = String((p && p.item_id) || '').replace(/\D/g, ''); const type = String((p && p.type) || 'note').slice(0, 30); const note = String((p && p.note) || '').slice(0, 500);
       if (!iid || !note) throw new Error('SAY: item id and a note are needed');
       const L = await ctx.env.DB.prepare('SELECT account FROM adtool_listings WHERE item_id = ?1').bind(iid).first();
@@ -21660,7 +21725,14 @@ const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
    Supplier cost moves are tiered 10p low · 20p moderate · 30p serious · 50p red · £1 critical. */
 const PR_INF = Infinity;
 const PR_SEE_ROLES = ['Management', 'Ops Head', 'Pricing'];   // per-unit profit on every row: Team Lead stays out (the profit gate)
-function prCanSee(user) { return PR_SEE_ROLES.indexOf(String((user || {}).role || '')) >= 0 || !!(user && user.super); }
+/* 10 Nov (owner): the desk is pinned into the Team Lead's portal, so the role may now OPEN it —
+   which listings to revise, what they sell at, how many sold, which supplier costs moved, what was
+   decided. It may NOT see an earning: prEarnings stays the old list, and stripEarnings takes the
+   actual profit, the gap, the target, the required price and the whole calculator chain out of the
+   answer. Deciding is unchanged — priceDecide still asks for the old list. */
+const PR_OPEN_ROLES = PR_SEE_ROLES.concat(['Team Lead']);
+function prCanSee(user) { return PR_OPEN_ROLES.indexOf(String((user || {}).role || '')) >= 0 || !!(user && user.super); }
+function prCanDecide(user) { return PR_SEE_ROLES.indexOf(String((user || {}).role || '')) >= 0 || !!(user && user.super); }
 /* The calculator's category bands. l1 is tested on the FIRST segment of eBay's "A > B > C" path,
    sub (when present) on the rest — sub-bands sit above their parent so they win. */
 const PR_BANDS = [
@@ -24185,7 +24257,11 @@ const ROUTES = {
     auth: 'any', fn: async (p, ctx) => {
       /* Account-level ad-spend totals are a money read: the gate mirrors the screen's own
          role list exactly (CAMPAIGN_ROLES also carries CS, which must not see totals). */
-      if (['Advertising Manager', 'Management', 'Ops Head'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth'); // Team Lead out — ad revenue is earnings (review 4)
+      /* 10 Nov (owner): the centre is pinned into the Team Lead's portal, so the role may open it —
+         spend, clicks, CPC, which campaigns are live and the waste alarm, which is a loss alert and
+         his to act on. Ad REVENUE is still earnings and still review 4's: it leaves in stripEarnings
+         below, with every other earning, so what reaches that screen is money spent, never made. */
+      if (['Advertising Manager', 'Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const day = ukDate('');
       /* Night review 2: "advertising requires all previous numbers the way i told you" — the
          board takes a window (7/14/30/60 days) and also returns the per-day series, so the
@@ -24344,7 +24420,7 @@ const ROUTES = {
          line here and the strip there are one answer. Behind a catch: a board that cannot read the
          stops must still draw the board. */
       const peakStops = await adtPeakStopsRead(ctx.env, day, acctF).catch(() => null);
-      return { day, updated_at: updated, combined, days: histDays, from, to, account: acctF, period, window_source: windowSource,
+      const centre = { day, updated_at: updated, combined, days: histDays, from, to, account: acctF, period, window_source: windowSource,
         peak_stops_today: peakStops,
         series: seriesOut,
         series_by_account: sbaOut,
@@ -24352,6 +24428,7 @@ const ROUTES = {
         items: items.slice(0, 300),
         split: split, split_total: splitTotal, split_incomplete: splitIncomplete,
         note: 'refreshed every 5 minutes; each cycle is as fresh as eBay built its last report (typically 5-10 minutes behind live). Organic vs promoted uses eBay-attributed sale revenue — promoted is what eBay credits to the ads, organic is the rest.' };
+      return canSeeEarnings(ctx.user) ? centre : stripEarnings(centre);
     },
   },
 
@@ -27368,10 +27445,12 @@ const ROUTES = {
         alerts_open: alerts.filter((a) => a.open).length, alerts_by_tier: alerts.filter((a) => a.open).reduce((m, a) => { m[a.tier || 'none'] = (m[a.tier || 'none'] || 0) + 1; return m; }, {}),
         suppliers: suppliers.length, suppliers_downgrade: suppliers.filter((s) => s.verdict === 'downgrade').length, suppliers_watch: suppliers.filter((s) => s.verdict === 'watch').length,
         neutral: modeCounts('n_'), ads: modeCounts('a_') };
-      return { rows, alerts, suppliers, decisions: decs.slice(0, 120), counts, as_of: new Date().toISOString(), windows: { d7, d14, d30, d90, today },
+      const board = { rows, alerts, suppliers, decisions: decs.slice(0, 120), counts, as_of: new Date().toISOString(), windows: { d7, d14, d30, d90, today },
         can_act: MGMT_ROLES.indexOf(ctx.user.role) >= 0 || !!ctx.user.super,
         benchmarks: { tier_targets: { under_5: 1.5, to_10: 2, over_10: 3 }, margin_pct: 15, cpc_line: 2, tolerance: 0.05, ads_window_days: 14, tiers: { low: 10, moderate: 20, serious: 30, red: 50, critical: 100 } },
         note: 'Judged exactly as the Order earning calculator: banded FVF for the eBay category, the per-order fee, 0.35% regulatory, 20% VAT on eBay fees, CPC × 1.2, and the sheet\'s VAT-to-HMRC column — Actual profit a unit at the price buyers paid in the last 30 days (the list price when nothing sold). Neutral = no advertising cost at all; With ads = the last 14 days\' CPC and General spend charged per unit sold in those 14 days. Ali cost: the Central Main Sheet\'s cost, else the orders\' own paid cost, else the hunt\'s source price, else the sourcing link\'s price. Targets: £1.50 / £2 / £3 a unit by Ali tier and 15% of the price, whichever binds; within 5p counts as on target.' };
+      /* the note itself describes the calculation in words and names no figure, so it stays */
+      return canSeeEarnings(ctx.user) ? board : stripEarnings(board);
     },
   },
   /* Item-ID search on the same desk: the listing's cost (sheet + what was actually paid), its
@@ -27460,7 +27539,7 @@ const ROUTES = {
         "SELECT COUNT(*) AS n FROM orders WHERE item_id = ?1 AND status = 'NOT_STARTED'"
       ).bind(id).first().catch(() => null);
       const h30 = history.filter((h) => String(h.seen_day || '') >= d30);
-      return {
+      const card = {
         item: { item_id: it.item_id, account: it.account, title: it.title, image: it.image || '', status: it.status, price: n(it.price), sold_30d: n(it.sold_30d), category_path: it.path || '', sheet_category: it.sheet_cat || '',
           supplier: it.supplier || '', facts_at: it.facts_at || '', sheet_oe: n(it.oe), sheet_profit: n(it.sheet_profit), sheet_campaign: it.sheet_campaign || '', sheet_campaign_type: it.sheet_campaign_type || '',
           hunter: pv ? pv.hunter_email || '' : '', lister: pv ? pv.lister_email || '' : (g ? g.lister || '' : ''), live_at: g ? g.live_at || '' : '',
@@ -27478,6 +27557,7 @@ const ROUTES = {
         recent_orders: orders.slice(0, 20).map((r) => ({ order_id: r.order_id, date: String(r.created_at || '').slice(0, 10), qty: n(r.qty), sold: n(r.sold), cost: n(r.cost), fees: n(r.ebay_fees), refunded: n(r.refunded) })),
         can_act: MGMT_ROLES.indexOf(ctx.user.role) >= 0 || !!ctx.user.super,
       };
+      return canSeeEarnings(ctx.user) ? card : stripEarnings(card);
     },
   },
   /* The desk's own record of what was decided per listing. The listing task (revise → the lister,
@@ -27486,7 +27566,7 @@ const ROUTES = {
      settles the item's open supplier alert in the same stroke — one decision, one record. */
   priceDecide: {
     auth: 'any', fn: async (p, ctx) => {
-      if (!prCanSee(ctx.user)) throw new AuthError('auth');
+      if (!prCanDecide(ctx.user)) throw new AuthError('auth');   // 10 Nov: reading the desk never granted deciding on it
       await ensurePriceSchema(ctx.env);
       const DB = ctx.env.DB;
       const id = String(p.item_id || '').replace(/\D/g, '');
@@ -32304,6 +32384,9 @@ for (const k of Object.keys(ROUTES)) {
   route.raw = raw;   // the pre-warm computes once and strips copies itself
   route.fn = async (p, ctx) => {
     const u = (ctx && ctx.user) || {};
-    return adtStripCollectiveProfit(await raw(p, ctx), { keepCollective: PROFIT_ROLES.indexOf(String(u.role || '')) >= 0 || !!u.super });
+    const out = adtStripCollectiveProfit(await raw(p, ctx), { keepCollective: PROFIT_ROLES.indexOf(String(u.role || '')) >= 0 || !!u.super });
+    /* 10 Nov: and for a reader who may see no earning at all — the Team Lead on the pinned Product
+       history — the per-item profit those rows deliberately keep goes too. */
+    return canSeeEarnings(u) ? out : stripEarnings(out);
   };
 }
