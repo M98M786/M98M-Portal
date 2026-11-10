@@ -30207,15 +30207,20 @@ const ROUTES = {
             'SELECT item_id, date AS d, SUM(spend) AS gen, SUM(cpc_spend) AS cpc, SUM(clicks) AS clicks FROM ads_daily WHERE item_id IN (' + ph + ") AND date >= date('now', '-8 day') GROUP BY item_id, d"
           ).bind(...ids).all().catch(() => ({ results: [] }));
           const hist = {};
-          const dayRow = (id, d) => { const k = id + '|' + d; return (hist[k] = hist[k] || { day: d, orders: 0, units: 0, revenue: 0, cost: 0, fees: 0, refunded: 0, ads: 0, clicks: 0 }); };
+          const dayRow = (id, d) => { const k = id + '|' + d; return (hist[k] = hist[k] || { day: d, orders: 0, units: 0, revenue: 0, cost: 0, fees: 0, refunded: 0, ads: 0, cpc: 0, clicks: 0 }); };
           for (const r of (od.results || [])) { const h = dayRow(String(r.item_id), String(r.d)); h.orders += Number(r.orders_n) || 0; h.units += Number(r.units) || 0; h.revenue += Number(r.revenue) || 0; h.cost += Number(r.cost) || 0; h.fees += Number(r.fees) || 0; h.refunded += Number(r.refunded) || 0; }
-          for (const r of (ad.results || [])) { const h = dayRow(String(r.item_id), String(r.d)); h.ads += (Number(r.gen) || 0) + (Number(r.cpc) || 0); h.clicks += Number(r.clicks) || 0; }
+          for (const r of (ad.results || [])) { const h = dayRow(String(r.item_id), String(r.d)); h.ads += (Number(r.gen) || 0) + (Number(r.cpc) || 0); h.cpc += Number(r.cpc) || 0; h.clicks += Number(r.clicks) || 0; }
           const days = []; for (let i = 7; i >= 1; i--) days.push(ukDate(new Date(Date.now() - i * 86400000).toISOString()));
           for (const rec of out) {
             if (MONEY.indexOf(rec.type) < 0 || !rec.item_id) continue;
-            rec.history = days.map((d) => { const h = hist[String(rec.item_id) + '|' + d] || { day: d, orders: 0, units: 0, revenue: 0, cost: 0, fees: 0, refunded: 0, ads: 0, clicks: 0 };
-              return { day: d, orders: h.orders, units: h.units, revenue: Math.round(h.revenue * 100) / 100, ads: Math.round(h.ads * 100) / 100, clicks: h.clicks,
-                profit: Math.round((h.revenue - h.cost - h.fees - h.refunded - h.ads) * 100) / 100 }; });
+            rec.history = days.map((d) => { const h = hist[String(rec.item_id) + '|' + d] || { day: d, orders: 0, units: 0, revenue: 0, cost: 0, fees: 0, refunded: 0, ads: 0, cpc: 0, clicks: 0 };
+              /* 10 Nov (owner): the tiles disagreed with the card's Actual Profit (9 Nov -11.04 vs -11.51).
+                 The card is the Sales Analysis row; the tiles used revenue - cost - fees - ALL ads, which
+                 skipped the 20% VAT and double-charged the General fee (already inside eBay's fees).
+                 Same law as itemPnl now: 0.8 x (Order Earning - Ali) - priority ads net of VAT - returns.
+                 ads is shown incl VAT, the card's own 'Ad fees incl VAT' basis. */
+              return { day: d, orders: h.orders, units: h.units, revenue: Math.round(h.revenue * 100) / 100, ads: Math.round(h.ads * 1.2 * 100) / 100, clicks: h.clicks,
+                profit: Math.round((0.8 * (h.revenue - h.fees - h.cost) - h.cpc - h.refunded) * 100) / 100 }; });
             const wk = rec.history.reduce((a, h) => ({ profit: a.profit + h.profit, orders: a.orders + h.orders, ads: a.ads + h.ads }), { profit: 0, orders: 0, ads: 0 });
             rec.history_week = { profit: Math.round(wk.profit * 100) / 100, orders: wk.orders, ads: Math.round(wk.ads * 100) / 100 };
           }

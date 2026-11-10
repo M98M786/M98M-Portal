@@ -315,7 +315,7 @@
     if (!hist || !hist.length) { return ''; }
     var wk = rec.history_week || null;
     var h = '<div class="sig-hist"><div class="sig-hist-h">The last 7 days' +
-      (wk ? ' · week ' + sgGbp(wk.profit) + ' after ads · ' + sgNumText(wk.orders) + ' orders · ads ' + sgGbp(wk.ads) : '') + '</div><div class="sig-hist-row">';
+      (wk ? ' · week ' + sgGbp(wk.profit) + ' after ads · ' + sgNumText(wk.orders) + ' orders · ads incl VAT ' + sgGbp(wk.ads) : '') + '</div><div class="sig-hist-row">';
     hist.forEach(function (d, i) {
       var p = Number(d.profit) || 0, last = i === hist.length - 1;
       h += '<div class="sig-hist-d' + (p < 0 ? ' neg' : '') + (last ? ' last' : '') + '" title="' + esc(sgStr(d.day)) + (last ? ' — yesterday' : '') + '"><span class="k">' + esc(sgDayShort(d.day)) + '</span>' +

@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261110-0002';
+var BUILD = '20261110-1315';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -14590,7 +14590,7 @@ VIEW_CSS.push(
     if (!hist || !hist.length) { return ''; }
     var wk = rec.history_week || null;
     var h = '<div class="sig-hist"><div class="sig-hist-h">The last 7 days' +
-      (wk ? ' · week ' + sgGbp(wk.profit) + ' after ads · ' + sgNumText(wk.orders) + ' orders · ads ' + sgGbp(wk.ads) : '') + '</div><div class="sig-hist-row">';
+      (wk ? ' · week ' + sgGbp(wk.profit) + ' after ads · ' + sgNumText(wk.orders) + ' orders · ads incl VAT ' + sgGbp(wk.ads) : '') + '</div><div class="sig-hist-row">';
     hist.forEach(function (d, i) {
       var p = Number(d.profit) || 0, last = i === hist.length - 1;
       h += '<div class="sig-hist-d' + (p < 0 ? ' neg' : '') + (last ? ' last' : '') + '" title="' + esc(sgStr(d.day)) + (last ? ' — yesterday' : '') + '"><span class="k">' + esc(sgDayShort(d.day)) + '</span>' +
