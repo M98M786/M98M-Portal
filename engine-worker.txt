@@ -5208,24 +5208,29 @@ async function adtoolRollupDays(env, fromDay, toDay, opts) {
      eBay HAS reported on, even if it reported nothing at all, has an ingested report task, and that
      day's noughts are a figure eBay gave us. Only a day with no rows AND no ingested report is a day
      nothing has arrived for. One read for the whole range this call is rolling, not one per day. */
+  /* PER ACCOUNT, because the report is per account: at 22:30 on 11 Nov one account's report for the day had
+     landed and seven had not, and a day-level judgement wrote the seven as nought. The map carries
+     'day|account' as well as the day. */
   const ingested = {};
-  for (const r of (((await env.DB.prepare("SELECT report_date FROM ad_report_tasks WHERE report_date >= ?1 AND report_date <= ?2 AND status = 'INGESTED' AND family NOT LIKE '%_intra' GROUP BY report_date").bind(fromDay, toDay).all().catch(() => ({ results: [] }))) || {}).results || [])) ingested[String(r.report_date)] = 1;
+  for (const r of (((await env.DB.prepare("SELECT report_date, account FROM ad_report_tasks WHERE report_date >= ?1 AND report_date <= ?2 AND status = 'INGESTED' AND family NOT LIKE '%_intra' GROUP BY report_date, account").bind(fromDay, toDay).all().catch(() => ({ results: [] }))).results) || [])) { ingested[String(r.report_date)] = true; ingested[String(r.report_date) + '|' + String(r.account)] = true; }
   for (let day = fromDay; day <= toDay; day = adtAddDays(day, 1)) {
     const rows = {};   // key account|item
     const get = (acct, iid) => rows[acct + '|' + iid] = rows[acct + '|' + iid] || { account: acct, item_id: iid, orders: 0, units: 0, revenue: 0, law_orders: [], clicks: 0, spend: 0, cpc_spend: 0, attr_units: 0, attr_revenue: 0, impressions: null };
     for (const o of ((await env.DB.prepare("SELECT account, item_id, qty, sale_price, ebay_fees, ali_cost, refunded FROM adtool_orders WHERE local_date = ?1 AND status <> 'CANCELLED'").bind(day).all()).results || [])) {
       const r = get(o.account, o.item_id); r.orders++; r.units += Number(o.qty) || 1; r.revenue += Number(o.sale_price) || 0; r.law_orders.push({ sold: o.sale_price, fees: o.ebay_fees, cost: o.ali_cost, refunded: o.refunded });
     }
-    let adRows = 0;
+    let adRows = 0; const adRowsBy = {};
     for (const a of ((await env.DB.prepare('SELECT account, item_id, spend, clicks, sales, sale_amount, cpc_spend, cpc_clicks, cpc_sales, cpc_sale_amount FROM ads_daily WHERE date = ?1').bind(day).all()).results || [])) {
-      adRows++;
+      adRows++; adRowsBy[String(a.account)] = (adRowsBy[String(a.account)] || 0) + 1;
       const r = get(a.account, a.item_id); r.spend += (Number(a.spend) || 0) + (Number(a.cpc_spend) || 0); r.cpc_spend += Number(a.cpc_spend) || 0; r.clicks += (Number(a.clicks) || 0) + (Number(a.cpc_clicks) || 0); r.attr_units += (Number(a.sales) || 0) + (Number(a.cpc_sales) || 0); r.attr_revenue += (Number(a.sale_amount) || 0) + (Number(a.cpc_sale_amount) || 0);
     }
     /* NOT ONE ROW and NO INGESTED REPORT for a finished day inside that window: nothing has arrived
        for this day, so every ad column of every row of it is written as NULL. A day eBay HAS reported
        keeps its noughts — eBay saying a listing, or a whole day, spent nothing is a figure, and this
        is not that. */
-    const landing = adRows === 0 && !ingested[day] && day < rollToday && day >= landingFloor;
+    const landingDay = day < rollToday && day >= landingFloor;
+    const landingFor = (acct) => landingDay && !(adRowsBy[String(acct)] > 0) && !ingested[day + '|' + String(acct)];
+    const landing = adRows === 0 && !ingested[day] && landingDay;   /* the day as a whole, kept for the scope rows */
     const wd = adtWeekdayOf(day), dom = adtDom(day);
     const stmts = [];
     /* a row this day already holds but that no longer has a source — its only orders flipped to CANCELLED since and it
@@ -5259,7 +5264,7 @@ async function adtoolRollupDays(env, fromDay, toDay, opts) {
       stmts.push(env.DB.prepare(
         'INSERT INTO adtool_listing_day (account, item_id, day, weekday, dom, orders, units, revenue, actual_profit, pending_cost_orders, refunds, clicks, spend, cpc_spend, attr_units, attr_revenue, roas, ad_profit, ad_active_campaigns, ad_paused_campaigns, pending_fee_orders) ' +
         'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21) ON CONFLICT(account, item_id, day) DO UPDATE SET weekday = ?4, dom = ?5, orders = ?6, units = ?7, revenue = ?8, actual_profit = ?9, pending_cost_orders = ?10, refunds = ?11, clicks = ?12, spend = ?13, cpc_spend = ?14, attr_units = ?15, attr_revenue = ?16, roas = ?17, ad_profit = ?18, ad_active_campaigns = ?19, ad_paused_campaigns = ?20, pending_fee_orders = ?21'
-      ).bind(r.account, r.item_id, day, wd, dom, r.orders, r.units, round2(r.revenue), landing ? null : r.actual, r.pending, round2(r.refunds), landing ? null : r.clicks, landing ? null : round2(r.spend), landing ? null : round2(r.cpc_spend), landing ? null : r.attr_units, landing ? null : round2(r.attr_revenue), landing ? null : (r.spend > 0 ? round2(r.attr_revenue / r.spend) : null), landing ? null : r.ad_profit, cs.act, cs.paused, r.pending_fee));
+      ).bind(r.account, r.item_id, day, wd, dom, r.orders, r.units, round2(r.revenue), landingFor(r.account) ? null : r.actual, r.pending, round2(r.refunds), landingFor(r.account) ? null : r.clicks, landingFor(r.account) ? null : round2(r.spend), landingFor(r.account) ? null : round2(r.cpc_spend), landingFor(r.account) ? null : r.attr_units, landingFor(r.account) ? null : round2(r.attr_revenue), landingFor(r.account) ? null : (r.spend > 0 ? round2(r.attr_revenue / r.spend) : null), landingFor(r.account) ? null : r.ad_profit, cs.act, cs.paused, r.pending_fee));
       const meta = listingMeta[r.item_id] || {};
       const hasAds = r.spend > 0 || r.clicks > 0 || r.attr_units > 0;
       addScope('account', r.account, r, hasAds); addScope('fleet', 'all', r, hasAds);
@@ -6148,7 +6153,9 @@ async function adtoolRollupRun(env, part) {
          moment its figures can change. The marker carries the day AND the report's state, so neither
          rebuild can be missed and neither is repeated. */
       let repState = 'landing';
-      try { const rep = await adtReportStatus(env, yday); const rv = Object.values(rep || {}); repState = (rv.length && rv.every(x => x === 'final')) ? 'final' : 'landing'; } catch (e) { repState = 'landing'; }
+      /* the state names HOW MANY accounts have landed, so each account's report arriving is its own rebuild
+         rather than the rows waiting for the last of eight */
+      try { const rep = await adtReportStatus(env, yday); const rv = Object.values(rep || {}); const nf = rv.filter(x => x === 'final').length; repState = (rv.length && nf === rv.length) ? 'final' : ('landing:' + nf + '/' + rv.length); } catch (e) { repState = 'landing'; }
       const ydayKey = yday + '|' + repState;
       const ydayDue = (await adtFlag(env, 'adtool_rollup_yday')) !== ydayKey;
       /* the tail, A DAY PER RUN: today-9..today-3 re-rolled once a day because Ali costs are typed

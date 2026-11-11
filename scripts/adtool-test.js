@@ -7920,13 +7920,13 @@ function run(argv) {
       /* the test itself: not one row from eBay for the day, NO ingested report for it either, the day
          is finished, and it is inside the window the kick still heals. The ingested half is what keeps
          a genuinely quiet day quiet: eBay reporting that a day spent nothing is a figure it gave us. */
-      const rule = /const landing = adRows === 0 && !ingested\[day\] && day < rollToday && day >= landingFloor;/.test(rollBlk) &&
+      const rule = /const landingFor = \(acct\) => landingDay && !\(adRowsBy\[String\(acct\)\] > 0\) && !ingested\[day \+ '\|' \+ String\(acct\)\];/.test(rollBlk) && /landingFor\(r\.account\) \? null : round2\(r\.spend\)/.test(rollBlk) &&
         /const landingFloor = adtAddDays\(rollToday, -ADTOOL_REPORT_LANDING_DAYS\);/.test(rollBlk) &&
-        /let adRows = 0;/.test(rollBlk) && /adRows\+\+;/.test(rollBlk) &&
-        /SELECT report_date FROM ad_report_tasks WHERE report_date >= \?1 AND report_date <= \?2 AND status = 'INGESTED' AND family NOT LIKE '%_intra' GROUP BY report_date/.test(rollBlk) &&
-        /ingested\[String\(r\.report_date\)\] = 1;/.test(rollBlk);
+        /let adRows = 0; const adRowsBy = \{\};/.test(rollBlk) && /adRows\+\+; adRowsBy\[String\(a\.account\)\]/.test(rollBlk) &&
+        /SELECT report_date, account FROM ad_report_tasks WHERE report_date >= \?1 AND report_date <= \?2 AND status = 'INGESTED' AND family NOT LIKE '%_intra' GROUP BY report_date, account/.test(rollBlk) &&
+        /ingested\[String\(r\.report_date\)\] = true; ingested\[String\(r\.report_date\) \+ '\|' \+ String\(r\.account\)\] = true;/.test(rollBlk);
       /* every ad column of the row, and the profit with them, because the profit is after the click fee */
-      const nulls = /landing \? null : r\.actual, r\.pending, round2\(r\.refunds\), landing \? null : r\.clicks, landing \? null : round2\(r\.spend\), landing \? null : round2\(r\.cpc_spend\), landing \? null : r\.attr_units, landing \? null : round2\(r\.attr_revenue\), landing \? null : \(r\.spend > 0 \? round2\(r\.attr_revenue \/ r\.spend\) : null\), landing \? null : r\.ad_profit,/.test(rollBlk);
+      const nulls = /landingFor\(r\.account\) \? null : r\.actual, r\.pending, round2\(r\.refunds\), landingFor\(r\.account\) \? null : r\.clicks, landingFor\(r\.account\) \? null : round2\(r\.spend\), landingFor\(r\.account\) \? null : round2\(r\.cpc_spend\), landingFor\(r\.account\) \? null : r\.attr_units, landingFor\(r\.account\) \? null : round2\(r\.attr_revenue\), landingFor\(r\.account\) \? null : \(r\.spend > 0 \? round2\(r\.attr_revenue \/ r\.spend\) : null\), landingFor\(r\.account\) \? null : r\.ad_profit,/.test(rollBlk);
       /* the orders side is bound exactly as it always was */
       const orders = /\.bind\(r\.account, r\.item_id, day, wd, dom, r\.orders, r\.units, round2\(r\.revenue\),/.test(rollBlk);
       /* ONE number for the two jobs that have to agree about how far back a missing report is still coming */
@@ -8459,6 +8459,13 @@ function run(argv) {
       const hit = keys ? rgAll.filter(r => keys.some(k => String(r.sources).indexOf(k) >= 0 || r.id === k)) : [];
       return !!keys && hit.some(r => r.id === 'PEAK_STOPLOSS') && /reg\('stopped by the spend rule'/.test(pkSrc);
     })(), null);
+
+  t('landing day: the judgement is per account and the yesterday marker counts landed accounts, so one account landing neither zeroes the other seven nor waits for the last', (() => {
+    const rb = src.slice(src.indexOf('async function adtoolRollupDays('), src.indexOf('async function adtoolRollupDays(') + 20000);
+    const perAcct = /GROUP BY report_date, account/.test(rb) && /ingested\[String\(r\.report_date\) \+ '\|' \+ String\(r\.account\)\] = true/.test(rb) && /adRowsBy\[String\(a\.account\)\]/.test(rb);
+    const key = /repState = \(rv\.length && nf === rv\.length\) \? 'final' : \('landing:' \+ nf \+ '\/' \+ rv\.length\);/.test(src);
+    return perAcct && key;
+  })(), null);
 
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
