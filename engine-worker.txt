@@ -4579,7 +4579,9 @@ const ADTOOL_ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
    the router's pre-gate (which runs before any cache and before the action) still refused every adtool* name
    for that role, so the page answered 'auth' for Husnain. Both gates now read THIS table, so a role opened on
    one page cannot be refused at the door and cannot reach any other advertising action. */
-const ADTOOL_OPEN_ROLES = { adtoolSearch: ['Team Lead'], adtoolListing: ['Team Lead'], adtoolActionLog: ['Team Lead'] };
+/* 11 Nov, owner's follow-up ('total/full access to the Product history page'): the number register the page's
+   'how is this worked out' chips open is a table of metric definitions, no earning in it, so it opens to the role too. */
+const ADTOOL_OPEN_ROLES = { adtoolSearch: ['Team Lead'], adtoolListing: ['Team Lead'], adtoolActionLog: ['Team Lead'], adtoolRegister: ['Team Lead'] };
 /* the role half of adtGate as a pure predicate: the route handler runs it BEFORE the KV page cache is consulted, so a
    cached advertising payload can never answer a role the gate would refuse (the page-flag half stays inside the action) */
 function adtRoleAllowed(user, extraRoles) {
@@ -7741,7 +7743,7 @@ const ADTOOL_ACTIONS = {
   },
   adtoolRegister: {
     auth: 'any', fn: async (p, ctx) => {
-      await adtGate(ctx, null);
+      await adtGate(ctx, null, ADTOOL_OPEN_ROLES.adtoolRegister);
       const id = String((p && p.metric) || '').toUpperCase();
       const row = id ? await ctx.env.DB.prepare('SELECT * FROM adtool_number_register WHERE metric_id = ?1').bind(id).first() : null;
       const all = id ? null : ((await ctx.env.DB.prepare('SELECT * FROM adtool_number_register ORDER BY phase, metric_id').all()).results || []);

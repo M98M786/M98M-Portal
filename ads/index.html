@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261111-2234';
+var BUILD = '20261111-1238';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -3206,20 +3206,6 @@ window.M98M_ADS_ONLY = true;
     var mark = perMoving(key, p) ? ' <span class="cpc-moving">still updating</span>' : '';
     if (!p || typeof p !== 'object') {
       return '<tr><td class="hr">' + esc(label) + mark + '</td><td colspan="7"><span class="cpc-sm2">not available yet</span></td></tr>';
-    }
-    /* A WINDOW HOLDING A DAY EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov). No ad spend, no units
-       from ads, no return on the spend, and no profit either, because the profit is worked out after
-       the click fee and the click fee is the half that has not arrived. The engine's own sentence
-       goes across the three ad columns and again in the profit column; the orders and the units are
-       the order book's and are printed as ever. */
-    if (p.ads_landing) {
-      var lnote = String(p.landing_note || '');
-      return '<tr><td class="hr">' + esc(label) + mark + '</td>' +
-        '<td class="r" colspan="3"><span class="cpc-sm2">' + esc(lnote) + '</span></td>' +
-        '<td class="r">' + cnt(p.orders) + '</td>' +
-        '<td class="r">' + cnt(p.units) + '</td>' +
-        '<td class="r"><span class="cpc-sm2">not known</span></td>' +
-        '<td class="r"><span class="cpc-sm2">' + esc(lnote) + '</span></td></tr>';
     }
     /* the orders the profit could not price: the Ali cost not typed in yet, or eBay's fee not landed.
        Counted beside the figure and never folded into it, which is how the law works everywhere else. */
@@ -5740,24 +5726,12 @@ window.M98M_ADS_ONLY = true;
       today = { spend: cmSum(byAcct, 'spend'), attr_revenue: cmSum(byAcct, 'attr_revenue'), attr_units: cmSum(byAcct, 'attr_units'), clicks: cmSum(byAcct, 'clicks'), orders: cmSum(byAcct, 'orders'), units: cmSum(byAcct, 'units') };
     }
     var repStatus = y.report_status != null ? String(y.report_status) : (D.report_status != null ? String(D.report_status) : null);
-    /* A WINDOW HOLDING A DAY EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov: "0.00 in yesterday's
-       data of whole portal"). The engine marks it and says so in its own words; the tile prints
-       those words instead of a money figure nobody earned, and still prints the orders and the units
-       of that day, which come from the order book and are real. */
-    var landNote = function (w) { return String((w && w.landing_note) || ''); };
-    var landOrders = function (w) {
-      if (!w) return '';
-      return (w.orders != null ? cnt(w.orders) + ' order' + (num(w.orders) === 1 ? '' : 's') : '') +
-        (w.units != null ? (w.orders != null ? ' · ' : '') + cnt(w.units) + ' units' : '');
-    };
     var win = function (label, w, sub, note) {
       if (!w) return kpi(label, '—', sub + '<br>not available yet');
-      if (w.ads_landing) return kpi(label, 'not known yet', esc(landNote(w)) + '<br>' + (landOrders(w) ? landOrders(w) + ' · ' : '') + sub);
       return kpi(label, gbp0(w.spend), gbp0(w.attr_revenue) + ' sales from ads · ROAS ' + roas(cmRoas(w)) +
         (w.attr_units != null ? ' · ' + w.attr_units + ' units from ads' : '') + '<br>' + sub +
         (note ? ' · <span class="ov-neg">' + note + '</span>' : ''));
     };
-    var yLand = !!y.ads_landing, yNote = esc(landNote(y));
     var lateAccounts = function (m) { var late = Object.keys(m || {}).filter(function (a) { return m[a] !== 'final'; }); return late.length ? ' (' + esc(late.join(', ')) + ')' : ''; };
     var h = '<div class="ov-kpis">' +
       win('Today so far', today,
@@ -5776,8 +5750,8 @@ window.M98M_ADS_ONLY = true;
     var scope = String(D.decisions_scope || 'all accounts');
     var fleetOnly = OV.account ? ' · all accounts' : '';
     h += '<div class="ov-kpis">' +
-      kpi('CPC yesterday', yLand ? 'not known yet' : (num(y.clicks) > 0 && y.spend != null ? gbp(Number(y.spend) / Number(y.clicks)) : '—'), yLand ? yNote : (y.clicks || 0) + ' clicks') +
-      kpi('Conversion rate yesterday', yLand ? 'not known yet' : (num(y.clicks) > 0 && y.attr_units != null ? pct(Number(y.attr_units) / Number(y.clicks)) : '—'), yLand ? yNote : 'units from ads ÷ clicks') +
+      kpi('CPC yesterday', num(y.clicks) > 0 && y.spend != null ? gbp(Number(y.spend) / Number(y.clicks)) : '—', (y.clicks || 0) + ' clicks') +
+      kpi('Conversion rate yesterday', num(y.clicks) > 0 && y.attr_units != null ? pct(Number(y.attr_units) / Number(y.clicks)) : '—', 'units from ads ÷ clicks') +
       kpi('Orders yesterday, all channels', y.orders != null ? cnt(y.orders) : '—', y.units != null ? y.units + ' units' : 'not available yet') +
       kpi('Open alerts' + fleetOnly, D.alerts && D.alerts.n != null ? String(D.alerts.n) : '—', D.alerts && D.alerts.n != null ? ((D.alerts.high || 0) + ' high') : 'not available yet', (D.alerts && D.alerts.high) ? 'ov-neg' : '') +
       kpi('Decisions today · ' + scope, decisions == null ? '—' : String(decisions),
@@ -6995,20 +6969,6 @@ window.M98M_ADS_ONLY = true;
     var mark = perMoving(key, p) ? ' <span class="pkt-moving">still updating</span>' : '';
     if (!p || typeof p !== 'object') {
       return '<tr><td class="hr">' + esc(label) + mark + '</td><td colspan="7"><span class="pkt-sm2">not available yet</span></td></tr>';
-    }
-    /* A WINDOW HOLDING A DAY EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov). No ad spend, no units
-       from ads, no return on the spend, and no profit either, because the profit is worked out after
-       the click fee and the click fee is the half that has not arrived. The engine's own sentence
-       goes across the three ad columns and again in the profit column; the orders and the units are
-       the order book's and are printed as ever. */
-    if (p.ads_landing) {
-      var lnote = String(p.landing_note || '');
-      return '<tr><td class="hr">' + esc(label) + mark + '</td>' +
-        '<td class="r" colspan="3"><span class="pkt-sm2">' + esc(lnote) + '</span></td>' +
-        '<td class="r">' + cnt(p.orders) + '</td>' +
-        '<td class="r">' + cnt(p.units) + '</td>' +
-        '<td class="r"><span class="pkt-sm2">not known</span></td>' +
-        '<td class="r"><span class="pkt-sm2">' + esc(lnote) + '</span></td></tr>';
     }
     /* the orders the profit could not price: the Ali cost not typed in yet, or eBay's fee not landed.
        Counted beside the figure and never folded into it, which is how the law works everywhere else. */
@@ -8844,20 +8804,6 @@ window.M98M_ADS_ONLY = true;
         var s = x[1], pc = pcOf(s), pf = pfOf(s);
         var notAds = Math.max(0, (Number(s.units) || 0) - (Number(s.attr_units) || 0));
         var moving = x[0] === 'Today so far' || !!s.includes_today;
-        /* A WINDOW HOLDING A DAY EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov: the whole portal
-           read yesterday as 0.00). There is no ad spend to print, no units from ads, no return on
-           the spend and no profit, because the profit is worked out after the click fee and the
-           click fee is the half that has not arrived. The engine says so in its own words, across
-           the three ad columns and again in the profit column, and the orders and the units of that
-           day are the order book's own and are printed exactly as ever. */
-        if (s.ads_landing) {
-          var lnote = String(s.landing_note || '');
-          return '<tr><td>' + esc(x[0]) + (moving ? ' <span class="at-src s">still updating</span>' : '') + '</td>' +
-            '<td class="r" colspan="' + (atSpendOnly() ? 2 : 3) + '"><span class="at-src">' + esc(lnote) + '</span></td>' +
-            '<td class="r">' + (s.orders || 0) + '</td><td class="r">' + (s.units || 0) + '</td>' +
-            '<td class="r"><span class="at-src">not known</span></td>' +
-            (atSpendOnly() ? '' : '<td class="r"><span class="at-src">' + esc(lnote) + '</span></td>') + '</tr>';
-        }
         return '<tr><td>' + esc(x[0]) + (moving ? ' <span class="at-src s">still updating</span>' : '') + '</td>' +
           '<td class="r">' + gbp(s.spend) + '</td><td class="r">' + (s.attr_units || 0) + '</td>' +
           (atSpendOnly() ? '' : '<td class="r">' + roas(s.roas != null ? s.roas : (Number(s.spend) > 0 && s.attr_revenue != null ? Number(s.attr_revenue) / Number(s.spend) : null)) + '</td>') +
@@ -9541,11 +9487,6 @@ window.M98M_ADS_ONLY = true;
     var yTile, ySub;
     if (!S) { yTile = '—'; ySub = 'not available yet'; }
     else if (S.error) { yTile = '—'; ySub = 'could not be read: ' + esc(String(S.error)); }
-    /* YESTERDAY CANNOT BE SCORED WHILE EBAY'S OWN REPORT FOR IT IS MISSING (owner, 11 Nov). Every
-       call under this tile was judged on what the day earned, and the day's profit is worked out
-       after the click fee: with the report unlanded there is no click fee to take off, so a score
-       here would be a score on half a day. The engine's own sentence stands in its place. */
-    else if (S.yesterday_ads_landing) { yTile = 'not known yet'; ySub = esc(String(S.yesterday_landing_note || '')) + ', so yesterday cannot be scored'; }
     else {
       yTile = yN ? Number(ySc.r) + ' of ' + yN + (yProv ? ' <span class="rt-dim">· ' + yProv + ' still updating</span>' : '') : (yProv ? '<span class="rt-dim">' + yProv + ' still updating</span>' : '—');
       ySub = yN ? Math.round(Number(ySc.r) / yN * 100) + ' % right' + (yProv ? ' (we check the rest again as costs and eBay figures land)' : '') : (yProv ? 'no final score yet, we check again as costs and eBay figures land' : 'nothing scored yet');
@@ -11924,7 +11865,7 @@ window.M98M_ADS_ONLY = true;
   function acSpendOnly(d) { return !!(d && d.spend_only); }
   /* sort: {key:'', dir:-1} means "nothing chosen", which is the board's own order — the waste rows
      first, then the biggest spend today. A choice is remembered per browser under AC_SORT_KEY. */
-  var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', landNote: '', sort: { key: '', dir: -1 } };
+  var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', sort: { key: '', dir: -1 } };
   /* the window in words, for every heading that names it: today, yesterday, the dates picked, or the last N days */
   function acWin(d) {
     d = d || {};
@@ -12068,12 +12009,8 @@ VIEW_CSS.push(
     if (!box) { return; }
     var rows = AC.items || [];
     if (!rows.length) {
-      /* "Nothing is recorded" and "eBay has not sent it" are different answers and a reader acts on
-         them differently: the first reads as a quiet day. Where the engine says the report for the
-         day has not landed, its own sentence is what goes here. */
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' +
-        (AC.landNote ? esc(AC.landNote) + '.'
-          : AC.period === 'yesterday' ? 'Nothing is recorded for yesterday yet.'
+        (AC.period === 'yesterday' ? 'Nothing is recorded for yesterday yet.'
           : 'No ad activity recorded yet today \u2014 eBay produces the first same-day report at about 08:05 UK, so nothing can be read before then.') + '</div>';
       return;
     }
@@ -12119,15 +12056,6 @@ VIEW_CSS.push(
         '<div class="ac-tile"><div class="k">Spend · ' + esc(acWin(d)) + '</div><div class="v">' + acGBP(c.spend_14d) + '</div></div>' +
       '</div>';
       if (d.window_source) { h += '<div class="ac-split-note" style="margin:-4px 0 10px">Window figures from ' + esc(String(d.window_source)) + '.</div>'; }
-      /* A DAY IN THIS WINDOW EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov: the whole portal read
-         yesterday as 0.00). This board reads eBay's own daily table, so such a day has no row at all
-         and every figure below would be a nought nobody earned. The engine names the day and writes
-         the sentence, so this line and every By period table in the tool say the same thing. */
-      if (d.ads_landing) {
-        h += '<div class="ac-split-note" style="margin:-4px 0 10px;color:var(--bad);font-weight:800">' +
-          esc(String(d.landing_note || '')) + ', so the spend and the sales for ' +
-          (Number((d.landing_days || []).length) === 1 ? 'that day' : 'those days') + ' are not in these figures.</div>';
-      }
       /* THE PEAK LIST'S DAY-STOPS (owner, 10 Nov): one line, and the figure that matters is the last
          one — what those listings have spent SINCE they were stopped, which on a stop that reached eBay
          should read nothing at all. Drawn only where the answer carries the count, because null is not
@@ -12223,9 +12151,6 @@ VIEW_CSS.push(
       /* the per-item board is painted on its own so a sort can redraw it without asking the engine again */
       AC.items = (d.items || []).filter(function (r) { return r && typeof r === 'object'; });
       AC.lastDays = Number(d.days) || 14;
-      /* the sentence travels with the board so the per-item table, which is painted on its own when
-         a sort redraws it, says the same thing as the line above it */
-      AC.landNote = d.ads_landing ? String(d.landing_note || '') : '';
       AC.win = d.period === 'today' ? 'today' : d.period === 'yesterday' ? 'yesterday' : AC.lastDays + 'd';
       h += '<div id="acItems"></div>';
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Snapshot ' +
@@ -15657,7 +15582,7 @@ function enterApp(user){
     var a=document.createElement('a'); if(v.key===landing) a.className='on'; a.dataset.key=v.key;
     a.innerHTML='<svg viewBox="0 0 24 24">'+(v.icon||'')+'</svg><span class="nav-label">'+esc(v.label)+'</span><span class="badge hidden" data-badge="'+esc(v.key)+'"></span>';
     a.href = '#' + v.key;              // a real link: middle-click / ctrl-click opens a new tab
-    a.onclick=function(ev){ ev.preventDefault(); location.hash = v.key; renderView(v.key); };   // renderView marks the sidebar
+    a.onclick=function(ev){ ev.preventDefault(); var all=document.querySelectorAll('.nav a'); for(var j=0;j<all.length;j++){ all[j].classList.remove('on'); } a.classList.add('on'); location.hash = v.key; renderView(v.key); };
     return a;
   }
   var visible = viewList();
@@ -15726,7 +15651,12 @@ function enterApp(user){
      throw away the parameter the new tab was opened with */
   if (adtRoute().key !== landing) { location.hash = landing; }
   renderView(landing);
-  var navTo = function(key){ renderView(key); };   // renderView marks the sidebar and unfolds its group
+  var navTo = function(key){
+    var links = document.querySelectorAll('.nav a');
+    for (var j = 0; j < links.length; j++) { links[j].classList.toggle('on', links[j].getAttribute('href') === '#' + key); }
+    if (window.__navReveal) { window.__navReveal(key); }
+    renderView(key);
+  };
   window.addEventListener('hashchange', function(){
     var k = adtRoute().key;
     if (k && VIEWS[k] && canSee(VIEWS[k])) { navTo(k); }
@@ -15785,27 +15715,8 @@ function warmUp(){
     setTimeout(fire, 2500);
   }catch(e){}
 }
-/* 11 Nov (owner, with a screenshot of Advertising overview open while the sidebar held Business
-   overview): "जो पेज खुला हुआ है ना सिर्फ वही पेज नजर आया करे" — only the page that is open should
-   read as selected. The highlight used to be set in exactly two places: once while the sidebar was
-   BUILT (for whatever `landing` was at that moment) and again inside a nav link's own click
-   handler. The sidebar is built BEFORE `landing` is re-pointed at the hash the tab was opened
-   with, so opening #adtoolOverview in a new tab drew the mark on the department's landing page and
-   nothing ever moved it. Every other way in had the same hole: a deep link, the back button, a
-   programmatic location.hash, the ads portal's own router.
-   It is now marked HERE, in the single function every one of those routes ends at, so the sidebar
-   cannot disagree with the screen. Matching is on data-key, not href, because a hash can carry a
-   parameter (#productSourcing/406483438958) that an href never has. */
-function navMark(key){
-  try{
-    var links = document.querySelectorAll('.nav a');
-    for (var j = 0; j < links.length; j++) { links[j].classList.toggle('on', links[j].getAttribute('data-key') === key); }
-    if (window.__navReveal) { window.__navReveal(key); }   // unfold the group the page lives in
-  }catch(e){}
-}
 function renderView(key){
   var v=VIEWS[key]; var m=$('mainView');
-  navMark(key);
   if(!v || !canSee(v)){
     m.innerHTML='<div class="hgroup enter d1"><h1>Not available</h1><span class="sub">This section is not part of your version.</span></div>';
     return;
