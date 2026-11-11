@@ -634,6 +634,13 @@ function huntingPortalForM98mfour() {
   sadmForgetUsers_();
   try { logActivity_('system', 'HUNTER_PORTAL_SET', TARGET, before || '(blank)', HUNTER_MODULES, 'owner 10 Nov — proper product hunting page'); } catch (e) {}
   out.unshift(TARGET + ': modules "' + (before || '(blank)') + '" -> the hunter list (' + HUNTER_MODULES.split(',').length + ' screens)');
+  /* SAY WHAT HAPPENED BEFORE DOING THE SLOW THING. The first run of this one-shot wrote the row and
+     then died inside pushEngineSync against Apps Script's six-minute ceiling (360.958 s), so the
+     Logger line never ran and the only trace left of a SUCCESSFUL write was the execution's
+     duration. The row write is already flushed above; the mirror is a convenience on top of it (an
+     hourly pushEngineSync trigger re-syncs D1 anyway), so the log is written first and the push
+     is allowed to fail or time out behind it. */
+  Logger.log(out.join(' · '));
   var mirror = 'mirror not pushed';
   try { if (typeof pushEngineSync === 'function') mirror = String(pushEngineSync()); } catch (e) { mirror = 'mirror push failed: ' + (e && e.message || e); }
   out.push('mirror: ' + mirror);

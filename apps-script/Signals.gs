@@ -1652,8 +1652,11 @@ function runLossEscalationSweep() {
      flag-guarded one-shot shape; flag set BEFORE the call so a crash cannot loop it. */
   try {
     const p10n = PropertiesService.getScriptProperties();
-    if (p10n.getProperty('HUNTER_PORTAL_M98MFOUR') !== 'done' && typeof huntingPortalForM98mfour === 'function') {
-      p10n.setProperty('HUNTER_PORTAL_M98MFOUR', 'done');
+    /* V2: the first run timed out inside the mirror push after writing the row, so it left no log.
+       The one-shot is idempotent — this second pass answers "no change" if the row is already
+       right, which is the confirmation the first run could not give. */
+    if (p10n.getProperty('HUNTER_PORTAL_M98MFOUR_V2') !== 'done' && typeof huntingPortalForM98mfour === 'function') {
+      p10n.setProperty('HUNTER_PORTAL_M98MFOUR_V2', 'done');
       logActivity_('system', 'HUNTER_PORTAL_M98MFOUR', 'm98mfour@gmail.com', '', 'run from the 5-minute sweep', huntingPortalForM98mfour());
     }
   } catch (e) { logActivity_('trigger', 'ERROR:hunterPortalM98mfour', '', '', '', String(e && e.stack || e).slice(0, 300)); }
