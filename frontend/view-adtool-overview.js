@@ -254,12 +254,24 @@
       today = { spend: cmSum(byAcct, 'spend'), attr_revenue: cmSum(byAcct, 'attr_revenue'), attr_units: cmSum(byAcct, 'attr_units'), clicks: cmSum(byAcct, 'clicks'), orders: cmSum(byAcct, 'orders'), units: cmSum(byAcct, 'units') };
     }
     var repStatus = y.report_status != null ? String(y.report_status) : (D.report_status != null ? String(D.report_status) : null);
+    /* A WINDOW HOLDING A DAY EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov: "0.00 in yesterday's
+       data of whole portal"). The engine marks it and says so in its own words; the tile prints
+       those words instead of a money figure nobody earned, and still prints the orders and the units
+       of that day, which come from the order book and are real. */
+    var landNote = function (w) { return String((w && w.landing_note) || ''); };
+    var landOrders = function (w) {
+      if (!w) return '';
+      return (w.orders != null ? cnt(w.orders) + ' order' + (num(w.orders) === 1 ? '' : 's') : '') +
+        (w.units != null ? (w.orders != null ? ' · ' : '') + cnt(w.units) + ' units' : '');
+    };
     var win = function (label, w, sub, note) {
       if (!w) return kpi(label, '—', sub + '<br>not available yet');
+      if (w.ads_landing) return kpi(label, 'not known yet', esc(landNote(w)) + '<br>' + (landOrders(w) ? landOrders(w) + ' · ' : '') + sub);
       return kpi(label, gbp0(w.spend), gbp0(w.attr_revenue) + ' sales from ads · ROAS ' + roas(cmRoas(w)) +
         (w.attr_units != null ? ' · ' + w.attr_units + ' units from ads' : '') + '<br>' + sub +
         (note ? ' · <span class="ov-neg">' + note + '</span>' : ''));
     };
+    var yLand = !!y.ads_landing, yNote = esc(landNote(y));
     var lateAccounts = function (m) { var late = Object.keys(m || {}).filter(function (a) { return m[a] !== 'final'; }); return late.length ? ' (' + esc(late.join(', ')) + ')' : ''; };
     var h = '<div class="ov-kpis">' +
       win('Today so far', today,
@@ -278,8 +290,8 @@
     var scope = String(D.decisions_scope || 'all accounts');
     var fleetOnly = OV.account ? ' · all accounts' : '';
     h += '<div class="ov-kpis">' +
-      kpi('CPC yesterday', num(y.clicks) > 0 && y.spend != null ? gbp(Number(y.spend) / Number(y.clicks)) : '—', (y.clicks || 0) + ' clicks') +
-      kpi('Conversion rate yesterday', num(y.clicks) > 0 && y.attr_units != null ? pct(Number(y.attr_units) / Number(y.clicks)) : '—', 'units from ads ÷ clicks') +
+      kpi('CPC yesterday', yLand ? 'not known yet' : (num(y.clicks) > 0 && y.spend != null ? gbp(Number(y.spend) / Number(y.clicks)) : '—'), yLand ? yNote : (y.clicks || 0) + ' clicks') +
+      kpi('Conversion rate yesterday', yLand ? 'not known yet' : (num(y.clicks) > 0 && y.attr_units != null ? pct(Number(y.attr_units) / Number(y.clicks)) : '—'), yLand ? yNote : 'units from ads ÷ clicks') +
       kpi('Orders yesterday, all channels', y.orders != null ? cnt(y.orders) : '—', y.units != null ? y.units + ' units' : 'not available yet') +
       kpi('Open alerts' + fleetOnly, D.alerts && D.alerts.n != null ? String(D.alerts.n) : '—', D.alerts && D.alerts.n != null ? ((D.alerts.high || 0) + ' high') : 'not available yet', (D.alerts && D.alerts.high) ? 'ov-neg' : '') +
       kpi('Decisions today · ' + scope, decisions == null ? '—' : String(decisions),

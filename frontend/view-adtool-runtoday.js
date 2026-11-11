@@ -490,6 +490,11 @@
     var yTile, ySub;
     if (!S) { yTile = '—'; ySub = 'not available yet'; }
     else if (S.error) { yTile = '—'; ySub = 'could not be read: ' + esc(String(S.error)); }
+    /* YESTERDAY CANNOT BE SCORED WHILE EBAY'S OWN REPORT FOR IT IS MISSING (owner, 11 Nov). Every
+       call under this tile was judged on what the day earned, and the day's profit is worked out
+       after the click fee: with the report unlanded there is no click fee to take off, so a score
+       here would be a score on half a day. The engine's own sentence stands in its place. */
+    else if (S.yesterday_ads_landing) { yTile = 'not known yet'; ySub = esc(String(S.yesterday_landing_note || '')) + ', so yesterday cannot be scored'; }
     else {
       yTile = yN ? Number(ySc.r) + ' of ' + yN + (yProv ? ' <span class="rt-dim">· ' + yProv + ' still updating</span>' : '') : (yProv ? '<span class="rt-dim">' + yProv + ' still updating</span>' : '—');
       ySub = yN ? Math.round(Number(ySc.r) / yN * 100) + ' % right' + (yProv ? ' (we check the rest again as costs and eBay figures land)' : '') : (yProv ? 'no final score yet, we check again as costs and eBay figures land' : 'nothing scored yet');

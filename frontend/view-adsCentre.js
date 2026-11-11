@@ -12,7 +12,7 @@
   function acSpendOnly(d) { return !!(d && d.spend_only); }
   /* sort: {key:'', dir:-1} means "nothing chosen", which is the board's own order — the waste rows
      first, then the biggest spend today. A choice is remembered per browser under AC_SORT_KEY. */
-  var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', sort: { key: '', dir: -1 } };
+  var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', landNote: '', sort: { key: '', dir: -1 } };
   /* the window in words, for every heading that names it: today, yesterday, the dates picked, or the last N days */
   function acWin(d) {
     d = d || {};
@@ -156,8 +156,12 @@ VIEW_CSS.push(
     if (!box) { return; }
     var rows = AC.items || [];
     if (!rows.length) {
+      /* "Nothing is recorded" and "eBay has not sent it" are different answers and a reader acts on
+         them differently: the first reads as a quiet day. Where the engine says the report for the
+         day has not landed, its own sentence is what goes here. */
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' +
-        (AC.period === 'yesterday' ? 'Nothing is recorded for yesterday yet.'
+        (AC.landNote ? esc(AC.landNote) + '.'
+          : AC.period === 'yesterday' ? 'Nothing is recorded for yesterday yet.'
           : 'No ad activity recorded yet today \u2014 eBay produces the first same-day report at about 08:05 UK, so nothing can be read before then.') + '</div>';
       return;
     }
@@ -203,6 +207,15 @@ VIEW_CSS.push(
         '<div class="ac-tile"><div class="k">Spend · ' + esc(acWin(d)) + '</div><div class="v">' + acGBP(c.spend_14d) + '</div></div>' +
       '</div>';
       if (d.window_source) { h += '<div class="ac-split-note" style="margin:-4px 0 10px">Window figures from ' + esc(String(d.window_source)) + '.</div>'; }
+      /* A DAY IN THIS WINDOW EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov: the whole portal read
+         yesterday as 0.00). This board reads eBay's own daily table, so such a day has no row at all
+         and every figure below would be a nought nobody earned. The engine names the day and writes
+         the sentence, so this line and every By period table in the tool say the same thing. */
+      if (d.ads_landing) {
+        h += '<div class="ac-split-note" style="margin:-4px 0 10px;color:var(--bad);font-weight:800">' +
+          esc(String(d.landing_note || '')) + ', so the spend and the sales for ' +
+          (Number((d.landing_days || []).length) === 1 ? 'that day' : 'those days') + ' are not in these figures.</div>';
+      }
       /* THE PEAK LIST'S DAY-STOPS (owner, 10 Nov): one line, and the figure that matters is the last
          one — what those listings have spent SINCE they were stopped, which on a stop that reached eBay
          should read nothing at all. Drawn only where the answer carries the count, because null is not
@@ -298,6 +311,9 @@ VIEW_CSS.push(
       /* the per-item board is painted on its own so a sort can redraw it without asking the engine again */
       AC.items = (d.items || []).filter(function (r) { return r && typeof r === 'object'; });
       AC.lastDays = Number(d.days) || 14;
+      /* the sentence travels with the board so the per-item table, which is painted on its own when
+         a sort redraws it, says the same thing as the line above it */
+      AC.landNote = d.ads_landing ? String(d.landing_note || '') : '';
       AC.win = d.period === 'today' ? 'today' : d.period === 'yesterday' ? 'yesterday' : AC.lastDays + 'd';
       h += '<div id="acItems"></div>';
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Snapshot ' +

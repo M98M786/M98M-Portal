@@ -478,6 +478,20 @@
     if (!p || typeof p !== 'object') {
       return '<tr><td class="hr">' + esc(label) + mark + '</td><td colspan="7"><span class="cpc-sm2">not available yet</span></td></tr>';
     }
+    /* A WINDOW HOLDING A DAY EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov). No ad spend, no units
+       from ads, no return on the spend, and no profit either, because the profit is worked out after
+       the click fee and the click fee is the half that has not arrived. The engine's own sentence
+       goes across the three ad columns and again in the profit column; the orders and the units are
+       the order book's and are printed as ever. */
+    if (p.ads_landing) {
+      var lnote = String(p.landing_note || '');
+      return '<tr><td class="hr">' + esc(label) + mark + '</td>' +
+        '<td class="r" colspan="3"><span class="cpc-sm2">' + esc(lnote) + '</span></td>' +
+        '<td class="r">' + cnt(p.orders) + '</td>' +
+        '<td class="r">' + cnt(p.units) + '</td>' +
+        '<td class="r"><span class="cpc-sm2">not known</span></td>' +
+        '<td class="r"><span class="cpc-sm2">' + esc(lnote) + '</span></td></tr>';
+    }
     /* the orders the profit could not price: the Ali cost not typed in yet, or eBay's fee not landed.
        Counted beside the figure and never folded into it, which is how the law works everywhere else. */
     var pc = n0(p.pending_cost_orders), pf = n0(p.pending_fee_orders), un = pc + pf;

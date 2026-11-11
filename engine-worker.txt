@@ -264,7 +264,19 @@ function cronMap() {
        busy one. Every free minute in this map has a five-minute slot a minute away on each side, so
        :43 is as clear as a minute here can be, and the test below proves it is still free.
        One lease covers both halves, so the two can never roll the same finished day at once. */
-    '43 * * * *': [adtoolRollupsCatchup],
+    /* adsReportKick RIDES HERE TOO (11 Nov 2026, the owner: "why advertising portal is showing - and
+       not available and 0.00 in yesterday's data of whole portal?"). It used to run ONCE a day, on
+       the 02:10 slot. At 02:10 that morning eBay answered its metadata call with HTTP 429 on every
+       account, so no report task for 10 November was filed at all, and its own self-healing window
+       would not have re-asked until 02:10 the NEXT morning: a whole day of advertising figures
+       missing while the pages showed nought spent. Asking once a day for something that can be
+       refused is the fault, and the slot is the remedy.
+       It is SAFE to ride an hourly slot because it is idempotent: it files only a (day, family) with
+       no INGESTED, PENDING or SUCCESS task inside the landing window, so on a normal day it costs one
+       metadata read per account and files nothing. LAST in the slot, because this file's own law is
+       that the cheap D1 work goes ahead of anything that fetches, and the roll-up ahead of it is the
+       page-facing half. The 02:10 slot keeps it as well: that is the first ask of each new day. */
+    '43 * * * *': [adtoolRollupsCatchup, adsReportKick],
     /* adtoolVideoSweep rides LAST here (31 Oct, §4). This slot already carries one light D1-only job,
        and this file's own law is that the cheap reads go ahead of anything that fetches: the sweep is
        the only job in the slot that calls eBay, so last is where it cannot eat the budget of the job
@@ -5154,6 +5166,13 @@ async function adtoolOrdersRoll(env, sinceIso, untilIso) {
   return adtBatch(env, stmts);
 }
 
+/* HOW FAR BACK A MISSING EBAY REPORT IS STILL ON ITS WAY (11 Nov 2026). ONE number for the two jobs
+   that both have to agree about it: adsReportKick re-files any (day, family) inside this many days
+   that has never been ingested, and the day roll writes a day's ad columns as NULL — not nought —
+   only inside the same window, because that is exactly the window in which "it has not landed yet"
+   is the truth. Older than this and nothing will ever file that day again, so the day is the settled
+   day it has always been and its figures do not move. */
+const ADTOOL_REPORT_LANDING_DAYS = 8;
 /* ---- job: rollups for a day range (listing_day/hour/slot + week/month + scope aggregates) ---- */
 async function adtoolRollupDays(env, fromDay, toDay, opts) {
   /* `opts` (1 Nov, the hourly roll-up's own budget):
@@ -5176,15 +5195,37 @@ async function adtoolRollupDays(env, fromDay, toDay, opts) {
   const campState = {};
   for (const r of ((await env.DB.prepare("SELECT ca.listing_id, SUM(CASE WHEN (c.funding_model = 'COST_PER_CLICK' AND ca.ad_status = 'ACTIVE') OR (c.funding_model = 'COST_PER_SALE' AND COALESCE(ca.ad_status,'') <> 'ARCHIVED') THEN 1 ELSE 0 END) AS act, SUM(CASE WHEN ca.ad_status = 'PAUSED' THEN 1 ELSE 0 END) AS paused FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id WHERE c.status = 'RUNNING' GROUP BY ca.listing_id").all()).results || [])) campState[r.listing_id] = { act: Number(r.act) || 0, paused: Number(r.paused) || 0 };
   let written = 0, held = 0;
+  /* THE DAYS A MISSING REPORT IS STILL A MISSING REPORT ON (11 Nov). A finished day with no row at
+     all in eBay's own daily table is a day whose report has not landed, and its ad columns are
+     written as NULL rather than nought so no page can print nothing-spent for it. The window is the
+     one adsReportKick heals: inside it the figures are still coming and "not landed yet" is the
+     truth, past it nothing will ever file them again and the day is the settled day it has always
+     been, which is also why no settled figure moves. Today is not judged here at all — today's ad
+     side has never come from this table and has its own grain. */
+  const rollToday = ukDate('');
+  const landingFloor = adtAddDays(rollToday, -ADTOOL_REPORT_LANDING_DAYS);
+  /* AND THE SECOND HALF OF THE TEST, which is what keeps a genuinely quiet day a quiet day: a day
+     eBay HAS reported on, even if it reported nothing at all, has an ingested report task, and that
+     day's noughts are a figure eBay gave us. Only a day with no rows AND no ingested report is a day
+     nothing has arrived for. One read for the whole range this call is rolling, not one per day. */
+  const ingested = {};
+  for (const r of (((await env.DB.prepare("SELECT report_date FROM ad_report_tasks WHERE report_date >= ?1 AND report_date <= ?2 AND status = 'INGESTED' AND family NOT LIKE '%_intra' GROUP BY report_date").bind(fromDay, toDay).all().catch(() => ({ results: [] }))) || {}).results || [])) ingested[String(r.report_date)] = 1;
   for (let day = fromDay; day <= toDay; day = adtAddDays(day, 1)) {
     const rows = {};   // key account|item
     const get = (acct, iid) => rows[acct + '|' + iid] = rows[acct + '|' + iid] || { account: acct, item_id: iid, orders: 0, units: 0, revenue: 0, law_orders: [], clicks: 0, spend: 0, cpc_spend: 0, attr_units: 0, attr_revenue: 0, impressions: null };
     for (const o of ((await env.DB.prepare("SELECT account, item_id, qty, sale_price, ebay_fees, ali_cost, refunded FROM adtool_orders WHERE local_date = ?1 AND status <> 'CANCELLED'").bind(day).all()).results || [])) {
       const r = get(o.account, o.item_id); r.orders++; r.units += Number(o.qty) || 1; r.revenue += Number(o.sale_price) || 0; r.law_orders.push({ sold: o.sale_price, fees: o.ebay_fees, cost: o.ali_cost, refunded: o.refunded });
     }
+    let adRows = 0;
     for (const a of ((await env.DB.prepare('SELECT account, item_id, spend, clicks, sales, sale_amount, cpc_spend, cpc_clicks, cpc_sales, cpc_sale_amount FROM ads_daily WHERE date = ?1').bind(day).all()).results || [])) {
+      adRows++;
       const r = get(a.account, a.item_id); r.spend += (Number(a.spend) || 0) + (Number(a.cpc_spend) || 0); r.cpc_spend += Number(a.cpc_spend) || 0; r.clicks += (Number(a.clicks) || 0) + (Number(a.cpc_clicks) || 0); r.attr_units += (Number(a.sales) || 0) + (Number(a.cpc_sales) || 0); r.attr_revenue += (Number(a.sale_amount) || 0) + (Number(a.cpc_sale_amount) || 0);
     }
+    /* NOT ONE ROW and NO INGESTED REPORT for a finished day inside that window: nothing has arrived
+       for this day, so every ad column of every row of it is written as NULL. A day eBay HAS reported
+       keeps its noughts — eBay saying a listing, or a whole day, spent nothing is a figure, and this
+       is not that. */
+    const landing = adRows === 0 && !ingested[day] && day < rollToday && day >= landingFloor;
     const wd = adtWeekdayOf(day), dom = adtDom(day);
     const stmts = [];
     /* a row this day already holds but that no longer has a source — its only orders flipped to CANCELLED since and it
@@ -5210,10 +5251,15 @@ async function adtoolRollupDays(env, fromDay, toDay, opts) {
       r.pending = law.pending_cost_orders; r.pending_fee = law.pending_fee_orders; r.refunds = law.refunds;
       r.ad_profit = (m != null && !isNaN(m)) ? round2(r.attr_units * m - r.spend) : null;
       const cs = campState[r.item_id] || { act: 0, paused: 0 };
+      /* ON A LANDING DAY THE AD SIDE IS NULL, NOT NOUGHT — spend, the click fee leg, clicks, the
+         units and revenue eBay credits to the ads, the ratio, the ad profit, and the day's profit
+         with them, because the profit is worked out after the click fee and the click fee is the
+         half that has not arrived. Orders, units, revenue, refunds and the two uncosted counts are
+         the order book's own and are written exactly as they always were. */
       stmts.push(env.DB.prepare(
         'INSERT INTO adtool_listing_day (account, item_id, day, weekday, dom, orders, units, revenue, actual_profit, pending_cost_orders, refunds, clicks, spend, cpc_spend, attr_units, attr_revenue, roas, ad_profit, ad_active_campaigns, ad_paused_campaigns, pending_fee_orders) ' +
         'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21) ON CONFLICT(account, item_id, day) DO UPDATE SET weekday = ?4, dom = ?5, orders = ?6, units = ?7, revenue = ?8, actual_profit = ?9, pending_cost_orders = ?10, refunds = ?11, clicks = ?12, spend = ?13, cpc_spend = ?14, attr_units = ?15, attr_revenue = ?16, roas = ?17, ad_profit = ?18, ad_active_campaigns = ?19, ad_paused_campaigns = ?20, pending_fee_orders = ?21'
-      ).bind(r.account, r.item_id, day, wd, dom, r.orders, r.units, round2(r.revenue), r.actual, r.pending, round2(r.refunds), r.clicks, round2(r.spend), round2(r.cpc_spend), r.attr_units, round2(r.attr_revenue), r.spend > 0 ? round2(r.attr_revenue / r.spend) : null, r.ad_profit, cs.act, cs.paused, r.pending_fee));
+      ).bind(r.account, r.item_id, day, wd, dom, r.orders, r.units, round2(r.revenue), landing ? null : r.actual, r.pending, round2(r.refunds), landing ? null : r.clicks, landing ? null : round2(r.spend), landing ? null : round2(r.cpc_spend), landing ? null : r.attr_units, landing ? null : round2(r.attr_revenue), landing ? null : (r.spend > 0 ? round2(r.attr_revenue / r.spend) : null), landing ? null : r.ad_profit, cs.act, cs.paused, r.pending_fee));
       const meta = listingMeta[r.item_id] || {};
       const hasAds = r.spend > 0 || r.clicks > 0 || r.attr_units > 0;
       addScope('account', r.account, r, hasAds); addScope('fleet', 'all', r, hasAds);
@@ -6700,6 +6746,59 @@ async function adtGate(ctx, pageFlag, extraRoles) {
   if (pageFlag && (await adtFlag(ctx.env, pageFlag)) !== 'on') throw new Error('SAY: this page is not enabled yet');
 }
 /* ADTOOL-WINDOWSUMS-PURE-BEGIN */
+/* ══ A DAY WHOSE EBAY ADVERTISING REPORT HAS NOT LANDED ═══════════════════════════════════════════
+   The owner, 11 Nov 2026: "why advertising portal is showing - and not available and 0.00 in
+   yesterday's data of whole portal? fix it please."
+   What had happened: eBay refused the once-a-day report request for 10 November with a 429, nothing
+   re-asked it inside that day, and the day table held the order side alone with its ad columns
+   stored as nought. So every page printed 10 November as nothing spent, nothing sold from ads, no
+   return on the spend, and a profit that had never had the click fee taken off it. NOUGHT IS A
+   FIGURE A READER ACTS ON; not knowing is not, and the two must never read the same.
+   The day roll now writes such a day's ad columns as NULL, and these three carry that forward: the
+   days are named, a window holding one of them gives its ad figures and its profit back as
+   nothing-known, and the sentence every page prints is written ONCE, here, so the By period tables,
+   the Overview and Decision tiles and the command centre cannot each say it their own way.
+   A landing day's orders, units and revenue are the order book's own and stand unchanged. */
+const ADTOOL_LANDING_DAYS_SHOWN = 3;
+function adLandingDaysClean(days) {
+  /* the days, as days: each one once, in date order, and nothing that is not a date */
+  const out = [], seen = {};
+  for (const x of (days || [])) {
+    const d = String(x == null ? '' : x).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || seen[d]) continue;
+    seen[d] = 1; out.push(d);
+  }
+  return out.sort();
+}
+function adLandingWords(days, count) {
+  /* THE ONE WORDING. `count` is a FALLBACK and nothing more: it is for a database that counts the
+     days without naming them, so a window still says what is missing rather than saying nothing.
+     Where the days ARE named they are the count, or a day held by several listings would be read as
+     several days. */
+  const d = adLandingDaysClean(days);
+  const n = d.length ? d.length : Math.round(Number(count) || 0);
+  if (!n) return '';
+  if (n === 1 && d.length === 1) return 'eBay’s report for ' + d[0] + ' has not landed yet';
+  if (!d.length) return 'eBay’s report for ' + n + ' of these days has not landed yet';
+  const shown = d.slice(0, ADTOOL_LANDING_DAYS_SHOWN);
+  return 'eBay’s report for ' + n + ' of these days has not landed yet: ' + shown.join(', ') +
+    (n > shown.length ? ' and ' + (n - shown.length) + ' more' : '');
+}
+function adLandingMark(s) {
+  /* A WINDOW'S TAIL, after its days have been added up. The ad figures of a window holding a landing
+     day are not known, and so is its profit: the profit is worked out after the click fee and the
+     click fee is the half that has not arrived. Only the keys the shape actually carries are set, so
+     a tile that never had a profit does not grow one. The two working keys leave with it, so a window
+     with no landing day comes out of here exactly as it went in. */
+  if (!s) return s;
+  const d = adLandingDaysClean(s.landing);
+  const n = d.length ? d.length : Math.round(Number(s.landing_n) || 0);
+  delete s.landing; delete s.landing_n;
+  if (!n) return s;
+  for (const k of ['spend', 'cpc_spend', 'clicks', 'attr_units', 'attr_revenue', 'roas', 'cpc', 'cvr', 'actual', 'actual_profit']) if (k in s) s[k] = null;
+  s.ads_landing = true; s.landing_days = d; s.landing_note = adLandingWords(d, n);
+  return s;
+}
 /* THE ONE WINDOW RULE. Product history’s By period table is built from this and nothing else, and
    from 2 Nov the Peak page prints the same five windows for the same listings. It cannot read the
    same rows again — that page lists hundreds of listings — so it asks the database for the sums and
@@ -6707,12 +6806,15 @@ async function adtGate(ctx, pageFlag, extraRoles) {
    here so the mirror can be held against this function by a test: if the two could ever disagree
    about one listing, that test fails. */
 function adtWindowSums(rows, from, to) {
-  const s = { days: 0, orders: 0, units: 0, revenue: 0, actual: 0, pending: 0, pending_fee_orders: 0, clicks: 0, spend: 0, attr_units: 0, attr_revenue: 0 };
-  for (const r of rows) { if (r.day < from || r.day > to) continue; s.days++; s.orders += r.orders; s.units += r.units; s.revenue += r.revenue; s.actual += Number(r.actual_profit) || 0; s.pending += Number(r.pending_cost_orders) || 0; s.pending_fee_orders += Number(r.pending_fee_orders) || 0; s.clicks += r.clicks; s.spend += r.spend; s.attr_units += r.attr_units; s.attr_revenue += r.attr_revenue; }
+  const s = { days: 0, orders: 0, units: 0, revenue: 0, actual: 0, pending: 0, pending_fee_orders: 0, clicks: 0, spend: 0, attr_units: 0, attr_revenue: 0, landing: [] };
+  /* a NULL ad column is the day roll saying eBay's report for that day has not landed. The partial
+     sums read it as nought, exactly as the mirror and the database aggregate do, and the day is NAMED
+     instead — the tail below is what turns the whole window's ad side back into nothing-known. */
+  for (const r of rows) { if (r.day < from || r.day > to) continue; s.days++; if (r.spend == null) s.landing.push(r.day); s.orders += r.orders; s.units += r.units; s.revenue += r.revenue; s.actual += Number(r.actual_profit) || 0; s.pending += Number(r.pending_cost_orders) || 0; s.pending_fee_orders += Number(r.pending_fee_orders) || 0; s.clicks += r.clicks; s.spend += r.spend; s.attr_units += r.attr_units; s.attr_revenue += r.attr_revenue; }
   s.roas = s.spend > 0 ? round2(s.attr_revenue / s.spend) : null;
   for (const k of ['revenue', 'actual', 'spend', 'attr_revenue']) s[k] = round2(s[k]);
   s.actual_profit = s.actual; s.pending_cost_orders = s.pending;
-  return s;
+  return adLandingMark(s);
 }
 /* ADTOOL-WINDOWSUMS-PURE-END */
 /* ADTOOL-PATTERN-PURE-BEGIN */
@@ -6986,11 +7088,26 @@ async function adtFresh(env, grain) {
   }
   /* 'cut' counts as a finish (1 Nov): a run that stopped itself inside its budget committed today's
      figures and ended its own row, and a stamp that ignored it would age while the job was working. */
-  const r = await env.DB.prepare("SELECT MAX(finished_at) AS t FROM adtool_jobs WHERE job = 'adtoolRollups' AND (status = 'ok' OR status = 'cut')").first().catch(() => null);
+  /* 11 Nov: AND WHETHER YESTERDAY'S ADS REPORT HAS LANDED, because every finished-day page header is
+     drawn from this and a reader is entitled to know which of the two days they are looking at. The
+     roll-up's own marker is the source — it reads '<day>|final' the moment yesterday was rebuilt with
+     the landed report and '<day>|landing' before that — so the header and the cells cannot disagree,
+     and the stamp beside it is when that rebuild happened. One read, and it rides WITH the stamp read
+     rather than after it, so a page header costs the same trip it always did. */
+  const DR = await Promise.all([
+    env.DB.prepare("SELECT MAX(finished_at) AS t FROM adtool_jobs WHERE job = 'adtoolRollups' AND (status = 'ok' OR status = 'cut')").first().catch(() => null),
+    env.DB.prepare("SELECT value, updated_at FROM portal_config WHERE key = 'adtool_rollup_yday'").first().catch(() => null),
+  ]);
+  const r = DR[0], yr = DR[1];
+  const yday = adtAddDays(ukDate(''), -1);
+  const landed = !!(yr && String(yr.value || '') === yday + '|final');
+  const landedAt = landed && yr && yr.updated_at ? String(yr.updated_at).replace('T', ' ').slice(11, 16) : '';
   /* `cadence` is printed verbatim in a page header, so it says how often a reader sees new figures.
      `grain` is NOT printed any more: the shell only pattern-matches it to decide whether to add
-     "still updating", so it stays a table name on purpose. */
-  return { grain: 'adtool_listing_day', rolled_at: r && r.t ? String(r.t) : null, cadence: 'every hour' };
+     "still updating", so it stays a table name on purpose. `note` is printed verbatim too. */
+  return { grain: 'adtool_listing_day', rolled_at: r && r.t ? String(r.t) : null, cadence: 'every hour',
+    ads_report_day: yday, ads_report_landed: landed,
+    note: 'yesterday’s ads report: ' + (landed ? 'landed' + (landedAt ? ' ' + landedAt : '') : 'landing') };
 }
 async function adtReportStatus(env, day) {
   /* per account: both T+1 families INGESTED for the report day → 'final', else 'landing' (the samples stand in).
@@ -9536,8 +9653,16 @@ const ADTOOL_ACTIONS_P5 = {
          table the brief removed is gone — `accounts` stays an empty list so an older page does not break */
       /* Phase 1B tiles: today from the today grain (sampled, provisional), yesterday / 7 d / 30 d from listing_day in
          one pass; yesterday carries report_status (landing until both T+1 families are INGESTED for every account) */
-      const tileSql = (from, to) => env.DB.prepare('SELECT ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue, SUM(pending_cost_orders) AS pending, COUNT(DISTINCT day) AS days FROM adtool_listing_day' + coJoin('item_id', 'day') + ' WHERE day >= ?1 AND day <= ?2' + (acct ? ' AND account = ?3' : '')).bind(...(acct ? [from, to, acct] : [from, to])).first();
-      const tile = (r, extra) => { const x = Object.assign({ spend: 0, clicks: 0, attr_units: 0, attr_revenue: 0, orders: 0, units: 0, revenue: 0, pending: 0 }, r || {}); for (const k of ['spend', 'clicks', 'attr_units', 'attr_revenue', 'orders', 'units', 'revenue', 'pending']) x[k] = Number(x[k]) || 0; x.roas = x.spend > 0 ? round2(x.attr_revenue / x.spend) : null; x.cpc = x.clicks > 0 ? round2(x.spend / x.clicks) : null; x.cvr = x.clicks > 0 ? round2(x.attr_units / x.clicks) : null; return Object.assign(x, extra || {}); };
+      /* the two landing columns ride the same aggregate (11 Nov): the days inside the window whose
+         eBay report has not landed, counted and named. A conditional SUM over such a day is nought
+         and nought is the figure the owner was shown for the whole of 10 November, so the tile has
+         to be able to tell the two apart without a second read. */
+      const tileSql = (from, to) => env.DB.prepare('SELECT ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(attr_units) AS attr_units, ROUND(SUM(attr_revenue), 2) AS attr_revenue, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue, SUM(pending_cost_orders) AS pending, COUNT(DISTINCT day) AS days, COUNT(DISTINCT CASE WHEN spend IS NULL THEN day END) AS landing, GROUP_CONCAT(DISTINCT CASE WHEN spend IS NULL THEN day END) AS landing_days FROM adtool_listing_day' + coJoin('item_id', 'day') + ' WHERE day >= ?1 AND day <= ?2' + (acct ? ' AND account = ?3' : '')).bind(...(acct ? [from, to, acct] : [from, to])).first();
+      const tile = (r, extra) => { const x = Object.assign({ spend: 0, clicks: 0, attr_units: 0, attr_revenue: 0, orders: 0, units: 0, revenue: 0, pending: 0 }, r || {}); for (const k of ['spend', 'clicks', 'attr_units', 'attr_revenue', 'orders', 'units', 'revenue', 'pending']) x[k] = Number(x[k]) || 0; x.roas = x.spend > 0 ? round2(x.attr_revenue / x.spend) : null; x.cpc = x.clicks > 0 ? round2(x.spend / x.clicks) : null; x.cvr = x.clicks > 0 ? round2(x.attr_units / x.clicks) : null;
+        /* and through the ONE mark the By period windows end with, so a tile and a table cannot say
+           different things about one day. Orders, units and revenue are the order book's and stay. */
+        x.landing = String((r && r.landing_days) || '').split(','); x.landing_n = Number((r && r.landing) || 0); delete x.landing_days;
+        return adLandingMark(Object.assign(x, extra || {})); };
       const y = await tileSql(yday, yday);
       const d7 = await tileSql(adtAddDays(today, -7), yday), d30 = await tileSql(adtAddDays(today, -30), yday);
       /* the pre-warm hands its Today payload in. Never for a cohort answer: that payload is the whole
@@ -10360,7 +10485,12 @@ const ADTOOL_ACTIONS_P6 = {
         env.DB.prepare('SELECT day, COALESCE(outcome_provisional, 0) AS provisional, COUNT(*) AS n, SUM(CASE WHEN outcome_score IS NOT NULL THEN 1 ELSE 0 END) AS scored, SUM(outcome_score) AS right_n FROM adtool_decisions WHERE day >= ?1 GROUP BY day, provisional ORDER BY day DESC').bind(adtAddDays(today, -30)),
         env.DB.prepare("SELECT status, evidence, ran_at FROM validation_runs WHERE metric_id = 'ADTOOL_SHADOW_14D' ORDER BY ran_at DESC LIMIT 1"),
         env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_apply_live%'"),
-        env.DB.prepare('SELECT a.account, a.item_id, a.type, a.note, a.by_email, a.at, l.title FROM adtool_actions a LEFT JOIN adtool_listings l ON l.item_id = a.item_id ORDER BY a.at DESC LIMIT 60')
+        env.DB.prepare('SELECT a.account, a.item_id, a.type, a.note, a.by_email, a.at, l.title FROM adtool_actions a LEFT JOIN adtool_listings l ON l.item_id = a.item_id ORDER BY a.at DESC LIMIT 60'),
+        /* 11 Nov: whether yesterday's own eBay report has landed. The tile beside this page's
+           decisions is scored on yesterday, and a score worked out while the ad side of that day is
+           NULL is not a score waiting on costs — it is a score nobody can take yet. One more
+           statement in a batch that was already travelling, so the page costs the same trip. */
+        env.DB.prepare('SELECT COUNT(*) AS n FROM adtool_listing_day WHERE day = ?1 AND spend IS NULL').bind(yday)
       ]);
       const list = B[0].results || [];
       const counts = B[1].results || [];
@@ -10379,7 +10509,10 @@ const ADTOOL_ACTIONS_P6 = {
       /* Phase 2: hours to run / not to run and the lever on every card, from the same helpers as Running today */
       const bl = await adtBandsAndLevers(env, decisions.map(d => String(d.item_id)), today, '');
       for (const d of decisions) { const id = String(d.item_id); d.hour_bands = bl.bands[id]; d.lever = bl.levers[id]; d.who = adtWho(d.account); }
-      return { day, period: adtPeriod({ period: 'today' }, today), fresh: await adtFresh(env, 'today'), mode: 'shadow', decisions, counts, yesterday_score: ySc, rule_scores: rules, carry, days, acceptance: acc, live_flags: live, action_log: log, hour_basis: ADTOOL_HOUR_BASIS, hour_excluded_note: ADTOOL_HOUR_EXCLUDED_NOTE, computed_at: new Date().toISOString(), source: 'adtool_decisions (shadow), adtool_listing_day, adtool_profiles, adtool_stages, adtool_listing_hour (' + ADTOOL_HOUR_BASIS + '), campaigns + campaign_ads' };
+      const yLandN = Number(((B[8].results || [])[0] || {}).n) || 0;
+      return { day, period: adtPeriod({ period: 'today' }, today), fresh: await adtFresh(env, 'today'), mode: 'shadow', decisions, counts, yesterday_score: ySc,
+        yesterday: yday, yesterday_ads_landing: yLandN > 0, yesterday_landing_note: yLandN > 0 ? adLandingWords([yday]) : '',
+        rule_scores: rules, carry, days, acceptance: acc, live_flags: live, action_log: log, hour_basis: ADTOOL_HOUR_BASIS, hour_excluded_note: ADTOOL_HOUR_EXCLUDED_NOTE, computed_at: new Date().toISOString(), source: 'adtool_decisions (shadow), adtool_listing_day, adtool_profiles, adtool_stages, adtool_listing_hour (' + ADTOOL_HOUR_BASIS + '), campaigns + campaign_ads' };
     },
   },
 };
@@ -16726,25 +16859,31 @@ const ADTOOL_PEAK_PERIOD_FIELDS = [
 /* the four money columns adtWindowSums rounds to the penny, and only after the ratio is worked out */
 const ADTOOL_PEAK_PERIOD_MONEY = ['revenue', 'actual', 'spend', 'attr_revenue'];
 function adPeakPeriodZero() {
-  /* adtWindowSums’s own accumulator, key for key */
-  return { days: 0, orders: 0, units: 0, revenue: 0, actual: 0, pending: 0, pending_fee_orders: 0, clicks: 0, spend: 0, attr_units: 0, attr_revenue: 0 };
+  /* adtWindowSums’s own accumulator, key for key — `landing` included: the days in the window whose
+     eBay report has not landed travel with the sums, because the sums alone cannot say it. */
+  return { days: 0, orders: 0, units: 0, revenue: 0, actual: 0, pending: 0, pending_fee_orders: 0, clicks: 0, spend: 0, attr_units: 0, attr_revenue: 0, landing: [] };
 }
 function adPeakPeriodAdd(s, r) {
   /* ONE day row into the running sums, added the way adtWindowSums adds it */
   if (!s || !r) return s;
   s.days++;
+  /* and named the way adtWindowSums names it: a NULL spend is the day roll saying eBay's report for
+     that day has not landed, and the partial sums read it as nought on both routes */
+  if (r.spend == null) s.landing = (s.landing || []).concat([r.day]);
   for (const f of ADTOOL_PEAK_PERIOD_FIELDS) s[f[0]] += f[2] ? (Number(r[f[1]]) || 0) : r[f[1]];
   return s;
 }
 function adPeakPeriodFinish(s) {
   /* and adtWindowSums’s own tail, in its own order: the ratio off the UNROUNDED sums first, because
      rounding the two sides of a division before dividing moves the answer; then the four money
-     columns to the penny; then the two names the rest of the tool reads them by. */
+     columns to the penny; then the two names the rest of the tool reads them by; then the one mark
+     adtWindowSums ends with, which gives a window holding a landing day its ad side back as
+     nothing-known. */
   if (!s) return s;
   s.roas = s.spend > 0 ? round2(s.attr_revenue / s.spend) : null;
   for (const k of ADTOOL_PEAK_PERIOD_MONEY) s[k] = round2(s[k]);
   s.actual_profit = s.actual; s.pending_cost_orders = s.pending;
-  return s;
+  return adLandingMark(s);
 }
 function adPeakPeriodSums(rows, from, to) {
   /* the whole of adtWindowSums, written from the column list the aggregate is written from. THE
@@ -16761,19 +16900,27 @@ function adPeakPeriodFromAgg(row, prefix) {
   const s = adPeakPeriodZero();
   s.days = Number(r[p + '_days']) || 0;
   for (const f of ADTOOL_PEAK_PERIOD_FIELDS) s[f[0]] = Number(r[p + '_' + f[0]]) || 0;
+  /* the landing days the aggregate named, and its count beside them: a database that will not give a
+     list still gives the count, and a window then says how many days are missing rather than nothing */
+  s.landing = String(r[p + '_landing_days'] == null ? '' : r[p + '_landing_days']).split(',');
+  s.landing_n = Number(r[p + '_landing']) || 0;
   return s;
 }
 function adPeakPeriodSelect(windows) {
   /* the aggregate’s columns: one conditional count of days and one conditional sum per field, for
-     every window. `windows` is [prefix, condition] pairs written by the caller, never by anybody
-     typing. NO ROUND() anywhere in here: the rounding belongs to adPeakPeriodFinish, after the
-     ratio, which is the order adtWindowSums does it in. */
+     every window, plus the two that carry the days eBay's report has not landed for — the count and
+     the days themselves, because a sum cannot say "not known" and a nought in a money column reads
+     as a day that cost nothing. `windows` is [prefix, condition] pairs written by the caller, never
+     by anybody typing. NO ROUND() anywhere in here: the rounding belongs to adPeakPeriodFinish,
+     after the ratio, which is the order adtWindowSums does it in. */
   const out = [];
   for (const w of (windows || [])) {
     const p = String((w && w[0]) || ''), c = String((w && w[1]) || '');
     if (!/^[a-z][a-z0-9_]*$/.test(p)) continue;
     out.push('SUM(CASE WHEN ' + c + ' THEN 1 ELSE 0 END) AS ' + p + '_days');
     for (const f of ADTOOL_PEAK_PERIOD_FIELDS) out.push('SUM(CASE WHEN ' + c + ' THEN COALESCE(d.' + f[1] + ', 0) ELSE 0 END) AS ' + p + '_' + f[0]);
+    out.push('COUNT(DISTINCT CASE WHEN ' + c + ' AND d.spend IS NULL THEN d.day END) AS ' + p + '_landing');
+    out.push('GROUP_CONCAT(DISTINCT CASE WHEN ' + c + ' AND d.spend IS NULL THEN d.day END) AS ' + p + '_landing_days');
   }
   return out.join(', ');
 }
@@ -16819,12 +16966,22 @@ function adPeakPeriodRow(s, includesToday) {
      `units_not_from_ads` is worked out HERE, by the subtraction Product history’s table does, so the
      two pages cannot each do that subtraction their own way. */
   if (!s) return null;
-  return {
+  const row = {
     spend: s.spend, attr_units: s.attr_units, roas: s.roas, orders: s.orders, units: s.units,
     units_not_from_ads: Math.max(0, (Number(s.units) || 0) - (Number(s.attr_units) || 0)),
     actual_profit: s.actual_profit, pending_cost_orders: s.pending_cost_orders,
     pending_fee_orders: s.pending_fee_orders, includes_today: !!includesToday,
   };
+  /* AND THE ONE THING THE COLUMNS CANNOT SAY. A window holding a day eBay's report has not landed
+     for has no ad spend, no units from ads, no return on the spend and no profit to print, and
+     `units_not_from_ads` is a subtraction from a figure nobody has: the two keys travel so each page
+     prints the engine's own sentence in those cells and leaves the orders and the units alone. Added
+     only where it is true, so a settled window is the row it always was, key for key. */
+  if (s.ads_landing) {
+    row.units_not_from_ads = null;
+    row.ads_landing = true; row.landing_days = s.landing_days; row.landing_note = s.landing_note;
+  }
+  return row;
 }
 function adPeakPeriodOrNull(agg, prefix) {
   /* A WINDOW WITH NO DAY ON RECORD IS NULL, never nought. A conditional sum over no rows is 0 in
@@ -21455,6 +21612,12 @@ async function adsReportKick(env) {
 
     const md = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_metadata/listing_performance_report', {
       headers: { authorization: 'Bearer ' + tok } });
+    /* THE 429 RULE (11 Nov 2026). eBay answered this call with HTTP 429 on all eight accounts at
+       02:10 on the 11th and the whole of 10 November went unfiled. A refusal is not a fault to retry
+       inside the run — a second ask a second later is the same ask — so THE ACCOUNT IS SKIPPED FOR
+       THIS RUN AND THE NOTE SAYS SO, and the next hourly turn asks again. It is a skip and not an
+       error on purpose: an error row would read as something broken, and nothing here is. */
+    if (md.status === 429) { await ctx_setSync(env, 'adsReportKick', acct, 'skipped this run: eBay refused the report metadata call with 429 (too many requests); the next hourly turn asks again'); return; }
     if (!md.ok) throw new Error(acct + ' report metadata ' + md.status + ': ' + (await md.text()).slice(0, 140));
     const meta = await md.json();
     const mets = (meta.metricMetadata || []).map(m => String(m.metricKey || ''));
@@ -21476,11 +21639,14 @@ async function adsReportKick(env) {
     /* SELF-HEALING WINDOW (19 Aug). Kicking only "yesterday" meant a day the cron missed — or,
        as just happened, weeks where one whole billing family was being refused — stayed a hole
        for ever. Each run now looks over the last 7 UK days and files a task for any
-       (family, day) that has never been ingested, so a gap closes itself within one run. */
+       (family, day) that has never been ingested, so a gap closes itself within one run.
+       11 Nov: the window is ADTOOL_REPORT_LANDING_DAYS, the one number the day roll also reads, so
+       the days this job will still re-file and the days the roll calls "not landed yet" are the same
+       days and cannot drift apart. */
     const have = {};
     const doneRs = await env.DB.prepare(
       "SELECT report_date, family, status FROM ad_report_tasks WHERE account = ?1 AND report_date >= ?2"
-    ).bind(acct, ukDate(new Date(Date.now() - 8 * 86400000).toISOString())).all();
+    ).bind(acct, ukDate(new Date(Date.now() - ADTOOL_REPORT_LANDING_DAYS * 86400000).toISOString())).all();
     for (const r of (doneRs.results || [])) {
       if (r.status === 'INGESTED' || r.status === 'PENDING' || r.status === 'SUCCESS') {
         have[String(r.report_date) + '|' + String(r.family || 'std')] = true;
@@ -21488,12 +21654,16 @@ async function adsReportKick(env) {
     }
 
     const problems = [];
+    /* WHAT THIS RUN ACTUALLY FILED, named day by day. The job rides an hourly slot now and files
+       nothing at all on a normal turn, so "it ran" is not the question anybody has: the question is
+       which days it had to ask for, and the answer belongs where it can be read without a redeploy. */
+    const filed = [];
     /* BACKLOG CAP (20 Aug): at most 4 report-task creates per account per run. An account with a
        week-deep hole used to fire up to 14 creates in one go, and the invocation's Workers
        subrequest budget died on whichever account ran last — Saif, for 29 hours straight. The
        'have' map resumes exactly where a capped run stopped, so a hole still heals in 2-3 runs. */
-    let kicked = 0;
-    for (let back = 1; back <= 7 && kicked < 4; back++) {
+    let kicked = 0, refused429 = false;
+    for (let back = 1; back <= 7 && kicked < 4 && !refused429; back++) {
       const day = ukDate(new Date(Date.now() - back * 86400000).toISOString());
       const from = day + 'T00:00:00.000Z';
       const to = day + 'T23:59:59.000Z';
@@ -21501,7 +21671,7 @@ async function adsReportKick(env) {
          seller both have one family that legitimately returns nothing. */
       for (const fam of families) {
         if (have[day + '|' + fam.family]) continue;
-        if (kicked >= 4) break;
+        if (kicked >= 4 || refused429) break;
         kicked++;
         const cr = await fetch('https://api.ebay.com/sell/marketing/v1/ad_report_task', {
           method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
@@ -21515,6 +21685,10 @@ async function adsReportKick(env) {
             dateFrom: from, dateTo: to, fundingModels: [fam.model],
             dimensions: fam.dims.map(d => ({ dimensionKey: d })), metricKeys: fam.keys }),
         });
+        /* the same 429 rule on the filing call: the account is done for this run, nothing is retried
+           inside it, and the day it stopped on is named. The 'have' map means the next hourly turn
+           carries on from exactly here. */
+        if (cr.status === 429) { refused429 = true; problems.push('stopped at ' + fam.family + ' ' + day + ': eBay refused with 429 (too many requests), the rest of this account is left to the next run'); break; }
         if (cr.status !== 202 && !cr.ok) {
           problems.push(fam.family + ' ' + day + ' ' + cr.status + ': ' + (await cr.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 200));
           continue;
@@ -21526,6 +21700,7 @@ async function adsReportKick(env) {
           "VALUES (?1, ?2, ?3, 'PENDING', '', datetime('now'), ?4) " +
           'ON CONFLICT(account, task_id) DO NOTHING'
         ).bind(acct, taskId, day, fam.family).run();
+        filed.push(day + ' ' + fam.family);
       }
     }
     /* ADTOOL P2: nightly re-pull of D-2..D-7 as new vintages (its own cap; fixture-window days frozen) */
@@ -21533,6 +21708,9 @@ async function adsReportKick(env) {
       try { await adtoolVintageKick(env, acct, tok, families); } catch (e) { await ctx_setSync(env, 'adtoolVintageKick', acct, 'error: ' + String(e && e.message || e).slice(0, 200)); }
     }
     if (problems.length) await ctx_setSync(env, 'adsFamilySkip', acct, problems.join(' | ').slice(0, 1200));
+    /* and the run's own note: the days it filed, named, or that it had nothing to file. */
+    await ctx_setSync(env, 'adsReportKick', acct, (filed.length ? 'filed ' + filed.length + ': ' + filed.join(', ') : 'nothing to file: every day inside the landing window already has a report task')
+      + (refused429 ? ' | stopped early on a 429, the next run carries on' : ''));
   });
 }
 
@@ -24438,7 +24616,16 @@ const ROUTES = {
          line here and the strip there are one answer. Behind a catch: a board that cannot read the
          stops must still draw the board. */
       const peakStops = await adtPeakStopsRead(ctx.env, day, acctF).catch(() => null);
+      /* THE DAYS IN THIS WINDOW EBAY'S REPORT HAS NOT LANDED FOR (11 Nov). This board reads eBay's own
+         daily table, so a day it has not published has no row at all and the board had nothing to say
+         but "nothing is recorded yet" — which reads as a quiet day rather than a missing report. The
+         answer is read off the day table, where the roll writes a landing day's ad columns as NULL,
+         so this line and every By period table say the same thing. Behind a catch: a board that
+         cannot read it must still draw. */
+      const landDays = await ctx.env.DB.prepare('SELECT DISTINCT day FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND spend IS NULL ORDER BY day')
+        .bind(from, to).all().then(r => ((r && r.results) || []).map(x => String(x.day))).catch(() => []);
       const centre = { day, updated_at: updated, combined, days: histDays, from, to, account: acctF, period, window_source: windowSource,
+        ads_landing: landDays.length > 0, landing_days: landDays, landing_note: adLandingWords(landDays),
         peak_stops_today: peakStops,
         series: seriesOut,
         series_by_account: sbaOut,
@@ -30756,6 +30943,11 @@ const ROUTES = {
         rows: { days: (d.days || []).length, hours: (d.hours || []).length, hour_profile: Number(hw.profile_rows) || 0, weeks: (d.weeks || []).length, months: (d.months || []).length, hours_window: [hw.from || '', hw.to || ''], hours_day: hw.hours_day || '',
           pattern_hours: (d.patterns && d.patterns.hours_read != null) ? Number(d.patterns.hours_read) : null,
           pattern_window: [(pw.from) || '', (pw.to) || ''], pattern_days: Number(pw.days) || 0, pattern_kind: String(pw.preset || '') },
+        /* 11 Nov: which of this listing's five windows are holding a day eBay's report has not landed
+           for, and the days themselves. A window marked here prints the engine's sentence on the page
+           instead of a figure, so the probe answers "why does yesterday say that" without a browser. */
+        ads_landing: ADTOOL_PEAK_PERIOD_KEYS.reduce((o, k) => { const w = (d.kpis || {})[k]; o[k] = !!(w && w.ads_landing); return o; }, {}),
+        ads_landing_days: ADTOOL_PEAK_PERIOD_KEYS.reduce((o, k) => { const w = (d.kpis || {})[k]; o[k] = (w && w.landing_days) || []; return o; }, {}),
       };
     },
   },
@@ -30807,7 +30999,10 @@ const ROUTES = {
          and set beside the same day's row in the finished-day table, per listing per day, so a reader can
          add them up themselves. */
       const dayFrom = adtAddDays(day, -(days - 1));
-      const dailyRows = ids.length ? await q('daily totals', 'SELECT item_id, day, ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND item_id IN ' + adtInList(ids, 2) + ' GROUP BY item_id, day', [dayFrom, day].concat(ids)) : [];
+      /* `ads_landing` on each day (11 Nov): the day roll writes a day eBay's report has not landed
+         for with its ad columns NULL, so the sum beside the sampled hours would otherwise read as a
+         day that cost nothing and the §6.3 comparison would call the hours wrong. */
+      const dailyRows = ids.length ? await q('daily totals', 'SELECT item_id, day, ROUND(SUM(spend), 2) AS spend, SUM(clicks) AS clicks, SUM(orders) AS orders, SUM(units) AS units, ROUND(SUM(revenue), 2) AS revenue, MAX(CASE WHEN spend IS NULL THEN 1 ELSE 0 END) AS ads_landing FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND item_id IN ' + adtInList(ids, 2) + ' GROUP BY item_id, day', [dayFrom, day].concat(ids)) : [];
       const dailyBy = {};
       for (const r of (dailyRows || [])) dailyBy[String(r.item_id) + '|' + String(r.day)] = r;
       /* ONE assembling function, for a handful of listings here and for one listing on the Peak page's
@@ -31360,6 +31555,10 @@ const ROUTES = {
 
       if (check === 'day_rows') {
         out.rows = await q('day rows', 'SELECT account, item_id, day, orders, units, ROUND(revenue, 2) AS revenue, actual_profit, pending_cost_orders, pending_fee_orders, ROUND(refunds, 2) AS refunds, clicks, ROUND(spend, 2) AS spend, ROUND(cpc_spend, 2) AS cpc_spend, attr_units, ROUND(attr_revenue, 2) AS attr_revenue, ad_active_campaigns, ad_paused_campaigns FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 ORDER BY day, account, item_id LIMIT ?3 OFFSET ?4', [from, to, limit, offset]);
+        /* THE DAYS EBAY'S REPORT HAS NOT LANDED FOR (11 Nov), named. Their ad columns are NULL rather
+           than nought, which is what every window in the tool now carries forward, so a night check
+           can settle "is yesterday real" from this row alone. */
+        out.ads_landing = await q('landing days', 'SELECT day, COUNT(*) AS rows, SUM(orders) AS orders, SUM(units) AS units FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND spend IS NULL GROUP BY day ORDER BY day', [from, to]);
         return Object.assign(out, { read_errors: errs });
       }
 

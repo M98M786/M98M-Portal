@@ -575,6 +575,20 @@
         var s = x[1], pc = pcOf(s), pf = pfOf(s);
         var notAds = Math.max(0, (Number(s.units) || 0) - (Number(s.attr_units) || 0));
         var moving = x[0] === 'Today so far' || !!s.includes_today;
+        /* A WINDOW HOLDING A DAY EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov: the whole portal
+           read yesterday as 0.00). There is no ad spend to print, no units from ads, no return on
+           the spend and no profit, because the profit is worked out after the click fee and the
+           click fee is the half that has not arrived. The engine says so in its own words, across
+           the three ad columns and again in the profit column, and the orders and the units of that
+           day are the order book's own and are printed exactly as ever. */
+        if (s.ads_landing) {
+          var lnote = String(s.landing_note || '');
+          return '<tr><td>' + esc(x[0]) + (moving ? ' <span class="at-src s">still updating</span>' : '') + '</td>' +
+            '<td class="r" colspan="' + (atSpendOnly() ? 2 : 3) + '"><span class="at-src">' + esc(lnote) + '</span></td>' +
+            '<td class="r">' + (s.orders || 0) + '</td><td class="r">' + (s.units || 0) + '</td>' +
+            '<td class="r"><span class="at-src">not known</span></td>' +
+            (atSpendOnly() ? '' : '<td class="r"><span class="at-src">' + esc(lnote) + '</span></td>') + '</tr>';
+        }
         return '<tr><td>' + esc(x[0]) + (moving ? ' <span class="at-src s">still updating</span>' : '') + '</td>' +
           '<td class="r">' + gbp(s.spend) + '</td><td class="r">' + (s.attr_units || 0) + '</td>' +
           (atSpendOnly() ? '' : '<td class="r">' + roas(s.roas != null ? s.roas : (Number(s.spend) > 0 && s.attr_revenue != null ? Number(s.attr_revenue) / Number(s.spend) : null)) + '</td>') +

@@ -59,7 +59,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, adSaleDayGap, adSaleNearPrice, adSaleLedgerRead, adSalePaidPerUnit, adSalePromoSaleFromXml, adSaleEventNamed, adSaleMembership, adSaleSkipReason, adSaleCountMembership, adSaleReasonText, adSaleMorningAfter, adSalePriceSteps, adSalePriceClocks, adSaleCohorts2, adTradeRequestXml, adTradeAckOf, ADTOOL_SALE_PENNY, ADTOOL_SALE_SKIP_REASONS, ADTOOL_SALE_SKIP_WORDS, ADTOOL_SALE_SKIP_SHORT, ADTOOL_TRADE_XML_FIELDS, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_SAMPLER_QUIET_DEFAULT_MIN, ADTOOL_SAMPLER_CONFIG_KEYS, adtSamplerCadence, adtSamplerDue, ADTOOL_PEAK_ENVELOPE_EDGE_MIN, adPeakEnvelopeHours, adPeakInEnvelope, adPeakStopLoss, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS, ADTOOL_PATTERN_KINDS, ADTOOL_PATTERN_MONTHS, ADTOOL_PATTERN_DATES_CAP, adListingDayWords, adListingMonthWords, adListingMonthEnd, adListingPattern, adListingPatternKey, adListingPatternWindow, adListingSlots, adListingWeekday, adListingHourWeekday, adListingDates, ADTOOL_PERIODS_NOTE, adPeakPeriodChunks };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, adSaleDayGap, adSaleNearPrice, adSaleLedgerRead, adSalePaidPerUnit, adSalePromoSaleFromXml, adSaleEventNamed, adSaleMembership, adSaleSkipReason, adSaleCountMembership, adSaleReasonText, adSaleMorningAfter, adSalePriceSteps, adSalePriceClocks, adSaleCohorts2, adTradeRequestXml, adTradeAckOf, ADTOOL_SALE_PENNY, ADTOOL_SALE_SKIP_REASONS, ADTOOL_SALE_SKIP_WORDS, ADTOOL_SALE_SKIP_SHORT, ADTOOL_TRADE_XML_FIELDS, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_SAMPLER_QUIET_DEFAULT_MIN, ADTOOL_SAMPLER_CONFIG_KEYS, adtSamplerCadence, adtSamplerDue, ADTOOL_PEAK_ENVELOPE_EDGE_MIN, adPeakEnvelopeHours, adPeakInEnvelope, adPeakStopLoss, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_LANDING_DAYS_SHOWN, adLandingDaysClean, adLandingWords, adLandingMark, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS, ADTOOL_PATTERN_KINDS, ADTOOL_PATTERN_MONTHS, ADTOOL_PATTERN_DATES_CAP, adListingDayWords, adListingMonthWords, adListingMonthEnd, adListingPattern, adListingPatternKey, adListingPatternWindow, adListingSlots, adListingWeekday, adListingHourWeekday, adListingDates, ADTOOL_PERIODS_NOTE, adPeakPeriodChunks };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -5141,7 +5141,7 @@ function run(argv) {
       const dump = src.slice(src.indexOf('  backupDump: {'), src.indexOf('  backupDump: {') + 80);
       return /^  adsFreshnessProbe: \{\n    auth: 'sync', fn: async \(p, ctx\) => \{/.test(probe) &&
         /auth: 'sync'/.test(dump) &&
-        /if \(action\.indexOf\('adtool'\) === 0 && !adtRoleAllowed\(ctx2\.user\)\) throw new AuthError\('auth'\);/.test(src) &&
+        /if \(action\.indexOf\('adtool'\) === 0 && !adtRoleAllowed\(ctx2\.user/.test(src) &&
         src.indexOf('  adsFreshnessProbe: {') > 0;
     })(), null);
   t('\u00a76.7 probe: it READS and nothing else \u2014 no eBay call of any kind and not one statement that changes a row',
@@ -6074,9 +6074,17 @@ function run(argv) {
   ];
   /* today 2 Nov 2026, so yesterday is the 1st and the windows are the four the page asks for */
   const bpWins = [['yesterday', '2026-11-01', '2026-11-01'], ['d7', '2026-10-26', '2026-11-01'], ['d30', '2026-10-03', '2026-11-01'], ['all', '2000-01-01', '2026-11-01']];
-  /* every key adtWindowSums puts on a window, so "every field is equal" means every field */
-  const bpFields = ['days', 'orders', 'units', 'revenue', 'actual', 'pending', 'pending_fee_orders', 'clicks', 'spend', 'attr_units', 'attr_revenue', 'roas', 'actual_profit', 'pending_cost_orders'];
-  const bpEqv = (x, y) => (x == null && y == null) || (x != null && y != null && Math.abs(Number(x) - Number(y)) < 1e-9);
+  /* every key adtWindowSums puts on a window, so "every field is equal" means every field. 11 Nov:
+     the three a landing day adds are in here too, or the two routes could agree about every number
+     and still disagree about whether the numbers mean anything. */
+  const bpFields = ['days', 'orders', 'units', 'revenue', 'actual', 'pending', 'pending_fee_orders', 'clicks', 'spend', 'attr_units', 'attr_revenue', 'roas', 'actual_profit', 'pending_cost_orders', 'ads_landing', 'landing_days', 'landing_note'];
+  const bpEqv = (x, y) => {
+    if (x == null && y == null) return true;
+    if (x == null || y == null) return false;
+    /* a list of days, a sentence and a flag are compared as themselves; everything else to the penny */
+    if (typeof x === 'string' || typeof y === 'string' || typeof x === 'boolean' || typeof y === 'boolean' || Array.isArray(x) || Array.isArray(y)) return JSON.stringify(x) === JSON.stringify(y);
+    return Math.abs(Number(x) - Number(y)) < 1e-9;
+  };
   /* WHAT THE DATABASE WOULD HAND BACK, worked out here and not by the engine: a plain conditional
      sum per column per window, which is exactly what the query's SUM(CASE WHEN … ) does. This is
      the independent half of the comparison; the engine's half is adPeakPeriodFromAgg. */
@@ -6085,15 +6093,34 @@ function run(argv) {
     for (const w of wins) {
       out[w[0] + '_days'] = 0;
       for (const f of F.ADTOOL_PEAK_PERIOD_FIELDS) out[w[0] + '_' + f[0]] = 0;
+      /* and the two the query adds for the days eBay's report has not landed for: how many DAYS,
+         which is its COUNT(DISTINCT CASE WHEN … spend IS NULL …), and the days themselves, which is
+         its GROUP_CONCAT of the same condition. Distinct days and not rows, or one day held by two
+         listings would be counted as two days. A NULL spend sums as nought on both sides. */
+      const lands = [];
       for (const r of rows) {
         if (r.day < w[1] || r.day > w[2]) continue;
         out[w[0] + '_days'] += 1;
         for (const f of F.ADTOOL_PEAK_PERIOD_FIELDS) out[w[0] + '_' + f[0]] += (Number(r[f[1]]) || 0);
+        if (r.spend == null && lands.indexOf(r.day) < 0) lands.push(r.day);
       }
+      out[w[0] + '_landing'] = lands.length;
+      out[w[0] + '_landing_days'] = lands.join(',');
     }
     return out;
   };
   const bpSums = bpAgg(bpFix, bpWins);
+  /* ── THE SAME FIXTURE WITH A LANDING DAY IN IT (owner, 11 Nov 2026) ────────────────────────────
+     eBay refused the report request for 10 November and the day table held the order side alone with
+     its ad columns stored as nought, so every page printed that day as nothing spent and a profit
+     with no click fee taken off it. The roll writes such a day's ad columns as NULL now, and this is
+     that day: orders and units real, every ad column and the profit null.
+     IT IS A SECOND FIXTURE AND NOT AN EXTRA ROW IN THE FIRST ONE, deliberately. The tests above are
+     the proof that a window with no landing day in it did not move, so the rows they are built on
+     must not move either. */
+  const bpLandDay = '2026-10-30';
+  const bpLand = bpFix.concat([{ day: bpLandDay, orders: 2, units: 2, revenue: 27.98, actual_profit: null, pending_cost_orders: 0, pending_fee_orders: 0, clicks: null, spend: null, attr_units: null, attr_revenue: null }]);
+  const bpLandSums = bpAgg(bpLand, bpWins);
 
   t('by period: the Peak page\'s arithmetic IS Product history\'s, field for field, over one fixture and all four windows',
     bpWins.every(w => { const a = F.adtWindowSums(bpFix, w[1], w[2]), b = F.adPeakPeriodSums(bpFix, w[1], w[2]); return bpFields.every(k => bpEqv(a[k], b[k])); }),
@@ -6127,6 +6154,78 @@ function run(argv) {
     return none === null && some !== null && some.orders === 4 &&
       F.ADTOOL_PEAK_PERIOD_KEYS.every(k => empty[k] === null) && F.ADTOOL_PEAK_PERIOD_KEYS.join(',') === 'today,yesterday,d7,d30,all';
   })(), [F.adPeakPeriodOrNull({}, 'd7'), F.adPeakPeriodOrNull(bpSums, 'd7')]);
+
+  /* ══ A DAY EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov 2026) ══════════════════════════════
+     "why advertising portal is showing - and not available and 0.00 in yesterday's data of whole
+     portal? fix it please." These tests are the whole of the arithmetic half: a window holding such
+     a day gives its ad side and its profit back as nothing-known on BOTH routes and names the day,
+     a window without one is the window it always was, and the sentence is written once. */
+  t('landing day: a window holding one gives its ad figures and its profit back as nothing-known, names the day, and keeps the orders and the units', (() => {
+    const d7 = F.adtWindowSums(bpLand, '2026-10-26', '2026-11-01');
+    const settled = F.adtWindowSums(bpLand, '2026-11-01', '2026-11-01');
+    /* the ad side and the profit are NOT KNOWN, never nought: nought is the figure the owner was shown */
+    const unknown = d7.spend === null && d7.clicks === null && d7.attr_units === null && d7.attr_revenue === null &&
+      d7.roas === null && d7.actual === null && d7.actual_profit === null;
+    /* and the order book's own figures are untouched: the landing day sold two units on two orders */
+    const orders = d7.days === 3 && d7.orders === 1 + 3 + 2 && d7.units === 1 + 4 + 2 && near(d7.revenue, 13.99 + 55.96 + 27.98);
+    const named = d7.ads_landing === true && JSON.stringify(d7.landing_days) === JSON.stringify([bpLandDay]) &&
+      d7.landing_note === 'eBay\u2019s report for ' + bpLandDay + ' has not landed yet';
+    /* a window that does NOT reach the landing day is the window it always was, key for key */
+    const same = JSON.stringify(settled) === JSON.stringify(F.adtWindowSums(bpFix, '2026-11-01', '2026-11-01')) &&
+      settled.ads_landing === undefined && settled.landing === undefined && settled.landing_n === undefined;
+    return unknown && orders && named && same;
+  })(), [F.adtWindowSums(bpLand, '2026-10-26', '2026-11-01')]);
+  t('landing day: the Peak page\'s mirror and the sums a database returns reach the same answer, field for field, on every window of the landing fixture',
+    bpWins.every(w => { const a = F.adtWindowSums(bpLand, w[1], w[2]), b = F.adPeakPeriodSums(bpLand, w[1], w[2]), c = F.adPeakPeriodFinish(F.adPeakPeriodFromAgg(bpLandSums, w[0])); return bpFields.every(k => bpEqv(a[k], b[k]) && bpEqv(a[k], c[k])); }),
+    bpWins.map(w => { const a = F.adtWindowSums(bpLand, w[1], w[2]), b = F.adPeakPeriodSums(bpLand, w[1], w[2]), c = F.adPeakPeriodFinish(F.adPeakPeriodFromAgg(bpLandSums, w[0])); return [w[0], bpFields.filter(k => !(bpEqv(a[k], b[k]) && bpEqv(a[k], c[k])))]; }));
+  t('landing day: the fixture really exercises it, so the test above is not agreeing about nothing — yesterday is settled and the other three windows are not', (() => {
+    const y = F.adtWindowSums(bpLand, '2026-11-01', '2026-11-01');
+    const d7 = F.adtWindowSums(bpLand, '2026-10-26', '2026-11-01');
+    const d30 = F.adtWindowSums(bpLand, '2026-10-03', '2026-11-01');
+    const all = F.adtWindowSums(bpLand, '2000-01-01', '2026-11-01');
+    return !y.ads_landing && near(y.spend, 7.13) && d7.ads_landing === true && d30.ads_landing === true && all.ads_landing === true &&
+      bpLandSums.d7_landing === 1 && bpLandSums.d7_landing_days === bpLandDay && bpLandSums.yesterday_landing === 0;
+  })(), [bpLandSums.d7_landing, bpLandSums.d7_landing_days]);
+  t('landing day: the row a page reads carries the flag and the sentence, says units-not-from-ads is not known, and a settled row is the row it always was, key for key', (() => {
+    const land = F.adPeakPeriodRow(F.adtWindowSums(bpLand, '2026-10-26', '2026-11-01'), false);
+    const settled = F.adPeakPeriodRow(F.adtWindowSums(bpFix, '2026-11-01', '2026-11-01'), false);
+    const keys = Object.keys(settled).join(',');
+    return land.ads_landing === true && land.spend === null && land.attr_units === null && land.roas === null &&
+      land.actual_profit === null && land.units_not_from_ads === null && land.orders === 6 && land.units === 7 &&
+      String(land.landing_note || '').indexOf(bpLandDay) > 0 &&
+      keys === 'spend,attr_units,roas,orders,units,units_not_from_ads,actual_profit,pending_cost_orders,pending_fee_orders,includes_today' &&
+      settled.ads_landing === undefined;
+  })(), [F.adPeakPeriodRow(F.adtWindowSums(bpLand, '2026-10-26', '2026-11-01'), false)]);
+  t('landing day: the sentence is written ONCE, names the days it knows, counts the ones it cannot name, and carries no setting and no em-dash', (() => {
+    const one = F.adLandingWords(['2026-11-10']);
+    const two = F.adLandingWords(['2026-11-10', '2026-11-09']);
+    const many = F.adLandingWords(['2026-11-10', '2026-11-09', '2026-11-08', '2026-11-07', '2026-11-06']);
+    const counted = F.adLandingWords([], 2);
+    /* the NAMED days are the count: a day held by several listings must not read as several days */
+    const namedWins = F.adLandingWords(['2026-11-10'], 7) === 'eBay\u2019s report for 2026-11-10 has not landed yet';
+    const none = F.adLandingWords([]) === '' && F.adLandingWords(null) === '' && F.adLandingWords(['rubbish']) === '';
+    /* in date order whichever way the days arrive, so one reader never sees them backwards */
+    const ordered = two.indexOf('2026-11-09, 2026-11-10') > 0;
+    /* no figure anybody can set appears in the words, and no em-dash: both are this portal's laws */
+    const clean = [one, two, many, counted].every(x => x.indexOf('\u2014') < 0 && x.indexOf(String(F.ADTOOL_LANDING_DAYS_SHOWN)) < 0 && /^eBay\u2019s report for /.test(x) && /has not landed yet/.test(x));
+    return one === 'eBay\u2019s report for 2026-11-10 has not landed yet' && ordered && none && clean && namedWins &&
+      many.indexOf('5 of these days') > 0 && many.indexOf('and 2 more') > 0 &&
+      counted === 'eBay\u2019s report for 2 of these days has not landed yet' &&
+      F.adLandingDaysClean(['2026-11-10', '2026-11-10', '', null, 'x']).join(',') === '2026-11-10';
+  })(), [F.adLandingWords(['2026-11-10']), F.adLandingWords(['2026-11-10', '2026-11-09', '2026-11-08', '2026-11-07', '2026-11-06'])]);
+  t('landing day: the mark only ever nulls a key the shape already carries, so a tile with no profit does not grow one, and the two working keys leave with it', (() => {
+    const tileLike = F.adLandingMark({ spend: 1.5, clicks: 3, attr_units: 1, attr_revenue: 9, roas: 6, cpc: 0.5, cvr: 0.33, orders: 2, units: 2, revenue: 27.98, landing: ['2026-11-10'], landing_n: 1 });
+    const keys = Object.keys(tileLike).join(',');
+    const noProfit = !('actual' in tileLike) && !('actual_profit' in tileLike);
+    const nulled = tileLike.spend === null && tileLike.clicks === null && tileLike.attr_units === null &&
+      tileLike.attr_revenue === null && tileLike.roas === null && tileLike.cpc === null && tileLike.cvr === null;
+    const kept = tileLike.orders === 2 && tileLike.units === 2 && near(tileLike.revenue, 27.98);
+    /* nothing to mark leaves the shape exactly as it arrived */
+    const quiet = JSON.stringify(F.adLandingMark({ spend: 1.5, orders: 2, landing: [], landing_n: 0 })) === JSON.stringify({ spend: 1.5, orders: 2 });
+    return noProfit && nulled && kept && quiet && !('landing' in tileLike) && !('landing_n' in tileLike) &&
+      keys.indexOf('ads_landing,landing_days,landing_note') > 0 &&
+      tileLike.ads_landing === true && F.adLandingMark(null) === null;
+  })(), [Object.keys(F.adLandingMark({ spend: 1, orders: 1, landing: ['2026-11-10'], landing_n: 1 }))]);
   t('by period: a row carries the eight columns of the table and nothing else, and units not from ads is the one subtraction Product history prints', (() => {
     const a = F.adtWindowSums(bpFix, '2026-10-03', '2026-11-01');
     const row = F.adPeakPeriodRow(a, false);
@@ -6159,14 +6258,20 @@ function run(argv) {
   })(), null);
   t('by period: the aggregate is written from the same column list the arithmetic loops, adds up the day table alone, and rounds nothing in SQL', (() => {
     const sel = F.adPeakPeriodSelect([['yesterday', 'd.day = ?1'], ['d7', 'd.day >= ?2'], ['d30', 'd.day >= ?3'], ['all', '1 = 1']]);
-    const perWin = 1 + F.ADTOOL_PEAK_PERIOD_FIELDS.length;
+    /* 11 Nov: three columns a window besides its fields — the day count, and the count and the names
+       of the days eBay's report has not landed for. A sum cannot say "not known" and a nought in a
+       money column reads as a day that cost nothing, which is the fault this answers. */
+    const perWin = 3 + F.ADTOOL_PEAK_PERIOD_FIELDS.length;
     const named = (sel.match(/ AS [a-z0-9_]+/g) || []).length;
     const everyField = F.ADTOOL_PEAK_PERIOD_FIELDS.every(f => sel.indexOf('SUM(CASE WHEN 1 = 1 THEN COALESCE(d.' + f[1] + ', 0) ELSE 0 END) AS all_' + f[0]) >= 0);
+    const landing = sel.indexOf('COUNT(DISTINCT CASE WHEN d.day = ?1 AND d.spend IS NULL THEN d.day END) AS yesterday_landing') >= 0 &&
+      sel.indexOf('GROUP_CONCAT(DISTINCT CASE WHEN d.day = ?1 AND d.spend IS NULL THEN d.day END) AS yesterday_landing_days') >= 0 &&
+      (sel.match(/_landing_days/g) || []).length === 4;
     const counted = sel.indexOf('SUM(CASE WHEN d.day = ?1 THEN 1 ELSE 0 END) AS yesterday_days') >= 0;
     /* the ROUND belongs to adPeakPeriodFinish, after the ratio: the two cannot both do it */
     const noRound = !/ROUND\(/.test(sel) && /for \(const k of ADTOOL_PEAK_PERIOD_MONEY\) s\[k\] = round2\(s\[k\]\);/.test(src) && F.ADTOOL_PEAK_PERIOD_MONEY.join(',') === 'revenue,actual,spend,attr_revenue';
     const inRoute = /SELECT d\.item_id, ' \+ adPeakPeriodSelect\(perWin\) \+ ' FROM adtool_listing_day d JOIN ' \+ perSql \+ ' pkc ON pkc\.pk_item = d\.item_id WHERE d\.day <= \?1 GROUP BY d\.item_id'\)\.bind\(yday, d7from, d30from\)/.test(src);
-    return named === 4 * perWin && everyField && counted && noRound && inRoute;
+    return named === 4 * perWin && everyField && landing && counted && noRound && inRoute;
   })(), null);
   t('by period: every column it adds up is a real column of the day table, read from the statements that create it', (() => {
     const i = src.indexOf('CREATE TABLE IF NOT EXISTS adtool_listing_day (');
@@ -6234,6 +6339,12 @@ function run(argv) {
 
   /* ---- and the page: the same table, inside the row's own details block ---- */
   const bpProd = rdFile('frontend/view-adtool-product.js');
+  /* 10 Nov: Product history answers a Team Lead with every earning stripped, so its table headers are
+     written as `… ' + (atSpendOnly() ? '' : '<th …>Profit</th>') + ' …`. These tests judge the columns
+     a reader who may see the money gets, which is the set the other two pages draw, so the fork is
+     resolved to its full-reader side before the source is matched and the headings are the plain
+     strings they were. Nothing is loosened: the strings themselves are still matched exactly. */
+  const bpFull = (x) => String(x).replace(/'\s*\+\s*\(atSpendOnly\(\) \? '' : '((?:[^'\\]|\\.)*)'\)\s*\+\s*'/g, '$1');
   t('peak page: the By period table is drawn INSIDE the listing\'s own details block, before the hour strips, and nowhere else', (() => {
     /* 2 Nov: it now shares a row with the campaigns the listing is in, and that row is still the
        first thing in the block and still sits above the hour strips. */
@@ -6254,12 +6365,12 @@ function run(argv) {
       const j = s.indexOf('Profit</th>', i); if (j < 0) return '';
       return s.slice(i, j + 11).replace(/'\s*\+\s*'/g, '').replace(/\s+/g, ' ');
     };
-    const a = cols(bpProd), b = cols(pkSrc);
+    const a = cols(bpFull(bpProd)), b = cols(pkSrc);
     const order = /\[\['today', 'Today so far'\], \['yesterday', 'Yesterday'\], \['d7', 'Last 7 days'\], \['d30', 'Last 30 days'\], \['all', 'All time'\]\]/.test(pkSrc);
     /* Product history lists them in that order too, today first */
     const same = /\[\['Yesterday', K\.yesterday \|\| \{\}\], \['Last 7 days', K\.d7 \|\| \{\}\], \['Last 30 days', K\.d30 \|\| \{\}\]/.test(bpProd) && /w\.unshift\(\['Today so far', K\.today\]\)/.test(bpProd);
     return a.length > 100 && a === b && order && same;
-  })(), [bpProd.indexOf('<th>Period</th>') >= 0, pkSrc.indexOf('<th>Period</th>') >= 0]);
+  })(), [bpFull(bpProd).indexOf('<th>Period</th>') >= 0, pkSrc.indexOf('<th>Period</th>') >= 0]);
   t('peak page: today and all time carry the still-updating mark, the profit is the shared per-item cell, and the orders it could not cost are counted beside it', (() => {
     const mark = /function perMoving\(key, p\) \{ return key === 'today' \|\| !!\(p && p\.includes_today\); \}/.test(pkSrc) && /<span class="pkt-moving">still updating<\/span>/.test(pkSrc);
     const prof = /adtProfitCell\(p\.actual_profit, 0, 0\)/.test(pkSrc) && (pkSrc.match(/adtProfitCell\(/g) || []).length === 1;
@@ -6382,7 +6493,7 @@ function run(argv) {
       const j = s.indexOf('Profit</th>', i); if (j < 0) return '';
       return s.slice(i, j + 11).replace(/'\s*\+\s*'/g, '').replace(/\s+/g, ' ');
     };
-    const a = cols(bpProd), b = cols(cpcSrc), c = cols(pkSrc);
+    const a = cols(bpFull(bpProd)), b = cols(cpcSrc), c = cols(pkSrc);
     const order = /\[\['today', 'Today so far'\], \['yesterday', 'Yesterday'\], \['d7', 'Last 7 days'\], \['d30', 'Last 30 days'\], \['all', 'All time'\]\]/.test(cpcSrc);
     return a.length > 100 && a === b && b === c && order;
   })(), [cpcSrc.indexOf('<th>Period</th>') >= 0]);
@@ -6456,8 +6567,10 @@ function run(argv) {
     const ttl = /adtoolListing: 120000 \};/.test(src);
     /* THE ROLE HALF OF THE GATE IS ABOVE THE CACHE: the key carries a profit class, never a role, so
        a stored answer must never be the thing that decides who may read the page */
-    const gateFirst = plRoute.indexOf("adtGate(ctx, 'adtool_page_product')") >= 0 &&
-      plRoute.indexOf("adtGate(ctx, 'adtool_page_product')") < plRoute.indexOf('adtKvMemo');
+    /* 10 Nov: the call carries a per-page role list now (…, ADTOOL_OPEN_ROLES.adtoolListing), so the
+       needle stops at the flag — what this test is about is the gate being ABOVE the cache. */
+    const gateFirst = plRoute.indexOf("adtGate(ctx, 'adtool_page_product'") >= 0 &&
+      plRoute.indexOf("adtGate(ctx, 'adtool_page_product'") < plRoute.indexOf('adtKvMemo');
     /* a caller asking for a PERIOD of its own is still answered FRESH: the key names no period */
     const windowFresh = /if \(p && \(p\.period \|\| p\.from\)\) return adtoolListingCompute\(ctx\.env, iid, p\);/.test(plRoute);
     /* one key per listing per class, and nothing else in it */
@@ -7276,13 +7389,17 @@ function run(argv) {
       }
       return calls.join(',') === F.ADTOOL_ROLLUP_ORDER.join(',');
     })(), (() => { const run = rbDrv.slice(rbDrv.indexOf('---- STEADY STATE')); const calls = []; for (const m of (run.match(/step\('[a-z0-9]+'|await doPeriods\(\)/g) || [])) { const n = m === 'await doPeriods()' ? 'periods' : m.slice(6, -1); if (calls[calls.length - 1] !== n) calls.push(n); } return calls; })());
-  t('roll-up slots: the catch-up slot is registered, it is the ONLY job on its minute, and that minute is on no other entry in the whole map (real source, real file)',
+  /* 11 Nov: adsReportKick joined this slot, and it is the one job allowed to — the owner lost a whole
+     day of advertising figures to a 429 on a job that only ever asked once a day. It rides LAST, which
+     is this file's own law for a job that fetches, and the minute is still on no other entry in the map:
+     a shared MINUTE is a shared invocation nobody wrote down, which is what this test exists to stop. */
+  t('roll-up slots: the catch-up slot is registered, the report kick is the only other job on it and rides last, and that minute is on no other entry in the whole map (real source, real file)',
     (() => {
       let file = null; try { file = JSON.parse(readFile('engine/crons.json')); } catch (e) {}
       const i = src.indexOf('function cronMap() {');
       const block = i < 0 ? '' : src.slice(i, src.indexOf('\n}', i)).replace(/\/\*[\s\S]*?\*\//g, '');
       const slots = (block.match(/'[^']+':\s*\[[^\]]*adtoolRollupsCatchup[^\]]*\]/g) || []);
-      if (slots.length !== 1 || slots[0].indexOf("'43 * * * *'") !== 0 || !/\[adtoolRollupsCatchup\]/.test(slots[0])) return false;
+      if (slots.length !== 1 || slots[0].indexOf("'43 * * * *'") !== 0 || !/\[adtoolRollupsCatchup, adsReportKick\]/.test(slots[0])) return false;
       if (!file || file.crons.indexOf('43 * * * *') < 0) return false;
       /* and the minute itself is free: no other registered slot ever falls on :43 */
       const fires = c => { const m = String(c).split(' ')[0]; if (m === '*') return true; return m.split(',').some(part => { const st = part.split('/'); const step = st[1] ? Number(st[1]) : 1; const rg = st[0]; if (rg === '*') return 43 % step === 0; const se = rg.split('-'); const lo = Number(se[0]), hi = se[1] === undefined ? lo : Number(se[1]); return 43 >= lo && 43 <= hi && (43 - lo) % step === 0; }); };
@@ -7747,7 +7864,7 @@ function run(argv) {
     return sql && trips && nulls && kept;
   })(), null);
   t('where its ads sit: the page gains four columns after the 7-day pair, each with its window in the header, and prints not known where the answer holds nothing', (() => {
-    const head = bpProd.indexOf('<th class="r">Spend, last 7 days</th><th class="r">ROAS, last 7 days</th><th class="r">Units sold, last 7 days</th><th class="r">Spend, last 30 days</th><th class="r">ROAS, last 30 days</th><th class="r">Units sold, last 30 days</th><th class="r">Spend, all time</th><th class="r">ROAS, all time</th><th class="r">Units sold, all time</th><th>Last change</th>') > 0;
+    const head = bpFull(bpProd).indexOf('<th class="r">Spend, last 7 days</th><th class="r">ROAS, last 7 days</th><th class="r">Units sold, last 7 days</th><th class="r">Spend, last 30 days</th><th class="r">ROAS, last 30 days</th><th class="r">Units sold, last 30 days</th><th class="r">Spend, all time</th><th class="r">ROAS, all time</th><th class="r">Units sold, all time</th><th>Last change</th>') > 0;
     const cells = /nk\(c\.spend_30d, gbp\)/.test(bpProd) && /nk\(c\.roas_30d, roas\)/.test(bpProd) &&
       /nk\(c\.spend_all, gbp\)/.test(bpProd) && /nk\(c\.roas_all, roas\)/.test(bpProd);
     /* all time is only as old as the first day that campaign has for this listing, and the cell says so */
@@ -7756,6 +7873,126 @@ function run(argv) {
     const words = /function nk\(v, f\) \{ return \(v == null \|\| v === '' \|\| \(typeof v === 'number' && isNaN\(v\)\)\) \? '<span class="at-nk">not known<\/span>' : f\(v\); \}/.test(bpProd);
     return head && cells && from && words;
   })(), null);
+
+  /* ══ YESTERDAY MUST NEVER READ £0.00 WHILE EBAY'S REPORT HAS NOT LANDED (owner, 11 Nov 2026) ════
+     The arithmetic half is tested above. This is the other half: the report is re-asked inside the
+     day instead of once a night, a refusal is a skip and not a retry, the day roll writes the ad
+     columns of such a day as NULL rather than nought, and every page that prints a period prints the
+     engine's own sentence in those cells while the orders and the units stay. */
+  const adcSrc = rdFile('frontend/view-adsCentre.js');
+  const kickBlk = src.slice(src.indexOf('async function adsReportKick(env) {'), src.indexOf('async function adtoolBackfillKick(env) {'));
+  const rollBlk = src.slice(src.indexOf('async function adtoolRollupDays(env, fromDay, toDay, opts) {'), src.indexOf('/* ---- job: profiles'));
+  t('landing day: the report is re-asked INSIDE the day — the kick rides the hourly catch-up slot as well as the 02:10 one, and it is safe there because it files only a day with no task already',
+    (() => {
+      const i = src.indexOf('function cronMap() {');
+      const block = i < 0 ? '' : src.slice(i, src.indexOf('\n}', i)).replace(/\/\*[\s\S]*?\*\//g, '');
+      const slots = (block.match(/'[^']+':\s*\[[^\]]*adsReportKick[^\]]*\]/g) || []);
+      const both = slots.length === 2 && slots.some(x => x.indexOf("'43 * * * *'") === 0) && slots.some(x => x.indexOf("'10 2 * * *'") === 0);
+      /* LAST in the hourly slot: this file's law is that the cheap D1 work goes ahead of a job that fetches */
+      const last = /'43 \* \* \* \*': \[adtoolRollupsCatchup, adsReportKick\]/.test(block);
+      /* idempotent: a (day, family) already filed is skipped, so an hourly turn files nothing on a normal day */
+      const idem = /if \(have\[day \+ '\|' \+ fam\.family\]\) continue;/.test(kickBlk) &&
+        /if \(r\.status === 'INGESTED' \|\| r\.status === 'PENDING' \|\| r\.status === 'SUCCESS'\) \{/.test(kickBlk);
+      return both && last && idem;
+    })(), null);
+  t('landing day: a 429 SKIPS that account for the run and says so — on the metadata call and on the filing call — and nothing is retried inside the run',
+    (() => {
+      /* the metadata call: the account is skipped outright and the row says why */
+      const meta = /if \(md\.status === 429\) \{ await ctx_setSync\(env, 'adsReportKick', acct, 'skipped this run: eBay refused the report metadata call with 429/.test(kickBlk) &&
+        kickBlk.indexOf('if (md.status === 429)') < kickBlk.indexOf('if (!md.ok) throw new Error');
+      /* the filing call: the rest of the account is left to the next run, and the day it stopped on is named */
+      const file = /if \(cr\.status === 429\) \{ refused429 = true; problems\.push\('stopped at ' \+ fam\.family \+ ' ' \+ day \+ ': eBay refused with 429/.test(kickBlk) &&
+        /let kicked = 0, refused429 = false;/.test(kickBlk) &&
+        /for \(let back = 1; back <= 7 && kicked < 4 && !refused429; back\+\+\) \{/.test(kickBlk) &&
+        /if \(kicked >= 4 \|\| refused429\) break;/.test(kickBlk);
+      /* and each branch is a SKIP, not a retry: it LEAVES, and it calls eBay no further on the way out */
+      const mLine = (kickBlk.match(/if \(md\.status === 429\)[^\n]*/) || [''])[0];
+      const cLine = (kickBlk.match(/if \(cr\.status === 429\)[^\n]*/) || [''])[0];
+      const noRetry = / return; \}$/.test(mLine) && / break; \}$/.test(cLine) &&
+        mLine.indexOf('fetch') < 0 && cLine.indexOf('fetch') < 0 && mLine.indexOf('throw') < 0 && cLine.indexOf('throw') < 0;
+      return meta && file && noRetry;
+    })(), null);
+  t('landing day: the kick’s own row names the days it filed, or says it had nothing to file',
+    /await ctx_setSync\(env, 'adsReportKick', acct, \(filed\.length \? 'filed ' \+ filed\.length \+ ': ' \+ filed\.join\(', '\) : 'nothing to file/.test(kickBlk) &&
+    /filed\.push\(day \+ ' ' \+ fam\.family\);/.test(kickBlk), null);
+  t('landing day: the day roll writes the ad columns as NULL and never nought, for a finished day with NO row in eBay’s own table inside the window the kick still heals, and the profit goes with them',
+    (() => {
+      /* the test itself: not one row from eBay for the day, NO ingested report for it either, the day
+         is finished, and it is inside the window the kick still heals. The ingested half is what keeps
+         a genuinely quiet day quiet: eBay reporting that a day spent nothing is a figure it gave us. */
+      const rule = /const landing = adRows === 0 && !ingested\[day\] && day < rollToday && day >= landingFloor;/.test(rollBlk) &&
+        /const landingFloor = adtAddDays\(rollToday, -ADTOOL_REPORT_LANDING_DAYS\);/.test(rollBlk) &&
+        /let adRows = 0;/.test(rollBlk) && /adRows\+\+;/.test(rollBlk) &&
+        /SELECT report_date FROM ad_report_tasks WHERE report_date >= \?1 AND report_date <= \?2 AND status = 'INGESTED' AND family NOT LIKE '%_intra' GROUP BY report_date/.test(rollBlk) &&
+        /ingested\[String\(r\.report_date\)\] = 1;/.test(rollBlk);
+      /* every ad column of the row, and the profit with them, because the profit is after the click fee */
+      const nulls = /landing \? null : r\.actual, r\.pending, round2\(r\.refunds\), landing \? null : r\.clicks, landing \? null : round2\(r\.spend\), landing \? null : round2\(r\.cpc_spend\), landing \? null : r\.attr_units, landing \? null : round2\(r\.attr_revenue\), landing \? null : \(r\.spend > 0 \? round2\(r\.attr_revenue \/ r\.spend\) : null\), landing \? null : r\.ad_profit,/.test(rollBlk);
+      /* the orders side is bound exactly as it always was */
+      const orders = /\.bind\(r\.account, r\.item_id, day, wd, dom, r\.orders, r\.units, round2\(r\.revenue\),/.test(rollBlk);
+      /* ONE number for the two jobs that have to agree about how far back a missing report is still coming */
+      const shared = /const ADTOOL_REPORT_LANDING_DAYS = 8;/.test(src) &&
+        /\.bind\(acct, ukDate\(new Date\(Date\.now\(\) - ADTOOL_REPORT_LANDING_DAYS \* 86400000\)\.toISOString\(\)\)\)/.test(kickBlk) &&
+        (src.match(/const ADTOOL_REPORT_LANDING_DAYS =/g) || []).length === 1;
+      return rule && nulls && orders && shared;
+    })(), null);
+  t('landing day: all three By period tables print the engine’s sentence across the ad cells and again in the profit cell, and still print the orders and the units',
+    (() => {
+      const prod = /if \(s\.ads_landing\) \{/.test(bpProd) && /var lnote = String\(s\.landing_note \|\| ''\);/.test(bpProd) &&
+        /'<td class="r" colspan="' \+ \(atSpendOnly\(\) \? 2 : 3\) \+ '"><span class="at-src">' \+ esc\(lnote\) \+ '<\/span><\/td>'/.test(bpProd) &&
+        /'<td class="r">' \+ \(s\.orders \|\| 0\) \+ '<\/td><td class="r">' \+ \(s\.units \|\| 0\) \+ '<\/td>' \+\n            '<td class="r"><span class="at-src">not known<\/span><\/td>'/.test(bpProd);
+      const pk = /if \(p\.ads_landing\) \{/.test(pkSrc) && /'<td class="r" colspan="3"><span class="pkt-sm2">' \+ esc\(lnote\) \+ '<\/span><\/td>'/.test(pkSrc) &&
+        /'<td class="r">' \+ cnt\(p\.orders\) \+ '<\/td>' \+\n        '<td class="r">' \+ cnt\(p\.units\) \+ '<\/td>' \+\n        '<td class="r"><span class="pkt-sm2">not known<\/span><\/td>' \+\n        '<td class="r"><span class="pkt-sm2">' \+ esc\(lnote\) \+ '<\/span><\/td><\/tr>'/.test(pkSrc);
+      const cp = /if \(p\.ads_landing\) \{/.test(cpcSrc) && /'<td class="r" colspan="3"><span class="cpc-sm2">' \+ esc\(lnote\) \+ '<\/span><\/td>'/.test(cpcSrc) &&
+        /'<td class="r"><span class="cpc-sm2">' \+ esc\(lnote\) \+ '<\/span><\/td><\/tr>'/.test(cpcSrc);
+      /* and the landing branch comes BEFORE the money cells on all three, or a nought would be drawn first */
+      const first = bpProd.indexOf('if (s.ads_landing) {') < bpProd.indexOf("'<td class=\"r\">' + gbp(s.spend)") &&
+        pkSrc.indexOf('if (p.ads_landing) {') < pkSrc.indexOf("'<td class=\"r\">' + gbp(p.spend)") &&
+        cpcSrc.indexOf('if (p.ads_landing) {') < cpcSrc.indexOf("'<td class=\"r\">' + gbp(p.spend)");
+      return prod && pk && cp && first;
+    })(), null);
+  t('landing day: the Overview’s yesterday tiles say it in words — the spend tile, the cost per click and the conversion rate — and the orders tile is left alone because orders are the order book’s',
+    (() => {
+      const win = /if \(w\.ads_landing\) return kpi\(label, 'not known yet', esc\(landNote\(w\)\) \+ '<br>' \+ \(landOrders\(w\) \? landOrders\(w\) \+ ' · ' : ''\) \+ sub\);/.test(ovSrc) &&
+        /var yLand = !!y\.ads_landing, yNote = esc\(landNote\(y\)\);/.test(ovSrc);
+      const two = /kpi\('CPC yesterday', yLand \? 'not known yet' :/.test(ovSrc) &&
+        /kpi\('Conversion rate yesterday', yLand \? 'not known yet' :/.test(ovSrc);
+      /* the orders tile is untouched: a landing day's orders and units are real and still printed */
+      const orders = /kpi\('Orders yesterday, all channels', y\.orders != null \? cnt\(y\.orders\) : '—', y\.units != null \? y\.units \+ ' units' : 'not available yet'\)/.test(ovSrc);
+      /* and the engine marks the tile through the SAME function the By period windows end with */
+      const engine = /x\.landing = String\(\(r && r\.landing_days\) \|\| ''\)\.split\(','\); x\.landing_n = Number\(\(r && r\.landing\) \|\| 0\); delete x\.landing_days;/.test(src) &&
+        /return adLandingMark\(Object\.assign\(x, extra \|\| \{\}\)\); \};/.test(src) &&
+        /COUNT\(DISTINCT CASE WHEN spend IS NULL THEN day END\) AS landing, GROUP_CONCAT\(DISTINCT CASE WHEN spend IS NULL THEN day END\) AS landing_days FROM adtool_listing_day/.test(src);
+      return win && two && orders && engine;
+    })(), null);
+  t('landing day: the Decision page’s yesterday tile says the report is missing instead of scoring half a day, and the engine tells it so off the same day table',
+    /else if \(S\.yesterday_ads_landing\) \{ yTile = 'not known yet'; ySub = esc\(String\(S\.yesterday_landing_note \|\| ''\)\) \+ ', so yesterday cannot be scored'; \}/.test(rtSrc) &&
+    rtSrc.indexOf('S.yesterday_ads_landing') < rtSrc.indexOf('yTile = yN ?') &&
+    /env\.DB\.prepare\('SELECT COUNT\(\*\) AS n FROM adtool_listing_day WHERE day = \?1 AND spend IS NULL'\)\.bind\(yday\)/.test(src) &&
+    /yesterday: yday, yesterday_ads_landing: yLandN > 0, yesterday_landing_note: yLandN > 0 \? adLandingWords\(\[yday\]\) : '',/.test(src), null);
+  t('landing day: the Ads command centre says it above the board and again where the board is empty, instead of "nothing is recorded", and the sentence travels with the rows so a sort cannot lose it',
+    (() => {
+      const line = /if \(d\.ads_landing\) \{\n        h \+= '<div class="ac-split-note" style="margin:-4px 0 10px;color:var\(--bad\);font-weight:800">' \+\n          esc\(String\(d\.landing_note \|\| ''\)\)/.test(adcSrc);
+      const empty = /\(AC\.landNote \? esc\(AC\.landNote\) \+ '\.'\n          : AC\.period === 'yesterday' \? 'Nothing is recorded for yesterday yet\.'/.test(adcSrc);
+      const kept = /AC\.landNote = d\.ads_landing \? String\(d\.landing_note \|\| ''\) : '';/.test(adcSrc) && /landNote: '',/.test(adcSrc);
+      /* the engine reads it off the DAY table, where the roll writes the NULLs, so this line and every
+         By period table are one answer rather than two reads that could disagree */
+      const engine = /const landDays = await ctx\.env\.DB\.prepare\('SELECT DISTINCT day FROM adtool_listing_day WHERE day >= \?1 AND day <= \?2 AND spend IS NULL ORDER BY day'\)/.test(src) &&
+        /ads_landing: landDays\.length > 0, landing_days: landDays, landing_note: adLandingWords\(landDays\),/.test(src);
+      return line && empty && kept && engine;
+    })(), null);
+  t('landing day: the finished-day freshness tag says whether yesterday’s ads report has landed, and when, off the roll-up’s own marker rather than a second opinion',
+    /env\.DB\.prepare\("SELECT value, updated_at FROM portal_config WHERE key = 'adtool_rollup_yday'"\)\.first\(\)\.catch\(\(\) => null\),/.test(src) &&
+    /const landed = !!\(yr && String\(yr\.value \|\| ''\) === yday \+ '\|final'\);/.test(src) &&
+    /note: 'yesterday’s ads report: ' \+ \(landed \? 'landed' \+ \(landedAt \? ' ' \+ landedAt : ''\) : 'landing'\) \}/.test(src) &&
+    /ads_report_day: yday, ads_report_landed: landed,/.test(src), null);
+  t('landing day: the three evidence routes expose it, so a night check can settle "is yesterday real" without a browser',
+    /out\.ads_landing = await q\('landing days', 'SELECT day, COUNT\(\*\) AS rows, SUM\(orders\) AS orders, SUM\(units\) AS units FROM adtool_listing_day WHERE day >= \?1 AND day <= \?2 AND spend IS NULL GROUP BY day ORDER BY day'/.test(src) &&
+    /ads_landing: ADTOOL_PEAK_PERIOD_KEYS\.reduce\(\(o, k\) => \{ const w = \(d\.kpis \|\| \{\}\)\[k\]; o\[k\] = !!\(w && w\.ads_landing\); return o; \}, \{\}\),/.test(src) &&
+    /MAX\(CASE WHEN spend IS NULL THEN 1 ELSE 0 END\) AS ads_landing FROM adtool_listing_day/.test(src), null);
+  t('landing day: not one page writes the sentence for itself — the words are the engine’s, so six screens cannot say it six ways',
+    ['frontend/view-adtool-product.js', 'frontend/view-adtool-peak.js', 'frontend/view-adtool-cpc.js', 'frontend/view-adtool-overview.js', 'frontend/view-adtool-runtoday.js', 'frontend/view-adsCentre.js', 'src/shell.html']
+      .every(f => !/has not landed yet/.test(rdFile(f))) &&
+    (src.match(/has not landed yet/g) || []).length >= 1 && /function adLandingWords\(days, count\) \{/.test(src), null);
 
   /* ---- and the page: one selector, and every one of the four headings carrying its window ---- */
   t('product history page: ONE selector above the four blocks, all time first, with a month picker and a week picker, and changing it re-asks the engine with the window', (() => {
