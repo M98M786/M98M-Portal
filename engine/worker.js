@@ -401,7 +401,7 @@ export default {
       const rcTtl = hasWriteIntent(body.payload) ? 0 : (ROUTE_CACHE_MS[action] || 0);
       /* the advertising KV cache is keyed by profit class, not role, and a hit never runs the action (so never its
          adtGate): the role half of the gate runs HERE first, or a Lister's session would read the pre-warmed payloads */
-      if (action.indexOf('adtool') === 0 && !adtRoleAllowed(ctx2.user)) throw new AuthError('auth');
+      if (action.indexOf('adtool') === 0 && !adtRoleAllowed(ctx2.user, ADTOOL_OPEN_ROLES[action])) throw new AuthError('auth');
       const runRoute = () => !rcTtl
         ? route.fn(body.payload || {}, ctx2)
         : action.indexOf('adtool') === 0
@@ -4550,6 +4550,12 @@ const ADS_FAMILIES = {
    page action is gated by role AND its own preview flag. Spec: docs kept outside the repo
    (M98M-Adtool handover, §4 data model, §6 analytics, §7 pages, §11 validation). */
 const ADTOOL_ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
+/* 11 Nov: the advertising actions a role OUTSIDE ADTOOL_ROLES may call, by action name. The owner pinned
+   Product history into the Team Lead's portal on 10 Nov and its three reads admitted the role in adtGate, but
+   the router's pre-gate (which runs before any cache and before the action) still refused every adtool* name
+   for that role, so the page answered 'auth' for Husnain. Both gates now read THIS table, so a role opened on
+   one page cannot be refused at the door and cannot reach any other advertising action. */
+const ADTOOL_OPEN_ROLES = { adtoolSearch: ['Team Lead'], adtoolListing: ['Team Lead'], adtoolActionLog: ['Team Lead'] };
 /* the role half of adtGate as a pure predicate: the route handler runs it BEFORE the KV page cache is consulted, so a
    cached advertising payload can never answer a role the gate would refuse (the page-flag half stays inside the action) */
 function adtRoleAllowed(user, extraRoles) {
@@ -7516,7 +7522,7 @@ const ADTOOL_ACTIONS = {
   },
   adtoolSearch: {
     auth: 'any', fn: async (p, ctx) => {
-      await adtGate(ctx, 'adtool_page_product', ['Team Lead']);   // Product history's own three reads
+      await adtGate(ctx, 'adtool_page_product', ADTOOL_OPEN_ROLES.adtoolSearch);   // Product history's own three reads
       const q = String((p && p.q) || '').trim().toLowerCase();
       const cols = 'l.item_id, l.account, l.title, l.price, l.status, l.last_ad_day, i.image AS image FROM adtool_listings l LEFT JOIN items_api i ON i.item_id = l.item_id';
       if (!q) {
@@ -7531,7 +7537,7 @@ const ADTOOL_ACTIONS = {
   },
   adtoolListing: {
     auth: 'any', fn: async (p, ctx) => {
-      await adtGate(ctx, 'adtool_page_product', ['Team Lead']);   // Product history's own three reads
+      await adtGate(ctx, 'adtool_page_product', ADTOOL_OPEN_ROLES.adtoolListing);   // Product history's own three reads
       const iid = String((p && p.item_id) || '').replace(/\D/g, '');
       if (!iid) throw new Error('SAY: give an item id');
       /* 2 Nov, the owner: "product history page takes a lot of time to get open, make it fast".
@@ -7559,7 +7565,7 @@ const ADTOOL_ACTIONS = {
   },
   adtoolActionLog: {
     auth: 'any', fn: async (p, ctx) => {
-      await adtGate(ctx, 'adtool_page_product', ['Team Lead']);   // Product history's own three reads
+      await adtGate(ctx, 'adtool_page_product', ADTOOL_OPEN_ROLES.adtoolActionLog);   // Product history's own three reads
       const iid = String((p && p.item_id) || '').replace(/\D/g, ''); const type = String((p && p.type) || 'note').slice(0, 30); const note = String((p && p.note) || '').slice(0, 500);
       if (!iid || !note) throw new Error('SAY: item id and a note are needed');
       const L = await ctx.env.DB.prepare('SELECT account FROM adtool_listings WHERE item_id = ?1').bind(iid).first();
