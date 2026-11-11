@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261111-1219';
+var BUILD = '20261111-2202';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -15582,7 +15582,7 @@ function enterApp(user){
     var a=document.createElement('a'); if(v.key===landing) a.className='on'; a.dataset.key=v.key;
     a.innerHTML='<svg viewBox="0 0 24 24">'+(v.icon||'')+'</svg><span class="nav-label">'+esc(v.label)+'</span><span class="badge hidden" data-badge="'+esc(v.key)+'"></span>';
     a.href = '#' + v.key;              // a real link: middle-click / ctrl-click opens a new tab
-    a.onclick=function(ev){ ev.preventDefault(); var all=document.querySelectorAll('.nav a'); for(var j=0;j<all.length;j++){ all[j].classList.remove('on'); } a.classList.add('on'); location.hash = v.key; renderView(v.key); };
+    a.onclick=function(ev){ ev.preventDefault(); location.hash = v.key; renderView(v.key); };   // renderView marks the sidebar
     return a;
   }
   var visible = viewList();
@@ -15651,12 +15651,7 @@ function enterApp(user){
      throw away the parameter the new tab was opened with */
   if (adtRoute().key !== landing) { location.hash = landing; }
   renderView(landing);
-  var navTo = function(key){
-    var links = document.querySelectorAll('.nav a');
-    for (var j = 0; j < links.length; j++) { links[j].classList.toggle('on', links[j].getAttribute('href') === '#' + key); }
-    if (window.__navReveal) { window.__navReveal(key); }
-    renderView(key);
-  };
+  var navTo = function(key){ renderView(key); };   // renderView marks the sidebar and unfolds its group
   window.addEventListener('hashchange', function(){
     var k = adtRoute().key;
     if (k && VIEWS[k] && canSee(VIEWS[k])) { navTo(k); }
@@ -15715,8 +15710,27 @@ function warmUp(){
     setTimeout(fire, 2500);
   }catch(e){}
 }
+/* 11 Nov (owner, with a screenshot of Advertising overview open while the sidebar held Business
+   overview): "जो पेज खुला हुआ है ना सिर्फ वही पेज नजर आया करे" — only the page that is open should
+   read as selected. The highlight used to be set in exactly two places: once while the sidebar was
+   BUILT (for whatever `landing` was at that moment) and again inside a nav link's own click
+   handler. The sidebar is built BEFORE `landing` is re-pointed at the hash the tab was opened
+   with, so opening #adtoolOverview in a new tab drew the mark on the department's landing page and
+   nothing ever moved it. Every other way in had the same hole: a deep link, the back button, a
+   programmatic location.hash, the ads portal's own router.
+   It is now marked HERE, in the single function every one of those routes ends at, so the sidebar
+   cannot disagree with the screen. Matching is on data-key, not href, because a hash can carry a
+   parameter (#productSourcing/406483438958) that an href never has. */
+function navMark(key){
+  try{
+    var links = document.querySelectorAll('.nav a');
+    for (var j = 0; j < links.length; j++) { links[j].classList.toggle('on', links[j].getAttribute('data-key') === key); }
+    if (window.__navReveal) { window.__navReveal(key); }   // unfold the group the page lives in
+  }catch(e){}
+}
 function renderView(key){
   var v=VIEWS[key]; var m=$('mainView');
+  navMark(key);
   if(!v || !canSee(v)){
     m.innerHTML='<div class="hgroup enter d1"><h1>Not available</h1><span class="sub">This section is not part of your version.</span></div>';
     return;

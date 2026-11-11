@@ -547,14 +547,26 @@ function hasWriteIntent(payload) {
   }
   return false;
 }
-/* Bound the sessions table per person. Ordered by created_at with the token as a tiebreak so
-   the ordering is total (two sign-ins inside the same second must not make the survivor random). */
-const SESSION_CAP_PER_EMAIL = 10;
+/* Bound the sessions table per person. The token is the tiebreak so the ordering is total (two
+   sign-ins inside the same second must not make the survivor random).
+   11 Nov (owner: "it logs itself out whenever it likes and all the working refreshes", and a new
+   tab asking for Google again): THIS WAS THE CAUSE, and the ordering was the bug. The cap kept the
+   ten NEWEST-CREATED sessions, so the session a person was working in — minted days ago, used
+   seconds ago — was deleted the moment a fresh sign-in anywhere pushed the count past ten. The
+   next call from the open tab answered 'auth', the shell cleared the stored session, and because
+   that store is localStorage and therefore SHARED, every other tab and every new tab lost it too
+   and went back to the Google screen.
+   Ordering by last_seen keeps the sessions actually IN USE and retires the ones nobody has
+   touched, which is what the cap was always meant to do. The ceiling is 25 rather than 10: a
+   working day legitimately holds a laptop, a desktop, a phone and a handful of tabs opened through
+   "open link in new tab", and ten was simply too few to survive an ordinary morning. */
+const SESSION_CAP_PER_EMAIL = 25;
 async function capSessions(env, email) {
   try {
     await env.DB.prepare(
       'DELETE FROM sessions WHERE email = ?1 AND token NOT IN ' +
-      '(SELECT token FROM sessions WHERE email = ?1 ORDER BY created_at DESC, token DESC LIMIT ?2)'
+      '(SELECT token FROM sessions WHERE email = ?1 ' +
+      ' ORDER BY COALESCE(last_seen, created_at) DESC, created_at DESC, token DESC LIMIT ?2)'
     ).bind(String(email || '').toLowerCase(), SESSION_CAP_PER_EMAIL).run();
   } catch (e) { /* a cap that fails must never stop someone signing in */ }
 }
@@ -3885,7 +3897,7 @@ async function securitySweep(env) {
   const flood = await env.DB.prepare('SELECT email, COUNT(*) AS n FROM sessions GROUP BY email HAVING COUNT(*) > ?1').bind(SESSION_CAP_PER_EMAIL).all();
   for (const r of (flood.results || [])) {
     await capSessions(env, r.email);
-    findings.push('🟠 session flood trimmed: ' + r.email + ' held ' + r.n + ' live sessions, kept the newest ' + SESSION_CAP_PER_EMAIL);
+    findings.push('🟠 session flood trimmed: ' + r.email + ' held ' + r.n + ' live sessions, kept the ' + SESSION_CAP_PER_EMAIL + ' most recently used');
   }
 
   const SUPER_ALLOW = ['mrhasibullah91@googlemail.com', 'zaidkaleem987@gmail.com', 'm98m786@gmail.com'];
@@ -24930,7 +24942,7 @@ const ROUTES = {
          minted on every fresh sign-in and simply accumulated — m98mtwo reached 44 live sessions
          and m98meight 20, which the nightly sweep had been reporting as a possible token leak for
          a week. A signed-in person legitimately holds a handful (phone, laptop, office desktop,
-         a second browser); SESSION_CAP_PER_EMAIL keeps the newest that many and retires the rest,
+         a second browser); SESSION_CAP_PER_EMAIL keeps that many MOST RECENTLY USED and retires the rest,
          so the flood can never build again and the just-minted token is never the one dropped. */
       await capSessions(ctx.env, ctx.email);
       const u = ctx.user;
