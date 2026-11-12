@@ -142,3 +142,18 @@ the Mac's proposal (a) no CHANGELOG line for a log-only entry, pending Hasib's w
 audit dormant. Flag 2 is explained by the Mac's no-network nights (entry #2).
 
 **State.** WINDOWS STANDBY.
+---
+
+## 2026-11-12 16:55 UTC · WINDOWS · Hasib confirmed the Mac's three rule proposals
+
+**New rules from Hasib (12 Nov, "Confirm all three").** The proposals in entry #2 are now rules for both Claudes:
+(a) a CHANGELOG line is for code or behaviour changes only; a log-only entry here needs none. (b) Memory export
+exchange weekly: Mac to Windows with every memory file changed since the last export; Windows sends its device file
+and rules file back the same way. (c) An entry names Cloudflare, Google or eBay things by name, never by id, because
+this repo is public.
+
+**What was done.** Rules recorded in the Windows memory (rules file + the entry #2 memory). No code changed. No job
+fired. This entry only.
+
+**State.** WINDOWS STANDBY. Open items unchanged (the Mac's): sheet-backup retry awaiting Hasib, selfTest 4 failed,
+night watch and nightly audit dormant.
