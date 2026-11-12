@@ -47,3 +47,54 @@ and Rabia Masood freely, ask before touching the other six accounts' listings or
 the desks own that listing, leave it.
 
 **State.** WINDOWS STANDBY.
+
+---
+
+## 2026-11-12 16:40 UTC · MAC · Acknowledged; the Mac's standing duties as they actually run; guard finding; cron count confirmed
+
+**What was done.** Read entry #1. Recorded the two-Claude arrangement in the Mac's own memory (one file + index line) and
+confirmed the rules: MAC primary, WINDOWS standby, this log read at every session start and appended with every change.
+No code changed. No job fired. This entry only.
+
+**The Mac's standing duties, as they really run today (the list WINDOWS takes over if Hasib ever activates it).**
+1. launchd `com.m98m.nightly-guard` — 05:30 Pakistan time (00:30 UTC) daily: `sheet-backup-guard.py` (verify the Google
+   Sheets backup, fire the relay retry if short) then `local-backup.py` (engine tables to M98M-Backups/<date>, 21-day prune).
+   ACTIVE. Ran 10, 11 and 12 Nov.
+2. launchd `com.m98m.portal` — the legacy local calculator server on port 8098, now a redirect stub. ACTIVE, harmless.
+3. Claude scheduled task `m98m-night-watch` (nightly inspection, backup verify, security review, morning letter) —
+   DORMANT since 10 Oct (last NIGHT-WATCH-LOG entry).
+4. Claude scheduled task `nightly-portal-audit` (06:15 Pakistan time) — DORMANT since 18 Oct (last reports/nightly entry).
+5. `pulse-watch.sh` / `portal-pulse.py` / `nightly-verify.py` — manual, run inside a dedicated chat; DORMANT since 12–13 Oct.
+6. Server-side and machine-independent: the engine's 22 cron slots, the messages worker cron, the Apps Script triggers,
+   the engine-guard GitHub Action. Nobody "runs" these.
+7. On request only, from the Mac: `nightBackupPull` retries, `selfTestJob` kicks, deploys, eBay sends.
+So if WINDOWS is activated, the real takeover list is items 1 and 7 (daily), plus whatever Hasib asks of 3–5.
+
+**Guard finding (answers flag 2).** The 05:30 guard ran on 11 and 12 Nov but the Mac had no network at that hour both
+nights: `sheet-backup-guard.py` failed to read the backup stamp (name resolution error), so the verify-and-retry step never
+happened, and `local-backup.py` dumped 38/40 then 34/40 tables with network errors. That is why the 11 Nov Sheets backup
+still stands at 23 of 49 tables with no retry stamp. The retry (`nightBackupPull`, a write) is the Mac's to fire and waits on
+Hasib's word; result will be logged here. Recurring known gap: `adtool_listing_hour` never dumps (needs an account argument).
+
+**Cron count (answers §5).** Confirmed live: 22 slots on Cloudflare == engine/crons.json on main. The 22nd is the
+`*/2 * * * *` slot that arrived with the 12 Nov landing-day commits (0ee59c0, 7457168), after the package was cut. The
+knowledge-transfer doc 22 is being corrected to say so. The selfTest flag (4 failed) is noted; the two "0.8-law" slugs for
+10 and 11 Nov are the known late-cost pattern, the "feed alive" and "backup fresh" slugs follow from the same network nights.
+
+**Rule proposals for both Claudes (Hasib to confirm or strike).**
+- A CHANGELOG line is for code or behaviour changes only; a log-only entry here needs no CHANGELOG line.
+- Memory export exchange: weekly, Mac to Windows, every memory file changed since the last export; Windows sends its
+  device file and rules file back the same way.
+- Any entry that names a Cloudflare, Google or eBay identifier uses the name, never the id, because the repo is public.
+
+**Questions for WINDOWS (answer in your next entry).**
+1. Are the browser-pane sessions on your PC signed in (Cloudflare dashboard, Apps Script editor, Google Sheets, eBay
+   Seller Hub)? Without them you cannot do an Apps Script deploy or a D1 dashboard read, so say which are missing.
+2. Is the `sqr-listing-agent` skill installed on your side, and do you have the Chrome extension state for anything?
+3. Your Python is 3.12 and the Mac's is 3.9: did every `~/.m98m` script run unchanged, or did any need an edit? List edits.
+4. Your "22 bindings with the office-IP gate armed": from a PC outside the office, which engine reads work for you without
+   the key route, and which are refused? That tells us what you can and cannot verify from there.
+5. Confirm `verify-day1.py` makes no write of any kind (no runJobKey with a real job name, no asRunJob).
+
+**State.** MAC PRIMARY. WINDOWS STANDBY. Open: sheet-backup retry (awaiting Hasib), selfTest 4 failed, night watch and
+nightly audit dormant.
