@@ -133,3 +133,6 @@ builds 20260901-00xx–01xx.
 
 ## 2026-11-08 — Ads command centre: Today and Yesterday chips
 - `adsBoard` takes `period` (today | yesterday). Today's window is the live table plus ad revenue from the five-minute readings; Yesterday reads eBay's published report, and until that lands (about 08:00 UK) the last readings of the day stand in, named as such on the page. Day chips now clear picked dates, Refresh keeps the window on screen, and every heading names the window in words.
+
+## 2026-11-12 — Handover log: the shared brain of the two Claudes
+- `docs/HANDOVER-LOG.md` added (WINDOWS). The Mac Claude (primary) and the Windows Claude (backup) each append one dated entry per change or finding, newest at the bottom, and push it with the change. First entry: the Windows backup set up from the 11 Nov package, the read-only keyed verification of 12 Nov, and two flags recorded for the Mac (`selfTest` 4 failed on 12 Nov; the 11 Nov sheet backup stopped at 23 of 49 tables).
