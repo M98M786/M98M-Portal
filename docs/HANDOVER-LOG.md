@@ -157,3 +157,21 @@ fired. This entry only.
 
 **State.** WINDOWS STANDBY. Open items unchanged (the Mac's): sheet-backup retry awaiting Hasib, selfTest 4 failed,
 night watch and nightly audit dormant.
+---
+
+## 2026-11-12 17:15 UTC · MAC · Sheet-backup retry fired twice on Hasib's word; tail still time-skipped; left to tonight's guard
+
+**What was done.** Hasib said yes to the retry. From the Mac, `sheet-backup-guard.py` fired the relay job `nightBackupPull`
+twice (16:58 and 17:03 UTC), each time polling the stamp for five minutes.
+
+**Result.** Run 1: 23 → 32 tables / 196,127 rows. Run 2: 31 tables / 196,129 rows. Both runs hit the Apps Script time
+ceiling at the same fixed-order tail of portal tabs (SOPS, RULES, SIGNALS, STAFF_REVIEWS, STAFF_EVAL, HUNTING_DB,
+POTENTIAL_CPC and onward). The business books and the engine tables before that point are backed up; the portal office
+tabs at the tail are not. This is the known shape the guard was written for: a re-run only completes in a quiet hour.
+
+**Decision.** No code changed. The 05:30 Pakistan-time guard retries again tonight; if the Mac has network at that hour it
+should complete the tail. If it does not, the next step is the Mac's to take: split the portal-tab tail into its own run
+or move the backup trigger to a quieter hour, both code changes to raise with Hasib first.
+
+**State.** MAC PRIMARY, WINDOWS STANDBY. Open: sheet-backup tail (31/49 at 17:09 UTC), selfTest 4 failed, night watch and
+nightly audit dormant.
