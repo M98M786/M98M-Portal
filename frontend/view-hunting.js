@@ -1610,6 +1610,65 @@
     var key = huQMode(box) === 'returned' ? 'huntRevised' : 'huntQueue';
     huCount(key, Math.max(0, ((STATE.counts && STATE.counts[key]) || 1) - 1));
   }
+
+  /* Owner (13 Nov): "I want to see option to select product from any day. Today, Yesterday,
+     3 days, 4 days, 5days, 7day, 30 days. I also want to select any hunter name to just see his
+     product, Third thing I want a search bar where I put main keywords related products appears."
+     Three filters on the decision desk, all client-side over the queue already fetched, combining
+     with each other and with the item-type chips. The chips keep their totals. Nothing is filtered
+     until he picks something — the default is the queue as it was. */
+  var HU_QF = { day: '', hunter: '', q: '' };
+  var HU_QDAYS = [['', 'Any day'], ['today', 'Today'], ['yesterday', 'Yesterday'], ['3', '3 days'],
+    ['4', '4 days'], ['5', '5 days'], ['7', '7 days'], ['30', '30 days']];
+  /** the hunt's submission day in PKT — the same date the card prints ("31 Oct, 05:22 pm") */
+  function huQPktDay(rec) {
+    var ms = Date.parse(huStr(rec.ts) || '') || Date.parse(huStr(rec['Date Added']) || '') || 0;
+    if (!ms) { return ''; }
+    return new Date(ms + 5 * 3600000).toISOString().slice(0, 10);
+  }
+  function huQDayShift(n) { return new Date(Date.now() + 5 * 3600000 - n * 86400000).toISOString().slice(0, 10); }
+  function huQDayOk(rec) {
+    var f = HU_QF.day;
+    if (!f) { return true; }
+    var d = huQPktDay(rec);
+    if (!d) { return false; }
+    if (f === 'today') { return d === huQDayShift(0); }
+    if (f === 'yesterday') { return d === huQDayShift(1); }
+    return d >= huQDayShift(Number(f) - 1);   // "N days" = the last N days including today
+  }
+  function huQHunterKey(rec) { return huStr(rec.hunter_email).toLowerCase() || huStr(rec.hunter_name).toLowerCase(); }
+  function huQHunterOk(rec) { return !HU_QF.hunter || huQHunterKey(rec) === HU_QF.hunter; }
+  /** every typed word must appear in the title or one of the evidence link cells */
+  function huQWords() { return huStr(HU_QF.q).toLowerCase().split(/\s+/).filter(Boolean); }
+  function huQTextOk(rec, words) {
+    if (!words.length) { return true; }
+    var hay = huStr(rec['Title']).toLowerCase() + ' ' + HU_EVIDENCE.map(function (c) { return huStr(rec[c]).toLowerCase(); }).join(' ');
+    for (var i = 0; i < words.length; i++) { if (hay.indexOf(words[i]) < 0) { return false; } }
+    return true;
+  }
+  function huQFilterRow(all) {
+    var seen = {}, hunters = [];
+    all.forEach(function (r) {
+      var k = huQHunterKey(r);
+      if (!k || seen[k]) { return; }
+      seen[k] = true; hunters.push({ key: k, name: huStr(r.hunter_name) || huStr(r.hunter_email) || k });
+    });
+    hunters.sort(function (a, b) { return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1; });
+    if (HU_QF.hunter && !seen[HU_QF.hunter]) { hunters.push({ key: HU_QF.hunter, name: HU_QF.hunter }); }
+    var sel = 'padding:7px 11px;font-size:12.5px;width:auto;min-width:130px';
+    return '<div class="hu-qfilters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">' +
+      '<select class="hu-sel" id="huQDay" title="Submitted on — PKT, the date on the card" style="' + sel + '">' +
+        HU_QDAYS.map(function (o) { return '<option value="' + huAttr(o[0]) + '"' + (HU_QF.day === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') +
+      '</select>' +
+      '<select class="hu-sel" id="huQHunter" title="Only this hunter\u2019s products" style="' + sel + '">' +
+        '<option value="">All hunters</option>' +
+        hunters.map(function (h) { return '<option value="' + huAttr(h.key) + '"' + (HU_QF.hunter === h.key ? ' selected' : '') + '>' + esc(h.name) + '</option>'; }).join('') +
+      '</select>' +
+      '<input class="hu-in" id="huQFind" placeholder="Search main keywords — title and links" value="' + huAttr(HU_QF.q) + '" ' +
+        'style="padding:7px 11px;font-size:12.5px;width:min(340px,100%);flex:1 1 200px">' +
+      ((HU_QF.day || HU_QF.hunter || huStr(HU_QF.q)) ? '<button class="minibtn" id="huQClear" type="button">Clear filters</button>' : '') +
+    '</div>';
+  }
   function huPaintQueue(box, d) {
     var mode = huQMode(box);
     var every = (d && d.hunts) || [];
@@ -1645,26 +1704,42 @@
         : '<button class="hu-qtab" data-qgo="huntQueue" style="padding:7px 13px;border-radius:9px;border:1px solid var(--gold-line);background:var(--panel);color:var(--text-2);font:inherit;font-weight:800;font-size:12.5px;cursor:pointer">&#8592; Fresh submissions <b style="color:var(--gold-a)">' + fresh.length + '</b></button>') +
       '</div>';
 
-    var hunts = HU_QK === 'all' ? all : all.filter(function (r) { return huKindOf(r) === HU_QK; });
+    var tray = HU_QK === 'all' ? all : all.filter(function (r) { return huKindOf(r) === HU_QK; });
+    var words = huQWords();
+    var hunts = tray.filter(function (r) { return huQDayOk(r) && huQHunterOk(r) && huQTextOk(r, words); });
+    var filtered = hunts.length !== tray.length;
 
     var body;
     if (!all.length) {
       body = mode === 'returned'
         ? '<div class="hu-empty">No revised hunt is waiting.<span>When a hunter fixes a sent-back hunt, it lands here for the re-decision.</span></div>'
         : '<div class="hu-empty">No new hunt is waiting on a decision.<span>The hunters are clear — new submissions land here straight away.</span></div>';
-    } else if (!hunts.length) {
+    } else if (!tray.length) {
       body = '<div class="hu-hint" style="margin-top:0">Nothing in the ' + esc(HU_QK === 'all' ? 'queue' : HU_QK + ' tray') + ' right now.</div>';
+    } else if (!hunts.length) {
+      body = '<div class="hu-hint" style="margin-top:0">No product matches these filters — ' + tray.length + ' in the ' + esc(HU_QK === 'all' ? 'queue' : HU_QK + ' tray') + '.</div>';
     } else {
-      body = (can ? '' : '<div class="hu-hint" style="margin-top:0;margin-bottom:12px">' +
+      body = (filtered ? '<div class="hu-hint" style="margin-top:0;margin-bottom:10px">Showing ' + hunts.length + ' of ' + tray.length + '</div>' : '') +
+        (can ? '' : '<div class="hu-hint" style="margin-top:0;margin-bottom:12px">' +
           'View only — hunted products are approved by Management and the Front Head of Operations.</div>') +
         hunts.map(function (rec) { return huQueueCard(rec, types, can); }).join('');
     }
     /* the tabs row always shows on the returned desk (it carries the way back), and on the fresh
        desk whenever there is anything to show or to point at */
-    box.innerHTML = ((all.length || mode === 'returned' || returned.length) ? tabs : '') + body;
+    var typing = document.activeElement && document.activeElement.id === 'huQFind';
+    box.innerHTML = ((all.length || mode === 'returned' || returned.length) ? tabs : '') + (all.length ? huQFilterRow(all) : '') + body;
     box.querySelectorAll('[data-qk]').forEach(function (b) {
       b.onclick = function () { HU_QK = this.getAttribute('data-qk'); huPaintQueue(box, d); };
     });
+    var fDay = huEl('huQDay'), fHunter = huEl('huQHunter'), fFind = huEl('huQFind'), fClear = huEl('huQClear');
+    if (fDay) { fDay.onchange = function () { HU_QF.day = this.value; huPaintQueue(box, d); }; }
+    if (fHunter) { fHunter.onchange = function () { HU_QF.hunter = this.value; huPaintQueue(box, d); }; }
+    if (fFind) {
+      fFind.oninput = function () { HU_QF.q = this.value; huPaintQueue(box, d); };
+      /* the list repaints on every keystroke (and on the auto-refresh) — keep the caret where it was */
+      if (typing) { fFind.focus(); try { fFind.setSelectionRange(fFind.value.length, fFind.value.length); } catch (e) {} }
+    }
+    if (fClear) { fClear.onclick = function () { HU_QF = { day: '', hunter: '', q: '' }; huPaintQueue(box, d); }; }
     box.querySelectorAll('[data-qgo]').forEach(function (b) {
       b.onclick = function () { location.hash = b.getAttribute('data-qgo'); };
     });
