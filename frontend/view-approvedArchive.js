@@ -39,21 +39,29 @@
     '.aa-empty{color:var(--text-2);font-weight:700;padding:16px 0}.aa-empty span{display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:4px}'
   );
 
-  var AA = { data: null, sentData: null, tab: 'pending', accounts: [], listers: [], autoListers: [], seq: 0, sentSeq: 0 };
+  var AA = { data: null, sentData: null, tab: 'pending', accounts: [], listers: [], autoListers: [], autoAccounts: [], seq: 0, sentSeq: 0 };
 
-  /* 22 Oct (owner): auto-select the deadline — today 11:59 PM Pakistan time — as a datetime-local
-     value, so the owner never types it. PKT is UTC+5; a datetime-local wants local wall time. */
-  function aaTodayEndPkt() {
-    var pk = new Date(Date.now() + 5 * 3600000);   // now in PKT
+  /* 22 Oct (owner): auto-select the deadline as a datetime-local value, so the owner never types it.
+     13 Nov (owner): "auto select the date two days into the future, don't select Sunday rather skip
+     to Monday" — two days after today in Pakistan time, 11:59 PM; a Sunday moves to the Monday.
+     PKT is UTC+5; a datetime-local wants local wall time. */
+  function aaTodayEndPkt(nowMs) {
+    var pk = new Date((nowMs == null ? Date.now() : nowMs) + 5 * 3600000 + 2 * 86400000);   // PKT, two days on
+    if (pk.getUTCDay() === 0) { pk = new Date(pk.getTime() + 86400000); }                    // Sunday → Monday
     var y = pk.getUTCFullYear(), m = ('0' + (pk.getUTCMonth() + 1)).slice(-2), d = ('0' + pk.getUTCDate()).slice(-2);
     return y + '-' + m + '-' + d + 'T23:59';
   }
-  /* "from now on auto-select one to Umar and one to Sajawal" — find both listers in the staff list
-     (by name) so the send form alternates between them per card. Falls back gracefully. */
+  /* 13 Nov (owner): "Lister selection alternating between four Listers" — the auto-pick rotates
+     round-robin, card by card, across the listing staff (Item Lister + Listing Manager roles; the
+     Team Lead stays in the dropdown for a manual pick but is not dealt cards). */
   function aaComputeAutoListers() {
-    var find = function (re) { for (var i = 0; i < AA.listers.length; i++) { if (re.test(AA.listers[i].name)) { return AA.listers[i].email; } } return ''; };
-    var umar = find(/umar|umer/i), saj = find(/saj[ao]?wal|sajjawal/i);
-    AA.autoListers = [umar, saj].filter(Boolean);
+    AA.autoListers = AA.listers.filter(function (l) { return l.role === 'Item Lister' || l.role === 'Listing Manager'; })
+      .map(function (l) { return l.email; });
+  }
+  /* 13 Nov (owner): "auto selections of all accounts except for Rabia & Yaseen" — every pending card
+     gets an account, dealt round-robin across the accounts that are not Rabia's or Yaseen's. */
+  function aaComputeAutoAccounts() {
+    AA.autoAccounts = AA.accounts.filter(function (a) { return !/\b(rabia|yaseen)\b/i.test(a); });
   }
 
   function aaStr(v) { return String(v == null ? '' : v).replace(/^\s+|\s+$/g, ''); }
@@ -76,6 +84,7 @@
   function aaCard(h, canSend, idx) {
     var id = aaStr(h.hunt_id);
     var autoL = AA.autoListers.length ? AA.autoListers[(idx || 0) % AA.autoListers.length] : '';
+    var autoA = AA.autoAccounts.length ? AA.autoAccounts[(idx || 0) % AA.autoAccounts.length] : '';
     var img = aaStr(h['Image Link']);
     var nums = '';
     function num(label, v, money) { var val = money ? aaMoney(v) : aaStr(v); if (!val || val === '0') { return; } nums += '<span class="aa-num">' + esc(label) + ' <b>' + esc(val) + '</b></span>'; }
@@ -93,7 +102,7 @@
     if (canSend) {
       send = '<div class="aa-send">' +
         '<div class="aa-row">' +
-          '<div><label>Account</label><select class="aa-in" data-aa-acc="' + aaAttr(id) + '"><option value="">— choose —</option>' + aaAccountOpts(h.account_hint) + '</select></div>' +
+          '<div><label>Account</label><select class="aa-in" data-aa-acc="' + aaAttr(id) + '"><option value="">— choose —</option>' + aaAccountOpts(aaStr(h.account_hint) || autoA) + '</select></div>' +
           '<div><label>Campaign type</label><select class="aa-in" data-aa-camp="' + aaAttr(id) + '"><option value="">— choose —</option>' + aaCampOpts(h['CPC Selling Chance']) + '</select></div>' +
         '</div>' +
         '<div class="aa-row">' +
@@ -222,8 +231,9 @@
       if (seq !== AA.seq) { return; }
       AA.data = res[0] || {};
       AA.accounts = ((res[1] && res[1].accounts) || []).map(function (a) { return aaStr(a.account); }).filter(Boolean);
-      AA.listers = ((res[2] && res[2].staff) || []).map(function (s) { return { email: aaStr(s.email), name: aaStr(s.name) + ' — ' + aaStr(s.role) }; });
+      AA.listers = ((res[2] && res[2].staff) || []).map(function (s) { return { email: aaStr(s.email), role: aaStr(s.role), name: aaStr(s.name) + ' — ' + aaStr(s.role) }; });
       aaComputeAutoListers();
+      aaComputeAutoAccounts();
       if (STATE.counts) { STATE.counts.approvedArchive = (AA.data.counts && AA.data.counts.pending_send) || 0; }
       if (typeof refreshBadges === 'function') { try { refreshBadges(); } catch (e) {} }
       aaPaint();

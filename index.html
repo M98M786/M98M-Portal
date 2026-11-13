@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261111-1238';
+var BUILD = '20261113-0959';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2618,7 +2618,7 @@ VIEWS.home = {
   function acSpendOnly(d) { return !!(d && d.spend_only); }
   /* sort: {key:'', dir:-1} means "nothing chosen", which is the board's own order — the waste rows
      first, then the biggest spend today. A choice is remembered per browser under AC_SORT_KEY. */
-  var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', sort: { key: '', dir: -1 } };
+  var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', landNote: '', sort: { key: '', dir: -1 } };
   /* the window in words, for every heading that names it: today, yesterday, the dates picked, or the last N days */
   function acWin(d) {
     d = d || {};
@@ -2762,8 +2762,12 @@ VIEW_CSS.push(
     if (!box) { return; }
     var rows = AC.items || [];
     if (!rows.length) {
+      /* "Nothing is recorded" and "eBay has not sent it" are different answers and a reader acts on
+         them differently: the first reads as a quiet day. Where the engine says the report for the
+         day has not landed, its own sentence is what goes here. */
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' +
-        (AC.period === 'yesterday' ? 'Nothing is recorded for yesterday yet.'
+        (AC.landNote ? esc(AC.landNote) + '.'
+          : AC.period === 'yesterday' ? 'Nothing is recorded for yesterday yet.'
           : 'No ad activity recorded yet today \u2014 eBay produces the first same-day report at about 08:05 UK, so nothing can be read before then.') + '</div>';
       return;
     }
@@ -2809,6 +2813,15 @@ VIEW_CSS.push(
         '<div class="ac-tile"><div class="k">Spend · ' + esc(acWin(d)) + '</div><div class="v">' + acGBP(c.spend_14d) + '</div></div>' +
       '</div>';
       if (d.window_source) { h += '<div class="ac-split-note" style="margin:-4px 0 10px">Window figures from ' + esc(String(d.window_source)) + '.</div>'; }
+      /* A DAY IN THIS WINDOW EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov: the whole portal read
+         yesterday as 0.00). This board reads eBay's own daily table, so such a day has no row at all
+         and every figure below would be a nought nobody earned. The engine names the day and writes
+         the sentence, so this line and every By period table in the tool say the same thing. */
+      if (d.ads_landing) {
+        h += '<div class="ac-split-note" style="margin:-4px 0 10px;color:var(--bad);font-weight:800">' +
+          esc(String(d.landing_note || '')) + ', so the spend and the sales for ' +
+          (Number((d.landing_days || []).length) === 1 ? 'that day' : 'those days') + ' are not in these figures.</div>';
+      }
       /* THE PEAK LIST'S DAY-STOPS (owner, 10 Nov): one line, and the figure that matters is the last
          one — what those listings have spent SINCE they were stopped, which on a stop that reached eBay
          should read nothing at all. Drawn only where the answer carries the count, because null is not
@@ -2904,6 +2917,9 @@ VIEW_CSS.push(
       /* the per-item board is painted on its own so a sort can redraw it without asking the engine again */
       AC.items = (d.items || []).filter(function (r) { return r && typeof r === 'object'; });
       AC.lastDays = Number(d.days) || 14;
+      /* the sentence travels with the board so the per-item table, which is painted on its own when
+         a sort redraws it, says the same thing as the line above it */
+      AC.landNote = d.ads_landing ? String(d.landing_note || '') : '';
       AC.win = d.period === 'today' ? 'today' : d.period === 'yesterday' ? 'yesterday' : AC.lastDays + 'd';
       h += '<div id="acItems"></div>';
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Snapshot ' +
@@ -4621,6 +4637,20 @@ VIEW_CSS.push(
     var mark = perMoving(key, p) ? ' <span class="cpc-moving">still updating</span>' : '';
     if (!p || typeof p !== 'object') {
       return '<tr><td class="hr">' + esc(label) + mark + '</td><td colspan="7"><span class="cpc-sm2">not available yet</span></td></tr>';
+    }
+    /* A WINDOW HOLDING A DAY EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov). No ad spend, no units
+       from ads, no return on the spend, and no profit either, because the profit is worked out after
+       the click fee and the click fee is the half that has not arrived. The engine's own sentence
+       goes across the three ad columns and again in the profit column; the orders and the units are
+       the order book's and are printed as ever. */
+    if (p.ads_landing) {
+      var lnote = String(p.landing_note || '');
+      return '<tr><td class="hr">' + esc(label) + mark + '</td>' +
+        '<td class="r" colspan="3"><span class="cpc-sm2">' + esc(lnote) + '</span></td>' +
+        '<td class="r">' + cnt(p.orders) + '</td>' +
+        '<td class="r">' + cnt(p.units) + '</td>' +
+        '<td class="r"><span class="cpc-sm2">not known</span></td>' +
+        '<td class="r"><span class="cpc-sm2">' + esc(lnote) + '</span></td></tr>';
     }
     /* the orders the profit could not price: the Ali cost not typed in yet, or eBay's fee not landed.
        Counted beside the figure and never folded into it, which is how the law works everywhere else. */
@@ -7141,12 +7171,24 @@ VIEW_CSS.push(
       today = { spend: cmSum(byAcct, 'spend'), attr_revenue: cmSum(byAcct, 'attr_revenue'), attr_units: cmSum(byAcct, 'attr_units'), clicks: cmSum(byAcct, 'clicks'), orders: cmSum(byAcct, 'orders'), units: cmSum(byAcct, 'units') };
     }
     var repStatus = y.report_status != null ? String(y.report_status) : (D.report_status != null ? String(D.report_status) : null);
+    /* A WINDOW HOLDING A DAY EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov: "0.00 in yesterday's
+       data of whole portal"). The engine marks it and says so in its own words; the tile prints
+       those words instead of a money figure nobody earned, and still prints the orders and the units
+       of that day, which come from the order book and are real. */
+    var landNote = function (w) { return String((w && w.landing_note) || ''); };
+    var landOrders = function (w) {
+      if (!w) return '';
+      return (w.orders != null ? cnt(w.orders) + ' order' + (num(w.orders) === 1 ? '' : 's') : '') +
+        (w.units != null ? (w.orders != null ? ' · ' : '') + cnt(w.units) + ' units' : '');
+    };
     var win = function (label, w, sub, note) {
       if (!w) return kpi(label, '—', sub + '<br>not available yet');
+      if (w.ads_landing) return kpi(label, 'not known yet', esc(landNote(w)) + '<br>' + (landOrders(w) ? landOrders(w) + ' · ' : '') + sub);
       return kpi(label, gbp0(w.spend), gbp0(w.attr_revenue) + ' sales from ads · ROAS ' + roas(cmRoas(w)) +
         (w.attr_units != null ? ' · ' + w.attr_units + ' units from ads' : '') + '<br>' + sub +
         (note ? ' · <span class="ov-neg">' + note + '</span>' : ''));
     };
+    var yLand = !!y.ads_landing, yNote = esc(landNote(y));
     var lateAccounts = function (m) { var late = Object.keys(m || {}).filter(function (a) { return m[a] !== 'final'; }); return late.length ? ' (' + esc(late.join(', ')) + ')' : ''; };
     var h = '<div class="ov-kpis">' +
       win('Today so far', today,
@@ -7165,8 +7207,8 @@ VIEW_CSS.push(
     var scope = String(D.decisions_scope || 'all accounts');
     var fleetOnly = OV.account ? ' · all accounts' : '';
     h += '<div class="ov-kpis">' +
-      kpi('CPC yesterday', num(y.clicks) > 0 && y.spend != null ? gbp(Number(y.spend) / Number(y.clicks)) : '—', (y.clicks || 0) + ' clicks') +
-      kpi('Conversion rate yesterday', num(y.clicks) > 0 && y.attr_units != null ? pct(Number(y.attr_units) / Number(y.clicks)) : '—', 'units from ads ÷ clicks') +
+      kpi('CPC yesterday', yLand ? 'not known yet' : (num(y.clicks) > 0 && y.spend != null ? gbp(Number(y.spend) / Number(y.clicks)) : '—'), yLand ? yNote : (y.clicks || 0) + ' clicks') +
+      kpi('Conversion rate yesterday', yLand ? 'not known yet' : (num(y.clicks) > 0 && y.attr_units != null ? pct(Number(y.attr_units) / Number(y.clicks)) : '—'), yLand ? yNote : 'units from ads ÷ clicks') +
       kpi('Orders yesterday, all channels', y.orders != null ? cnt(y.orders) : '—', y.units != null ? y.units + ' units' : 'not available yet') +
       kpi('Open alerts' + fleetOnly, D.alerts && D.alerts.n != null ? String(D.alerts.n) : '—', D.alerts && D.alerts.n != null ? ((D.alerts.high || 0) + ' high') : 'not available yet', (D.alerts && D.alerts.high) ? 'ov-neg' : '') +
       kpi('Decisions today · ' + scope, decisions == null ? '—' : String(decisions),
@@ -8384,6 +8426,20 @@ VIEW_CSS.push(
     var mark = perMoving(key, p) ? ' <span class="pkt-moving">still updating</span>' : '';
     if (!p || typeof p !== 'object') {
       return '<tr><td class="hr">' + esc(label) + mark + '</td><td colspan="7"><span class="pkt-sm2">not available yet</span></td></tr>';
+    }
+    /* A WINDOW HOLDING A DAY EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov). No ad spend, no units
+       from ads, no return on the spend, and no profit either, because the profit is worked out after
+       the click fee and the click fee is the half that has not arrived. The engine's own sentence
+       goes across the three ad columns and again in the profit column; the orders and the units are
+       the order book's and are printed as ever. */
+    if (p.ads_landing) {
+      var lnote = String(p.landing_note || '');
+      return '<tr><td class="hr">' + esc(label) + mark + '</td>' +
+        '<td class="r" colspan="3"><span class="pkt-sm2">' + esc(lnote) + '</span></td>' +
+        '<td class="r">' + cnt(p.orders) + '</td>' +
+        '<td class="r">' + cnt(p.units) + '</td>' +
+        '<td class="r"><span class="pkt-sm2">not known</span></td>' +
+        '<td class="r"><span class="pkt-sm2">' + esc(lnote) + '</span></td></tr>';
     }
     /* the orders the profit could not price: the Ali cost not typed in yet, or eBay's fee not landed.
        Counted beside the figure and never folded into it, which is how the law works everywhere else. */
@@ -10219,6 +10275,20 @@ VIEW_CSS.push(
         var s = x[1], pc = pcOf(s), pf = pfOf(s);
         var notAds = Math.max(0, (Number(s.units) || 0) - (Number(s.attr_units) || 0));
         var moving = x[0] === 'Today so far' || !!s.includes_today;
+        /* A WINDOW HOLDING A DAY EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov: the whole portal
+           read yesterday as 0.00). There is no ad spend to print, no units from ads, no return on
+           the spend and no profit, because the profit is worked out after the click fee and the
+           click fee is the half that has not arrived. The engine says so in its own words, across
+           the three ad columns and again in the profit column, and the orders and the units of that
+           day are the order book's own and are printed exactly as ever. */
+        if (s.ads_landing) {
+          var lnote = String(s.landing_note || '');
+          return '<tr><td>' + esc(x[0]) + (moving ? ' <span class="at-src s">still updating</span>' : '') + '</td>' +
+            '<td class="r" colspan="' + (atSpendOnly() ? 2 : 3) + '"><span class="at-src">' + esc(lnote) + '</span></td>' +
+            '<td class="r">' + (s.orders || 0) + '</td><td class="r">' + (s.units || 0) + '</td>' +
+            '<td class="r"><span class="at-src">not known</span></td>' +
+            (atSpendOnly() ? '' : '<td class="r"><span class="at-src">' + esc(lnote) + '</span></td>') + '</tr>';
+        }
         return '<tr><td>' + esc(x[0]) + (moving ? ' <span class="at-src s">still updating</span>' : '') + '</td>' +
           '<td class="r">' + gbp(s.spend) + '</td><td class="r">' + (s.attr_units || 0) + '</td>' +
           (atSpendOnly() ? '' : '<td class="r">' + roas(s.roas != null ? s.roas : (Number(s.spend) > 0 && s.attr_revenue != null ? Number(s.attr_revenue) / Number(s.spend) : null)) + '</td>') +
@@ -10902,6 +10972,11 @@ VIEW_CSS.push(
     var yTile, ySub;
     if (!S) { yTile = '—'; ySub = 'not available yet'; }
     else if (S.error) { yTile = '—'; ySub = 'could not be read: ' + esc(String(S.error)); }
+    /* YESTERDAY CANNOT BE SCORED WHILE EBAY'S OWN REPORT FOR IT IS MISSING (owner, 11 Nov). Every
+       call under this tile was judged on what the day earned, and the day's profit is worked out
+       after the click fee: with the report unlanded there is no click fee to take off, so a score
+       here would be a score on half a day. The engine's own sentence stands in its place. */
+    else if (S.yesterday_ads_landing) { yTile = 'not known yet'; ySub = esc(String(S.yesterday_landing_note || '')) + ', so yesterday cannot be scored'; }
     else {
       yTile = yN ? Number(ySc.r) + ' of ' + yN + (yProv ? ' <span class="rt-dim">· ' + yProv + ' still updating</span>' : '') : (yProv ? '<span class="rt-dim">' + yProv + ' still updating</span>' : '—');
       ySub = yN ? Math.round(Number(ySc.r) / yN * 100) + ' % right' + (yProv ? ' (we check the rest again as costs and eBay figures land)' : '') : (yProv ? 'no final score yet, we check again as costs and eBay figures land' : 'nothing scored yet');
@@ -15370,21 +15445,29 @@ function createMeeting() {
     '.aa-empty{color:var(--text-2);font-weight:700;padding:16px 0}.aa-empty span{display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:4px}'
   );
 
-  var AA = { data: null, sentData: null, tab: 'pending', accounts: [], listers: [], autoListers: [], seq: 0, sentSeq: 0 };
+  var AA = { data: null, sentData: null, tab: 'pending', accounts: [], listers: [], autoListers: [], autoAccounts: [], seq: 0, sentSeq: 0 };
 
-  /* 22 Oct (owner): auto-select the deadline — today 11:59 PM Pakistan time — as a datetime-local
-     value, so the owner never types it. PKT is UTC+5; a datetime-local wants local wall time. */
-  function aaTodayEndPkt() {
-    var pk = new Date(Date.now() + 5 * 3600000);   // now in PKT
+  /* 22 Oct (owner): auto-select the deadline as a datetime-local value, so the owner never types it.
+     13 Nov (owner): "auto select the date two days into the future, don't select Sunday rather skip
+     to Monday" — two days after today in Pakistan time, 11:59 PM; a Sunday moves to the Monday.
+     PKT is UTC+5; a datetime-local wants local wall time. */
+  function aaTodayEndPkt(nowMs) {
+    var pk = new Date((nowMs == null ? Date.now() : nowMs) + 5 * 3600000 + 2 * 86400000);   // PKT, two days on
+    if (pk.getUTCDay() === 0) { pk = new Date(pk.getTime() + 86400000); }                    // Sunday → Monday
     var y = pk.getUTCFullYear(), m = ('0' + (pk.getUTCMonth() + 1)).slice(-2), d = ('0' + pk.getUTCDate()).slice(-2);
     return y + '-' + m + '-' + d + 'T23:59';
   }
-  /* "from now on auto-select one to Umar and one to Sajawal" — find both listers in the staff list
-     (by name) so the send form alternates between them per card. Falls back gracefully. */
+  /* 13 Nov (owner): "Lister selection alternating between four Listers" — the auto-pick rotates
+     round-robin, card by card, across the listing staff (Item Lister + Listing Manager roles; the
+     Team Lead stays in the dropdown for a manual pick but is not dealt cards). */
   function aaComputeAutoListers() {
-    var find = function (re) { for (var i = 0; i < AA.listers.length; i++) { if (re.test(AA.listers[i].name)) { return AA.listers[i].email; } } return ''; };
-    var umar = find(/umar|umer/i), saj = find(/saj[ao]?wal|sajjawal/i);
-    AA.autoListers = [umar, saj].filter(Boolean);
+    AA.autoListers = AA.listers.filter(function (l) { return l.role === 'Item Lister' || l.role === 'Listing Manager'; })
+      .map(function (l) { return l.email; });
+  }
+  /* 13 Nov (owner): "auto selections of all accounts except for Rabia & Yaseen" — every pending card
+     gets an account, dealt round-robin across the accounts that are not Rabia's or Yaseen's. */
+  function aaComputeAutoAccounts() {
+    AA.autoAccounts = AA.accounts.filter(function (a) { return !/\b(rabia|yaseen)\b/i.test(a); });
   }
 
   function aaStr(v) { return String(v == null ? '' : v).replace(/^\s+|\s+$/g, ''); }
@@ -15407,6 +15490,7 @@ function createMeeting() {
   function aaCard(h, canSend, idx) {
     var id = aaStr(h.hunt_id);
     var autoL = AA.autoListers.length ? AA.autoListers[(idx || 0) % AA.autoListers.length] : '';
+    var autoA = AA.autoAccounts.length ? AA.autoAccounts[(idx || 0) % AA.autoAccounts.length] : '';
     var img = aaStr(h['Image Link']);
     var nums = '';
     function num(label, v, money) { var val = money ? aaMoney(v) : aaStr(v); if (!val || val === '0') { return; } nums += '<span class="aa-num">' + esc(label) + ' <b>' + esc(val) + '</b></span>'; }
@@ -15424,7 +15508,7 @@ function createMeeting() {
     if (canSend) {
       send = '<div class="aa-send">' +
         '<div class="aa-row">' +
-          '<div><label>Account</label><select class="aa-in" data-aa-acc="' + aaAttr(id) + '"><option value="">— choose —</option>' + aaAccountOpts(h.account_hint) + '</select></div>' +
+          '<div><label>Account</label><select class="aa-in" data-aa-acc="' + aaAttr(id) + '"><option value="">— choose —</option>' + aaAccountOpts(aaStr(h.account_hint) || autoA) + '</select></div>' +
           '<div><label>Campaign type</label><select class="aa-in" data-aa-camp="' + aaAttr(id) + '"><option value="">— choose —</option>' + aaCampOpts(h['CPC Selling Chance']) + '</select></div>' +
         '</div>' +
         '<div class="aa-row">' +
@@ -15553,8 +15637,9 @@ function createMeeting() {
       if (seq !== AA.seq) { return; }
       AA.data = res[0] || {};
       AA.accounts = ((res[1] && res[1].accounts) || []).map(function (a) { return aaStr(a.account); }).filter(Boolean);
-      AA.listers = ((res[2] && res[2].staff) || []).map(function (s) { return { email: aaStr(s.email), name: aaStr(s.name) + ' — ' + aaStr(s.role) }; });
+      AA.listers = ((res[2] && res[2].staff) || []).map(function (s) { return { email: aaStr(s.email), role: aaStr(s.role), name: aaStr(s.name) + ' — ' + aaStr(s.role) }; });
       aaComputeAutoListers();
+      aaComputeAutoAccounts();
       if (STATE.counts) { STATE.counts.approvedArchive = (AA.data.counts && AA.data.counts.pending_send) || 0; }
       if (typeof refreshBadges === 'function') { try { refreshBadges(); } catch (e) {} }
       aaPaint();
@@ -44919,7 +45004,7 @@ function enterApp(user){
     var a=document.createElement('a'); if(v.key===landing) a.className='on'; a.dataset.key=v.key;
     a.innerHTML='<svg viewBox="0 0 24 24">'+(v.icon||'')+'</svg><span class="nav-label">'+esc(v.label)+'</span><span class="badge hidden" data-badge="'+esc(v.key)+'"></span>';
     a.href = '#' + v.key;              // a real link: middle-click / ctrl-click opens a new tab
-    a.onclick=function(ev){ ev.preventDefault(); var all=document.querySelectorAll('.nav a'); for(var j=0;j<all.length;j++){ all[j].classList.remove('on'); } a.classList.add('on'); location.hash = v.key; renderView(v.key); };
+    a.onclick=function(ev){ ev.preventDefault(); location.hash = v.key; renderView(v.key); };   // renderView marks the sidebar
     return a;
   }
   var visible = viewList();
@@ -44988,12 +45073,7 @@ function enterApp(user){
      throw away the parameter the new tab was opened with */
   if (adtRoute().key !== landing) { location.hash = landing; }
   renderView(landing);
-  var navTo = function(key){
-    var links = document.querySelectorAll('.nav a');
-    for (var j = 0; j < links.length; j++) { links[j].classList.toggle('on', links[j].getAttribute('href') === '#' + key); }
-    if (window.__navReveal) { window.__navReveal(key); }
-    renderView(key);
-  };
+  var navTo = function(key){ renderView(key); };   // renderView marks the sidebar and unfolds its group
   window.addEventListener('hashchange', function(){
     var k = adtRoute().key;
     if (k && VIEWS[k] && canSee(VIEWS[k])) { navTo(k); }
@@ -45052,8 +45132,27 @@ function warmUp(){
     setTimeout(fire, 2500);
   }catch(e){}
 }
+/* 11 Nov (owner, with a screenshot of Advertising overview open while the sidebar held Business
+   overview): "जो पेज खुला हुआ है ना सिर्फ वही पेज नजर आया करे" — only the page that is open should
+   read as selected. The highlight used to be set in exactly two places: once while the sidebar was
+   BUILT (for whatever `landing` was at that moment) and again inside a nav link's own click
+   handler. The sidebar is built BEFORE `landing` is re-pointed at the hash the tab was opened
+   with, so opening #adtoolOverview in a new tab drew the mark on the department's landing page and
+   nothing ever moved it. Every other way in had the same hole: a deep link, the back button, a
+   programmatic location.hash, the ads portal's own router.
+   It is now marked HERE, in the single function every one of those routes ends at, so the sidebar
+   cannot disagree with the screen. Matching is on data-key, not href, because a hash can carry a
+   parameter (#productSourcing/406483438958) that an href never has. */
+function navMark(key){
+  try{
+    var links = document.querySelectorAll('.nav a');
+    for (var j = 0; j < links.length; j++) { links[j].classList.toggle('on', links[j].getAttribute('data-key') === key); }
+    if (window.__navReveal) { window.__navReveal(key); }   // unfold the group the page lives in
+  }catch(e){}
+}
 function renderView(key){
   var v=VIEWS[key]; var m=$('mainView');
+  navMark(key);
   if(!v || !canSee(v)){
     m.innerHTML='<div class="hgroup enter d1"><h1>Not available</h1><span class="sub">This section is not part of your version.</span></div>';
     return;
