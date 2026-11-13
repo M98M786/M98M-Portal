@@ -172,7 +172,14 @@ function cronMap() {
        It is deliberately NOT on the KV heartbeat below, for the same reason the five-minute slot is
        not: a beat every two minutes is 720 writes a day on its own, and the whole worker has a
        thousand. The per-slot row in the database below carries it instead. */
-    '*/2 * * * *': [adsIntraday],
+    /* 14 Nov: adsItemsWatched joins this slot and rides SECOND, behind the sampler and never ahead of
+       it. The sampler is the job in this map that can pause an ad on eBay and it keeps the head of the
+       slot for exactly that reason; the watch only READS, so it is the right job to be the one a
+       stretched invocation starves. It is on this slot and not one of its own because what it does is
+       the owner's two minutes: the account somebody has open is re-read from eBay every two minutes
+       while their page keeps asking for it. On a tick when nobody is watching it is ONE D1 read and
+       nothing else, so the slot costs no more than it did before. */
+    '*/2 * * * *': [adsIntraday, adsItemsWatched],
     /* R8 speed (Hasib): tracking chases every 15 minutes now, not hourly — the paid plan
        carries 1000 subrequests per invocation, so the backfill batch grew 18 → 60 too. */
     /* adsItems LEFT this slot on 24 Oct. It used to read 2 campaigns per account per tick, which
@@ -2973,7 +2980,229 @@ const ADS_PROBE_LISTING_CAP = 300;
 const ADS_PROBE_RECORD_CAP = 20;
 const DUP_CONFIRM_MS = 90 * 60000;
 
-function adsBudgetSpent(b) { return !b || b.fetches >= ADS_ITEM_FETCH_CAP || Date.now() >= b.until; }
+/* ADTOOL-WATCH-PURE-BEGIN */
+/* ══ THE ACCOUNT SOMEBODY IS LOOKING AT IS RE-READ EVERY TWO MINUTES ════════════════════════════
+   The owner, 14 Nov 2026 (translated): "this page is very important: it must update every 2 minutes,
+   so the live changes I make on an account are reflected at once and I can see the duplication. If I
+   come back an hour later, after the hourly run, it is no use."
+
+   WHY ONE ACCOUNT AND NEVER THE FLEET. The rotation above re-reads a given account roughly hourly,
+   which is the right cost for a fleet nobody is watching. A full re-read of ONE account is one
+   ad-list GET per running campaign: the busiest account holds 95 of them, so a pass every two
+   minutes is 95 calls × 30 an hour = 2,850 an hour, and 68,400 if a page were left open for a
+   whole day. eBay's app allowance on that endpoint is 100,000 a day and the hourly pass already
+   spends about 9,880 of it. THE FLEET WOULD NOT FIT: 351 running campaigns is 10,530 an hour and
+   252,720 a day. So the fast re-read follows the ONE account a person has picked, it lives only
+   while that person's page keeps asking for it, and the whole of it stops dead at the daily cap
+   below, which leaves the hourly pass its own room with a wide margin.
+
+   EVERY FIGURE IS A CONSTANT HERE AND THE PAGE READS IT BACK. Not one cadence, cap or bound is
+   typed into the words a reader sees: the header sentence itself is built in this block, from these
+   constants and the stamps the database holds, so changing a cadence changes the page with it. */
+const ADTOOL_CAMPAIGN_WATCH_MIN = 10;          // a watch outlives the last read by this many minutes
+const ADTOOL_CAMPAIGN_WATCH_EVERY_MIN = 2;     // the cron slot the fast re-read rides
+const ADTOOL_CAMPAIGN_WATCH_CALLS = 150;       // ad-list GETs in one tick, every watched account together
+const ADTOOL_CAMPAIGN_WATCH_DAILY = 40000;     // ad-list GETs a day for the whole watch, fleet-wide
+const ADTOOL_CAMPAIGN_WATCH_ACCOUNTS = 3;      // watched accounts one tick will take on
+const ADTOOL_CAMPAIGN_WATCH_MS = 90000;        // wall clock for one tick, well inside its own two minutes
+const ADTOOL_CAMPAIGN_WATCH_REREAD_S = 60;     // "Re-read now", at most once this often per account
+const ADTOOL_CAMPAIGN_WATCH_ITEM_S = 30;       // one listing on demand, at most once this often
+const ADTOOL_CAMPAIGN_WATCH_KEY = 'adtool_campaign_watch_';
+const ADTOOL_CAMPAIGN_WATCH_BY_KEY = 'adtool_campaign_watch_by_';
+const ADTOOL_CAMPAIGN_WATCH_CALLS_KEY = 'adtool_campaign_watch_calls_';
+const ADTOOL_CAMPAIGN_REREAD_KEY = 'adtool_campaign_reread_at_';
+const ADTOOL_CAMPAIGN_REREAD_ITEM_KEY = 'adtool_campaign_reread_item_';
+/* the three things the header can say, and nothing else */
+const ADTOOL_CAMPAIGN_WATCH_STATES = ['watched', 'fleet', 'capped'];
+/* THE STATES THIS PAGE ACTUALLY ASKS WITH, which is what its memo has to be dropped under: the
+   whole list, the duplicated and the ones in no campaign. Its three sections are three reads of the
+   one action, so there are three and not four: 'in a campaign' is a filter the engine accepts and
+   this page never sends, and naming it here would mean two KV deletes a tick for an answer nobody
+   has ever stored. */
+const ADTOOL_CAMPAIGN_WATCH_PAGE_STATES = ['', 'multi', 'none'];
+
+function adWatchKey(acct) { return ADTOOL_CAMPAIGN_WATCH_KEY + String(acct == null ? '' : acct); }
+function adWatchByKey(acct) { return ADTOOL_CAMPAIGN_WATCH_BY_KEY + String(acct == null ? '' : acct); }
+function adWatchRereadKey(acct) { return ADTOOL_CAMPAIGN_REREAD_KEY + String(acct == null ? '' : acct); }
+function adWatchItemKey(id) { return ADTOOL_CAMPAIGN_REREAD_ITEM_KEY + String(id == null ? '' : id); }
+/* the calls are counted against a UTC day, the same day eBay's own allowance resets on */
+function adWatchDayKey(nowMs) { return ADTOOL_CAMPAIGN_WATCH_CALLS_KEY + new Date(Number(nowMs) || Date.now()).toISOString().slice(0, 10); }
+/* a watch is an EXPIRY, never a switch: the page keeps it alive by asking, and a closed page lets it
+   lapse on its own. Nothing has to be turned off, so a page nobody closed properly cannot leave the
+   fast re-read running for ever. */
+function adWatchUntil(nowMs, mins) {
+  const now = Number(nowMs) || Date.now();
+  const m = Number(mins); return now + (m > 0 ? m : ADTOOL_CAMPAIGN_WATCH_MIN) * 60000;
+}
+function adWatchAlive(value, nowMs) {
+  const until = Number(String(value == null ? '' : value).trim());
+  if (!isFinite(until) || until <= 0) return false;
+  return until > (Number(nowMs) || Date.now());
+}
+/* the accounts a tick should re-read, newest watch first and capped, out of the raw portal_config
+   rows. The watch keys share a prefix with the "who" and "calls" keys, so those two are named and
+   skipped rather than left to a pattern that an account name could one day collide with. */
+function adWatchAccounts(rows, nowMs, cap) {
+  const now = Number(nowMs) || Date.now();
+  const n = Number(cap) > 0 ? Number(cap) : ADTOOL_CAMPAIGN_WATCH_ACCOUNTS;
+  const out = [];
+  for (const r of (rows || [])) {
+    const key = String((r && r.key) || '');
+    if (key.indexOf(ADTOOL_CAMPAIGN_WATCH_KEY) !== 0) continue;
+    const rest = key.slice(ADTOOL_CAMPAIGN_WATCH_KEY.length);
+    if (!rest || rest.indexOf('by_') === 0 || rest.indexOf('calls_') === 0) continue;
+    if (!adWatchAlive(r && r.value, now)) continue;
+    out.push({ account: rest, until: Number(String((r && r.value) || '').trim()) });
+  }
+  out.sort((a, b) => (b.until - a.until) || String(a.account).localeCompare(String(b.account)));
+  return out.slice(0, n).map(x => x.account);
+}
+/* what is left of the day's allowance. Null is never 0 here: an unreadable counter reads as nothing
+   spent, because refusing to re-read on a figure we cannot parse would be a page that silently
+   stopped being live. */
+function adWatchDailyLeft(used, cap) {
+  const c = Number(cap) > 0 ? Number(cap) : ADTOOL_CAMPAIGN_WATCH_DAILY;
+  const u = Number(used); return Math.max(0, c - (isFinite(u) && u > 0 ? u : 0));
+}
+/* a by-hand re-read is bounded per account and per listing, so a held button cannot turn one
+   person's page into a faster poller than the job itself */
+function adWatchBound(stamp, nowMs, seconds) {
+  const now = Number(nowMs) || Date.now();
+  const s = Number(seconds) > 0 ? Number(seconds) : 0;
+  const at = Number(String(stamp == null ? '' : stamp).trim());
+  if (!isFinite(at) || at <= 0 || !s) return { ok: true, wait_s: null };
+  const left = Math.ceil((at + s * 1000 - now) / 1000);
+  return left > 0 ? { ok: false, wait_s: left } : { ok: true, wait_s: null };
+}
+/* a stored UTC stamp as the UK clock reads it, to the second. The hour and the minute come from the
+   one DST-correct helper; the seconds are the same in every zone. */
+function adWatchClock(stamp) {
+  const s = String(stamp == null ? '' : stamp).trim().replace(' ', 'T');
+  if (!s) return '';
+  const ms = Date.parse(s.length <= 19 ? s + 'Z' : s);
+  if (!isFinite(ms)) return '';
+  const p = adtUkParts(ms);
+  return String(p.hour).padStart(2, '0') + ':' + String(p.minute).padStart(2, '0') + ':' +
+    String(new Date(ms).getUTCSeconds()).padStart(2, '0');
+}
+function adWatchEveryText(min, rough) {
+  const m = Number(min);
+  if (!(m > 0)) return '';
+  const pre = rough ? 'roughly every ' : 'every ';
+  if (m < 60) return pre + Math.round(m) + ' min';
+  const h = Math.round(m / 60);
+  return pre + (h === 1 ? 'hour' : h + ' hours');
+}
+/* how long the hourly pass takes to come round to a given account again: the slot it rides, times
+   the number of ticks the fleet's running campaigns need at this account rate. It is worked out and
+   never asserted, so the sentence follows the rotation rate rather than describing an old one. */
+function adWatchFleetMin(inp) {
+  const i = inp || {};
+  const slot = Number(i.slot_min), per = Number(i.per_tick), accts = Number(i.accounts), camps = Number(i.campaigns);
+  if (!(slot > 0) || !(per > 0) || !(accts > 0) || !(camps > 0)) return null;
+  return slot * Math.max(1, Math.ceil(camps / (accts * per)));
+}
+/* THE HEADER. One sentence, three states, every figure a constant or a stamp — see the block note. */
+function adWatchHeader(inp) {
+  const i = inp || {};
+  const acct = String(i.account == null ? '' : i.account).trim();
+  const everyMin = Number(i.every_min) > 0 ? Number(i.every_min) : null;
+  const fleetMin = Number(i.fleet_min) > 0 ? Number(i.fleet_min) : null;
+  const fleetTxt = adWatchEveryText(fleetMin, true);
+  const last = String(i.last_clock == null ? '' : i.last_clock).trim();
+  const state = i.capped ? 'capped' : (acct ? 'watched' : 'fleet');
+  const parts = [];
+  if (state === 'capped') {
+    parts.push('today’s watch allowance used');
+    if (fleetTxt) parts.push('fleet readings ' + fleetTxt);
+  } else if (state === 'watched') {
+    parts.push(acct + ' re-read from eBay ' + (adWatchEveryText(everyMin) || 'on its own slot') + ' while this page is open');
+  } else {
+    parts.push('all accounts: readings ' + (fleetTxt || 'on the hourly pass') + ', pick an account to watch it');
+  }
+  if (state !== 'fleet') parts.push(last ? 'last ' + last : 'no reading on record yet');
+  if (state === 'watched' && fleetTxt) parts.push('fleet ' + fleetTxt);
+  /* the tooltip carries what the sentence has no room for, including whatever the day-grain
+     freshness had to say, so nothing a reader used to be told is lost by this header owning the slot */
+  const note = String(i.note == null ? '' : i.note).trim();
+  const title = [
+    i.last_read_at ? 'the newest reading we hold was taken ' + String(i.last_read_at) : 'we hold no reading for this account yet',
+    'a watch lasts ' + ADTOOL_CAMPAIGN_WATCH_MIN + ' minutes past the last time this page asked',
+    Number(i.used) >= 0 ? Math.round(Number(i.used)) + ' of ' + ADTOOL_CAMPAIGN_WATCH_DAILY + ' watch readings used today' : '',
+    note,
+  ].filter(Boolean).join(' · ');
+  return {
+    state: state, parts: parts, text: parts.join(' · '), title: title,
+    account: acct || null, every_min: state === 'watched' ? everyMin : null, fleet_min: fleetMin,
+    last_read_at: String(i.last_read_at == null ? '' : i.last_read_at) || null, last_clock: last || null,
+    watch_minutes: ADTOOL_CAMPAIGN_WATCH_MIN, capped: state === 'capped',
+    allowance: { used: Number(i.used) >= 0 ? Number(i.used) : null, cap: ADTOOL_CAMPAIGN_WATCH_DAILY, left: Number(i.left) >= 0 ? Number(i.left) : null },
+    watched_by: String(i.watched_by == null ? '' : i.watched_by) || null,
+  };
+}
+/* what a by-hand re-read tells the person who pressed it. The engine owns these words because every
+   figure in them is one of the constants above. */
+function adWatchRereadNote(inp) {
+  const i = inp || {}, one = (n, s, p) => (Math.round(Number(n) || 0) === 1 ? s : p);
+  if (Number(i.wait_s) > 0) return 'That was read moments ago. Ask again in ' + Math.ceil(Number(i.wait_s)) + ' ' + one(Math.ceil(Number(i.wait_s)), 'second', 'seconds') + '.';
+  if (i.capped) return 'Today’s watch allowance is used, so nothing was asked of eBay. The hourly fleet reading still runs.';
+  if (i.no_campaigns) return 'Nothing to read: no running campaign of ours holds this ' + (i.listing_id ? 'listing' : 'account') + ' at the moment.';
+  const camps = Math.round(Number(i.campaigns_read) || 0), calls = Math.round(Number(i.calls) || 0);
+  const ch = i.changes || {};
+  const moved = Math.round(Number(ch.added) || 0) + Math.round(Number(ch.removed) || 0) + Math.round(Number(ch.bid_moved) || 0);
+  const bits = ['Read ' + camps + ' ' + one(camps, 'campaign', 'campaigns') + ' from eBay in ' + calls + ' ' + one(calls, 'call', 'calls')];
+  if (i.listing_id) bits.push('for item ' + String(i.listing_id));
+  bits.push(moved ? moved + ' ' + one(moved, 'change', 'changes') + ' found' : 'nothing had changed');
+  return bits.join(', ') + '.';
+}
+/* the tick's own note, naming the accounts, the calls and what moved */
+function adWatchTickNote(inp) {
+  const i = inp || {}, accts = (i.accounts || []).map(a => String(a)).filter(Boolean);
+  const ch = i.changes || {};
+  const moved = Math.round(Number(ch.added) || 0) + Math.round(Number(ch.removed) || 0) + Math.round(Number(ch.bid_moved) || 0);
+  if (!accts.length) return 'no account is being watched, so nothing was asked of eBay';
+  return 'watched ' + accts.join(', ') + ' · campaigns read ' + Math.round(Number(i.campaigns_read) || 0) +
+    ' · ad-list reads ' + Math.round(Number(i.calls) || 0) + ' of ' + ADTOOL_CAMPAIGN_WATCH_CALLS +
+    ' this tick · ' + moved + ' change(s) found (' + Math.round(Number(ch.added) || 0) + ' in, ' +
+    Math.round(Number(ch.removed) || 0) + ' out, ' + Math.round(Number(ch.bid_moved) || 0) + ' bid) · ' +
+    Math.round(Number(i.used) || 0) + ' of ' + ADTOOL_CAMPAIGN_WATCH_DAILY + ' reads used today' +
+    (i.capped ? ' · the allowance is used, so the fast re-read has stopped until tomorrow' : '') +
+    (i.starved && i.starved.length ? ' · out of budget before: ' + i.starved.join(', ') : '');
+}
+/* THE PAGE'S MEMO, named rather than guessed. This page is asked for with an account and one of
+   three states, so the entries a re-read makes stale can be named exactly: both profit classes, the
+   account just read and the all-accounts answer, every state the page asks with. A search term is
+   left to its own short time to live, because naming those would mean guessing what was typed. */
+function adWatchCachePayloads(acct) {
+  const a = String(acct == null ? '' : acct).trim(), out = [];
+  for (const account of (a ? [a, ''] : [''])) {
+    for (const state of ADTOOL_CAMPAIGN_WATCH_PAGE_STATES) out.push({ account: account, state: state });
+  }
+  return out;
+}
+/* the campaign ids out of find_campaign_by_ad_reference. One call names every campaign a listing is
+   advertised in; the shape is read defensively because an answer we cannot parse must read as "we
+   found none" and never as a campaign id of nought. */
+function adWatchCampaignIds(body) {
+  let j = body;
+  if (typeof body === 'string') { try { j = JSON.parse(body); } catch (e) { return []; } }
+  if (!j || typeof j !== 'object') return [];
+  const list = Array.isArray(j) ? j : (Array.isArray(j.campaigns) ? j.campaigns : []);
+  const out = [], seen = {};
+  for (const c of list) {
+    const id = String((c && (c.campaignId != null ? c.campaignId : c.campaign_id)) || '').trim();
+    if (!id || seen[id]) continue;
+    seen[id] = 1; out.push(id);
+  }
+  return out;
+}
+/* ADTOOL-WATCH-PURE-END */
+
+/* The tick ceiling is the BUDGET'S OWN when it carries one. The hourly rotation leaves it unset and
+   keeps ADS_ITEM_FETCH_CAP; the two-minute watch above passes a tighter one, and what is left of the
+   day's allowance can tighten it further still, so the two readers share this one gate rather than
+   each counting its own calls. */
+function adsBudgetSpent(b) { return !b || b.fetches >= (Number(b.cap) > 0 ? Number(b.cap) : ADS_ITEM_FETCH_CAP) || Date.now() >= b.until; }
 /* the ad report’s own day keys are UTC days (the report is asked for from 00:00Z to 23:59Z), so the
    money window is counted the same way and never in Pakistan time */
 function adsDayBack(n) { return new Date(Date.now() - (Number(n) || 0) * 86400000).toISOString().slice(0, 10); }
@@ -3002,139 +3231,13 @@ async function adsFetchAdList(tok, acct, cid, budget) {
 async function adsItems(env) {
   /* one budget for the whole tick, closed over by every account below */
   const budget = { fetches: 0, until: Date.now() + ADS_ITEM_TICK_MS, campaigns: 0, repaired: 0,
-    unchanged: 0, missing: 0, dup_listings: 0, truncated: 0, starved: [] };
+    unchanged: 0, missing: 0, dup_listings: 0, truncated: 0, added: 0, removed: 0, bid_moved: 0, starved: [] };
   /* before the FIRST query, because the very first one names ads_synced_at. perAccount catches per
      account, so a missing column here would have failed every account in turn and never reached the
      ensureTruthSchema call further down, which is the one that would have fixed it. */
   await ensureAdsReadingColumns(env);
   await perAccount(env, 'adsItems', async (acct) => {
-    if (adsBudgetSpent(budget)) { budget.starved.push(acct); return; }
-    const camps = await env.DB.prepare(
-      "SELECT campaign_id, name, funding_model, ads_synced_at FROM campaigns WHERE account = ?1 AND (status LIKE '%RUNNING%' OR status = 'ENDING_SOON') ORDER BY campaign_id LIMIT 600"
-    ).bind(acct).all();
-    const running = (camps.results || []);
-    if (!running.length) return;
-    /* money first: what each of this account’s campaigns spent over the last 2 finished days, from
-       the campaign-level report rows. One bounded read per account per tick. */
-    const spend = {};
-    for (const r of ((await env.DB.prepare(
-      'SELECT campaign_id, SUM(spend) AS sp FROM adtool_ads_daily WHERE account = ?1 AND day >= ?2 AND day <= ?3 GROUP BY campaign_id LIMIT 600'
-    ).bind(acct, adsDayBack(ADS_REPAIR_DAYS), adsDayBack(1)).all().catch(() => ({ results: [] }))).results || [])) spend[String(r.campaign_id)] = Number(r.sp) || 0;
-    const order = adsRotationPick(running, spend, ADS_ITEM_CAMPAIGNS_PER_TICK, ADS_ITEM_MONEY_SLOTS);
-    const tok = await ebayAccessToken(env, acct);
-    await ensureTruthSchema(env);
-    /* read once per account, not once per campaign: at 14 campaigns a tick that was 7 times the
-       D1 reads for an answer that cannot change inside one tick */
-    const truthOn = (await adtFlag(env, 'adtool_campaign_truth')) === 'on';
-
-    let done = 0;
-    for (const camp of order) {
-      if (done >= ADS_ITEM_CAMPAIGNS_PER_TICK) break;
-      if (adsBudgetSpent(budget)) { budget.starved.push(acct + ' (part way)'); break; }
-      const cid = camp.campaign_id;
-      const nm = camp.name || cid;
-      const funding = String(camp.funding_model || '');
-      done++;
-
-      const got = await adsFetchAdList(tok, acct, cid, budget);
-      if (!got.ok) continue;
-      budget.campaigns++;
-      if (got.truncated) budget.truncated++;
-
-      /* THE CORE FIX: one governing record per listing, chosen by precedence and never by arrival
-         order, so an ARCHIVED record can no longer overwrite a live one. */
-      const merged = adMergeAds(got.ads);
-      const now = merged.now;
-      budget.dup_listings += merged.duplicate_listings;
-
-      const prevRs = await env.DB.prepare('SELECT listing_id, bid_pct, ad_status FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).all();
-      const prev = {}, prevSt = {};
-      for (const row of (prevRs.results || [])) { prev[row.listing_id] = String(row.bid_pct || ''); prevSt[row.listing_id] = row.ad_status == null ? '' : String(row.ad_status); }
-      const first = Object.keys(prev).length === 0;
-
-      const added = Object.keys(now).filter(l => !(l in prev));
-      /* fix 5: a short answer cannot say what left. Nothing is removed from a truncated answer. */
-      const removed = got.truncated ? [] : Object.keys(prev).filter(l => !(l in now));
-      const bidMoved = Object.keys(now).filter(l => (l in prev) && prev[l] !== now[l].bid);
-
-      if (!first && (added.length || removed.length || bidMoved.length)) {
-        const sample = ids => ids.length ? ' (' + ids.slice(0, 3).join(', ') + (ids.length > 3 ? ', …' : '') + ')' : '';
-        const parts = [];
-        if (added.length) parts.push(added.length + ' item(s) added' + sample(added));
-        if (removed.length) parts.push(removed.length + ' removed' + sample(removed));
-        if (bidMoved.length) parts.push(bidMoved.length + ' bid change(s)' + sample(bidMoved));
-        const msg = '🔵 Campaign items changed on eBay · ' + acct + ' · "' + nm + '" — ' + parts.join(' · ') +
-          '. (Changed on eBay — the portal cannot see who.)';
-        await env.DB.prepare(
-          "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'items', ?4, ?5, '', datetime('now'))"
-        ).bind(acct, nm, added.concat(removed).slice(0, 5).join(','), removed.length + ' out', added.length + ' in / ' + bidMoved.length + ' bid').run();
-        await queueNotify(env, 'advertising', 'Campaign items', msg, 'engine:campitems:' + acct + ':' + cid);
-      }
-
-      /* TRUTH v2 WO-09: a listing newly LIVE in a CPC campaign starts the 72-hour keyword-doc
-         clock for Zain. `first` (whole campaign never synced) is the baseline — memberships are
-         recorded, no events, no task flood. Dedupe: one event per listing per 30 days. */
-      if (funding === 'COST_PER_CLICK' && !first && added.length) {
-        for (const lid of added) {
-          const recent = await env.DB.prepare(
-            "SELECT 1 AS x FROM cpc_live_events WHERE listing_id = ?1 AND live_at > datetime('now', '-30 days') LIMIT 1"
-          ).bind(lid).first();
-          if (recent) continue;
-          const it = await env.DB.prepare('SELECT title FROM items_api WHERE item_id = ?1').bind(lid).first();
-          const t = await env.DB.prepare(
-            "INSERT INTO keyword_tasks (kind, account, listing_id, campaign_id, campaign_name, title, assignee, opens_at, due_at, live_at) " +
-            "VALUES ('KEYWORD_DOC', ?1, ?2, ?3, ?4, ?5, ?6, datetime('now', '+72 hours'), datetime('now', '+96 hours'), datetime('now'))"
-          ).bind(acct, lid, cid, nm, 'Upload keywords doc — ' + String((it && it.title) || lid).slice(0, 120) + ' (' + acct + ')',
-            'm98mfour@gmail.com').run();
-          await env.DB.prepare(
-            "INSERT INTO cpc_live_events (account, listing_id, campaign_id, live_at, task_id) VALUES (?1, ?2, ?3, datetime('now'), ?4)"
-          ).bind(acct, lid, cid, Number(t.meta && t.meta.last_row_id) || 0).run();
-        }
-      }
-
-      /* ADTOOL P2: every change of an ad's state inside this campaign becomes an event (flag-gated; a
-         campaign's first-ever sync is a baseline, not a flood of 'added' events) */
-      if (!first && truthOn) {
-        try { await adtoolAdEventsWrite(env, acct, cid, prevSt, now); } catch (e) { await ctx_setSync(env, 'adtoolAdEvents', acct, String(e && e.message || e).slice(0, 200)); }
-      }
-      const stmts = [];
-      for (const lid of added) {
-        stmts.push(env.DB.prepare(
-          "INSERT INTO campaign_ads (account, campaign_id, listing_id, ad_id, bid_pct, ad_status, ad_group, ad_records, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now')) " +
-          "ON CONFLICT(account, campaign_id, listing_id) DO UPDATE SET ad_id = ?4, bid_pct = ?5, ad_status = ?6, ad_group = ?7, ad_records = ?8, synced_at = datetime('now')"
-        ).bind(acct, cid, lid, now[lid].ad_id, now[lid].bid, now[lid].st, now[lid].grp, now[lid].records));
-      }
-      /* status/bid updates for every row still present — a CPC pause must land even when the
-         membership itself did not change */
-      for (const lid of Object.keys(now)) {
-        if (added.indexOf(lid) >= 0) continue;
-        stmts.push(env.DB.prepare(
-          "UPDATE campaign_ads SET bid_pct = ?4, ad_id = ?5, ad_status = ?6, ad_group = ?7, ad_records = ?8, synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3"
-        ).bind(acct, cid, lid, now[lid].bid, now[lid].ad_id, now[lid].st, now[lid].grp, now[lid].records));
-      }
-      for (const lid of removed) {
-        stmts.push(env.DB.prepare('DELETE FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3').bind(acct, cid, lid));
-      }
-      for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
-      await env.DB.prepare("UPDATE campaigns SET ads_synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2").bind(acct, cid).run();
-      if (got.truncated) {
-        await ctx_setSync(env, 'adsItemsTruncated', acct, 'campaign ' + cid + ': eBay reported ' + String(got.total) +
-          ' ads and the two pages carried ' + got.ads.length + ', so what was seen was written and nothing was removed. ' +
-          'Raise the page count before this campaign can be trusted to say what left it.');
-      }
-    }
-
-    const fixed = await adsRepairPass(env, acct, tok, budget, truthOn);
-    budget.repaired += fixed.corrected;
-    budget.unchanged += fixed.unchanged;
-    budget.missing += fixed.missing;
-
-    await env.DB.prepare(
-      "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('adsItems', ?1, ?2, datetime('now'), '') " +
-      "ON CONFLICT(job, account) DO UPDATE SET cursor = ?2, last_ok = datetime('now'), last_error = ''"
-    ).bind(acct, 'read ' + done + ' of ' + running.length + ' running campaigns · money first').run();
-
-    await dupSweep(env, acct);
+    await adsItemsAccount(env, acct, budget, { job: 'adsItems' });
   });
   await ctx_setSync(env, 'adsItemsTick', '', 'campaigns read ' + budget.campaigns + ' · ad-list reads ' + budget.fetches +
     ' of ' + ADS_ITEM_FETCH_CAP + ' · listings with more than one ad record ' + budget.dup_listings +
@@ -3143,6 +3246,179 @@ async function adsItems(env) {
     (budget.starved.length ? ' · out of budget before: ' + budget.starved.join(', ') : ' · every account inside budget'));
 }
 
+/* ══ ONE READER, AND SINCE 14 NOVEMBER TWO CALLERS ══════════════════════════════════════════════
+   What used to be the body of the loop above is these two functions, lifted out WITHOUT a second
+   copy. The hourly pass over the fleet (adsItems, every quarter hour, fourteen campaigns an account)
+   and the two-minute re-read of the one account somebody is looking at (adsItemsWatched) are now two
+   callers of the same reader, and the on-demand re-read of a single listing is a third caller of the
+   per-campaign half. THERE IS NO SECOND READER ON PURPOSE: the merge and its precedence, the
+   truncation rule that refuses to delete a membership out of a short answer, the ad-state events, the
+   72-hour keyword clock and the writes themselves happen in exactly one place, so a fast page and an
+   hourly page cannot hold two different answers about one ad.
+   Everything either caller changes is in `opts`: which campaigns (all of them, or the rotation's
+   share), whether the money-beats-status repair and the duplicate sweep ride along, and the job name
+   the per-account row is written under. Nothing new is ever SENT to eBay by any of it: adsFetchAdList
+   is a GET and the only writes are to our own tables. */
+async function adsItemsAccount(env, acct, budget, opts) {
+  const o = opts || {};
+  const job = String(o.job || 'adsItems');
+  const perTick = Number(o.per_tick) > 0 ? Number(o.per_tick) : ADS_ITEM_CAMPAIGNS_PER_TICK;
+  const out = { account: acct, read: 0, running: 0, added: 0, removed: 0, bid_moved: 0, calls: 0 };
+  const spent0 = budget.fetches;
+  if (adsBudgetSpent(budget)) { budget.starved.push(acct); return out; }
+  const camps = await env.DB.prepare(
+    "SELECT campaign_id, name, funding_model, ads_synced_at FROM campaigns WHERE account = ?1 AND (status LIKE '%RUNNING%' OR status = 'ENDING_SOON') ORDER BY campaign_id LIMIT 600"
+  ).bind(acct).all();
+  /* the watched account follows its PAY-PER-CLICK campaigns: those are the ones a bid, a pause or a
+     removal moves between two ticks, and they are the ones with an ad list to read in the first
+     place. The hourly pass leaves this unset and reads every running campaign as it always has. */
+  const running = (camps.results || []).filter(c => !o.cpc_only || String(c.funding_model || '') === 'COST_PER_CLICK');
+  out.running = running.length;
+  if (!running.length) return out;
+  /* money first: what each of this account’s campaigns spent over the last 2 finished days, from
+     the campaign-level report rows. One bounded read per account per tick. */
+  const spend = {};
+  for (const r of ((await env.DB.prepare(
+    'SELECT campaign_id, SUM(spend) AS sp FROM adtool_ads_daily WHERE account = ?1 AND day >= ?2 AND day <= ?3 GROUP BY campaign_id LIMIT 600'
+  ).bind(acct, adsDayBack(ADS_REPAIR_DAYS), adsDayBack(1)).all().catch(() => ({ results: [] }))).results || [])) spend[String(r.campaign_id)] = Number(r.sp) || 0;
+  const order = adsRotationPick(running, spend, perTick, ADS_ITEM_MONEY_SLOTS);
+  const tok = await ebayAccessToken(env, acct);
+  await ensureTruthSchema(env);
+  /* read once per account, not once per campaign: at 14 campaigns a tick that was 7 times the
+     D1 reads for an answer that cannot change inside one tick */
+  const truthOn = (await adtFlag(env, 'adtool_campaign_truth')) === 'on';
+
+  let done = 0;
+  for (const camp of order) {
+    if (done >= perTick) break;
+    if (adsBudgetSpent(budget)) { budget.starved.push(acct + ' (part way)'); break; }
+    done++;
+    const got = await adsItemsCampaign(env, acct, camp, tok, budget, truthOn);
+    out.added += got.added; out.removed += got.removed; out.bid_moved += got.bid_moved;
+  }
+  out.read = done;
+
+  if (o.repair !== false) {
+    const fixed = await adsRepairPass(env, acct, tok, budget, truthOn);
+    budget.repaired += fixed.corrected;
+    budget.unchanged += fixed.unchanged;
+    budget.missing += fixed.missing;
+  }
+
+  await env.DB.prepare(
+    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES (?1, ?2, ?3, datetime('now'), '') " +
+    "ON CONFLICT(job, account) DO UPDATE SET cursor = ?3, last_ok = datetime('now'), last_error = ''"
+  ).bind(job, acct, 'read ' + done + ' of ' + running.length + (o.cpc_only ? ' running pay-per-click campaigns · the account being watched' : ' running campaigns · money first')).run();
+
+  if (o.dup_sweep !== false) await dupSweep(env, acct);
+  out.calls = budget.fetches - spent0;
+  return out;
+}
+
+/* ONE CAMPAIGN'S ADS, read from eBay and written to our own tables. The third caller is the
+   on-demand re-read of a single listing, which finds the listing's campaigns from eBay and then
+   comes through here for each of them, so a listing the owner has just changed is exact within
+   seconds by the very same path the jobs use. */
+async function adsItemsCampaign(env, acct, camp, tok, budget, truthOn) {
+  const cid = String((camp && camp.campaign_id) || '');
+  const nm = (camp && camp.name) || cid;
+  const funding = String((camp && camp.funding_model) || '');
+  const out = { campaign_id: cid, read: false, added: 0, removed: 0, bid_moved: 0, truncated: false };
+  if (!cid) return out;
+
+  const got = await adsFetchAdList(tok, acct, cid, budget);
+  if (!got.ok) return out;                               // 4xx: rule-based campaign, no ad list
+  out.read = true;
+  budget.campaigns++;
+  if (got.truncated) { budget.truncated++; out.truncated = true; }
+
+  /* THE CORE FIX: one governing record per listing, chosen by precedence and never by arrival
+     order, so an ARCHIVED record can no longer overwrite a live one. */
+  const merged = adMergeAds(got.ads);
+  const now = merged.now;
+  budget.dup_listings += merged.duplicate_listings;
+
+  const prevRs = await env.DB.prepare('SELECT listing_id, bid_pct, ad_status FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).all();
+  const prev = {}, prevSt = {};
+  for (const row of (prevRs.results || [])) { prev[row.listing_id] = String(row.bid_pct || ''); prevSt[row.listing_id] = row.ad_status == null ? '' : String(row.ad_status); }
+  const first = Object.keys(prev).length === 0;
+
+  const added = Object.keys(now).filter(l => !(l in prev));
+  /* fix 5: a short answer cannot say what left. Nothing is removed from a truncated answer. */
+  const removed = got.truncated ? [] : Object.keys(prev).filter(l => !(l in now));
+  const bidMoved = Object.keys(now).filter(l => (l in prev) && prev[l] !== now[l].bid);
+  if (!first) {
+    out.added = added.length; out.removed = removed.length; out.bid_moved = bidMoved.length;
+    budget.added += added.length; budget.removed += removed.length; budget.bid_moved += bidMoved.length;
+  }
+
+  if (!first && (added.length || removed.length || bidMoved.length)) {
+    const sample = ids => ids.length ? ' (' + ids.slice(0, 3).join(', ') + (ids.length > 3 ? ', …' : '') + ')' : '';
+    const parts = [];
+    if (added.length) parts.push(added.length + ' item(s) added' + sample(added));
+    if (removed.length) parts.push(removed.length + ' removed' + sample(removed));
+    if (bidMoved.length) parts.push(bidMoved.length + ' bid change(s)' + sample(bidMoved));
+    const msg = '🔵 Campaign items changed on eBay · ' + acct + ' · "' + nm + '" — ' + parts.join(' · ') +
+      '. (Changed on eBay — the portal cannot see who.)';
+    await env.DB.prepare(
+      "INSERT INTO campaign_events (account, campaign, item_id, change_type, old, new, actor, at) VALUES (?1, ?2, ?3, 'items', ?4, ?5, '', datetime('now'))"
+    ).bind(acct, nm, added.concat(removed).slice(0, 5).join(','), removed.length + ' out', added.length + ' in / ' + bidMoved.length + ' bid').run();
+    await queueNotify(env, 'advertising', 'Campaign items', msg, 'engine:campitems:' + acct + ':' + cid);
+  }
+
+  /* TRUTH v2 WO-09: a listing newly LIVE in a CPC campaign starts the 72-hour keyword-doc
+     clock for Zain. `first` (whole campaign never synced) is the baseline — memberships are
+     recorded, no events, no task flood. Dedupe: one event per listing per 30 days. */
+  if (funding === 'COST_PER_CLICK' && !first && added.length) {
+    for (const lid of added) {
+      const recent = await env.DB.prepare(
+        "SELECT 1 AS x FROM cpc_live_events WHERE listing_id = ?1 AND live_at > datetime('now', '-30 days') LIMIT 1"
+      ).bind(lid).first();
+      if (recent) continue;
+      const it = await env.DB.prepare('SELECT title FROM items_api WHERE item_id = ?1').bind(lid).first();
+      const t = await env.DB.prepare(
+        "INSERT INTO keyword_tasks (kind, account, listing_id, campaign_id, campaign_name, title, assignee, opens_at, due_at, live_at) " +
+        "VALUES ('KEYWORD_DOC', ?1, ?2, ?3, ?4, ?5, ?6, datetime('now', '+72 hours'), datetime('now', '+96 hours'), datetime('now'))"
+      ).bind(acct, lid, cid, nm, 'Upload keywords doc — ' + String((it && it.title) || lid).slice(0, 120) + ' (' + acct + ')',
+        'm98mfour@gmail.com').run();
+      await env.DB.prepare(
+        "INSERT INTO cpc_live_events (account, listing_id, campaign_id, live_at, task_id) VALUES (?1, ?2, ?3, datetime('now'), ?4)"
+      ).bind(acct, lid, cid, Number(t.meta && t.meta.last_row_id) || 0).run();
+    }
+  }
+
+  /* ADTOOL P2: every change of an ad's state inside this campaign becomes an event (flag-gated; a
+     campaign's first-ever sync is a baseline, not a flood of 'added' events) */
+  if (!first && truthOn) {
+    try { await adtoolAdEventsWrite(env, acct, cid, prevSt, now); } catch (e) { await ctx_setSync(env, 'adtoolAdEvents', acct, String(e && e.message || e).slice(0, 200)); }
+  }
+  const stmts = [];
+  for (const lid of added) {
+    stmts.push(env.DB.prepare(
+      "INSERT INTO campaign_ads (account, campaign_id, listing_id, ad_id, bid_pct, ad_status, ad_group, ad_records, synced_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now')) " +
+      "ON CONFLICT(account, campaign_id, listing_id) DO UPDATE SET ad_id = ?4, bid_pct = ?5, ad_status = ?6, ad_group = ?7, ad_records = ?8, synced_at = datetime('now')"
+    ).bind(acct, cid, lid, now[lid].ad_id, now[lid].bid, now[lid].st, now[lid].grp, now[lid].records));
+  }
+  /* status/bid updates for every row still present — a CPC pause must land even when the
+     membership itself did not change */
+  for (const lid of Object.keys(now)) {
+    if (added.indexOf(lid) >= 0) continue;
+    stmts.push(env.DB.prepare(
+      "UPDATE campaign_ads SET bid_pct = ?4, ad_id = ?5, ad_status = ?6, ad_group = ?7, ad_records = ?8, synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3"
+    ).bind(acct, cid, lid, now[lid].bid, now[lid].ad_id, now[lid].st, now[lid].grp, now[lid].records));
+  }
+  for (const lid of removed) {
+    stmts.push(env.DB.prepare('DELETE FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3').bind(acct, cid, lid));
+  }
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  await env.DB.prepare("UPDATE campaigns SET ads_synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2").bind(acct, cid).run();
+  if (got.truncated) {
+    await ctx_setSync(env, 'adsItemsTruncated', acct, 'campaign ' + cid + ': eBay reported ' + String(got.total) +
+      ' ads and the two pages carried ' + got.ads.length + ', so what was seen was written and nothing was removed. ' +
+      'Raise the page count before this campaign can be trusted to say what left it.');
+  }
+  return out;
+}
 /* Fix 3, money beats status. A listing eBay BILLED inside a campaign cannot be archived in that
    campaign, so for the last ADS_REPAIR_DAYS finished days every campaign_ads row that reads
    ARCHIVED against money is re-read from eBay AT ONCE and taken from the live answer through
@@ -3223,6 +3499,189 @@ async function adsItemsNet(env) {
   await ctx_setSync(env, 'adsItemsNet', '', 'the dedicated ad-membership slot has not landed for ' + ADS_ITEM_NET_MINUTES +
     ' minutes, so the 15-minute slot ran it instead. Check that the cron trigger is registered.');
   await adsItems(env);
+}
+
+/* ══ THE TWO-MINUTE RE-READ OF A WATCHED ACCOUNT (owner, 14 Nov 2026) ═══════════════════════════
+   Rides the sampler's own two-minute slot, SECOND and never first: the sampler ahead of it can pause
+   an ad on eBay and must never be the job a packed slot starves, while this one only reads. runJob's
+   per-name lease is THE ONE LOCK, so a pass still in flight when the next turn comes round is never
+   doubled.
+   It reads the SAME way the hourly pass does, through adsItemsAccount, with its own budget: the
+   per-tick ceiling, the clock, and whatever is left of the day's allowance, whichever is smallest.
+   The repair pass and the duplicate sweep stay with the hourly pass: both cost more eBay calls or
+   more D1 work than a two-minute turn should, and neither is what a person watching one account for
+   live changes is waiting on.
+   Past the daily cap it stops and writes down that it has, which is the same figure the page reads
+   back to say "today's watch allowance used". */
+async function adsItemsWatched(env) {
+  const now = Date.now();
+  const cfg = (await env.DB.prepare(
+    "SELECT key, value FROM portal_config WHERE key LIKE 'adtool_campaign_watch%' LIMIT 200"
+  ).all().catch(() => ({ results: [] }))).results || [];
+  const accounts = adWatchAccounts(cfg, now, ADTOOL_CAMPAIGN_WATCH_ACCOUNTS);
+  /* NOBODY IS LOOKING: not one call, not one query more. This is the whole reason the fast re-read
+     can afford to be fast at all. */
+  if (!accounts.length) return;
+  const dayKey = adWatchDayKey(now);
+  let used = 0;
+  for (const r of cfg) if (String(r.key) === dayKey) used = Number(String(r.value || '').trim()) || 0;
+  const left = adWatchDailyLeft(used, ADTOOL_CAMPAIGN_WATCH_DAILY);
+  if (left <= 0) {
+    await ctx_setSync(env, 'adsItemsWatched', '', adWatchTickNote({ accounts: accounts, campaigns_read: 0, calls: 0, used: used, capped: true }));
+    return;
+  }
+  await ensureAdsReadingColumns(env);
+  const budget = { fetches: 0, until: now + ADTOOL_CAMPAIGN_WATCH_MS, cap: Math.min(ADTOOL_CAMPAIGN_WATCH_CALLS, left),
+    campaigns: 0, repaired: 0, unchanged: 0, missing: 0, dup_listings: 0, truncated: 0, added: 0, removed: 0, bid_moved: 0, starved: [] };
+  const done = [];
+  for (const acct of accounts) {
+    try {
+      const got = await adsItemsAccount(env, acct, budget, { job: 'adsItemsWatched', cpc_only: true,
+        per_tick: ADTOOL_CAMPAIGN_WATCH_CALLS, repair: false, dup_sweep: false });
+      done.push(acct + ' (' + got.read + ' of ' + got.running + ')');
+      /* THE PAGE'S MEMO GOES THE MOMENT SOMETHING HAS MOVED, and only then. KV is the one budget in
+         this worker counted in writes a day rather than a month, and a clear on every tick of every
+         watched account would be hundreds of them an hour for an answer that had not changed. A tick
+         that found a change drops the stored answer at once, so the next poll shows it; a tick that
+         found nothing leaves the page to its own thirty seconds, which is shorter than the gap
+         between two ticks in any case. */
+      if (got.added || got.removed || got.bid_moved) await adWatchCacheClear(env, acct);
+    } catch (e) {
+      await env.DB.prepare(
+        "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('adsItemsWatched', ?1, '', '', ?2) " +
+        'ON CONFLICT(job, account) DO UPDATE SET last_error = ?2'
+      ).bind(acct, String(e && e.message || e).slice(0, 300)).run();
+    }
+  }
+  const spentNow = await adWatchCountCalls(env, budget.fetches, used);
+  await ctx_setSync(env, 'adsItemsWatched', '', adWatchTickNote({ accounts: done.length ? done : accounts,
+    campaigns_read: budget.campaigns, calls: budget.fetches, used: spentNow,
+    changes: { added: budget.added, removed: budget.removed, bid_moved: budget.bid_moved },
+    capped: adWatchDailyLeft(spentNow, ADTOOL_CAMPAIGN_WATCH_DAILY) <= 0, starved: budget.starved }));
+}
+
+/* every ad-list GET the watch makes, counted against the UTC day in one row. The hourly pass is NOT
+   counted here: it has its own place in the allowance and its own budget, and mixing the two would
+   make the cap on the fast re-read depend on how busy the fleet was. */
+async function adWatchCountCalls(env, n, usedBefore) {
+  const calls = Math.max(0, Math.round(Number(n) || 0));
+  const before = Math.max(0, Math.round(Number(usedBefore) || 0));
+  if (!calls) return before;
+  await env.DB.prepare(
+    "INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) " +
+    "ON CONFLICT(key) DO UPDATE SET value = CAST((CAST(value AS INTEGER) + ?3) AS TEXT), updated_at = datetime('now')"
+  ).bind(adWatchDayKey(Date.now()), String(calls), calls).run().catch(() => null);
+  return before + calls;
+}
+
+/* HOW OFTEN A JOB REALLY GETS A TURN, read off the cron map itself rather than asserted beside it.
+   The header on Where each listing advertises prints these two figures, so a slot that moved would
+   move the sentence with it instead of leaving a page telling a reader something that stopped being
+   true. Minutes for a stepped slot (every n minutes, or from minute m every n), 60 for an hourly
+   slot written as a single minute, and null for anything this cannot read as a cadence. */
+function adsSlotMinutes(fn) {
+  const m = cronMap();
+  for (const k of Object.keys(m)) {
+    if ((m[k] || []).indexOf(fn) < 0) continue;
+    const field = String(k).split(' ')[0];
+    const step = field.match(/\/(\d+)$/);
+    if (step) return Number(step[1]);
+    if (/^\d+$/.test(field)) return 60;
+    return null;
+  }
+  return null;
+}
+
+/* the watch itself: an expiry the page pushes forward with every read, and who pushed it. Written
+   BEFORE the page's memo is consulted, so a cached answer still keeps the watch alive — otherwise a
+   page sitting quietly on a cache hit would let its own watch lapse. */
+async function adWatchTouch(env, acct, user) {
+  const a = String(acct || '').trim();
+  if (!a) return null;
+  const until = adWatchUntil(Date.now(), ADTOOL_CAMPAIGN_WATCH_MIN);
+  const who = String((user && user.email) || '').slice(0, 120);
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')").bind(adWatchKey(a), String(until)),
+    env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')").bind(adWatchByKey(a), who),
+  ]).catch(() => null);
+  return { account: a, until: until, by: who || null };
+}
+
+/* THE PAGE'S MEMO, dropped by name (adWatchCachePayloads says which and why) */
+async function adWatchCacheClear(env, acct) {
+  let dropped = 0;
+  for (const pay of adWatchCachePayloads(acct)) {
+    for (const cls of ['p', 'np']) {
+      try { await env.HOT.delete(adtKvKey('adtoolItemCampaigns', cls, pay)); dropped++; } catch (e) { /* the read window catches it inside the page's own ceiling */ }
+    }
+  }
+  return dropped;
+}
+
+/* "Re-read now", and one listing on demand. Both are the SAME reader as the jobs — the account one
+   calls adsItemsAccount, the listing one asks eBay which campaigns hold that listing and then calls
+   adsItemsCampaign for each — and both are bounded, counted against the day's allowance and refused
+   once it is used. NOTHING NEW IS SENT TO EBAY: find_campaign_by_ad_reference and the ad list are
+   GETs, and the only writes are to our own tables. */
+async function adWatchReread(env, acct, listingId, user) {
+  const a = String(acct || '').trim();
+  const lid = String(listingId || '').trim();
+  if (!a) throw new Error('SAY: choose one account first, because the re-read follows the account you are working on');
+  if (lid && !/^\d{6,20}$/.test(lid)) throw new Error('SAY: that does not look like an item number');
+  const now = Date.now();
+  const boundKey = lid ? adWatchItemKey(lid) : adWatchRereadKey(a);
+  const boundS = lid ? ADTOOL_CAMPAIGN_WATCH_ITEM_S : ADTOOL_CAMPAIGN_WATCH_REREAD_S;
+  const rows = (await env.DB.prepare('SELECT key, value FROM portal_config WHERE key = ?1 OR key = ?2').bind(boundKey, adWatchDayKey(now)).all().catch(() => ({ results: [] }))).results || [];
+  let stamp = '', used = 0;
+  for (const r of rows) { if (String(r.key) === boundKey) stamp = String(r.value || ''); if (String(r.key) === adWatchDayKey(now)) used = Number(String(r.value || '').trim()) || 0; }
+  const bound = adWatchBound(stamp, now, boundS);
+  const base = { op: lid ? 'reread_listing' : 'reread', account: a, listing_id: lid || null, every_seconds: boundS,
+    by: String((user && user.email) || '') || null };
+  if (!bound.ok) return Object.assign(base, { ran: false, wait_s: bound.wait_s, calls: 0, campaigns_read: 0, campaigns_found: null, changes: null, note: adWatchRereadNote({ wait_s: bound.wait_s }), allowance: { used: used, cap: ADTOOL_CAMPAIGN_WATCH_DAILY, left: adWatchDailyLeft(used, ADTOOL_CAMPAIGN_WATCH_DAILY) } });
+  const left = adWatchDailyLeft(used, ADTOOL_CAMPAIGN_WATCH_DAILY);
+  if (left <= 0) return Object.assign(base, { ran: false, wait_s: null, calls: 0, campaigns_read: 0, campaigns_found: null, changes: null, capped: true, note: adWatchRereadNote({ capped: true }), allowance: { used: used, cap: ADTOOL_CAMPAIGN_WATCH_DAILY, left: 0 } });
+  await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')").bind(boundKey, String(now)).run().catch(() => null);
+  await ensureAdsReadingColumns(env);
+  const budget = { fetches: 0, until: now + ADTOOL_CAMPAIGN_WATCH_MS, cap: Math.min(ADTOOL_CAMPAIGN_WATCH_CALLS, left),
+    campaigns: 0, repaired: 0, unchanged: 0, missing: 0, dup_listings: 0, truncated: 0, added: 0, removed: 0, bid_moved: 0, starved: [] };
+  let found = null, read = 0;
+  if (!lid) {
+    const got = await adsItemsAccount(env, a, budget, { job: 'adsItemsWatched', cpc_only: true,
+      per_tick: ADTOOL_CAMPAIGN_WATCH_CALLS, repair: false, dup_sweep: false });
+    found = got.running; read = got.read;
+  } else {
+    /* ONE call names every campaign this listing is advertised in, which is why a single listing can
+       be made exact in seconds without re-reading the account */
+    const ref = await ebayRestFetch(env, a, 'GET', '/sell/marketing/v1/ad_campaign/find_campaign_by_ad_reference?listing_id=' + encodeURIComponent(lid));
+    budget.fetches++;
+    if (!ref || !ref.ok) throw new Error('SAY: eBay would not say which campaigns hold that listing (' + String((ref && ref.status) || 'no answer') + ')');
+    const ids = adWatchCampaignIds(ref.body);
+    found = ids.length;
+    if (ids.length) {
+      const held = (await env.DB.prepare(
+        "SELECT campaign_id, name, funding_model FROM campaigns WHERE account = ?1 AND (status LIKE '%RUNNING%' OR status = 'ENDING_SOON') AND campaign_id IN (" +
+        ids.slice(0, 50).map(() => '?').join(',') + ')'
+      ).bind(...[a].concat(ids.slice(0, 50))).all().catch(() => ({ results: [] }))).results || [];
+      if (held.length) {
+        const tok = await ebayAccessToken(env, a);
+        await ensureTruthSchema(env);
+        const truthOn = (await adtFlag(env, 'adtool_campaign_truth')) === 'on';
+        for (const camp of held) {
+          if (adsBudgetSpent(budget)) break;
+          await adsItemsCampaign(env, a, camp, tok, budget, truthOn);
+          read++;
+        }
+      }
+    }
+  }
+  const usedNow = await adWatchCountCalls(env, budget.fetches, used);
+  await adWatchCacheClear(env, a);
+  const changes = { added: budget.added, removed: budget.removed, bid_moved: budget.bid_moved };
+  return Object.assign(base, {
+    ran: true, wait_s: null, calls: budget.fetches, campaigns_read: read, campaigns_found: found, changes: changes,
+    note: adWatchRereadNote({ campaigns_read: read, calls: budget.fetches, changes: changes, listing_id: lid || null, no_campaigns: !read }),
+    allowance: { used: usedNow, cap: ADTOOL_CAMPAIGN_WATCH_DAILY, left: adWatchDailyLeft(usedNow, ADTOOL_CAMPAIGN_WATCH_DAILY) },
+  });
 }
 
 /* dup_state carries each currently-duplicated item: first_seen for the 90-minute confirmation,
@@ -7369,7 +7828,13 @@ const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunTo
   /* the campaign pages read the campaign map, which the sync refreshes every few minutes, and the finished
      day figures behind it, which move once an hour. Two minutes keeps a page flag switched off honoured
      inside the ceiling the gate above states, and still spares the owner the whole compute on every click. */
-  adtoolCampaignBoard: 120000, adtoolCampaignListings: 120000, adtoolItemCampaigns: 120000,
+  adtoolCampaignBoard: 120000, adtoolCampaignListings: 120000,
+  /* 14 Nov: THIRTY SECONDS for Where each listing advertises, because the account on it is now
+     re-read from eBay every two minutes and the page polls inside the minute. Two minutes of memo
+     would have thrown that away: a change made on eBay would have shown up to two minutes after the
+     reading that found it. The watch job drops this page's entries by name the moment it has read an
+     account, so the figure is the ceiling for a reader who is NOT watching an account. */
+  adtoolItemCampaigns: 30000,
   /* Stopped yesterday / Activated today: ONE MINUTE. Activated today is a page about today, and the
      sync writes into it every few minutes, so it has to move. Peak times only reads finished days
      and a list people keep by hand, and the two writes behind that list drop this entry themselves
@@ -9952,7 +10417,7 @@ const ADTOOL_ACTIONS_P5 = {
          itself the day somebody changes the spacing. */
       const dhCad = await adtSamplerCadenceFor(env).catch(() => adtSamplerCadence(null));
       const jobs = (await env.DB.prepare("SELECT job, MAX(started_at) AS last_start, MAX(finished_at) AS last_end, SUM(CASE WHEN status IN ('error', 'FAIL', 'killed') THEN 1 ELSE 0 END) AS bad, COUNT(*) AS runs, (SELECT status FROM adtool_jobs j2 WHERE j2.job = j.job ORDER BY started_at DESC LIMIT 1) AS last_status, (SELECT note FROM adtool_jobs j3 WHERE j3.job = j.job ORDER BY started_at DESC LIMIT 1) AS last_note, (SELECT rows_written FROM adtool_jobs j4 WHERE j4.job = j.job ORDER BY started_at DESC LIMIT 1) AS last_rows FROM adtool_jobs j GROUP BY job ORDER BY job").all()).results || [];
-      const schedules = { adtoolRollups: 'hourly :20 (+ profiles / forecast catch-up)', adtoolTruth: '05:20 UTC', adtoolProfiles: '05:20 UTC chain', adtoolForecast: '05:20 UTC chain', adtoolReport: '05:20 UTC chain', adtoolRoas: '05:20 UTC chain', adtoolAlerts: 'hourly :25', adsIntraday: dhCad.text + ' (samples)', adsReportPoll: 'every 15 min', adsSync: 'every 5 min', adsItems: 'every 15 min (:08 :23 :38 :53, its own slot)', listingSync: 'hourly :40 (category fill)' };
+      const schedules = { adtoolRollups: 'hourly :20 (+ profiles / forecast catch-up)', adtoolTruth: '05:20 UTC', adtoolProfiles: '05:20 UTC chain', adtoolForecast: '05:20 UTC chain', adtoolReport: '05:20 UTC chain', adtoolRoas: '05:20 UTC chain', adtoolAlerts: 'hourly :25', adsIntraday: dhCad.text + ' (samples)', adsReportPoll: 'every 15 min', adsSync: 'every 5 min', adsItems: 'every 15 min (:08 :23 :38 :53, its own slot)', adsItemsWatched: 'every 2 min, and only for an account somebody has open on Where each listing advertises', listingSync: 'hourly :40 (category fill)' };
       const gaps = {
         missing_report_days: (await env.DB.prepare("SELECT c.account, COUNT(*) AS days FROM (SELECT DISTINCT account FROM campaigns) c JOIN (SELECT DISTINCT date FROM ads_daily WHERE date >= '2026-08-13') d LEFT JOIN ad_report_tasks t ON t.account = c.account AND t.report_date = d.date AND t.status = 'INGESTED' WHERE t.task_id IS NULL GROUP BY c.account").all()).results || [],
         unresolved_campaign_ids: await env.DB.prepare('SELECT COUNT(DISTINCT ca.campaign_id) AS n FROM campaign_ads ca LEFT JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = ca.account AND a.campaign_id = ca.campaign_id WHERE c.campaign_id IS NULL AND a.campaign_id IS NULL').first(),
@@ -14335,6 +14800,11 @@ async function adtoolItemCampaignsCompute(env, p) {
     env.DB.prepare('SELECT d.item_id, ROUND(SUM(CASE WHEN d.day >= ?1 THEN d.spend ELSE 0 END), 2) AS spend_7d, ROUND(SUM(CASE WHEN d.day >= ?2 THEN d.spend ELSE 0 END), 2) AS spend_3d, SUM(d.units) AS units_30d FROM adtool_listing_day d WHERE d.day >= ?3 AND d.day <= ?4 GROUP BY d.item_id').bind(d7.from, d3.from, adtAddDays(today, -30), yday),
     env.DB.prepare("SELECT DISTINCT account FROM items_api WHERE status = 'ACTIVE' AND account <> '' ORDER BY account LIMIT 100"),
     env.DB.prepare("SELECT COUNT(*) AS n FROM items_api WHERE status = 'ACTIVE'" + (acct ? ' AND account = ?1' : '')).bind(...(acct ? [acct] : [])),
+    /* 14 Nov: what this page's header says is live — the watch rows and the day's watch allowance,
+       and the running-campaign count and newest reading per account. Both ride WITH the batch above
+       rather than after it, so saying what is live costs the page no extra trip. */
+    env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_campaign_watch%' LIMIT 200"),
+    env.DB.prepare("SELECT account, COUNT(*) AS camps, MAX(ads_synced_at) AS last_read FROM campaigns WHERE (status LIKE '%RUNNING%' OR status = 'ENDING_SOON') GROUP BY account LIMIT 100"),
   ]);
   const items = B[0].results || [];
   const live = {};
@@ -14410,16 +14880,54 @@ async function adtoolItemCampaignsCompute(env, p) {
   const counts = { active: rows.length, in_one: rows.filter(r => r.live_count === 1).length, in_many: rows.filter(r => r.live_count > 1).length, in_none: rows.filter(r => r.live_count === 0).length };
   const keep = rows.filter(r => state === '' || (state === 'in' ? r.live_count > 0 : state === 'none' ? r.live_count === 0 : r.live_count > 1))
     .sort((a, b) => (b.live_count - a.live_count) || (b.spend_7d - a.spend_7d) || String(a.title).localeCompare(String(b.title)));
+  /* WHAT IS LIVE, FOR THE HEADER (owner, 14 Nov). Three states and one sentence: the account this
+     page is watching is re-read from eBay on the watch job's own slot; all accounts means the hourly
+     readings and an invitation to pick one; and when the day's watch allowance is used it says so.
+     Every figure comes from the constants and the cron map, never from a phrase typed here: the
+     cadence is the minutes of the slot the job actually rides, and the fleet figure is worked out
+     from the rotation rate and the running campaigns the fleet holds. */
+  const nowMs = Date.now();
+  const wCfg = (B[6] || {}).results || [], wCamps = (B[7] || {}).results || [];
+  const wDayKey = adWatchDayKey(nowMs);
+  let wUsed = 0, wBy = '', wAlive = false;
+  for (const r of wCfg) {
+    const k = String(r.key || '');
+    if (k === wDayKey) wUsed = Number(String(r.value || '').trim()) || 0;
+    else if (acct && k === adWatchByKey(acct)) wBy = String(r.value || '');
+    else if (acct && k === adWatchKey(acct)) wAlive = adWatchAlive(r.value, nowMs);
+  }
+  let wFleetCamps = 0, wLastRead = '';
+  for (const r of wCamps) {
+    wFleetCamps += Number(r.camps) || 0;
+    if (acct && String(r.account || '') === acct) wLastRead = String(r.last_read || '');
+  }
+  const wLeft = adWatchDailyLeft(wUsed, ADTOOL_CAMPAIGN_WATCH_DAILY);
+  const wDay = await adtFresh(env, 'day');
+  const watchHead = adWatchHeader({
+    account: (acct && wAlive) ? acct : '', capped: !!(acct && wAlive && wLeft <= 0),
+    every_min: adsSlotMinutes(adsItemsWatched) || ADTOOL_CAMPAIGN_WATCH_EVERY_MIN,
+    fleet_min: adWatchFleetMin({ slot_min: adsSlotMinutes(adsItems), per_tick: ADS_ITEM_CAMPAIGNS_PER_TICK, accounts: wCamps.length, campaigns: wFleetCamps }),
+    last_read_at: wLastRead, last_clock: adWatchClock(wLastRead), used: wUsed, left: wLeft, watched_by: wBy,
+    note: String((wDay && wDay.note) || ''),
+  });
   return {
     computed_at: new Date().toISOString(),
     /* the page carries a freshness tag like every other advertising page, and the grain is the
-       finished-day one because both spend windows here end yesterday */
-    fresh: await adtFresh(env, 'day'),
+       finished-day one because both spend windows here end yesterday. Since 14 Nov it also carries
+       the watch, which is what this page's own header prints. */
+    fresh: Object.assign({}, wDay, { watch: watchHead }),
     accounts: (B[4].results || []).map(r => String(r.account)), account: acct || 'all', q, state: state || 'all',
     counts, active_counted: Number((((B[5] || {}).results || [])[0] || {}).n) || null,
     windows: { spend_7d: { from: d7.from, to: d7.to }, spend_3d: { from: d3.from, to: d3.to }, sold_30d: { from: adtAddDays(today, -30), to: yday } },
     items: keep.slice(0, 600), items_total: keep.length, items_held_back: Math.max(0, keep.length - 600),
     rules: { live: 'Being advertised means a running campaign, an active listing, and an ad that is neither stopped nor put away. It is the same test every other advertising page uses.',
+      /* the one sentence about the watch, written here so the page cannot go on printing it after
+         the cadence or the cap behind it has changed */
+      watch: 'Pick one account and its running pay-per-click campaigns are re-read from eBay ' +
+        (adWatchEveryText(adsSlotMinutes(adsItemsWatched) || ADTOOL_CAMPAIGN_WATCH_EVERY_MIN) || 'on the watch slot') +
+        ' for as long as this page keeps asking, and for ' + ADTOOL_CAMPAIGN_WATCH_MIN + ' minutes after it stops. ' +
+        'All accounts together would not fit what eBay allows in a day, so the fleet keeps its hourly readings and the watch follows the one account you are working on. ' +
+        'Re-read now takes a reading at once, at most once every ' + ADTOOL_CAMPAIGN_WATCH_REREAD_S + ' seconds an account, and one listing can be re-read on its own at most once every ' + ADTOOL_CAMPAIGN_WATCH_ITEM_S + ' seconds.',
       peak: 'Where a listing is on the peak hours list, the state beside it is the one the system wants its ad in at this hour and not a reading of eBay, which is what the campaign rows above it carry. A listing that is not on the list has none of this, which means nothing is switching it rather than that it is off.' },
     peak_listings: Object.keys(peakNow).length,
     source: 'campaign_ads, campaigns, items_api, adtool_listing_day, adtool_peak_items, adtool_peak_schedule',
@@ -14460,6 +14968,23 @@ const ADTOOL_ACTIONS_P14 = {
       await ensureAdtoolPhaseCampaignBoardRegister(ctx.env);
       await adtGate(ctx, 'adtool_page_item_campaigns');
       const pay = { account: String((p && p.account) || '').trim(), q: String((p && p.q) || '').trim(), state: String((p && p.state) || '').trim() };
+      /* THE WATCH, AND IT IS WRITTEN BEFORE THE MEMO IS CONSULTED (owner, 14 Nov). The page sends the
+         account it is showing with every read, and that pushes the watch ten minutes forward; the
+         two-minute job then re-reads that account from eBay for as long as the page keeps asking. It
+         has to happen ahead of the cache: a page sitting on a cache hit would otherwise let its own
+         watch lapse and go quiet while somebody was still looking at it. All accounts sends nothing,
+         which is the quota arithmetic in the watch block's own note. */
+      /* ONE WRITE PER POLL CYCLE, not three. The page asks this action three times (the whole list
+         and the two narrow ones) and it is the WHOLE-LIST read that carries the watch forward, so an
+         open page costs two portal_config writes a minute rather than six. */
+      if (!pay.state) await adWatchTouch(ctx.env, String((p && p.watch) || '').trim(), ctx.user);
+      const op = String((p && p.op) || '').trim();
+      if (op === 'reread' || op === 'reread_listing') {
+        /* the by-hand re-read: the same reader the jobs use, bounded, counted and never cached */
+        return adWatchReread(ctx.env, String((p && p.account) || '').trim() || String((p && p.watch) || '').trim(),
+          op === 'reread_listing' ? String((p && p.item_id) || '').trim() : '', ctx.user);
+      }
+      if (op) throw new Error('SAY: the only things this page can ask for are a reading, a re-read of the account, or a re-read of one listing');
       return adtKvMemo(ctx.env, 'adtoolItemCampaigns', adtProfitClass(ctx.user), pay, ADTOOL_KV_TTL_MS.adtoolItemCampaigns,
         () => adtoolItemCampaignsCompute(ctx.env, pay),
         (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
@@ -30338,6 +30863,9 @@ const ROUTES = {
            hand without waiting an hour, and a once-over of the days the audit found carrying a
            stale eBay vintage or a stale unpriced-order count, which sits on no cron slot (item 5) */
         adtoolRollupsCatchup, adtoolRollupOwedSeed,
+        /* the two-minute re-read of whichever account somebody has open on Where each listing
+           advertises (14 Nov): run by hand it reads every watched account at once */
+        adsItemsWatched,
         /* a once-over of the peak list, run by hand and on no cron slot: it names the campaign a
            listing is already wholly switched in, and never chooses for one in two (2 Nov) */
         adtoolPeakCampaignFill, adtoolPeakHoursSet, adtoolPeakPlan };
@@ -32293,7 +32821,7 @@ const ROUTES = {
      fires on its own, and the '@lock' lease keeps a forced run from racing a real tick. */
   runJobNow: {
     auth: 'mgmt', fn: async (p, ctx) => {
-      const jobs = { listingSync, orderSync, adsSync, adsItems, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, trafficNow, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, policyScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsCatchup, adtoolRollupOwedSeed, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume, adtoolPeakSwitch, adtoolPeakPlan };
+      const jobs = { listingSync, orderSync, adsSync, adsItems, adsItemsWatched, rollups, rollupsWide, backup, adsReportKick, adsReportPoll, csSync, violationsSync, autoMsgScan, autoMsgSend, standardsSync, financeSync, itemStats, cpcAudit, statusRefresh, adsIntraday, trafficSync, trafficNow, zeroSaleScan, cpcRevisionWatch, alertAckWatch, uncampaignedDigest, darkAccountWatch, supplierLinkFill, noSupplierScan, policyScan, selfTestJob, nightlyCatchup, marketingSync, feedbackSync, securitySweep, processWatch, sleepWatch, trackingBackfill, truthTier1, truthTier3, openSync, signalReeval, truthAlertSweep, ladderWatch, adtoolRollups, adtoolRollupsCatchup, adtoolRollupOwedSeed, adtoolRollupsFull, adtoolTruth, adtoolRegisterSeed, adtoolListingsRefresh, adtoolProfiles, adtoolForecast, adtoolAlerts, adtoolReport, adtoolRoas, adtoolAlertsFixtureCheck, adtoolDecisions, adtoolDecisionsBoundary, adtoolDecisionScore, adtoolCarry, adtoolAnalyst, adtoolApply, adtoolApplyPreflight, adtoolResume, adtoolPeakSwitch, adtoolPeakPlan };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
       await runJob(ctx.env, fn);

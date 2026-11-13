@@ -53,13 +53,19 @@ function run(argv) {
      hold that is to work the window out here as well and compare. */
   const iPT = src.indexOf('/* ADTOOL-PATTERN-PURE-BEGIN */'); const jPT = src.indexOf('/* ADTOOL-PATTERN-PURE-END */');
   if (iPT < 0 || jPT < 0) return 'FAIL: pattern-window block markers not found';
-  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '') + (i15 >= 0 && j15 >= 0 ? '\n' + src.slice(i15, j15) : '') + (i16 >= 0 && j16 >= 0 ? '\n' + src.slice(i16, j16) : '') + '\n' + src.slice(i17, j17) + '\n' + src.slice(iAS, jAS) + '\n' + src.slice(iTR, jTR) + '\n' + src.slice(iWS, jWS) + '\n' + src.slice(iPT, jPT);   /* pure helpers of every phase */
+  /* 14 Nov: the watch on Where each listing advertises — the expiry, the per-tick and daily caps,
+     the two by-hand bounds and the header sentence itself. Pure on purpose: "what is live" is a
+     sentence a reader acts on, and the quota arithmetic behind it is the whole reason ONE account is
+     watched and the fleet is not. */
+  const iWA = src.indexOf('/* ADTOOL-WATCH-PURE-BEGIN */'); const jWA = src.indexOf('/* ADTOOL-WATCH-PURE-END */');
+  if (iWA < 0 || jWA < 0) return 'FAIL: campaign watch block markers not found';
+  const pure = src.slice(ia, ib) + '\n' + src.slice(iv, jv) + (ip >= 0 && jp >= 0 ? '\n' + src.slice(ip, jp) : '') + (i3 >= 0 && j3 >= 0 ? '\n' + src.slice(i3, j3) : '') + (i4 >= 0 && j4 >= 0 ? '\n' + src.slice(i4, j4) : '') + (i5 >= 0 && j5 >= 0 ? '\n' + src.slice(i5, j5) : '') + (i6 >= 0 && j6 >= 0 ? '\n' + src.slice(i6, j6) : '') + (i7 >= 0 && j7 >= 0 ? '\n' + src.slice(i7, j7) : '') + (i8 >= 0 && j8 >= 0 ? '\n' + src.slice(i8, j8) : '') + (i9 >= 0 && j9 >= 0 ? '\n' + src.slice(i9, j9) : '') + (i10 >= 0 && j10 >= 0 ? '\n' + src.slice(i10, j10) : '') + (i11 >= 0 && j11 >= 0 ? '\n' + src.slice(i11, j11) : '') + (i12 >= 0 && j12 >= 0 ? '\n' + src.slice(i12, j12) : '') + (i13 >= 0 && j13 >= 0 ? '\n' + src.slice(i13, j13) : '') + (i14 >= 0 && j14 >= 0 ? '\n' + src.slice(i14, j14) : '') + (i15 >= 0 && j15 >= 0 ? '\n' + src.slice(i15, j15) : '') + (i16 >= 0 && j16 >= 0 ? '\n' + src.slice(i16, j16) : '') + '\n' + src.slice(i17, j17) + '\n' + src.slice(iAS, jAS) + '\n' + src.slice(iTR, jTR) + '\n' + src.slice(iWS, jWS) + '\n' + src.slice(iPT, jPT) + '\n' + src.slice(iWA, jWA);   /* pure helpers of every phase */
   const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
   /* JavaScriptCore has no btoa/atob; the Workers runtime does. Small stand-ins so the PDF test can run here. */
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, adSaleDayGap, adSaleNearPrice, adSaleLedgerRead, adSalePaidPerUnit, adSalePromoSaleFromXml, adSaleEventNamed, adSaleMembership, adSaleSkipReason, adSaleCountMembership, adSaleReasonText, adSaleMorningAfter, adSalePriceSteps, adSalePriceClocks, adSaleCohorts2, adTradeRequestXml, adTradeAckOf, ADTOOL_SALE_PENNY, ADTOOL_SALE_SKIP_REASONS, ADTOOL_SALE_SKIP_WORDS, ADTOOL_SALE_SKIP_SHORT, ADTOOL_TRADE_XML_FIELDS, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_SAMPLER_QUIET_DEFAULT_MIN, ADTOOL_SAMPLER_CONFIG_KEYS, adtSamplerCadence, adtSamplerDue, ADTOOL_PEAK_ENVELOPE_EDGE_MIN, adPeakEnvelopeHours, adPeakInEnvelope, adPeakStopLoss, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_LANDING_DAYS_SHOWN, adLandingDaysClean, adLandingWords, adLandingMark, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS, ADTOOL_PATTERN_KINDS, ADTOOL_PATTERN_MONTHS, ADTOOL_PATTERN_DATES_CAP, adListingDayWords, adListingMonthWords, adListingMonthEnd, adListingPattern, adListingPatternKey, adListingPatternWindow, adListingSlots, adListingWeekday, adListingHourWeekday, adListingDates, ADTOOL_PERIODS_NOTE, adPeakPeriodChunks };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, adSaleDayGap, adSaleNearPrice, adSaleLedgerRead, adSalePaidPerUnit, adSalePromoSaleFromXml, adSaleEventNamed, adSaleMembership, adSaleSkipReason, adSaleCountMembership, adSaleReasonText, adSaleMorningAfter, adSalePriceSteps, adSalePriceClocks, adSaleCohorts2, adTradeRequestXml, adTradeAckOf, ADTOOL_SALE_PENNY, ADTOOL_SALE_SKIP_REASONS, ADTOOL_SALE_SKIP_WORDS, ADTOOL_SALE_SKIP_SHORT, ADTOOL_TRADE_XML_FIELDS, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_SAMPLER_QUIET_DEFAULT_MIN, ADTOOL_SAMPLER_CONFIG_KEYS, adtSamplerCadence, adtSamplerDue, ADTOOL_PEAK_ENVELOPE_EDGE_MIN, adPeakEnvelopeHours, adPeakInEnvelope, adPeakStopLoss, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_LANDING_DAYS_SHOWN, adLandingDaysClean, adLandingWords, adLandingMark, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS, ADTOOL_PATTERN_KINDS, ADTOOL_PATTERN_MONTHS, ADTOOL_PATTERN_DATES_CAP, adListingDayWords, adListingMonthWords, adListingMonthEnd, adListingPattern, adListingPatternKey, adListingPatternWindow, adListingSlots, adListingWeekday, adListingHourWeekday, adListingDates, ADTOOL_PERIODS_NOTE, adPeakPeriodChunks, ADTOOL_CAMPAIGN_WATCH_MIN, ADTOOL_CAMPAIGN_WATCH_EVERY_MIN, ADTOOL_CAMPAIGN_WATCH_CALLS, ADTOOL_CAMPAIGN_WATCH_DAILY, ADTOOL_CAMPAIGN_WATCH_ACCOUNTS, ADTOOL_CAMPAIGN_WATCH_MS, ADTOOL_CAMPAIGN_WATCH_REREAD_S, ADTOOL_CAMPAIGN_WATCH_ITEM_S, ADTOOL_CAMPAIGN_WATCH_STATES, ADTOOL_CAMPAIGN_WATCH_PAGE_STATES, adWatchKey, adWatchByKey, adWatchRereadKey, adWatchItemKey, adWatchDayKey, adWatchUntil, adWatchAlive, adWatchAccounts, adWatchDailyLeft, adWatchBound, adWatchClock, adWatchEveryText, adWatchFleetMin, adWatchHeader, adWatchRereadNote, adWatchTickNote, adWatchCachePayloads, adWatchCampaignIds };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -1119,7 +1125,11 @@ function run(argv) {
     t('campaign actions: ' + cbAct2 + ' refuses the wrong role BEFORE it ever looks in the cache', cbBody.indexOf('adtGate') >= 0 && cbBody.indexOf('adtKvMemo') > cbBody.indexOf('adtGate') && /adtGate\(ctx, null\)/.test(cbBody) && /adtGate\(ctx, 'adtool_page_[a-z_]+'\)/.test(cbBody), [cbBody.indexOf('adtGate'), cbBody.indexOf('adtKvMemo')]);
   }
   t('campaign actions: all three are held in the page cache, keyed by the caller\'s profit class', (cbSrc.match(/adtKvMemo\(ctx\.env, 'adtool/g) || []).length === 3 && (cbSrc.match(/adtProfitClass\(ctx\.user\)/g) || []).length === 3, (cbSrc.match(/adtKvMemo\(ctx\.env, 'adtool/g) || []).length);
-  t('campaign actions: each of the three names its own time to live, and none of them outlives the ceiling the gate states', /adtoolCampaignBoard: 120000, adtoolCampaignListings: 120000, adtoolItemCampaigns: 120000/.test(src) && (cbSrc.match(/ADTOOL_KV_TTL_MS\.adtool(CampaignBoard|CampaignListings|ItemCampaigns)/g) || []).length === 3, null);
+  /* 14 Nov: the third of the three is no longer two minutes. Where each listing advertises re-reads
+     the watched account from eBay every two minutes and polls inside the minute, so a two-minute memo
+     would have thrown that away; it is THIRTY SECONDS now, and still inside the ceiling the gate
+     states. The other two read finished days and are unchanged. */
+  t('campaign actions: each of the three names its own time to live, the live one is the shortest, and none of them outlives the ceiling the gate states', /adtoolCampaignBoard: 120000, adtoolCampaignListings: 120000,/.test(src) && /adtoolItemCampaigns: 30000,/.test(src) && !/adtoolItemCampaigns: 120000/.test(src) && (cbSrc.match(/ADTOOL_KV_TTL_MS\.adtool(CampaignBoard|CampaignListings|ItemCampaigns)/g) || []).length === 3, null);
 
   /* (l) the flag, and the promise that turning it on costs nothing */
   t('campaign truth: the flag is SET on, not merely defaulted, so a row already holding off does not survive', /'adtool_campaign_truth', 'on'[\s\S]{0,160}DO UPDATE SET value = 'on'/.test(cbSrc) && !/adtool_campaign_truth[\s\S]{0,120}DO NOTHING/.test(cbSrc), null);
@@ -2095,12 +2105,12 @@ function run(argv) {
      keeps whichever record arrived last. These read the source. */
   const asBlk = src.slice(src.indexOf('async function adsItems(env) {'), src.indexOf('/* The safety net for the dedicated cron slot'));
   t('engine: the membership job merges by precedence and no longer keeps whichever record arrived last', /const merged = adMergeAds\(got\.ads\);/.test(asBlk) && !/if \(lid\) now\[lid\] = \{ ad_id:/.test(src), null);
-  t('engine: the removed list is EMPTY when the answer was truncated, so no membership is deleted from a short answer', /const removed = got\.truncated \? \[\] : Object\.keys\(prev\)\.filter/.test(asBlk) && /if \(got\.truncated\) budget\.truncated\+\+;/.test(asBlk), null);
+  t('engine: the removed list is EMPTY when the answer was truncated, so no membership is deleted from a short answer', /const removed = got\.truncated \? \[\] : Object\.keys\(prev\)\.filter/.test(asBlk) && /if \(got\.truncated\) \{ budget\.truncated\+\+; out\.truncated = true; \}/.test(asBlk), null);
   t('engine: a truncated campaign is written down where a person can read it, naming what eBay said', /adsItemsTruncated/.test(asBlk) && /eBay reported/.test(asBlk), null);
   t('engine: the duplicate count is stored on both the insert and the update, so an existing row gains it too', /INSERT INTO campaign_ads \(account, campaign_id, listing_id, ad_id, bid_pct, ad_status, ad_group, ad_records, synced_at\)/.test(asBlk) && /UPDATE campaign_ads SET bid_pct = \?4, ad_id = \?5, ad_status = \?6, ad_group = \?7, ad_records = \?8/.test(asBlk), null);
   t('engine: the column is added once, guarded, in the same list as the two that are already there', /"ALTER TABLE campaign_ads ADD COLUMN ad_records INTEGER DEFAULT 1"/.test(src) && /"ALTER TABLE campaign_ads ADD COLUMN ad_group TEXT"/.test(src), null);
-  t('engine: the rotation is money first and the rate is high enough to come round inside the hour', /const order = adsRotationPick\(running, spend, ADS_ITEM_CAMPAIGNS_PER_TICK, ADS_ITEM_MONEY_SLOTS\);/.test(asBlk) && /const ADS_ITEM_CAMPAIGNS_PER_TICK = (\d+);/.test(src) && Number((src.match(/const ADS_ITEM_CAMPAIGNS_PER_TICK = (\d+);/) || [])[1]) >= 14, (src.match(/const ADS_ITEM_CAMPAIGNS_PER_TICK = (\d+);/) || [])[1]);
-  t('engine: a slow account cannot starve the ones after it — the tick carries a clock and a fetch ceiling, checked before every campaign', /function adsBudgetSpent\(b\) \{ return !b \|\| b\.fetches >= ADS_ITEM_FETCH_CAP \|\| Date\.now\(\) >= b\.until; \}/.test(src) && (asBlk.match(/adsBudgetSpent\(budget\)/g) || []).length >= 2 && /starved/.test(asBlk), (asBlk.match(/adsBudgetSpent\(budget\)/g) || []).length);
+  t('engine: the rotation is money first and the rate is high enough to come round inside the hour', /const order = adsRotationPick\(running, spend, perTick, ADS_ITEM_MONEY_SLOTS\);/.test(asBlk) && /const perTick = Number\(o\.per_tick\) > 0 \? Number\(o\.per_tick\) : ADS_ITEM_CAMPAIGNS_PER_TICK;/.test(asBlk) && /const ADS_ITEM_CAMPAIGNS_PER_TICK = (\d+);/.test(src) && Number((src.match(/const ADS_ITEM_CAMPAIGNS_PER_TICK = (\d+);/) || [])[1]) >= 14, (src.match(/const ADS_ITEM_CAMPAIGNS_PER_TICK = (\d+);/) || [])[1]);
+  t('engine: a slow account cannot starve the ones after it — the tick carries a clock and a fetch ceiling, checked before every campaign', /function adsBudgetSpent\(b\) \{ return !b \|\| b\.fetches >= \(Number\(b\.cap\) > 0 \? Number\(b\.cap\) : ADS_ITEM_FETCH_CAP\) \|\| Date\.now\(\) >= b\.until; \}/.test(src) && (asBlk.match(/adsBudgetSpent\(budget\)/g) || []).length >= 2 && /starved/.test(asBlk), (asBlk.match(/adsBudgetSpent\(budget\)/g) || []).length);
   t('engine: the heavy rotation got a cron slot of its own, and the 15-minute slot keeps only a safety net', /'8-59\/15 \* \* \* \*': \[adsItems\],/.test(src) && /adsItemsNet, adsReportPoll/.test(src) && !/\[reportsRelayToSheet, adsItems,/.test(src), null);
   t('engine: the safety net runs the job only when the dedicated slot has not landed, so nothing runs twice', /async function adsItemsNet\(env\) \{/.test(src) && /ADS_ITEM_NET_MINUTES \* 60000\) return;/.test(src), null);
   t('engine: the repair pass re-reads from eBay and takes eBay’s own answer through the merge, never a guess', /async function adsRepairPass\(env, acct, tok, budget, truthOn\)/.test(src) && /const targets = adRepairTargets\(rows, byCampaign, byListing\);/.test(src) && /const merged = adMergeAds\(got\.ads\);/.test(src.slice(src.indexOf('async function adsRepairPass'))), null);
@@ -8285,7 +8295,10 @@ function run(argv) {
       const slots = (bare.match(/'[^']+':\s*\[[^\]]*\badsIntraday\b[^\]]*\]/g) || []);
       /* one slot, it is the two-minute one, and nothing else rides it: the rule under this job can
          pause an ad, and a job that writes to eBay must not share a subrequest budget */
-      return slots.length === 1 && slots[0].indexOf("'*/2 * * * *'") === 0 && /\[adsIntraday\]/.test(slots[0]) &&
+      /* 14 Nov: the watched-account re-read joined this slot and rides SECOND. The sampler keeps the
+         head of it, which is what this test is really about: the sampler is the job here that can pause
+         an ad on eBay, and the job behind it only reads. */
+      return slots.length === 1 && slots[0].indexOf("'*/2 * * * *'") === 0 && /\[adsIntraday, adsItemsWatched\]/.test(slots[0]) &&
         inFile.indexOf('*/2 * * * *') >= 0 && inFile.length === new Set(inFile).size &&
         !/'\*\/5 \* \* \* \*': \[[^\]]*adsIntraday/.test(bare);
     })(), (() => { let file = null; try { file = JSON.parse(readFile('engine/crons.json')); } catch (e) {} return file && file.crons; })());
@@ -8467,6 +8480,253 @@ function run(argv) {
     return perAcct && key;
   })(), null);
 
+  /* ══ 14 NOVEMBER: THE ACCOUNT SOMEBODY IS LOOKING AT IS RE-READ EVERY TWO MINUTES ═════════════
+     The owner, on Where each listing advertises: "this page is very important: it must update every
+     2 minutes, so the live changes I make on an account are reflected at once and I can see the
+     duplication. If I come back an hour later, after the hourly run, it is no use."
+     The rules first — the watch is an expiry and not a switch, both caps are real, both by-hand
+     bounds are real, and the header says exactly what is live in each of its three states. Then the
+     four things that could make the whole of it a lie: a second reader, the slot it rides, a write
+     to eBay, and a page that polls but never says it is watching. */
+  t('watch: a watch is an EXPIRY and never a switch, so a page that was closed lets it lapse on its own and nothing has to be turned off',
+    (() => {
+      const now = Date.parse('2026-11-14T19:00:00Z');
+      const until = F.adWatchUntil(now, F.ADTOOL_CAMPAIGN_WATCH_MIN);
+      return until === now + F.ADTOOL_CAMPAIGN_WATCH_MIN * 60000 &&
+        F.adWatchUntil(now, 0) === until && F.adWatchUntil(now, null) === until &&
+        F.adWatchAlive(String(until), now) && F.adWatchAlive(String(until), until - 1) &&
+        !F.adWatchAlive(String(until), until) && !F.adWatchAlive(String(until), until + 1) &&
+        !F.adWatchAlive('', now) && !F.adWatchAlive(null, now) && !F.adWatchAlive('not a number', now) && !F.adWatchAlive('0', now);
+    })(), [F.ADTOOL_CAMPAIGN_WATCH_MIN]);
+  t('watch: a tick takes the accounts whose watch has not lapsed, newest first and capped, and never reads the "who" or "calls" rows as an account name',
+    (() => {
+      const now = Date.parse('2026-11-14T19:00:00Z');
+      const rows = [
+        { key: F.adWatchKey('HAFIZA BHAJI'), value: String(now + 60000) },
+        { key: F.adWatchKey('Azhar Bhai'), value: String(now + 300000) },
+        { key: F.adWatchKey('Amna Baji'), value: String(now - 1000) },
+        { key: F.adWatchByKey('HAFIZA BHAJI'), value: 'm98m786@gmail.com' },
+        { key: F.adWatchDayKey(now), value: '1234' },
+        { key: 'adtool_page_item_campaigns', value: 'on' },
+      ];
+      const all = F.adWatchAccounts(rows, now, 9), one = F.adWatchAccounts(rows, now, 1);
+      return all.length === 2 && all[0] === 'Azhar Bhai' && all[1] === 'HAFIZA BHAJI' &&
+        one.length === 1 && one[0] === 'Azhar Bhai' &&
+        F.adWatchAccounts([], now, 3).length === 0 &&
+        F.adWatchAccounts(rows, now).length <= F.ADTOOL_CAMPAIGN_WATCH_ACCOUNTS;
+    })(), null);
+  t('watch: THE QUOTA ARITHMETIC — one account at this cadence fits inside the day’s cap and the fleet never could, which is why one account is watched and not all of them',
+    (() => {
+      const cap = F.ADTOOL_CAMPAIGN_WATCH_DAILY;
+      const left = F.adWatchDailyLeft(cap - 95, cap) === 95 && F.adWatchDailyLeft(cap, cap) === 0 && F.adWatchDailyLeft(cap + 500, cap) === 0;
+      /* an unreadable counter reads as nothing spent: refusing to re-read on a figure we cannot
+         parse would be a page that silently stopped being live */
+      const soft = F.adWatchDailyLeft('', cap) === cap && F.adWatchDailyLeft(null, cap) === cap &&
+        F.adWatchDailyLeft('nonsense', cap) === cap && F.adWatchDailyLeft(-5, cap) === cap;
+      const passes = 60 / F.ADTOOL_CAMPAIGN_WATCH_EVERY_MIN;      // 30 an hour
+      const busiest = 95, fleet = 351;                            // running CPC campaigns, read 14 Nov
+      const oneHour = busiest * passes, fleetHour = fleet * passes;
+      return left && soft && busiest <= F.ADTOOL_CAMPAIGN_WATCH_CALLS && fleet > F.ADTOOL_CAMPAIGN_WATCH_CALLS &&
+        oneHour === 2850 && fleetHour === 10530 &&
+        cap < 100000 - 9880 &&                                    // the hourly pass keeps its own room
+        oneHour * 24 > cap && fleetHour * 24 > 100000;            // a whole day of either would not fit
+    })(), [F.ADTOOL_CAMPAIGN_WATCH_DAILY, F.ADTOOL_CAMPAIGN_WATCH_CALLS]);
+  t('watch: "Re-read now" and one listing on demand are each bounded, and a bound says how many seconds are left rather than refusing silently',
+    (() => {
+      const now = Date.parse('2026-11-14T19:00:00Z'), justNow = String(now - 10000);
+      const acc = F.adWatchBound(justNow, now, F.ADTOOL_CAMPAIGN_WATCH_REREAD_S);
+      const item = F.adWatchBound(justNow, now, F.ADTOOL_CAMPAIGN_WATCH_ITEM_S);
+      const older = F.adWatchBound(String(now - 61000), now, F.ADTOOL_CAMPAIGN_WATCH_REREAD_S);
+      const never = F.adWatchBound('', now, F.ADTOOL_CAMPAIGN_WATCH_REREAD_S);
+      return !acc.ok && acc.wait_s === 50 && !item.ok && item.wait_s === 20 &&
+        older.ok && older.wait_s === null && never.ok && never.wait_s === null &&
+        F.adWatchBound(String(now), now, 0).ok &&
+        F.ADTOOL_CAMPAIGN_WATCH_ITEM_S < F.ADTOOL_CAMPAIGN_WATCH_REREAD_S;
+    })(), [F.ADTOOL_CAMPAIGN_WATCH_REREAD_S, F.ADTOOL_CAMPAIGN_WATCH_ITEM_S]);
+  t('watch header: the three states say exactly what is live — the watched account and its cadence, the fleet sentence when none is picked, and the allowance when it is used',
+    (() => {
+      const base = { every_min: 2, fleet_min: 75, last_read_at: '2026-11-14 19:22:40', last_clock: '19:22:40', used: 1200, left: 38800 };
+      const w = F.adWatchHeader(Object.assign({ account: 'HAFIZA BHAJI' }, base));
+      const all = F.adWatchHeader(Object.assign({ account: '' }, base));
+      const cap = F.adWatchHeader(Object.assign({ account: 'HAFIZA BHAJI', capped: true }, base));
+      return w.state === 'watched' &&
+        w.text === 'HAFIZA BHAJI re-read from eBay every 2 min while this page is open · last 19:22:40 · fleet roughly every hour' &&
+        all.state === 'fleet' && all.text === 'all accounts: readings roughly every hour, pick an account to watch it' &&
+        cap.state === 'capped' && cap.parts[0] === 'today’s watch allowance used' && cap.capped === true &&
+        [w, all, cap].every(x => F.ADTOOL_CAMPAIGN_WATCH_STATES.indexOf(x.state) >= 0) &&
+        /* the fleet sentence is about the fleet: it never claims a watch, and it never prints the
+           account's own last reading as though something were following it */
+        all.every_min === null && all.parts.length === 1 && w.every_min === 2;
+    })(), [F.adWatchHeader({ account: 'HAFIZA BHAJI', every_min: 2, fleet_min: 75, last_clock: '19:22:40' }).text]);
+  t('watch header: a reading we do not hold is SAID to be missing and never printed as a time, and no figure appears in the words that is not one of the constants (null never 0)',
+    (() => {
+      const none = F.adWatchHeader({ account: 'Saif Bhai', every_min: 2, fleet_min: 75 });
+      const bare = F.adWatchHeader({ account: '', every_min: 2 });
+      const noCad = F.adWatchHeader({ account: 'Saif Bhai' });
+      return none.parts.indexOf('no reading on record yet') >= 0 && none.last_clock === null && none.last_read_at === null &&
+        bare.text === 'all accounts: readings on the hourly pass, pick an account to watch it' && bare.fleet_min === null &&
+        noCad.text.indexOf('on its own slot') > 0 &&
+        none.allowance.used === null && none.allowance.cap === F.ADTOOL_CAMPAIGN_WATCH_DAILY &&
+        none.watch_minutes === F.ADTOOL_CAMPAIGN_WATCH_MIN && none.title.indexOf('we hold no reading') >= 0;
+    })(), null);
+  t('watch header: the cadence words are made from minutes and the fleet figure is WORKED OUT from the rotation rate, never asserted beside it',
+    F.adWatchEveryText(2) === 'every 2 min' && F.adWatchEveryText(60) === 'every hour' &&
+    F.adWatchEveryText(105, true) === 'roughly every 2 hours' && F.adWatchEveryText(75, true) === 'roughly every hour' &&
+    F.adWatchEveryText(0) === '' && F.adWatchEveryText(null) === '' && F.adWatchEveryText('') === '' &&
+    F.adWatchFleetMin({ slot_min: 15, per_tick: 14, accounts: 6, campaigns: 351 }) === 75 &&
+    F.adWatchFleetMin({ slot_min: 15, per_tick: 14, accounts: 6, campaigns: 10 }) === 15 &&
+    F.adWatchFleetMin({ slot_min: 15, per_tick: 14, accounts: 6, campaigns: 0 }) === null &&
+    F.adWatchFleetMin({}) === null && F.adWatchFleetMin(null) === null,
+    [F.adWatchFleetMin({ slot_min: 15, per_tick: 14, accounts: 6, campaigns: 351 })]);
+  t('watch header: the last reading is printed on a UK clock to the second, through the one DST-correct helper, and an unreadable stamp prints nothing at all',
+    F.adWatchClock('2026-11-14 19:22:40') === '19:22:40' && F.adWatchClock('2026-07-14 19:22:40') === '20:22:40' &&
+    F.adWatchClock('2026-11-14T19:22:40Z') === '19:22:40' &&
+    F.adWatchClock('') === '' && F.adWatchClock(null) === '' && F.adWatchClock('not a date') === '',
+    [F.adWatchClock('2026-07-14 19:22:40')]);
+  t('watch: the page memo is dropped by NAME for the account just read and for the all-accounts answer, in every state the page asks with',
+    (() => {
+      const pays = F.adWatchCachePayloads('HAFIZA BHAJI'), all = F.adWatchCachePayloads('');
+      const states = F.ADTOOL_CAMPAIGN_WATCH_PAGE_STATES;
+      const keys = pays.map(x => F.adtKvKey('adtoolItemCampaigns', 'p', x));
+      return pays.length === states.length * 2 && all.length === states.length &&
+        keys.length === new Set(keys).size &&
+        F.adtKvKey('adtoolItemCampaigns', 'p', { account: '', state: '' }) === F.adtKvKey('adtoolItemCampaigns', 'p', {}) &&
+        F.adtKvKey('adtoolItemCampaigns', 'p', pays[0]) !== F.adtKvKey('adtoolItemCampaigns', 'np', pays[0]) &&
+        pays.some(x => x.account === 'HAFIZA BHAJI') && pays.some(x => x.account === '');
+    })(), null);
+  t('watch: one call names every campaign a listing is advertised in, and an answer we cannot read says NONE rather than inventing a campaign',
+    (() => {
+      const two = F.adWatchCampaignIds('{"campaigns":[{"campaignId":"123"},{"campaign_id":"456"},{"campaignId":"123"}]}');
+      return two.length === 2 && two[0] === '123' && two[1] === '456' &&
+        F.adWatchCampaignIds('not json').length === 0 && F.adWatchCampaignIds('{"campaigns":[]}').length === 0 &&
+        F.adWatchCampaignIds(null).length === 0 && F.adWatchCampaignIds('{"campaigns":[{"name":"no id"}]}').length === 0 &&
+        F.adWatchCampaignIds([{ campaignId: '9' }]).length === 1;
+    })(), null);
+  t('watch: what a by-hand re-read tells the person who pressed it is the engine’s own sentence, and a bound or a used allowance says so plainly',
+    (() => {
+      const soon = F.adWatchRereadNote({ wait_s: 12 }), capped = F.adWatchRereadNote({ capped: true });
+      const read = F.adWatchRereadNote({ campaigns_read: 7, calls: 9, changes: { added: 1, removed: 0, bid_moved: 2 } });
+      const quiet = F.adWatchRereadNote({ campaigns_read: 1, calls: 1, changes: {} });
+      return /12 seconds/.test(soon) && /allowance is used/.test(capped) &&
+        read === 'Read 7 campaigns from eBay in 9 calls, 3 changes found.' &&
+        quiet === 'Read 1 campaign from eBay in 1 call, nothing had changed.' &&
+        F.adWatchRereadNote({ no_campaigns: true, listing_id: '123' }).indexOf('listing') > 0 &&
+        F.adWatchRereadNote({ campaigns_read: 2, calls: 2, changes: {}, listing_id: '123' }).indexOf('item 123') > 0;
+    })(), [F.adWatchRereadNote({ campaigns_read: 7, calls: 9, changes: { added: 1, removed: 0, bid_moved: 2 } })]);
+  t('watch: a tick nobody is watching says so, and a tick that read something names the accounts, the calls and what moved',
+    (() => {
+      const idle = F.adWatchTickNote({ accounts: [] });
+      const busy = F.adWatchTickNote({ accounts: ['HAFIZA BHAJI'], campaigns_read: 95, calls: 95, changes: { added: 2, removed: 1, bid_moved: 0 }, used: 2850 });
+      return /no account is being watched/.test(idle) && /HAFIZA BHAJI/.test(busy) &&
+        /campaigns read 95/.test(busy) && /3 change\(s\) found/.test(busy) &&
+        busy.indexOf(String(F.ADTOOL_CAMPAIGN_WATCH_DAILY)) > 0 &&
+        F.adWatchTickNote({ accounts: ['A'], capped: true }).indexOf('allowance is used') > 0;
+    })(), null);
+
+  /* ---- the wiring, over the real source and the real files ------------------------------------ */
+  t('watch wiring: the two-minute re-read and the hourly pass are two callers of ONE reader, and the listing on demand is a third caller of its per-campaign half (real source)',
+    (() => {
+      const acctFn = (src.match(/async function adsItemsAccount\(env, acct, budget, opts\) \{/g) || []).length;
+      const campFn = (src.match(/async function adsItemsCampaign\(env, acct, camp, tok, budget, truthOn\) \{/g) || []).length;
+      const hourly = /await perAccount\(env, 'adsItems', async \(acct\) => \{/.test(src) && /await adsItemsAccount\(env, acct, budget, \{ job: 'adsItems' \}\);/.test(src);
+      const fast = /const got = await adsItemsAccount\(env, acct, budget, \{ job: 'adsItemsWatched', cpc_only: true,/.test(src);
+      const loop = /const got = await adsItemsCampaign\(env, acct, camp, tok, budget, truthOn\);/.test(src);
+      const listing = /await adsItemsCampaign\(env, a, camp, tok, budget, truthOn\);/.test(src);
+      /* and the merge exists TWICE in the whole worker and no more: the one reader, and the
+         money-beats-status repair. A second copy is the one thing that could put two different
+         answers about one ad on two pages. */
+      const once = (src.match(/const merged = adMergeAds\(got\.ads\);/g) || []).length === 2;
+      const writesOnce = (src.match(/INSERT INTO campaign_ads \(account, campaign_id, listing_id, ad_id, bid_pct, ad_status, ad_group, ad_records, synced_at\)/g) || []).length === 1;
+      return acctFn === 1 && campFn === 1 && hourly && fast && loop && listing && once && writesOnce;
+    })(), [(src.match(/const merged = adMergeAds\(got\.ads\);/g) || []).length]);
+  t('watch wiring: the fast re-read rides the sampler’s two-minute slot and rides SECOND, the slot is registered where the guard reads it, the cadence constant agrees with the slot, and a tick nobody is watching asks eBay for nothing (real source + real file)',
+    (() => {
+      let file = null; try { file = JSON.parse(readFile('engine/crons.json')); } catch (e) {}
+      const inFile = (file && Array.isArray(file.crons)) ? file.crons.map(String) : [];
+      const i = src.indexOf('function cronMap() {');
+      const bare = (i < 0 ? '' : src.slice(i, src.indexOf('\n}', i))).replace(/\/\*[\s\S]*?\*\//g, '');
+      const slots = (bare.match(/'[^']+':\s*\[[^\]]*\badsItemsWatched\b[^\]]*\]/g) || []);
+      const j = src.slice(src.indexOf('async function adsItemsWatched(env) {'), src.indexOf('async function adWatchCountCalls('));
+      const step = Number(((slots[0] || '').match(/'\*\/(\d+) /) || [])[1]);
+      const konst = Number((src.match(/const ADTOOL_CAMPAIGN_WATCH_EVERY_MIN = (\d+);/) || [])[1]);
+      return slots.length === 1 && slots[0].indexOf("'*/2 * * * *'") === 0 &&
+        slots[0].indexOf('adsIntraday') < slots[0].indexOf('adsItemsWatched') &&
+        inFile.indexOf('*/2 * * * *') >= 0 && inFile.length === new Set(inFile).size &&
+        step === konst && step === 2 &&
+        /if \(!accounts\.length\) return;/.test(j) &&
+        j.indexOf('if (!accounts.length) return;') < j.indexOf('ensureAdsReadingColumns') &&
+        /for \(const fn of fns\) \{ await runJob\(env, fn\); \}/.test(src) && !/@lock/.test(j);
+    })(), null);
+  t('watch wiring: the tick budget is the smaller of its own ceiling and what is left of the day, the day’s calls are counted in portal_config, past the cap it stops and writes down that it has, and the heavy tails stay with the hourly pass (real source)',
+    (() => {
+      const j = src.slice(src.indexOf('async function adsItemsWatched(env) {'), src.indexOf('async function adWatchCountCalls('));
+      const c = src.slice(src.indexOf('async function adWatchCountCalls('), src.indexOf('function adsSlotMinutes('));
+      return /cap: Math\.min\(ADTOOL_CAMPAIGN_WATCH_CALLS, left\)/.test(j) &&
+        /const left = adWatchDailyLeft\(used, ADTOOL_CAMPAIGN_WATCH_DAILY\);/.test(j) && /if \(left <= 0\) \{/.test(j) &&
+        /capped: true/.test(j) && /repair: false, dup_sweep: false/.test(j) &&
+        /until: now \+ ADTOOL_CAMPAIGN_WATCH_MS/.test(j) &&
+        /INSERT INTO portal_config \(key, value, updated_at\)/.test(c) &&
+        /CAST\(\(CAST\(value AS INTEGER\) \+ \?3\) AS TEXT\)/.test(c) && /adWatchDayKey\(Date\.now\(\)\)/.test(c) &&
+        /function adsBudgetSpent\(b\) \{ return !b \|\| b\.fetches >= \(Number\(b\.cap\) > 0 \? Number\(b\.cap\) : ADS_ITEM_FETCH_CAP\)/.test(src);
+    })(), null);
+  t('watch wiring: NOTHING NEW IS SENT TO EBAY — every call the watch makes is a GET through readers that were already there, the one listing path goes through the allow-listed reference read, and the two controls that DO act on eBay are untouched (real source + real file)',
+    (() => {
+      const blk = src.slice(src.indexOf('async function adsItemsWatched(env) {'), src.indexOf('/* dup_state carries each currently-duplicated item'));
+      const noSend = !/method: 'POST'|method: 'PUT'|method: 'DELETE'/.test(blk) && !/fetch\(/.test(blk) &&
+        !/bulk_|\/ad_campaign\/' \+/.test(blk);
+      const getOnly = /await ebayRestFetch\(env, a, 'GET', '\/sell\/marketing\/v1\/ad_campaign\/find_campaign_by_ad_reference\?listing_id=' \+ encodeURIComponent\(lid\)\)/.test(blk);
+      const allowed = /\^\\\/sell\\\/marketing\\\/v1\\\/ad_campaign\\\/find_campaign_by_ad_reference/.test(src);
+      const view = readFile('frontend/view-adtool-itemcampaigns.js');
+      const controls = /api\('adsPauseListing', \{ account: p\[0\], campaign_id: p\[1\], listing_id: p\[2\] \}\)/.test(view) &&
+        /api\('campaignRemoveItem', \{ account: p\[0\], campaign_id: p\[1\], listing_id: p\[2\] \}\)/.test(view) &&
+        /if \(!confirm\('Pause this ad on eBay\?/.test(view) && /if \(!confirm\('Remove item /.test(view);
+      return noSend && getOnly && allowed && controls;
+    })(), null);
+  t('watch page: the page re-asks itself every minute through the shell’s own poller, sends the watch with every read, and prints the header the engine built rather than words of its own (real file)',
+    (() => {
+      const view = readFile('frontend/view-adtool-itemcampaigns.js');
+      const poll = /var POLL_MS = 60000;/.test(view) && /adtPoll\('wlaBody', POLL_MS, function \(\) \{ return loadAll\(true\); \}\);/.test(view);
+      const quiet = /if \(!quiet\) \{/.test(view) && /function loadAll\(quiet\) \{/.test(view);
+      const watch = /if \(WL\.account\) p\.watch = WL\.account;/.test(view);
+      const header = /W = F && F\.watch;/.test(view) && /W\.parts\.map\(function \(p, i\) \{/.test(view) &&
+        /adtFreshShow\('wlaFresh', F\); return;/.test(view);
+      const ops = /op: key \? 'reread_listing' : 'reread'/.test(view) && /id="wlaReread"/.test(view) && /data-wlare=/.test(view);
+      /* an expired sign-in is an answer, not an outage: it goes back up to the poller, which stops
+         for good and says so (the session-expiry law) */
+      const expiry = (view.match(/=== 'auth'\) throw e;/g) || []).length === 2;
+      return poll && quiet && watch && header && ops && expiry;
+    })(), null);
+  t('watch page: not one cadence, cap or bound is typed into what a reader sees — the page prints the engine’s sentences and the only figure in the file is the minute it polls on (real file)',
+    (() => {
+      const view = readFile('frontend/view-adtool-itemcampaigns.js').replace(/\/\*[\s\S]*?\*\//g, '');
+      const typed = /every 2 min|two minutes|2 minutes|every hour|hourly|40,000|60 seconds|30 seconds|ten minutes/i.test(view);
+      const fromEngine = /rereadWhy\(\)/.test(view) && /\(\(\(WL\.main && WL\.main\.rules\) \|\| \{\}\)\.watch\)/.test(view) &&
+        /var wrule = String\(\(D\.rules \|\| \{\}\)\.watch \|\| ''\);/.test(view) && /\(d && d\.note\)/.test(view);
+      return !typed && fromEngine;
+    })(), null);
+  t('watch page: the memo is thirty seconds, the job drops this page’s entries by name the moment a tick FINDS a change, and a tick that found nothing spends no KV writes at all (real source)',
+    /adtoolItemCampaigns: 30000,/.test(src) &&
+    /if \(got\.added \|\| got\.removed \|\| got\.bid_moved\) await adWatchCacheClear\(env, acct\);/.test(src) &&
+    /await adWatchCacheClear\(env, a\);/.test(src) && /adtKvKey\('adtoolItemCampaigns', cls, pay\)/.test(src) &&
+    (src.match(/await adWatchCacheClear\(/g) || []).length === 2, null);
+  t('watch route: the role gate still runs first of all, the watch is written BEFORE the memo is consulted, and an op nobody wrote is refused (real source)',
+    (() => {
+      const r = src.slice(src.indexOf('  adtoolItemCampaigns: {'), src.indexOf('/* ADTOOL-P14-END'));
+      return r.indexOf('adtGate(ctx, null)') < r.indexOf('adWatchTouch(ctx.env') &&
+        /if \(!pay\.state\) await adWatchTouch\(ctx\.env, String\(\(p && p\.watch\) \|\| ''\)\.trim\(\), ctx\.user\);/.test(r) &&
+        r.indexOf('adWatchTouch(ctx.env') < r.indexOf('adtKvMemo(ctx.env') &&
+        r.indexOf("adtGate(ctx, 'adtool_page_item_campaigns')") < r.indexOf('adWatchTouch(ctx.env') &&
+        /if \(op === 'reread' \|\| op === 'reread_listing'\)/.test(r) && /if \(op\) throw new Error\('SAY:/.test(r) &&
+        r.indexOf("op === 'reread'") < r.indexOf('adtKvMemo(ctx.env');
+    })(), null);
+  t('watch header: both cadences in it are read off the cron map itself, so a slot that moved would move the sentence with it (real source)',
+    (() => {
+      const f = src.slice(src.indexOf('function adsSlotMinutes(fn) {'), src.indexOf('/* the watch itself: an expiry'));
+      return /const m = cronMap\(\);/.test(f) && /if \(\(m\[k\] \|\| \[\]\)\.indexOf\(fn\) < 0\) continue;/.test(f) &&
+        /every_min: adsSlotMinutes\(adsItemsWatched\) \|\| ADTOOL_CAMPAIGN_WATCH_EVERY_MIN,/.test(src) &&
+        /fleet_min: adWatchFleetMin\(\{ slot_min: adsSlotMinutes\(adsItems\), per_tick: ADS_ITEM_CAMPAIGNS_PER_TICK/.test(src) &&
+        /fresh: Object\.assign\(\{\}, wDay, \{ watch: watchHead \}\),/.test(src);
+    })(), null);
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
   return lines.join('\n') + '\n' + (passed === results.length ? 'PASS ' : 'FAIL ') + passed + '/' + results.length;

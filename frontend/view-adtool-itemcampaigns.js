@@ -23,7 +23,17 @@
   var ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
   var ACT_ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
   var LOSS = '#e0563f';
-  var WL = { account: '', q: '', accounts: [], main: null, dup: null, gap: null, err: {}, busy: false, acting: false };
+  /* ── THE PAGE IS LIVE (owner, 14 Nov 2026) ────────────────────────────────────────────────────
+     "this page is very important: it must update every 2 minutes, so the live changes I make on an
+     account are reflected at once and I can see the duplication."
+     Three parts, and only this first one lives here: the page re-asks itself every minute through the
+     shell's own poller (hidden tabs skipped, stops for good on an expired sign-in), and every read
+     carries `watch: <account>` so the engine keeps re-reading that one account from eBay on its own
+     two-minute slot. The cadence of the re-read, the caps behind it and the words in the header are
+     the engine's: every figure a reader sees on this page is read back from the answer, never typed
+     here, so a cap or a cadence that changes changes this page with it. */
+  var POLL_MS = 60000;
+  var WL = { account: '', q: '', accounts: [], main: null, dup: null, gap: null, err: {}, busy: false, acting: false, rereading: false };
 
   VIEW_CSS.push([
     '.wla-wrap{max-width:1420px}',
@@ -83,7 +93,13 @@
     '.wla-peak{display:inline-block;margin-top:4px;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:800;letter-spacing:.03em;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap}',
     '.wla-peak.on{color:var(--gold-a);border-color:rgba(242,176,53,.5);background:rgba(242,176,53,.08)}',
     '.wla-peak.off{color:' + LOSS + ';border-color:rgba(224,86,63,.5)}',
-    '.wla-peak.quiet{color:var(--text-3);border-style:dashed}'
+    '.wla-peak.quiet{color:var(--text-3);border-style:dashed}',
+    /* the two re-read controls. Both are READINGS: they ask eBay again and write nothing there, so
+       they are deliberately quiet next to the two red controls that do act on eBay. */
+    '.wla-re{background:transparent;border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}',
+    '.wla-re:hover{color:var(--gold-a);border-color:rgba(242,176,53,.5)}',
+    '.wla-re[disabled]{opacity:.45;cursor:default}',
+    '.wla-re.row{margin-top:4px;padding:2px 8px;font-size:10.5px;font-weight:800}'
   ].join(''));
 
   function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
@@ -189,22 +205,35 @@
     init: function () {
       /* the closure outlives a visit: drop every answer on entry so a page re-opened later asks
          again instead of painting an old reading */
-      WL.main = null; WL.dup = null; WL.gap = null; WL.err = {};
+      WL.main = null; WL.dup = null; WL.gap = null; WL.err = {}; WL.rereading = false;
       var q = $('wlaQ'), go = $('wlaGo'), clear = $('wlaClear');
       go.onclick = function () { WL.q = q.value.trim(); loadAll(); };
       clear.onclick = function () { q.value = ''; WL.q = ''; loadAll(); };
       q.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); go.onclick(); } };
       acctChips();
-      loadAll();
+      loadAll().catch(function () { /* the poller below reports a refusal; a first read must not throw into the shell */ });
+      /* THE POLLER. Every minute, quietly: the engine re-reads the watched account from eBay on its
+         own two-minute slot, so a change made on eBay shows here inside about two minutes and
+         usually sooner. adtPoll skips a hidden tab, stops when the page is gone and stops for good
+         on an expired sign-in, which is the session-expiry law. */
+      adtPoll('wlaBody', POLL_MS, function () { return loadAll(true); });
     }
   };
 
+  /* what a re-read is, in the engine's own words rather than this file's, so the bounds and the
+     cadence behind these two buttons cannot be described here after they have changed */
+  function rereadWhy() {
+    return String((((WL.main && WL.main.rules) || {}).watch) || 'Ask eBay for this again now.');
+  }
   function acctChips() {
     var el = $('wlaAcct'); if (!el) return;
     el.innerHTML = '<button class="' + (WL.account ? '' : 'on') + '" data-a="">All accounts</button>' +
-      WL.accounts.map(function (a) { return '<button class="' + (WL.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('');
-    var bs = el.querySelectorAll('button');
+      WL.accounts.map(function (a) { return '<button class="' + (WL.account === a ? 'on' : '') + '" data-a="' + esc(a) + '">' + esc(a) + '</button>'; }).join('') +
+      '<button class="wla-re" id="wlaReread" title="' + esc(rereadWhy()) + '">Re-read now</button>';
+    var bs = el.querySelectorAll('button[data-a]');
     for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { WL.account = this.getAttribute('data-a'); acctChips(); loadAll(); };
+    var rr = $('wlaReread');
+    if (rr) rr.onclick = function () { reread('', rr); };
   }
 
   /* ── loading. ONE action, asked once per section, so each section's "not on the page" line is
@@ -214,6 +243,11 @@
     if (WL.account) p.account = WL.account;
     if (WL.q) p.q = WL.q;
     if (state) p.state = state;
+    /* THE WATCH RIDES EVERY READ. One account on the page means the engine re-reads that account
+       from eBay on its own slot for as long as this page keeps asking; all accounts sends nothing,
+       because the whole fleet every two minutes is more than eBay's day allows and the header says
+       so in the engine's own words. */
+    if (WL.account) p.watch = WL.account;
     return p;
   }
   function ask(state, slot) {
@@ -227,22 +261,80 @@
     }).catch(function (e) {
       WL[slot] = null;
       WL.err[slot] = (e && e.message) || 'This list could not load.';
+      /* an expired sign-in is an ANSWER, not an outage: it goes back up to the poller, which stops
+         for good and says so rather than hammering the engine once a minute (session-expiry law) */
+      if (String((e && e.message) || '') === 'auth') throw e;
     });
   }
-  function loadAll() {
+  /* the header: what is live, in the engine's words. The engine sends the sentence in pieces and the
+     separator is the shell's, so this page's tag looks like every other freshness tag in the tool
+     while saying the one thing only this page can say. */
+  function freshShow() {
+    var s = $('wlaFresh'); if (!s) return;
+    var F = (WL.main && WL.main.fresh) || null, W = F && F.watch;
+    if (!W || !W.parts || !W.parts.length) { adtFreshShow('wlaFresh', F); return; }
+    s.innerHTML = '<span class="adt-fresh' + (W.state === 'capped' ? ' stale' : '') + '" title="' + esc(String(W.title || '')) + '">' +
+      W.parts.map(function (p, i) { return (i ? '<span class="p">·</span>' : '') + esc(String(p)); }).join('') + '</span>';
+  }
+  function loadAll(quiet) {
     if (WL.busy) return Promise.resolve();
     WL.busy = true;
-    WL.main = null; WL.dup = null; WL.gap = null; WL.err = {};
-    if ($('wlaBody')) $('wlaBody').innerHTML = '<div class="wla-empty">Loading…</div>';
+    /* a quiet re-read keeps what is on screen until the new answer lands, so the minute poller never
+       blinks the page back to "Loading…" under somebody's hands */
+    if (!quiet) {
+      WL.main = null; WL.dup = null; WL.gap = null; WL.err = {};
+      if ($('wlaBody')) $('wlaBody').innerHTML = '<div class="wla-empty">Loading…</div>';
+    }
     /* the whole list first, so the page paints as soon as there is anything to read; the two
        narrow lists follow and fill their own sections */
     return ask('', 'main').then(function () {
-      if ($('wlaBody')) { draw(); adtFreshShow('wlaFresh', WL.main && WL.main.fresh); }
+      if ($('wlaBody')) { draw(); freshShow(); }
       return Promise.all([ask('multi', 'dup'), ask('none', 'gap')]);
     }).then(function () {
       WL.busy = false;
-      if ($('wlaBody')) draw();
-    }).catch(function () { WL.busy = false; });
+      if ($('wlaBody')) { draw(); freshShow(); }
+    }).catch(function (e) {
+      WL.busy = false;
+      if (String((e && e.message) || '') === 'auth') throw e;
+    });
+  }
+
+  /* ── RE-READ NOW, AND ONE LISTING ON DEMAND ───────────────────────────────────────────────────
+     Both are READINGS: they ask eBay for the ad lists again and write nothing there, which is why
+     neither asks first the way the two controls in Duplication do. Both are the same reader the
+     two-minute job uses, both are bounded by the engine, and what comes back is the engine's own
+     sentence about what it read and what had changed. */
+  function reread(key, el) {
+    if (WL.rereading) return Promise.resolve();
+    var p = { op: key ? 'reread_listing' : 'reread' };
+    if (key) {
+      var b = String(key).split('|');
+      if (b.length < 2 || !b[0] || !b[1]) { toast('That row does not carry enough to re-read.'); return Promise.resolve(); }
+      p.account = b[0]; p.item_id = b[1];
+    } else {
+      if (!WL.account) { toast('Pick one account first: the re-read follows the account you are working on.'); return Promise.resolve(); }
+      p.account = WL.account;
+    }
+    if (WL.account) p.watch = WL.account;
+    WL.rereading = true;
+    var was = el ? el.textContent : '';
+    if (el) { el.disabled = true; el.textContent = '…'; }
+    return api('adtoolItemCampaigns', p).then(function (d) {
+      WL.rereading = false;
+      if (el) { el.disabled = false; el.textContent = was; }
+      toast((d && d.note) || 'Read again from eBay.');
+      return loadAll(true);
+    }).catch(function (e) {
+      WL.rereading = false;
+      if (el) { el.disabled = false; el.textContent = was; }
+      toast((e && e.message) || 'The re-read did not go through.');
+    });
+  }
+  /* one listing, on its own: eBay is asked which campaigns hold it and only those are read again */
+  function rowReread(it) {
+    var id = String((it && it.item_id) || ''), acc = String((it && it.account) || '');
+    if (!id || !acc) return '';
+    return '<button class="wla-re row" data-wlare="' + esc(acc + '|' + id) + '" title="' + esc(rereadWhy()) + '">Re-read this listing</button>';
   }
 
   function itemsOf(slot) {
@@ -376,7 +468,7 @@
     h += '<div class="wla-scroll"><table class="wla-tbl"><thead><tr>' +
       '<th>Listing</th><th>How many</th><th>What it has been doing</th><th>The campaigns, and what to do</th>' +
       '</tr></thead><tbody>' + rows.map(function (it) {
-        return '<tr class="multi"><td>' + adtProductCell(it) + peakChip(it) + '</td>' +
+        return '<tr class="multi"><td>' + adtProductCell(it) + peakChip(it) + rowReread(it) + '</td>' +
           '<td>' + stateCell(it) + '</td>' +
           '<td>' + historyCell(it) + '</td>' +
           '<td>' + campaignsCell(it, true) + '</td></tr>';
@@ -410,7 +502,7 @@
       '</tr></thead><tbody>' + rows.map(function (it) {
         var n = num(it.live_count), multi = n != null && n > 1;
         return '<tr class="' + (multi ? 'multi' : '') + '">' +
-          '<td>' + adtProductCell(it) + peakChip(it) + '</td>' +
+          '<td>' + adtProductCell(it) + peakChip(it) + rowReread(it) + '</td>' +
           '<td>' + stateCell(it) + '</td>' +
           '<td class="r">' + gbp(it.price) + '</td>' +
           '<td class="r">' + cnt(it.sold_30d) + '</td>' +
@@ -442,7 +534,7 @@
       '<th>Listing</th><th class="r">Price</th><th class="r">Sold 30 d</th><th class="r">Spend 3 d</th>' +
       '<th class="r">Spend 7 d</th><th>Anything on record</th>' +
       '</tr></thead><tbody>' + rows.map(function (it) {
-        return '<tr><td>' + adtProductCell(it) + peakChip(it) + '</td>' +
+        return '<tr><td>' + adtProductCell(it) + peakChip(it) + rowReread(it) + '</td>' +
           '<td class="r">' + gbp(it.price) + '</td>' +
           '<td class="r">' + cnt(it.sold_30d) + '</td>' +
           '<td class="r">' + gbp(it.spend_3d) + '</td>' +
@@ -493,6 +585,10 @@
     }
     h += ' <b>Everything on this page is a reading, except the two controls in Duplication: those act on eBay, ' +
       'and each one asks before it goes.</b>';
+    /* WHAT MAKES THIS PAGE LIVE, in the engine's words and never in this file's: the cadence, the
+       two bounds and the reason the fleet is not watched are all figures over there. */
+    var wrule = String((D.rules || {}).watch || '');
+    if (wrule) h += ' <b>This page is live.</b> ' + esc(wrule);
     /* THE PEAK CHIP IS NOT A READING OF EBAY, and this page's whole note is about readings, so the
        one line that says so comes from the engine rather than from here: a sentence typed in this
        file would go on being printed after the rule behind it changed. */
@@ -517,6 +613,9 @@
     for (var i = 0; i < ps.length; i++) ps[i].onclick = function () { pause(this); };
     var rs = box.querySelectorAll('[data-wlarm]');
     for (var j = 0; j < rs.length; j++) rs[j].onclick = function () { remove(this); };
+    /* the per-listing re-read, on every row of all three sections */
+    var rr = box.querySelectorAll('[data-wlare]');
+    for (var k = 0; k < rr.length; k++) rr[k].onclick = function () { reread(this.getAttribute('data-wlare'), this); };
   }
 
   function parts(el, attr) { return String(el.getAttribute(attr) || '').split('|'); }
