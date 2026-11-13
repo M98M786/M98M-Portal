@@ -3005,6 +3005,7 @@ const ADTOOL_CAMPAIGN_WATCH_CALLS = 150;       // ad-list GETs in one tick, ever
 const ADTOOL_CAMPAIGN_WATCH_DAILY = 40000;     // ad-list GETs a day for the whole watch, fleet-wide
 const ADTOOL_CAMPAIGN_WATCH_ACCOUNTS = 3;      // watched accounts one tick will take on
 const ADTOOL_CAMPAIGN_WATCH_MS = 90000;        // wall clock for one tick, well inside its own two minutes
+const ADTOOL_CAMPAIGN_WATCH_IN_FLIGHT = 4;    // campaigns read at once by the watched re-read; the hourly pass reads one at a time
 const ADTOOL_CAMPAIGN_WATCH_REREAD_S = 60;     // "Re-read now", at most once this often per account
 const ADTOOL_CAMPAIGN_WATCH_ITEM_S = 30;       // one listing on demand, at most once this often
 const ADTOOL_CAMPAIGN_WATCH_KEY = 'adtool_campaign_watch_';
@@ -3288,13 +3289,19 @@ async function adsItemsAccount(env, acct, budget, opts) {
      D1 reads for an answer that cannot change inside one tick */
   const truthOn = (await adtFlag(env, 'adtool_campaign_truth')) === 'on';
 
-  let done = 0;
-  for (const camp of order) {
-    if (done >= perTick) break;
+  /* HOW MANY CAMPAIGNS ARE READ AT ONCE. The hourly pass reads one at a time, as it always has. The
+     watched re-read (14 Nov) has ninety seconds a tick and the busiest account holds ninety-five
+     campaigns at about a second each, so read one at a time it ran out of clock at eighty-four and
+     left the rest for the next tick; its caller asks for a few in flight, and a tick covers the whole
+     account. Each campaign's read and write are its own, so a batch shares only the budget counter. */
+  const inFlight = Math.max(1, Math.min(ADTOOL_CAMPAIGN_WATCH_IN_FLIGHT, Math.round(Number(o.in_flight) || 1)));
+  let done = 0, idx = 0;
+  while (idx < order.length && done < perTick) {
     if (adsBudgetSpent(budget)) { budget.starved.push(acct + ' (part way)'); break; }
-    done++;
-    const got = await adsItemsCampaign(env, acct, camp, tok, budget, truthOn);
-    out.added += got.added; out.removed += got.removed; out.bid_moved += got.bid_moved;
+    const batch = order.slice(idx, Math.min(order.length, idx + inFlight, idx + (perTick - done)));
+    idx += batch.length; done += batch.length;
+    const gots = await Promise.all(batch.map(camp => adsItemsCampaign(env, acct, camp, tok, budget, truthOn)));
+    for (const got of gots) { out.added += got.added; out.removed += got.removed; out.bid_moved += got.bid_moved; }
   }
   out.read = done;
 
@@ -3536,7 +3543,7 @@ async function adsItemsWatched(env) {
   const done = [];
   for (const acct of accounts) {
     try {
-      const got = await adsItemsAccount(env, acct, budget, { job: 'adsItemsWatched', cpc_only: true,
+      const got = await adsItemsAccount(env, acct, budget, { job: 'adsItemsWatched', cpc_only: true, in_flight: ADTOOL_CAMPAIGN_WATCH_IN_FLIGHT,
         per_tick: ADTOOL_CAMPAIGN_WATCH_CALLS, repair: false, dup_sweep: false });
       done.push(acct + ' (' + got.read + ' of ' + got.running + ')');
       /* THE PAGE'S MEMO GOES THE MOMENT SOMETHING HAS MOVED, and only then. KV is the one budget in
@@ -3646,7 +3653,7 @@ async function adWatchReread(env, acct, listingId, user) {
     campaigns: 0, repaired: 0, unchanged: 0, missing: 0, dup_listings: 0, truncated: 0, added: 0, removed: 0, bid_moved: 0, starved: [] };
   let found = null, read = 0;
   if (!lid) {
-    const got = await adsItemsAccount(env, a, budget, { job: 'adsItemsWatched', cpc_only: true,
+    const got = await adsItemsAccount(env, a, budget, { job: 'adsItemsWatched', cpc_only: true, in_flight: ADTOOL_CAMPAIGN_WATCH_IN_FLIGHT,
       per_tick: ADTOOL_CAMPAIGN_WATCH_CALLS, repair: false, dup_sweep: false });
     found = got.running; read = got.read;
   } else {

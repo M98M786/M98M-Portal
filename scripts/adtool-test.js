@@ -8630,7 +8630,8 @@ function run(argv) {
       const campFn = (src.match(/async function adsItemsCampaign\(env, acct, camp, tok, budget, truthOn\) \{/g) || []).length;
       const hourly = /await perAccount\(env, 'adsItems', async \(acct\) => \{/.test(src) && /await adsItemsAccount\(env, acct, budget, \{ job: 'adsItems' \}\);/.test(src);
       const fast = /const got = await adsItemsAccount\(env, acct, budget, \{ job: 'adsItemsWatched', cpc_only: true,/.test(src);
-      const loop = /const got = await adsItemsCampaign\(env, acct, camp, tok, budget, truthOn\);/.test(src);
+      /* the account loop reads its campaigns in a small pool now (14 Nov), so the per-campaign reader is called from the pool's map */
+      const loop = /batch\.map\(camp => adsItemsCampaign\(env, acct, camp, tok, budget, truthOn\)\)/.test(src);
       const listing = /await adsItemsCampaign\(env, a, camp, tok, budget, truthOn\);/.test(src);
       /* and the merge exists TWICE in the whole worker and no more: the one reader, and the
          money-beats-status repair. A second copy is the one thing that could put two different
@@ -8727,6 +8728,16 @@ function run(argv) {
         /fleet_min: adWatchFleetMin\(\{ slot_min: adsSlotMinutes\(adsItems\), per_tick: ADS_ITEM_CAMPAIGNS_PER_TICK/.test(src) &&
         /fresh: Object\.assign\(\{\}, wDay, \{ watch: watchHead \}\),/.test(src);
     })(), null);
+  t('campaign watch: the watched re-read reads a few campaigns at once so one tick covers the busiest account, while the hourly pass still reads one at a time', (() => {
+    const fn = src.slice(src.indexOf('async function adsItemsAccount('), src.indexOf('async function adsItemsAccount(') + 6000);
+    const pooled = /const inFlight = Math\.max\(1, Math\.min\(ADTOOL_CAMPAIGN_WATCH_IN_FLIGHT, Math\.round\(Number\(o\.in_flight\) \|\| 1\)\)\);/.test(fn) &&
+      /const gots = await Promise\.all\(batch\.map\(camp => adsItemsCampaign\(env, acct, camp, tok, budget, truthOn\)\)\);/.test(fn) &&
+      /if \(adsBudgetSpent\(budget\)\) \{ budget\.starved\.push\(acct \+ ' \(part way\)'\); break; \}/.test(fn);
+    const watchedAsks = (src.match(/\{ job: 'adsItemsWatched', cpc_only: true, in_flight: ADTOOL_CAMPAIGN_WATCH_IN_FLIGHT,/g) || []).length >= 2;
+    const hourlyDoesNot = /adsItemsAccount\(env, acct, budget, \{ job: 'adsItems' \}\);/.test(src);
+    return pooled && watchedAsks && hourlyDoesNot && /const ADTOOL_CAMPAIGN_WATCH_IN_FLIGHT = 4;/.test(src);
+  })(), null);
+
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
   return lines.join('\n') + '\n' + (passed === results.length ? 'PASS ' : 'FAIL ') + passed + '/' + results.length;
