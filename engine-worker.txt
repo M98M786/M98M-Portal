@@ -2573,8 +2573,25 @@ async function adsSync(env) {
     }
     await env.DB.prepare("DELETE FROM sync_state WHERE job = 'adsEnrolment' AND account = ?1").bind(acct).run();
     const page = await r.json();
+    /* THE WHOLE LIST, NOT THE FIRST HUNDRED (14 Nov 2026). This read took one page of a hundred and then
+       archived every campaign in the table that was not on it, so the day an account passed a hundred
+       campaigns everything beyond the first page read as "gone from eBay": HAFIZA BHAJI's and Amna Baji's
+       Dynamic campaigns were archived while live with hundreds of listings in them. The list is paged to
+       eBay's own total now, and a short or broken answer archives NOTHING (the rule the ad lists have had
+       since fix 5): a campaign may only be called gone by an answer that was complete. */
+    let allCamps = (page.campaigns || []).slice();
+    const listTotal = page.total == null ? null : Number(page.total);
+    let listTruncated = false;
+    for (let off = allCamps.length; listTotal != null && off < listTotal && off < 2000; off += 100) {
+      const rp = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign?limit=100&offset=' + off, { headers: { authorization: 'Bearer ' + tok } });
+      if (!rp.ok) { listTruncated = true; break; }
+      const pj = await rp.json(); const more = pj.campaigns || [];
+      if (!more.length) { listTruncated = true; break; }
+      allCamps = allCamps.concat(more);
+    }
+    if (listTotal != null && allCamps.length < listTotal) listTruncated = true;
     const live = {};
-    for (const c of (page.campaigns || [])) {
+    for (const c of allCamps) {
       const budget = String((c.budget && c.budget.daily && c.budget.daily.amount && c.budget.daily.amount.value) || '');
       /* COST_PER_SALE (Promoted Listings Standard) or COST_PER_CLICK (Advanced). Nothing recorded
          this before, which is why nobody could answer why the ad-spend report refused the CPC
@@ -2708,11 +2725,21 @@ async function adsSync(env) {
        campaign that left eBay's list is archived before its row goes, so its id still resolves. */
     const adtP2 = (await adtFlag(env, 'adtool_campaign_truth')) === 'on';
     if (adtP2) { try { await adtoolCampaignFieldsWrite(env, acct, live); } catch (e) { await ctx_setSync(env, 'adtoolCampaignFields', acct, String(e && e.message || e).slice(0, 200)); } }
+    if (listTruncated) {
+      await ctx_setSync(env, 'adsCampaignList', acct, 'the campaign list came back short (' + allCamps.length + ' of ' + (listTotal == null ? '?' : listTotal) + '), so nothing was archived this run');
+    }
     for (const id of Object.keys(prev)) {
-      if (!live[id]) {
+      if (!live[id] && !listTruncated) {
         if (adtP2) { try { await adtoolCampaignArchiveWrite(env, acct, id, prev[id]); } catch (e) { await ctx_setSync(env, 'adtoolCampaignArchive', acct, String(e && e.message || e).slice(0, 200)); } }
         await env.DB.prepare('DELETE FROM campaigns WHERE account = ?1 AND campaign_id = ?2').bind(acct, id).run();
       }
+    }
+    /* a campaign that is back on eBay's list is not gone: its archive row (the "gone from eBay" label on
+       every page) is removed, so the listing pages resolve it by name again */
+    const back = Object.keys(live).filter(id => !prev[id]);
+    if (adtP2 && back.length) {
+      try { for (const ch of adtChunks(back)) await env.DB.prepare('DELETE FROM adtool_campaign_archive WHERE account = ?1 AND campaign_id IN ' + adtInList(ch, 1)).bind(acct, ...ch).run(); }
+      catch (e) { await ctx_setSync(env, 'adtoolCampaignArchive', acct, 'un-archive: ' + String(e && e.message || e).slice(0, 160)); }
     }
 
   });
@@ -33005,6 +33032,8 @@ const ROUTES = {
            negative keyword only ever narrows where our own ad shows. */
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/ad_group(\?|$)/,
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_create_keyword$/,
+        /* 14 Nov (owner): the review step — a keyword's bid moves up or down on its own record */
+        /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_update_keyword$/,
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/keyword(\?|$)/,
         /^\/sell\/marketing\/v1\/bulk_create_negative_keyword$/,
         /^\/sell\/marketing\/v1\/negative_keyword(\?|$)/,

@@ -8738,6 +8738,16 @@ function run(argv) {
     return pooled && watchedAsks && hourlyDoesNot && /const ADTOOL_CAMPAIGN_WATCH_IN_FLIGHT = 4;/.test(src);
   })(), null);
 
+  /* 14 Nov: the campaign list was read as ONE page of a hundred and everything past it archived as gone */
+  t('campaign sync: the list is paged to eBay\'s total, a short answer archives nothing, and a campaign back on the list loses its gone label', (() => {
+    const s0 = src.indexOf('async function adsSync('); const fn = src.slice(s0, src.indexOf('\nasync function ', s0 + 10));
+    const paged = /ad_campaign\?limit=100&offset=' \+ off/.test(fn) && /const listTotal = page\.total == null \? null : Number\(page\.total\);/.test(fn) &&
+      /if \(listTotal != null && allCamps\.length < listTotal\) listTruncated = true;/.test(fn) && /for \(const c of allCamps\) \{/.test(fn);
+    const guarded = /if \(!live\[id\] && !listTruncated\) \{/.test(fn) && !/if \(!live\[id\]\) \{/.test(fn);
+    const back = /DELETE FROM adtool_campaign_archive WHERE account = \?1 AND campaign_id IN/.test(fn);
+    return paged && guarded && back;
+  })(), null);
+
   const passed = results.filter(r => r.ok).length;
   const lines = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  → ' + r.detail));
   return lines.join('\n') + '\n' + (passed === results.length ? 'PASS ' : 'FAIL ') + passed + '/' + results.length;
