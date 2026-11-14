@@ -72,6 +72,10 @@
   /* 13 Nov (owner): "Lister selection alternating between four Listers" — the auto-pick rotates
      round-robin, card by card, across the listing staff (Item Lister + Listing Manager roles; the
      Team Lead stays in the dropdown for a manual pick but is not dealt cards). */
+  /* 14 Nov (owner): "Husnain Naeem is removed listers, and also in listers selections" — the Team
+     Lead is no longer asked for at all, so he sits in neither the workload boxes nor the Lister
+     dropdown; both are drawn from this one list, so they cannot disagree. */
+  var AA_LISTER_ROLES = ['Item Lister', 'Listing Manager'];
   function aaComputeAutoListers() {
     AA.autoListers = AA.listers.filter(function (l) { return l.role === 'Item Lister' || l.role === 'Listing Manager'; })
       .map(function (l) { return l.email; });
@@ -322,7 +326,7 @@
     Promise.all([
       api('approvedArchive', {}),
       api('accountList', {}).catch(function () { return { accounts: [] }; }),
-      api('assignableStaff', { roles: ['Item Lister', 'Listing Manager', 'Team Lead'] }).catch(function () { return { staff: [] }; })
+      api('assignableStaff', { roles: AA_LISTER_ROLES }).catch(function () { return { staff: [] }; })
     ]).then(function (res) {
       if (seq !== AA.seq) { return; }
       AA.data = res[0] || {};

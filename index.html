@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261114-1543';
+var BUILD = '20261114-1712';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -15577,6 +15577,10 @@ function createMeeting() {
   /* 13 Nov (owner): "Lister selection alternating between four Listers" — the auto-pick rotates
      round-robin, card by card, across the listing staff (Item Lister + Listing Manager roles; the
      Team Lead stays in the dropdown for a manual pick but is not dealt cards). */
+  /* 14 Nov (owner): "Husnain Naeem is removed listers, and also in listers selections" — the Team
+     Lead is no longer asked for at all, so he sits in neither the workload boxes nor the Lister
+     dropdown; both are drawn from this one list, so they cannot disagree. */
+  var AA_LISTER_ROLES = ['Item Lister', 'Listing Manager'];
   function aaComputeAutoListers() {
     AA.autoListers = AA.listers.filter(function (l) { return l.role === 'Item Lister' || l.role === 'Listing Manager'; })
       .map(function (l) { return l.email; });
@@ -15827,7 +15831,7 @@ function createMeeting() {
     Promise.all([
       api('approvedArchive', {}),
       api('accountList', {}).catch(function () { return { accounts: [] }; }),
-      api('assignableStaff', { roles: ['Item Lister', 'Listing Manager', 'Team Lead'] }).catch(function () { return { staff: [] }; })
+      api('assignableStaff', { roles: AA_LISTER_ROLES }).catch(function () { return { staff: [] }; })
     ]).then(function (res) {
       if (seq !== AA.seq) { return; }
       AA.data = res[0] || {};
