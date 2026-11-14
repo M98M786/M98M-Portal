@@ -33005,6 +33005,8 @@ const ROUTES = {
            negative keyword only ever narrows where our own ad shows. */
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/ad_group(\?|$)/,
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_create_keyword$/,
+        /* 14 Nov (owner): the review step — a keyword's bid moves up or down on its own record */
+        /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_update_keyword$/,
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/keyword(\?|$)/,
         /^\/sell\/marketing\/v1\/bulk_create_negative_keyword$/,
         /^\/sell\/marketing\/v1\/negative_keyword(\?|$)/,
