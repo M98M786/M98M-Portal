@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261114-1541';
+var BUILD = '20261114-1543';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -45415,11 +45415,37 @@ function warmUp(){
    It is now marked HERE, in the single function every one of those routes ends at, so the sidebar
    cannot disagree with the screen. Matching is on data-key, not href, because a hash can carry a
    parameter (#productSourcing/406483438958) that an href never has. */
+/* 14 Nov (owner, asked and answered): a pinned page is listed TWICE — once under Pinned and once
+   in its own department — and lighting both copies read as two pages being open. One copy is lit
+   now, and it is the PINNED one, because that is the copy he navigates from.
+   The pinned copy only wins while it is actually on screen: if the Pinned group is folded shut the
+   mark would be invisible, so it falls back to a copy the eye can reach. */
+function navSecOf(el){
+  var n = el && el.parentNode;
+  while (n && !(n.classList && n.classList.contains('nav-sec'))) { n = n.parentNode; }
+  return n || null;
+}
 function navMark(key){
   try{
-    var links = document.querySelectorAll('.nav a');
-    for (var j = 0; j < links.length; j++) { links[j].classList.toggle('on', links[j].getAttribute('data-key') === key); }
-    if (window.__navReveal) { window.__navReveal(key); }   // unfold the group the page lives in
+    var links = document.querySelectorAll('.nav a'), match = [], j;
+    for (j = 0; j < links.length; j++) {
+      links[j].classList.remove('on');
+      if (links[j].getAttribute('data-key') === key) { match.push(links[j]); }
+    }
+    if (!match.length) { return; }
+    var pick = null, visible = null, k, sec;
+    for (k = 0; k < match.length; k++) {
+      sec = navSecOf(match[k]);
+      var open = !(sec && sec.classList.contains('closed'));
+      if (open && !visible) { visible = match[k]; }
+      if (open && sec && sec.getAttribute('data-dept') === 'Pinned') { pick = match[k]; break; }
+    }
+    pick = pick || visible || match[0];
+    pick.classList.add('on');
+    /* only go hunting for the page's department when the lit copy is NOT the pinned shortcut —
+       unfolding a group whose copy stays unlit would just look like the wrong thing opened */
+    sec = navSecOf(pick);
+    if (!(sec && sec.getAttribute('data-dept') === 'Pinned') && window.__navReveal) { window.__navReveal(key); }
   }catch(e){}
 }
 function renderView(key){
