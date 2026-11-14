@@ -15,6 +15,22 @@
     '.aa-tile{border:1px solid var(--gold-line);border-radius:12px;padding:13px 15px;background:var(--panel-2)}' +
     '.aa-tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
     '.aa-tile b{display:block;font-size:22px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
+    /* 13 Nov (owner): the per-lister load, on the page where the sending decision is made */
+    '.aa-load{margin:0 0 14px}' +
+    '.aa-load-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}' +
+    '.aa-load-h b{font-size:12.5px;font-weight:800}' +
+    '.aa-load-h span{font-size:11px;color:var(--text-3);font-weight:600;line-height:1.5}' +
+    '.aa-lgrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}' +
+    '.aa-l{border:1px solid var(--gold-line);border-radius:12px;padding:11px 13px;background:var(--panel-2)}' +
+    '.aa-l .n{font-size:12.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.aa-l .r{font-size:10px;color:var(--text-3);font-weight:700;text-transform:uppercase;letter-spacing:.06em}' +
+    '.aa-l b{display:block;font-size:26px;font-weight:800;margin:6px 0 1px;font-variant-numeric:tabular-nums;line-height:1}' +
+    '.aa-l .w{font-size:10.5px;color:var(--text-3);font-weight:700}' +
+    '.aa-l .d{font-size:10.5px;color:var(--text-2);font-weight:600;margin-top:6px;line-height:1.5}' +
+    '.aa-l.free{border-color:rgba(72,199,142,.45)}.aa-l.free b{color:var(--ok)}' +
+    '.aa-l.busy{border-color:rgba(255,159,67,.45)}.aa-l.busy b{color:var(--warn)}' +
+    '.aa-l.heavy{border-color:rgba(240,96,90,.5)}.aa-l.heavy b{color:var(--bad)}' +
+    '.aa-l .late{color:var(--bad);font-weight:800}' +
     '.aa-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}' +
     '.aa-card{border:1px solid var(--gold-line);border-radius:14px;background:var(--panel-2);overflow:hidden;display:flex;flex-direction:column}' +
     '.aa-card .aa-hd{display:flex;gap:11px;padding:12px 13px;border-bottom:1px solid var(--gold-line)}' +
@@ -39,7 +55,9 @@
     '.aa-empty{color:var(--text-2);font-weight:700;padding:16px 0}.aa-empty span{display:block;color:var(--text-3);font-weight:600;font-size:12.5px;margin-top:4px}'
   );
 
-  var AA = { data: null, sentData: null, tab: 'pending', accounts: [], listers: [], autoListers: [], autoAccounts: [], seq: 0, sentSeq: 0 };
+  /* `load` is deliberately absent until listingLoad answers: undefined means "not asked yet" and
+     draws nothing, null means "asked and refused" and says so. */
+  var AA = { data: null, sentData: null, tab: 'pending', accounts: [], listers: [], autoListers: [], autoAccounts: [], seq: 0, sentSeq: 0, loadErr: '' };
 
   /* 22 Oct (owner): auto-select the deadline as a datetime-local value, so the owner never types it.
      13 Nov (owner): "auto select the date two days into the future, don't select Sunday rather skip
@@ -141,6 +159,83 @@
     return AA.listers.map(function (l) { return '<option value="' + aaAttr(l.email) + '"' + (aaStr(sel) && aaStr(sel) === aaStr(l.email) ? ' selected' : '') + '>' + esc(l.name) + '</option>'; }).join('');
   }
 
+  /* ---------- who is holding how much, right now (owner, 13 Nov) ----------
+     "boxes at the top showing how many items each lister already has assigned right now, so we
+     know how many more to send them, and how many are still pending on their portal where they
+     have not added the draft link yet."
+     THOSE TWO ARE ONE NUMBER, and the page says so instead of printing it twice: adding the draft
+     link hands the task to the go-live desk, so a listing still sitting with a lister is exactly a
+     listing with no draft link yet. Checked against the live book before building this — all four
+     listers held zero drafted items; every drafted one had already moved to the go-live holder.
+     The same engine read Hunt approvals uses (listingLoad), so there is one source of truth for
+     the workload and no second route to keep in step. It is fetched AFTER the archive paints, so
+     the page opens no slower than it does today.
+     Ordered with the most room first: this page exists to choose who gets the next one. */
+  var AA_SUBMITTED = 'Submitted — awaiting approval';   // the TASKS tab's own words, em dash included
+  function aaLoadLoad() {
+    if (typeof engineCall !== 'function') { return; }
+    engineCall('listingLoad', {}, 20000).then(function (d) {
+      AA.load = (d && d.tasks) || [];
+      AA.loadErr = '';
+      aaPaintLoad();
+    }).catch(function (e) {
+      AA.load = null; AA.loadErr = (e && e.message) || 'no answer';
+      aaPaintLoad();
+    });
+  }
+  function aaPaintLoad() {
+    var box = $('aaLoad'); if (!box) { return; }
+    if (AA.load === undefined) { return; }
+    if (AA.load === null) {
+      box.innerHTML = '<div class="aa-load-h"><b>Lister workload</b><span>could not be read \u2014 ' + esc(AA.loadErr) + '</span></div>';
+      return;
+    }
+    var by = {};
+    AA.load.forEach(function (t) {
+      if (!t.open) { return; }
+      var k = aaStr(t.assigned_to).toLowerCase();
+      if (!k) { return; }
+      var b = by[k] || (by[k] = { waiting: 0, notStarted: 0, working: 0, submitted: 0, overdue: 0, oldest: null });
+      /* a submitted task is waiting on US to approve it, not on the lister's draft link */
+      if (t.status === AA_SUBMITTED) { b.submitted++; return; }
+      b.waiting++;
+      if (t.status === 'Working' || t.status === 'Updated') { b.working++; } else { b.notStarted++; }
+      if (t.overdue) { b.overdue++; }
+      var ms = Date.parse(aaStr(t.assigned_at));
+      if (isFinite(ms)) {
+        var days = Math.floor((Date.now() - ms) / 86400000);
+        if (b.oldest === null || days > b.oldest) { b.oldest = days; }
+      }
+    });
+    /* exactly the people the Send form can choose — the boxes and the dropdown must agree */
+    var rows = AA.listers.map(function (l) {
+      var b = by[aaStr(l.email).toLowerCase()] || { waiting: 0, notStarted: 0, working: 0, submitted: 0, overdue: 0, oldest: null };
+      return { name: aaStr(l.name).split(' \u2014 ')[0], role: aaStr(l.role), b: b };
+    }).sort(function (x, y) { return x.b.waiting - y.b.waiting; });
+    if (!rows.length) { box.innerHTML = ''; return; }
+    var total = rows.reduce(function (n, r) { return n + r.b.waiting; }, 0);
+    box.innerHTML =
+      '<div class="aa-load-h"><b>Waiting with the listers right now</b>' +
+        '<span>' + total + ' listing' + (total === 1 ? '' : 's') + ' on their desks \u00b7 most room first. ' +
+        'A listing leaves a lister the moment its draft link is added, so what they are holding IS what has no draft link yet.</span></div>' +
+      '<div class="aa-lgrid">' + rows.map(function (r) {
+        var b = r.b;
+        var cls = b.waiting === 0 ? ' free' : (b.waiting >= 20 ? ' heavy' : (b.waiting >= 8 ? ' busy' : ''));
+        var bits = [];
+        if (b.notStarted) { bits.push(b.notStarted + ' not opened'); }
+        if (b.working) { bits.push(b.working + ' started'); }
+        if (b.oldest !== null && b.waiting) { bits.push('oldest ' + b.oldest + 'd'); }
+        if (b.submitted) { bits.push(b.submitted + ' with us to approve'); }
+        return '<div class="aa-l' + cls + '"><div class="n" title="' + esc(r.name) + '">' + esc(r.name) + '</div>' +
+          '<div class="r">' + esc(r.role) + '</div>' +
+          '<b>' + b.waiting + '</b>' +
+          '<div class="w">' + (b.waiting === 0 ? 'nothing waiting \u2014 free' : 'waiting for a draft link') + '</div>' +
+          (b.overdue ? '<div class="d"><span class="late">' + b.overdue + ' past the deadline</span>' + (bits.length ? ' \u00b7 ' + esc(bits.join(' \u00b7 ')) : '') + '</div>'
+                     : (bits.length ? '<div class="d">' + esc(bits.join(' \u00b7 ')) + '</div>' : '')) +
+        '</div>';
+      }).join('') + '</div>';
+  }
+
   function aaPaint() {
     var d = AA.data;
     var tiles = $('aaTiles'); if (tiles && d) {
@@ -151,6 +246,7 @@
         '<div class="aa-tile"><span class="k">With listers · in progress</span><b style="color:var(--warn)">' + (withL == null ? '…' : withL) + '</b></div>' +
         '<div class="aa-tile"><span class="k">Listed</span><b style="color:var(--ok)">' + (listed == null ? '…' : listed) + '</b></div>';
     }
+    aaPaintLoad();   // AA.listers arrives with the archive, so the boxes are drawn with it
     var tabs = $('aaTabs'); if (tabs && d) {
       tabs.innerHTML =
         '<button class="aa-tab' + (AA.tab === 'pending' ? ' on' : '') + '" data-aa-tab="pending">Pending send <span style="opacity:.7">' + (d.counts ? d.counts.pending_send : 0) + '</span></button>' +
@@ -238,6 +334,7 @@
       if (typeof refreshBadges === 'function') { try { refreshBadges(); } catch (e) {} }
       aaPaint();
       aaLoadSent();   // the heavy list, in the background, so the tiles fill and the Sent tab is ready
+      aaLoadLoad();   // and who is holding how much, so the choice of lister is an informed one
     }).catch(function (e) {
       if (seq !== AA.seq) { return; }
       var b = $('aaBody'); if (b) { b.innerHTML = '<div class="aa-empty">Could not load the archive.<span>' + esc((e && e.message) || 'no answer') + '</span></div>'; }
@@ -255,6 +352,7 @@
           '<span class="sub">every approved product, waiting for you to pick a lister and send it · the listing task is created the moment you send</span>' +
           '<button class="minibtn" id="aaRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div class="aa-tiles enter d1" id="aaTiles"></div>' +
+        '<div class="aa-load enter d2" id="aaLoad"></div>' +
         '<div class="aa-tabs enter d2" id="aaTabs"></div>' +
         '<div class="card enter d2"><div class="bd" id="aaBody"><div class="spinner"></div></div></div>';
     },
