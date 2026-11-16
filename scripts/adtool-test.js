@@ -65,7 +65,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, adSaleDayGap, adSaleNearPrice, adSaleLedgerRead, adSalePaidPerUnit, adSalePromoSaleFromXml, adSaleEventNamed, adSaleMembership, adSaleSkipReason, adSaleCountMembership, adSaleReasonText, adSaleMorningAfter, adSalePriceSteps, adSalePriceClocks, adSaleCohorts2, adTradeRequestXml, adTradeAckOf, ADTOOL_SALE_PENNY, ADTOOL_SALE_SKIP_REASONS, ADTOOL_SALE_SKIP_WORDS, ADTOOL_SALE_SKIP_SHORT, ADTOOL_TRADE_XML_FIELDS, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_SAMPLER_QUIET_DEFAULT_MIN, ADTOOL_SAMPLER_CONFIG_KEYS, adtSamplerCadence, adtSamplerDue, ADTOOL_PEAK_ENVELOPE_EDGE_MIN, adPeakEnvelopeHours, adPeakInEnvelope, adPeakStopLoss, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_LANDING_DAYS_SHOWN, adLandingDaysClean, adLandingWords, adLandingMark, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS, ADTOOL_PATTERN_KINDS, ADTOOL_PATTERN_MONTHS, ADTOOL_PATTERN_DATES_CAP, adListingDayWords, adListingMonthWords, adListingMonthEnd, adListingPattern, adListingPatternKey, adListingPatternWindow, adListingSlots, adListingWeekday, adListingHourWeekday, adListingDates, ADTOOL_PERIODS_NOTE, adPeakPeriodChunks, ADTOOL_CAMPAIGN_WATCH_MIN, ADTOOL_CAMPAIGN_WATCH_EVERY_MIN, ADTOOL_CAMPAIGN_WATCH_CALLS, ADTOOL_CAMPAIGN_WATCH_DAILY, ADTOOL_CAMPAIGN_WATCH_ACCOUNTS, ADTOOL_CAMPAIGN_WATCH_MS, ADTOOL_CAMPAIGN_WATCH_REREAD_S, ADTOOL_CAMPAIGN_WATCH_ITEM_S, ADTOOL_CAMPAIGN_WATCH_STATES, ADTOOL_CAMPAIGN_WATCH_PAGE_STATES, adWatchKey, adWatchByKey, adWatchRereadKey, adWatchItemKey, adWatchDayKey, adWatchUntil, adWatchAlive, adWatchAccounts, adWatchDailyLeft, adWatchBound, adWatchClock, adWatchEveryText, adWatchFleetMin, adWatchHeader, adWatchRereadNote, adWatchTickNote, adWatchCachePayloads, adWatchCampaignIds };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, liveMembershipRow, adDupVerdict, ADTOOL_DUP_RULE, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, adSaleDayGap, adSaleNearPrice, adSaleLedgerRead, adSalePaidPerUnit, adSalePromoSaleFromXml, adSaleEventNamed, adSaleMembership, adSaleSkipReason, adSaleCountMembership, adSaleReasonText, adSaleMorningAfter, adSalePriceSteps, adSalePriceClocks, adSaleCohorts2, adTradeRequestXml, adTradeAckOf, ADTOOL_SALE_PENNY, ADTOOL_SALE_SKIP_REASONS, ADTOOL_SALE_SKIP_WORDS, ADTOOL_SALE_SKIP_SHORT, ADTOOL_TRADE_XML_FIELDS, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_SAMPLER_QUIET_DEFAULT_MIN, ADTOOL_SAMPLER_CONFIG_KEYS, adtSamplerCadence, adtSamplerDue, ADTOOL_PEAK_ENVELOPE_EDGE_MIN, adPeakEnvelopeHours, adPeakInEnvelope, adPeakStopLoss, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_LANDING_DAYS_SHOWN, adLandingDaysClean, adLandingWords, adLandingMark, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS, ADTOOL_PATTERN_KINDS, ADTOOL_PATTERN_MONTHS, ADTOOL_PATTERN_DATES_CAP, adListingDayWords, adListingMonthWords, adListingMonthEnd, adListingPattern, adListingPatternKey, adListingPatternWindow, adListingSlots, adListingWeekday, adListingHourWeekday, adListingDates, ADTOOL_PERIODS_NOTE, adPeakPeriodChunks, ADTOOL_CAMPAIGN_WATCH_MIN, ADTOOL_CAMPAIGN_WATCH_EVERY_MIN, ADTOOL_CAMPAIGN_WATCH_CALLS, ADTOOL_CAMPAIGN_WATCH_DAILY, ADTOOL_CAMPAIGN_WATCH_ACCOUNTS, ADTOOL_CAMPAIGN_WATCH_MS, ADTOOL_CAMPAIGN_WATCH_REREAD_S, ADTOOL_CAMPAIGN_WATCH_ITEM_S, ADTOOL_CAMPAIGN_WATCH_STATES, ADTOOL_CAMPAIGN_WATCH_PAGE_STATES, adWatchKey, adWatchByKey, adWatchRereadKey, adWatchItemKey, adWatchDayKey, adWatchUntil, adWatchAlive, adWatchAccounts, adWatchDailyLeft, adWatchBound, adWatchClock, adWatchEveryText, adWatchFleetMin, adWatchHeader, adWatchRereadNote, adWatchTickNote, adWatchCachePayloads, adWatchCampaignIds };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -1138,7 +1138,12 @@ function run(argv) {
 
   /* (m) read-only, one membership rule, and the columns not to touch */
   t('campaign pages: nothing is ever sent to eBay, and the only writes at all are the documentation and the flags', !/fetch\(/.test(cbSrc) && (cbSrc.match(/INSERT INTO/g) || []).length === (cbSrc.match(/INSERT INTO (adtool_number_register|portal_config)/g) || []).length && !/UPDATE campaigns|DELETE FROM/.test(cbSrc), (cbSrc.match(/INSERT INTO/g) || []).length);
-  t('campaign pages: the one membership rule the tool shares is reused, never written a second time', (cbSrc.match(/ADTOOL_LIVE_AD_SQL/g) || []).length >= 2 && /adtCampaignStmt\(/.test(cbSrc) && !/c\.status LIKE/.test(cbSrc), (cbSrc.match(/ADTOOL_LIVE_AD_SQL/g) || []).length);
+  /* 16 Nov: Where each listing advertises asked the shared live-ad query a SECOND time, fleet wide,
+     on every one of its three reads, only to learn which of the membership rows it already held were
+     live. It takes that from the shared duplication verdict now, so the rule is still reused and
+     still written nowhere twice: through the shared SQL, through the shared statement helper, and
+     through adDupVerdict. */
+  t('campaign pages: the one membership rule the tool shares is reused, never written a second time', (cbSrc.match(/ADTOOL_LIVE_AD_SQL/g) || []).length >= 1 && /adtCampaignStmt\(/.test(cbSrc) && (cbSrc.match(/adDupVerdict\(/g) || []).length >= 1 && !/c\.status LIKE/.test(cbSrc), [(cbSrc.match(/ADTOOL_LIVE_AD_SQL/g) || []).length, (cbSrc.match(/adDupVerdict\(/g) || []).length]);
   t('campaign pages: no query asks for the impressions column that is declared and never written', !/impressions/.test(cbSrc), null);
   t('campaign pages: nothing adds the click fee on top of a day total that already carries it', !/cpc_spend/.test(cbSrc), null);
   t('campaign pages: every window comes from the shared period helper, and the day source is asked for rather than named', (cbSrc.match(/adtPeriodOr\(/g) || []).length === 2 && /adtDaySrc\(/.test(cbSrc) && /adtPeriod\(\{ period: 'd3' \}/.test(cbSrc), null);
@@ -1199,7 +1204,7 @@ function run(argv) {
     const n = ['stopped', 'activated', 'neither'].filter(d => k.direction === d).length;
     if (n !== 1) adOnce.push([f, to, k.direction]);
   }
-  t('ad changes: all thirty six pairs of before and after land on exactly one of stopped, activated or neither', adOnce.length === 0, adOnce.slice(0, 4));
+  t('ad changes: every pair of before and after, GONE included, lands on exactly one of stopped, activated or neither', adOnce.length === 0, adOnce.slice(0, 4));
   t('ad changes: a pause, a put away and a leaving are the stopped page', adK('ACTIVE', 'PAUSED').kind === 'ad_paused' && adK('ACTIVE', 'PAUSED').direction === 'stopped' && adK('ACTIVE', 'ARCHIVED').kind === 'ad_archived' && adK('ACTIVE', 'ARCHIVED').direction === 'stopped' && adK('ACTIVE', 'REMOVED').kind === 'ad_removed' && adK('ACTIVE', 'REMOVED').direction === 'stopped', null);
   t('ad changes: a resume and a brand new ad are the activated page', adK('PAUSED', 'ACTIVE').kind === 'ad_resumed' && adK('PAUSED', 'ACTIVE').direction === 'activated' && adK('', 'ACTIVE').kind === 'ad_added' && adK('', 'ACTIVE').direction === 'activated', null);
   t('ad changes: a pay-on-sale ad joining or leaving is neither on its state and still lands on a page through its membership', adK('', 'EXISTS').kind === 'ad_added' && adK('', 'EXISTS').basis === 'membership' && adK('', 'EXISTS').direction === 'activated' && adK('', 'EXISTS').status_direction === 'neither' && adK('EXISTS', 'REMOVED').kind === 'ad_removed' && adK('EXISTS', 'REMOVED').basis === 'membership' && adK('EXISTS', 'REMOVED').direction === 'stopped' && adK('EXISTS', 'REMOVED').status_direction === 'neither', [adK('', 'EXISTS'), adK('EXISTS', 'REMOVED')]);
@@ -2290,7 +2295,17 @@ function run(argv) {
   t('dynamic rate: with nothing from eBay the campaign name decides, whatever case it is written in', F.adDynamicRate({ name: 'ZAREEN Dynamic general' }).source === 'name' && F.adDynamicRate({ ad_rate_strategy: '', name: 'dynamic' }).dynamic === true, [F.adDynamicRate({ name: 'ZAREEN Dynamic general' }), F.adDynamicRate({ ad_rate_strategy: '', name: 'dynamic' })]);
   t('dynamic rate: neither says so, so it is not one, and the source is left empty', JSON.stringify(F.adDynamicRate({ ad_rate_strategy: 'FIXED', name: 'General' })) === JSON.stringify({ dynamic: false, source: '' }) && F.adDynamicRate(null).dynamic === false && F.adDynamicRate({}).source === '', [F.adDynamicRate({ ad_rate_strategy: 'FIXED', name: 'General' }), F.adDynamicRate(null)]);
   t('dynamic rate: eBay saying FIXED does not overrule a name the owner calls dynamic, and the source shows which answered', F.adDynamicRate({ ad_rate_strategy: 'FIXED', name: 'General dynamic' }).dynamic === true && F.adDynamicRate({ ad_rate_strategy: 'FIXED', name: 'General dynamic' }).source === 'name', F.adDynamicRate({ ad_rate_strategy: 'FIXED', name: 'General dynamic' }));
-  t('columns: the rate strategy and the funding reply are nullable columns added behind a guard, with the old column list still behind them', /ALTER TABLE campaigns ADD COLUMN ad_rate_strategy TEXT DEFAULT ''/.test(src) && /ALTER TABLE campaigns ADD COLUMN funding_json TEXT DEFAULT ''/.test(src) && /INSERT INTO campaigns \(account, campaign_id, name, status, budget, funding_model, ad_rate_strategy, funding_json, synced_at\)/.test(src) && (src.match(/INSERT INTO campaigns \(account, campaign_id, name, status, budget, funding_model, synced_at\)/g) || []).length === 1, null);
+  /* 16 Nov: there are TWO writers of a campaign row now — the list sync, and the orphan sweep that
+     puts back a campaign eBay says still exists — and each carries its own fallback to the old
+     column list, so neither can be the one that fails on a database the ALTER has not reached. The
+     two counts are held equal: a writer with the new columns and no fallback behind it is the fault
+     this test exists to catch. */
+  t('columns: the rate strategy and the funding reply are nullable columns added behind a guard, with the old column list still behind them', (() => {
+    const neu = (src.match(/INSERT INTO campaigns \(account, campaign_id, name, status, budget, funding_model, ad_rate_strategy, funding_json, synced_at\)/g) || []).length;
+    const old = (src.match(/INSERT INTO campaigns \(account, campaign_id, name, status, budget, funding_model, synced_at\)/g) || []).length;
+    return /ALTER TABLE campaigns ADD COLUMN ad_rate_strategy TEXT DEFAULT ''/.test(src) && /ALTER TABLE campaigns ADD COLUMN funding_json TEXT DEFAULT ''/.test(src) &&
+      neu === 2 && old === 2;
+  })(), [(src.match(/INSERT INTO campaigns \(account, campaign_id, name, status, budget, funding_model, ad_rate_strategy, funding_json, synced_at\)/g) || []).length, (src.match(/INSERT INTO campaigns \(account, campaign_id, name, status, budget, funding_model, synced_at\)/g) || []).length]);
   t('honesty: the whole funding reply is kept, and kept long enough to read back, which 400 characters was not (regex over the real source)', /JSON\.stringify\(fs\)\.slice\(0, 1000\)/.test(src) && !/JSON\.stringify\(fs\)\.slice\(0, 400\)/.test(src) && /fs\.adRateStrategy/.test(src) && /adtoolFundingStrategy/.test(src), null);
   t('honesty: a reply that does not carry the rate strategy keeps the one already on record instead of blanking it (regex over the real source)', (() => {
     /* both writers run on the same five-minute tick, so both have to refuse the blank: the upsert
@@ -6341,9 +6356,11 @@ function run(argv) {
     return i > 0 && /advertising report/.test(say) && /order book/.test(say) && /still filling/.test(say) &&
       !/—/.test(say) && !/\d/.test(say) && /periods_problem: periodsProblem,/.test(src) &&
       /catch \(e\) \{ periodsProblem = 'the figures by period could not be read just now'; \}/.test(src) &&
-      (src.match(/periods_windows: ADTOOL_PEAK_PERIOD_KEYS,/g) || []).length === 2 &&
-      (src.match(/periods_note: periods\.note,/g) || []).length === 2 &&
-      (src.match(/periods_problem: periodsProblem,/g) || []).length === 2 &&
+      /* 16 Nov: THREE pages carry the table now — the Peak page, Entire live listings and Where each
+         listing advertises — and all three print the same one sentence out of the same const. */
+      (src.match(/periods_windows: ADTOOL_PEAK_PERIOD_KEYS,/g) || []).length === 3 &&
+      (src.match(/periods_note: periods\.note,/g) || []).length === 3 &&
+      (src.match(/periods_problem: (periodsProblem|periods\.problem),/g) || []).length === 3 &&
       F.ADTOOL_PERIODS_NOTE === F.ADTOOL_PERIODS_NOTE.trim() && F.ADTOOL_PERIODS_NOTE.length > 120;
   })(), null);
 
@@ -6403,17 +6420,19 @@ function run(argv) {
      tests hold that there is exactly one of it, that it is bounded to the rows a page returns, and
      that the page really draws the table under every row of all three lists. ══ */
   t('shared: there is ONE period aggregate in the engine and both pages call it, so no second piece of this arithmetic exists to disagree with the first', (() => {
-    /* declared once, called twice, and the two callers are the two computes */
+    /* declared once, called by each of the three computes that carry the table, and by nothing else */
     const decl = (src.match(/async function adtPeriodsForItems\(env, ids, cap, today, todayUtc\) \{/g) || []).length === 1;
-    const calls = (src.match(/adtPeriodsForItems\(/g) || []).length === 3;
+    const calls = (src.match(/adtPeriodsForItems\(/g) || []).length === 4;
     const pkBlk = src.slice(src.indexOf('async function adtoolPeakCompute'), src.indexOf('/* ---- which campaigns a listing’s peak hours could switch ----'));
     const lsBlk = src.slice(src.indexOf('async function adtoolLiveSplitCompute'), src.indexOf('/* ---- Potential CPC'));
-    const both = /const periods = await adtPeriodsForItems\(env, manualRows\.map/.test(pkBlk) && /const periods = await adtPeriodsForItems\(env, perIdsShown, ADTOOL_LIVE_SPLIT_LIST_CAP, today, todayUtc\)/.test(lsBlk);
+    const wlaBlk = src.slice(src.indexOf('async function adtoolItemCampaignsCompute'), src.indexOf('const ADTOOL_ACTIONS_P14 = {'));
+    const both = /const periods = await adtPeriodsForItems\(env, manualRows\.map/.test(pkBlk) && /const periods = await adtPeriodsForItems\(env, perIdsShown, ADTOOL_LIVE_SPLIT_LIST_CAP, today, todayUtc\)/.test(lsBlk) &&
+      /const periods = await adtPeriodsForItems\(env, keep\.slice\(0, 600\)\.map\(r => String\(r\.item_id \|\| ''\)\), ADTOOL_ITEM_CAMPAIGNS_PERIOD_CHUNK, today, utcDate\(\)\)/.test(wlaBlk);
     /* and the arithmetic itself is in that one place: each of the five windows is built exactly once
-       in the whole engine, and neither compute builds any of it for itself */
+       in the whole engine, and none of the three computes builds any of it for itself */
     const onceEach = ["adPeakPeriodSpliceToday(adPeakPeriodFromAgg(agg, 'all'), tRow)", "today: adPeakPeriodToday(tRow),", "yesterday: adPeakPeriodOrNull(agg, 'yesterday'),", "d7: adPeakPeriodOrNull(agg, 'd7'),", "d30: adPeakPeriodOrNull(agg, 'd30'),"]
       .every(x => src.split(x).length === 2);
-    const noneInComputes = !/adPeakPeriodOrNull\(|adPeakPeriodToday\(|adPeakPeriodFromAgg\(|adPeakPeriodSpliceToday\(/.test(pkBlk) && !/adPeakPeriodOrNull\(|adPeakPeriodToday\(|adPeakPeriodFromAgg\(|adPeakPeriodSpliceToday\(/.test(lsBlk);
+    const noneInComputes = [pkBlk, lsBlk, wlaBlk].every(b => !/adPeakPeriodOrNull\(|adPeakPeriodToday\(|adPeakPeriodFromAgg\(|adPeakPeriodSpliceToday\(/.test(b));
     /* one day-aggregate statement and one today-grain statement in the whole engine for this table */
     const oneQuery = src.split("FROM adtool_listing_day d JOIN ' + perSql + ' pkc ON pkc.pk_item = d.item_id").length === 2 &&
       src.split("FROM adtool_listing_today t JOIN ' + perSql + ' pkc ON pkc.pk_item = t.item_id").length === 2;
@@ -6570,8 +6589,11 @@ function run(argv) {
     /* 9 Nov: the key carries the pattern window too, because the page sends one on every open and
        four blocks of it are summed over that window. All time keys to nothing, so a reader who asks
        for nothing and a reader who asks for all time share one entry. */
-    const memo = /return adtKvMemo\(ctx\.env, 'adtoolListing', adtProfitClass\(ctx\.user\), patKey \? \{ item_id: iid, pattern: patKey \} : \{ item_id: iid \}, ADTOOL_KV_TTL_MS\.adtoolListing,/.test(plRoute) &&
+    /* 16 Nov: the memoised answer is handed on through adtListingWithEbayRead, which puts the eBay
+       stamp OUTSIDE the stored answer. The key itself is unchanged, which is the point of this test. */
+    const memo = /const out = await adtKvMemo\(ctx\.env, 'adtoolListing', adtProfitClass\(ctx\.user\), patKey \? \{ item_id: iid, pattern: patKey \} : \{ item_id: iid \}, ADTOOL_KV_TTL_MS\.adtoolListing,/.test(plRoute) &&
       /const patKey = adListingPatternKey\(p && p\.pattern\);/.test(plRoute) &&
+      /return adtListingWithEbayRead\(out, ebayRead\);/.test(plRoute) &&
       /\(\) => adtoolListingCompute\(ctx\.env, iid, p\),/.test(plRoute);
     /* two minutes, the same ceiling the other listing-level pages state */
     const ttl = /adtoolListing: 120000 \};/.test(src);
@@ -8707,7 +8729,10 @@ function run(argv) {
     })(), null);
   t('watch page: the memo is thirty seconds, the job drops this page’s entries by name the moment a tick FINDS a change, and a tick that found nothing spends no KV writes at all (real source)',
     /adtoolItemCampaigns: 30000,/.test(src) &&
-    /if \(got\.added \|\| got\.removed \|\| got\.bid_moved\) await adWatchCacheClear\(env, acct\);/.test(src) &&
+    /* 16 Nov: an ad whose own state moved counts as a change here too. A pause is neither a
+       membership nor a bid, so the drop used to sit still through the one change a reader watching
+       this page is most likely to have just made by hand. */
+    /if \(got\.added \|\| got\.removed \|\| got\.bid_moved \|\| got\.status_moved\) await adWatchCacheClear\(env, acct\);/.test(src) &&
     /await adWatchCacheClear\(env, a\);/.test(src) && /adtKvKey\('adtoolItemCampaigns', cls, pay\)/.test(src) &&
     (src.match(/await adWatchCacheClear\(/g) || []).length === 2, null);
   t('watch route: the role gate still runs first of all, the watch is written BEFORE the memo is consulted, and an op nobody wrote is refused (real source)',
@@ -8746,6 +8771,332 @@ function run(argv) {
     const guarded = /if \(!live\[id\] && !listTruncated\) \{/.test(fn) && !/if \(!live\[id\]\) \{/.test(fn);
     const back = /DELETE FROM adtool_campaign_archive WHERE account = \?1 AND campaign_id IN/.test(fn);
     return paged && guarded && back;
+  })(), null);
+
+  /* ══ 16 NOV 2026: ONE DUPLICATION RULE, DELETED CAMPAIGNS OUT, AND THE LISTING READ ON OPEN ════
+     The owner: "Product history does not show the campaigns a listing is in properly: first it says
+     not in any campaign, then after I add it, it shows duplication. Many campaigns say gone from
+     eBay while they exist. The duplication thing has caused many wrong decisions."
+     Three faults, one batch. The verdict is pure, so these hold it without a database; the SQL twin
+     is held against the pure rule on a fixture; and the four places the rule is used, the sweep, the
+     sync's delete and both pages are held by their own source. ══ */
+  const dupRow = (o) => Object.assign({ account: 'A', campaign_id: 'C1', name: 'General', campaign_status: 'RUNNING', funding_model: 'COST_PER_CLICK', ad_status: 'ACTIVE' }, o || {});
+  t('duplication: two live pay-per-click campaigns is duplication, and the sentence says so without a figure being typed into it', (() => {
+    const v = F.adDupVerdict([dupRow({ campaign_id: 'C1' }), dupRow({ campaign_id: 'C2', name: 'Winners' })], 'ACTIVE');
+    return v.n === 2 && v.duplicated === true && v.live_campaigns.length === 2 &&
+      v.live_names.join(',') === 'General,Winners' && /2 campaigns at once/.test(v.why) && !/—/.test(v.why);
+  })(), [F.adDupVerdict([dupRow({ campaign_id: 'C1' }), dupRow({ campaign_id: 'C2' })], 'ACTIVE')]);
+  t('duplication: a pay-per-click campaign and a cost-per-sale one is still duplication, because both are charging for the same listing', (() => {
+    const v = F.adDupVerdict([dupRow({ campaign_id: 'C1' }), dupRow({ campaign_id: 'C2', funding_model: 'COST_PER_SALE', ad_status: '' })], 'ACTIVE');
+    return v.n === 2 && v.duplicated === true;
+  })(), null);
+  t('duplication: one live campaign and one that is no longer on eBay is NOT duplication, and the gone one is counted apart and named in the sentence', (() => {
+    const v = F.adDupVerdict([dupRow({ campaign_id: 'C1' }), { account: 'A', campaign_id: 'C9', name: 'campaign C9', gone: true, gone_at: '2026-08-19', campaign_status: 'no longer on eBay' }], 'ACTIVE');
+    const unresolved = F.adDupVerdict([dupRow({ campaign_id: 'C1' }), { account: 'A', campaign_id: 'C9', resolved: false }], 'ACTIVE');
+    return v.n === 1 && v.duplicated === false && v.not_counted.gone === 1 && /no longer on eBay/.test(v.why) &&
+      unresolved.n === 1 && unresolved.duplicated === false && unresolved.not_counted.gone === 1;
+  })(), [F.adDupVerdict([dupRow({}), { campaign_id: 'C9', gone: true }], 'ACTIVE')]);
+  t('duplication: a PAUSED pay-per-click ad is not live, so two campaigns with one paused ad between them is not duplication', (() => {
+    const v = F.adDupVerdict([dupRow({ campaign_id: 'C1' }), dupRow({ campaign_id: 'C2', ad_status: 'PAUSED' })], 'ACTIVE');
+    /* and an ad eBay has never stamped IS being served, which is the pre-WO-08 meaning kept */
+    const blank = F.adDupVerdict([dupRow({ campaign_id: 'C1', ad_status: '' }), dupRow({ campaign_id: 'C2', ad_status: null })], 'ACTIVE');
+    /* a cost-per-sale ad that has been put away is not live either */
+    const away = F.adDupVerdict([dupRow({ campaign_id: 'C1', funding_model: 'COST_PER_SALE', ad_status: 'ARCHIVED' }), dupRow({ campaign_id: 'C2', funding_model: 'COST_PER_SALE', ad_status: '' })], 'ACTIVE');
+    return v.n === 1 && v.duplicated === false && v.not_counted.not_live === 1 &&
+      blank.n === 2 && blank.duplicated === true && away.n === 1 && away.duplicated === false;
+  })(), null);
+  t('duplication: an archived campaign never counts however live its ad reads, a paused campaign never counts, and a listing that is not active has no live ad at all', (() => {
+    /* the fault itself: a deleted campaign whose ad row still says ACTIVE */
+    const arch = F.adDupVerdict([dupRow({ campaign_id: 'C1' }), { account: 'A', campaign_id: 'C9', archived: true, gone_at: '2026-08-19', funding_model: 'COST_PER_CLICK', ad_status: 'ACTIVE', campaign_status: 'RUNNING' }], 'ACTIVE');
+    const paused = F.adDupVerdict([dupRow({ campaign_id: 'C1', campaign_status: 'PAUSED' })], 'ACTIVE');
+    const ended = F.adDupVerdict([dupRow({ campaign_id: 'C1' })], 'ENDED');
+    const endedWhy = /not active/.test(ended.why) && ended.not_counted.listing_not_active === 1;
+    /* and "we do not hold whether it is active" is NOT "it has ended": both stop the row counting
+       and the sentence says which of the two it was */
+    const nk = F.adDupVerdict([{ account: 'A', campaign_id: 'C1', name: 'G', c_status: 'RUNNING', funding_model: 'COST_PER_CLICK', ad_status: 'ACTIVE' }], '');
+    const nkOk = nk.n === 0 && nk.not_counted.listing_not_known === 1 && nk.not_counted.listing_not_active === 0 &&
+      /do not hold whether/.test(nk.why) && !/not active/.test(nk.why);
+    if (!nkOk) return false;
+    /* ENDING_SOON is a campaign that is still spending today, so it counts */
+    const soon = F.adDupVerdict([dupRow({ campaign_id: 'C1', campaign_status: 'ENDING_SOON' })], 'ACTIVE');
+    return arch.n === 1 && arch.not_counted.gone === 1 && paused.n === 0 && paused.duplicated === false &&
+      ended.n === 0 && endedWhy && soon.n === 1;
+  })(), [F.adDupVerdict([dupRow({ campaign_status: 'PAUSED' })], 'ACTIVE')]);
+  t('duplication: each campaign counts ONCE however many ad rows carry it, which is what COUNT(DISTINCT) means, and the rule is safe on nothing at all', (() => {
+    const twice = F.adDupVerdict([dupRow({ campaign_id: 'C1', ad_id: '1' }), dupRow({ campaign_id: 'C1', ad_id: '2' })], 'ACTIVE');
+    const empty = F.adDupVerdict([], 'ACTIVE'), nil = F.adDupVerdict(null, '');
+    const junk = F.adDupVerdict([null, undefined, 7], 'ACTIVE');
+    /* a row that does not say what its campaign was doing is unknown, and unknown is never live */
+    const unknown = F.adDupVerdict([{ account: 'A', campaign_id: 'C1', name: 'x', funding_model: 'COST_PER_CLICK', ad_status: 'ACTIVE' }], 'ACTIVE');
+    return twice.n === 1 && twice.duplicated === false && empty.n === 0 && empty.duplicated === false &&
+      nil.n === 0 && junk.n === 0 && unknown.n === 0 && unknown.not_counted.status_not_known === 1;
+  })(), null);
+  t('duplication: the rule reads the campaign status and the funding model under every name the pages carry them by, so no caller can be quietly judged as unknown', (() => {
+    /* Product history's rows say c_status and funding; the Where page's membership rows say status
+       and funding_model; the shaped rows the pages hand round say campaign_status. All three must
+       land on the same verdict for the same listing. */
+    const a = F.adDupVerdict([{ account: 'A', campaign_id: 'C1', name: 'G', c_status: 'RUNNING', funding: 'COST_PER_CLICK', ad_status: 'ACTIVE' }], 'ACTIVE');
+    const b = F.adDupVerdict([{ account: 'A', campaign_id: 'C1', name: 'G', status: 'RUNNING', funding_model: 'COST_PER_CLICK', ad_status: 'ACTIVE' }], 'ACTIVE');
+    const c = F.adDupVerdict([{ account: 'A', campaign_id: 'C1', campaign_name: 'G', campaign_status: 'RUNNING', funding_model: 'COST_PER_CLICK', ad_status: 'ACTIVE' }], 'ACTIVE');
+    /* and the listing status off the row itself when the caller passes none */
+    const own = F.adDupVerdict([{ account: 'A', campaign_id: 'C1', name: 'G', c_status: 'RUNNING', l_status: 'ACTIVE', funding_model: 'COST_PER_CLICK', ad_status: 'ACTIVE' }], '');
+    const ownEnded = F.adDupVerdict([{ account: 'A', campaign_id: 'C1', name: 'G', c_status: 'RUNNING', listing_status: 'ENDED', funding_model: 'COST_PER_CLICK', ad_status: 'ACTIVE' }], '');
+    return a.n === 1 && b.n === 1 && c.n === 1 && c.live_names[0] === 'G' && own.n === 1 && ownEnded.n === 0;
+  })(), null);
+  t('duplication: THE SQL AND THE PURE RULE AGREE, clause for clause, on a fixture that includes a campaign eBay has deleted', (() => {
+    /* The SQL is the one the feed runs, read out of the engine rather than retyped here, and each of
+       its clauses is matched before the twin below is trusted to stand for it. */
+    const i = src.indexOf('const ADTOOL_DUP_SQL =');
+    const sql = src.slice(i, src.indexOf("HAVING COUNT(DISTINCT ca.campaign_id) > 1'", i) + 42);
+    const clauses = i > 0 &&
+      /JOIN campaigns c ON c\.account = ca\.account AND c\.campaign_id = ca\.campaign_id/.test(sql) &&
+      /JOIN items_api ia ON ia\.item_id = ca\.listing_id AND ia\.status = 'ACTIVE'/.test(sql) &&
+      /\(c\.status LIKE '%RUNNING%' OR c\.status = 'ENDING_SOON'\)/.test(sql) &&
+      /CASE WHEN c\.funding_model = 'COST_PER_CLICK' THEN \(ca\.ad_status = 'ACTIVE' OR ca\.ad_status IS NULL OR ca\.ad_status = ''\) ELSE COALESCE\(ca\.ad_status, ''\) <> 'ARCHIVED' END/.test(sql) &&
+      /GROUP BY ca\.listing_id HAVING COUNT\(DISTINCT ca\.campaign_id\) > 1/.test(sql) &&
+      /* and it is written ONCE and named, so the feed and the probe cannot ask it two ways */
+      (src.match(/const ADTOOL_DUP_SQL =/g) || []).length === 1 &&
+      (src.match(/env\.DB\.prepare\(ADTOOL_DUP_SQL\)/g) || []).length === 2;
+    /* the JS twin of exactly those clauses, over a fixture of ad rows, campaign rows and item rows.
+       A campaign row that is MISSING is a campaign eBay has deleted: the inner join drops it. */
+    const camps = {
+      'A|C1': { status: 'RUNNING', funding_model: 'COST_PER_CLICK' },
+      'A|C2': { status: 'RUNNING', funding_model: 'COST_PER_CLICK' },
+      'A|C3': { status: 'RUNNING', funding_model: 'COST_PER_SALE' },
+      'A|C4': { status: 'PAUSED', funding_model: 'COST_PER_CLICK' },
+      'A|C5': { status: 'ENDING_SOON', funding_model: 'COST_PER_CLICK' },
+    };
+    const items = { L1: 'ACTIVE', L2: 'ACTIVE', L3: 'ACTIVE', L4: 'ENDED', L5: 'ACTIVE', L6: 'ACTIVE', L7: 'ACTIVE' };
+    const ads = [
+      /* two live pay-per-click campaigns: duplication */
+      { listing_id: 'L1', campaign_id: 'C1', ad_status: 'ACTIVE' }, { listing_id: 'L1', campaign_id: 'C2', ad_status: null },
+      /* one live and ONE EBAY HAS DELETED (C9 has no campaign row): not duplication */
+      { listing_id: 'L2', campaign_id: 'C1', ad_status: 'ACTIVE' }, { listing_id: 'L2', campaign_id: 'C9', ad_status: 'ACTIVE' },
+      /* pay-per-click and cost-per-sale: duplication */
+      { listing_id: 'L3', campaign_id: 'C1', ad_status: '' }, { listing_id: 'L3', campaign_id: 'C3', ad_status: '' },
+      /* an ended listing in two campaigns: history, not a leak */
+      { listing_id: 'L4', campaign_id: 'C1', ad_status: 'ACTIVE' }, { listing_id: 'L4', campaign_id: 'C2', ad_status: 'ACTIVE' },
+      /* one paused ad beside one live one: not duplication */
+      { listing_id: 'L5', campaign_id: 'C1', ad_status: 'PAUSED' }, { listing_id: 'L5', campaign_id: 'C2', ad_status: 'ACTIVE' },
+      /* a cost-per-sale ad PUT AWAY beside a live pay-per-click one: not duplication, and this is
+         the clause the old SQL got wrong */
+      { listing_id: 'L6', campaign_id: 'C1', ad_status: 'ACTIVE' }, { listing_id: 'L6', campaign_id: 'C3', ad_status: 'ARCHIVED' },
+      /* a paused campaign and an ending-soon one: ending soon still spends, paused does not */
+      { listing_id: 'L7', campaign_id: 'C4', ad_status: 'ACTIVE' }, { listing_id: 'L7', campaign_id: 'C5', ad_status: 'ACTIVE' },
+    ];
+    const sqlSays = {};
+    for (const a of ads) {
+      const c = camps['A|' + a.campaign_id];
+      if (!c) continue;                                                              // JOIN campaigns
+      if (items[a.listing_id] !== 'ACTIVE') continue;                                // JOIN items_api ... ACTIVE
+      if (!(String(c.status).indexOf('RUNNING') >= 0 || c.status === 'ENDING_SOON')) continue;
+      const ok = c.funding_model === 'COST_PER_CLICK'
+        ? (a.ad_status === 'ACTIVE' || a.ad_status === null || a.ad_status === '')
+        : (a.ad_status == null ? '' : a.ad_status) !== 'ARCHIVED';
+      if (!ok) continue;
+      (sqlSays[a.listing_id] = sqlSays[a.listing_id] || {})[a.campaign_id] = 1;
+    }
+    const bad = [];
+    for (const lid of Object.keys(items)) {
+      const sqlN = Object.keys(sqlSays[lid] || {}).length;
+      const rows = ads.filter(a => a.listing_id === lid).map(a => {
+        const c = camps['A|' + a.campaign_id];
+        return c
+          ? { account: 'A', campaign_id: a.campaign_id, name: a.campaign_id, campaign_status: c.status, funding_model: c.funding_model, ad_status: a.ad_status }
+          /* a campaign with no row of its own is what Product history returns as gone */
+          : { account: 'A', campaign_id: a.campaign_id, name: 'campaign ' + a.campaign_id, gone: true, resolved: false, ad_status: a.ad_status };
+      });
+      const v = F.adDupVerdict(rows, items[lid]);
+      if (v.n !== sqlN || v.duplicated !== (sqlN > 1)) bad.push([lid, sqlN, v.n, v.duplicated]);
+    }
+    /* and the fixture really does exercise both answers, or an agreement on nothing would pass */
+    const exercised = Object.keys(items).filter(l => Object.keys(sqlSays[l] || {}).length > 1).length === 2;
+    return clauses && bad.length === 0 && exercised;
+  })(), null);
+  t('duplication: all four places take the verdict from the one function, and the rule is one sentence the pages print rather than describe', (() => {
+    /* Product history, the Peak rows, Entire live listings and Where each listing advertises */
+    const where = /const dup = adDupVerdict\(out, lstat\);/.test(src) && /dup: \{ n: dup\.n, duplicated: dup\.duplicated, why: dup\.why, names: dup\.live_names, not_counted: dup\.not_counted, rule: ADTOOL_DUP_RULE \}/.test(src);
+    const peak = /const dupNow = adDupVerdict\(sw, 'ACTIVE'\);/.test(src) && /campaigns_live_n: dupNow\.n, campaigns_duplicated: dupNow\.duplicated/.test(src);
+    const split = /const dupV = adDupVerdict\(rows, 'ACTIVE'\);/.test(src) && /const cl = adLiveSplitClassify\(dupV\.live_campaigns\), cls = cl\.split;/.test(src);
+    const wla = /const v = adDupVerdict\(memb\[id\], 'ACTIVE'\);/.test(src) && /live_count: \(verdict\[id\] \|\| \{ n: 0 \}\)\.n/.test(src);
+    /* the rule itself: one const, printed by the pages, carrying no figure and no em-dash */
+    const i = src.indexOf("const ADTOOL_DUP_RULE = '");
+    const say = src.slice(i, src.indexOf('\n', i));
+    const rule = i > 0 && !/—/.test(say) && !/\d/.test(say) && F.ADTOOL_DUP_RULE.length > 120 &&
+      /no longer on eBay never counts/.test(F.ADTOOL_DUP_RULE) &&
+      (src.match(/ADTOOL_DUP_RULE,?$/gm) || []).length >= 3;
+    /* and liveMembershipRow is written ONCE in the whole engine, which is what makes the above one rule */
+    const once = (src.match(/function liveMembershipRow\(r\) \{/g) || []).length === 1;
+    return where && peak && split && wla && rule && once;
+  })(), null);
+  t('deleted campaigns: the sync writes the history FIRST and removes the ad rows second, through one writer both callers share', (() => {
+    const fn = src.slice(src.indexOf('async function adsCampaignAdsGone('), src.indexOf('\n/* ---- the one-off sweep'));
+    /* every listing's ad goes from whatever it last read to GONE, through the existing event writer */
+    const event = /now\[lid\] = \{ st: 'GONE' \};/.test(fn) && /await adtoolAdEventsWrite\(env, acct, String\(cid\), prevSt, now, 'gone'\);/.test(fn);
+    /* and the delete comes AFTER it, so a failure half way leaves the rows to be swept again rather
+       than a listing's history silently missing the campaign it was in */
+    const order = fn.indexOf('adtoolAdEventsWrite') < fn.indexOf('DELETE FROM campaign_ads') &&
+      /await env\.DB\.prepare\('DELETE FROM campaign_ads WHERE account = \?1 AND campaign_id = \?2'\)/.test(fn);
+    /* called by the sync, inside the branch that only a COMPLETE campaign list can reach, and by the
+       sweep. Nowhere else, and never on a short answer. */
+    const sync = src.slice(src.indexOf('async function adsSync('), src.indexOf('\n/* ---- a campaign eBay has deleted'));
+    const fromSync = /if \(!live\[id\] && !listTruncated\) \{/.test(sync) && /const n = await adsCampaignAdsGone\(env, acct, id, adtP2\);/.test(sync) &&
+      sync.indexOf('adtoolCampaignArchiveWrite') < sync.indexOf('adsCampaignAdsGone') &&
+      sync.indexOf('adsCampaignAdsGone') < sync.indexOf("DELETE FROM campaigns WHERE account = ?1 AND campaign_id = ?2");
+    const callers = (src.match(/await adsCampaignAdsGone\(/g) || []).length === 2;
+    /* GONE is in the vocabulary, and a deletion lands on NEITHER the stopped page nor the activated
+       one, because the campaign-level event is already counted as a stop */
+    const kind = F.adtAdChangeKind('ACTIVE', 'GONE').kind === 'ad_campaign_deleted' && F.adtAdChangeKind('ACTIVE', 'GONE').direction === 'neither' &&
+      F.adtAdChangeKind('ACTIVE', 'GONE').basis === 'membership' && F.ADTOOL_AD_STATES.indexOf('GONE') >= 0;
+    return event && order && fromSync && callers && kind;
+  })(), null);
+  t('orphan sweep: eBay is asked once per campaign, a 404 writes the history and removes the rows, a 200 puts the campaign back and leaves the ads, and it is bounded', (() => {
+    const fn = src.slice(src.indexOf('async function adsOrphanSweep('), src.indexOf('\n/* Item-level membership (req 22)'));
+    /* the orphans: ad rows whose campaign is in no campaign row */
+    const find = /LEFT JOIN campaigns c ON c\.account = ca\.account AND c\.campaign_id = ca\.campaign_id /.test(fn) &&
+      /WHERE c\.campaign_id IS NULL GROUP BY ca\.account, ca\.campaign_id/.test(fn);
+    /* ONE GET per campaign, and it is a read */
+    const one = (fn.match(/await ebayRestFetch\(/g) || []).length === 1 &&
+      /await ebayRestFetch\(env, acct, 'GET', '\/sell\/marketing\/v1\/ad_campaign\/' \+ encodeURIComponent\(cid\)\)/.test(fn) &&
+      !/method: 'POST'/.test(fn) && /sent_to_ebay: false/.test(fn);
+    /* the 404 branch: an archive row where there is none, then the shared writer */
+    const gone404 = /if \(got\.status === 404\) \{/.test(fn) && /if \(truthOn && !archived\[acct \+ '\|' \+ cid\]\) \{/.test(fn) &&
+      /await adsCampaignAdsGone\(env, acct, cid, truthOn\);/.test(fn) &&
+      fn.indexOf('adtoolCampaignArchiveWrite') < fn.indexOf('await adsCampaignAdsGone');
+    /* the 200 branch: the campaign goes back and the ads are NOT touched. The branch itself is read
+       out, between its own two markers, so "it leaves the ads alone" is checked on the branch rather
+       than on the function around it. */
+    const okBranch = fn.slice(fn.indexOf('} else if (got.ok) {'), fn.indexOf('    } else {', fn.indexOf('} else if (got.ok) {')));
+    const back200 = okBranch.length > 20 && /await adsOrphanCampaignBack\(env, acct, cid, got\.body\)/.test(okBranch) &&
+      okBranch.indexOf('adsCampaignAdsGone') < 0 && okBranch.indexOf('DELETE FROM campaign_ads') < 0;
+    const putBack = src.slice(src.indexOf('async function adsOrphanCampaignBack('), src.indexOf('async function adsOrphanSweep('));
+    const unarchive = /DELETE FROM adtool_campaign_archive WHERE account = \?1 AND campaign_id = \?2/.test(putBack) && !/campaign_ads/.test(putBack);
+    /* anything else leaves the rows alone and is written down */
+    const refused = /refused\.push\(acct \+ ' ' \+ cid \+ ' ' \+ got\.status\);/.test(fn);
+    /* bounded: a ceiling on the campaigns asked about and a wall clock, both constants, and a
+       dry run that writes nothing */
+    const bound = /if \(asked >= cap \|\| Date\.now\(\) >= until\) \{ heldBack\+\+; continue; \}/.test(fn) &&
+      /const ADTOOL_ORPHAN_SWEEP_CAP = \d+;/.test(src) && /const ADTOOL_ORPHAN_SWEEP_MS = \d+;/.test(src) &&
+      /const dry = !!o\.dry_run;/.test(fn) && /if \(!dry\) \{/.test(fn);
+    /* and it is run BY KEY and has no cron slot of its own */
+    const byKey = /  adsOrphanSweep: \{\n    auth: 'sync',/.test(src) && !/adsOrphanSweep[,}]/.test(src.slice(src.indexOf('function cronMap()'), src.indexOf('function cronMap()') + 4000));
+    /* an account we hold no token for is never asked about */
+    const reach = /if \(reachable\.indexOf\(acct\) < 0\) \{ noToken\+\+; continue; \}/.test(fn);
+    return find && one && gone404 && back200 && unarchive && refused && bound && byKey && reach;
+  })(), null);
+  t('product history: a row whose campaign has left eBay comes back GONE and never live, and the page prints those in one dim line instead of as rows', (() => {
+    const fn = src.slice(src.indexOf('async function adtWhereRows('), src.indexOf('/* ---- actions ---- */'));
+    /* archived is judged on the archive row EXISTING, not on it carrying a name */
+    const judged = /const archived = !resolved && r\.gone_at != null;/.test(fn) && /const goneRow = !resolved;/.test(fn);
+    /* and the state is never run through adtAdState, which reads a blank funding model as
+       cost-per-sale and answers "exists (live)" — the whole fault */
+    const state = /const st = goneRow \? \{ state: 'gone', live: false \} : adtAdState\(funding, r\.ad_status\);/.test(fn) &&
+      /gone: goneRow, gone_at: archived \? String\(r\.gone_at \|\| ''\)\.slice\(0, 10\) : ''/.test(fn) &&
+      /campaign_status: resolved \? r\.c_status : 'no longer on eBay'/.test(fn) &&
+      !/unresolved id/.test(fn) && !/gone from eBay '/.test(fn);
+    /* the gone rows are counted apart for the page */
+    const list = /const goneRows = out\.filter\(r => r\.gone\);/.test(fn) && /gone: goneRows\.map\(/.test(fn) && /gone_n: goneRows\.length,/.test(fn);
+    /* and the page: the table draws the live rows, the gone ones are ONE line under it */
+    const view = rdFile('frontend/view-adtool-product.js');
+    const page = /var WrLive = Wr \? Wr\.filter\(function \(c\) \{ return !\(c && c\.gone\); \}\) : null;/.test(view) &&
+      /WrLive\.map\(function \(c\)/.test(view) && /goneLine\(D\.where\)/.test(view) &&
+      /function goneLine\(W\) \{/.test(view) && /no longer on eBay, ' \+\n *\(at \? 'found gone ' \+ esc\(dfmt\(at\)\) : 'the date is not on record'\)/.test(view) &&
+      /Not in any campaign that is still on eBay\./.test(view) &&
+      !/'<div class="at-empty">Not in any campaign we know about\.<\/div>'\) :/.test(view);
+    /* the chip and the header line, both out of the shared verdict and neither carrying a nought
+       where the answer holds nothing */
+    const chip = /function dupChip\(W\) \{/.test(view) && /Dp\.n == null \|\| isNaN\(Number\(Dp\.n\)\)/.test(view) &&
+      /how many campaigns is not known/.test(view) && /dupChip\(D\.where\)/.test(view) &&
+      /D\.where\.dup\.why/.test(view);
+    return judged && state && list && page && chip;
+  })(), null);
+  t('product history: eBay is asked about the listing on every open, through the Where page\'s own bounded reader, and the stamp rides OUTSIDE the memo', (() => {
+    const fn = src.slice(src.indexOf('async function adtListingEbayRead('), src.indexOf('async function adtListingCacheClear('));
+    /* the same reader the Where page's button uses, and nothing new is sent to eBay */
+    const same = /r = await adWatchReread\(env, acct, String\(iid\), user\);/.test(fn) && !/fetch\(/.test(fn) &&
+      /SELECT COALESCE\(\(SELECT account FROM items_api WHERE item_id = \?1\), \(SELECT account FROM adtool_listings WHERE item_id = \?1\), ''\) AS account/.test(fn);
+    /* it never throws: a refusal becomes a reason the panel prints */
+    const safe = (fn.match(/catch \(e\)/g) || []).length >= 3 && /asked: false, at: '', account: acct, changed: 0, reason:/.test(fn);
+    /* the memo goes only when something MOVED, and an ad whose own state moved counts */
+    const drop = /const changed = \(Number\(ch\.added\) \|\| 0\) \+ \(Number\(ch\.removed\) \|\| 0\) \+ \(Number\(ch\.bid_moved\) \|\| 0\) \+ \(Number\(ch\.status_moved\) \|\| 0\);/.test(fn) &&
+      /if \(changed\) \{ try \{ await adtListingCacheClear\(env, iid, patKey\); \}/.test(fn);
+    /* the route asks BEFORE the memo is consulted, and the stamp is added after it so a stored
+       answer can never be handed back under a fresh one */
+    const route = src.slice(src.indexOf('  adtoolListing: {'), src.indexOf('  adtoolActionLog: {'));
+    const order = route.indexOf('adtListingEbayRead(ctx.env') < route.indexOf('adtKvMemo(ctx.env') &&
+      /return adtListingWithEbayRead\(out, ebayRead\);/.test(route) &&
+      /return Object\.assign\(\{\}, out, \{ ebay_read: ebayRead \|\| null \}\);/.test(src);
+    /* and the page prints the engine's two sentences, neither of them typed here */
+    const view = rdFile('frontend/view-adtool-product.js');
+    const page = /function ebayReadSentence\(D\) \{/.test(view) && /Read from eBay/.test(view) &&
+      /Stored reading, eBay not asked: ' \+ esc\(String\(E\.reason \|\| 'no reason came back'\)\)/.test(view) &&
+      /ebayReadSentence\(D\)/.test(view);
+    return same && safe && drop && order && page;
+  })(), null);
+  t('where each listing advertises: the three chips jump to their own section, the hash carries it so a reload lands there, and the counts are still the payload\'s', (() => {
+    const view = rdFile('frontend/view-adtool-itemcampaigns.js');
+    /* the link carries THIS page's route with the section as its parameter, so the shell's router
+       reads a reload as this page and the section is not lost */
+    const link = /href="#adtoolItemCampaigns\/' \+ b\[0\] \+ '" data-wlajump="' \+ b\[0\] \+ '"/.test(view) &&
+      !/href="#' \+ b\[0\] \+ '"/.test(view);
+    const wired = /var js = box\.querySelectorAll\('\[data-wlajump\]'\);/.test(view) && /jumpTo\(this\.getAttribute\('data-wlajump'\), true\);/.test(view) &&
+      /if \(ev && \(ev\.metaKey \|\| ev\.ctrlKey \|\| ev\.shiftKey \|\| ev\.button === 1\)\) return;/.test(view);
+    const scroll = /function jumpTo\(id, push\) \{/.test(view) && /if \(SECTIONS\.indexOf\(String\(id\)\) < 0\) return;/.test(view) &&
+      /el\.classList\.add\('wla-jumped'\)/.test(view) && /\.wla-panel\.wla-jumped\{/.test(view) &&
+      /history\.replaceState\(null, '', location\.pathname \+ location\.search \+ '#adtoolItemCampaigns\/' \+ id\)/.test(view);
+    /* a reload lands on the section, once, and the three section ids are the page's own panels */
+    const land = /WL\.jump = String\(\(window\.adtRoute \? adtRoute\(\)\.param : ''\) \|\| ''\)\.trim\(\);/.test(view) &&
+      /if \(WL\.jump\) \{ var want = WL\.jump; WL\.jump = ''; jumpTo\(want, false\); \}/.test(view) &&
+      /var SECTIONS = \['wlaDup', 'wlaStands', 'wlaGaps'\];/.test(view) &&
+      /id="wlaDup"/.test(view) && /id="wlaStands"/.test(view) && /id="wlaGaps"/.test(view);
+    /* the counts are read off the payload exactly as they were */
+    const counts = /\['wlaDup', 'Duplication', num\(C\.in_many\), 'dup'\]/.test(view) &&
+      /\['wlaStands', 'Where each item stands', num\(C\.active\), ''\]/.test(view) &&
+      /\['wlaGaps', 'Gaps', num\(C\.in_none\), ''\]/.test(view);
+    return link && wired && scroll && land && counts;
+  })(), null);
+  t('where each listing advertises: every row of all three sections carries the By period block, from the shared helper, with the source sentence said once', (() => {
+    const view = rdFile('frontend/view-adtool-itemcampaigns.js');
+    /* one block, drawn under each row of each of the three tables, spanning that table's width */
+    const rows = (view.match(/periodsRow\(it, \d\)/g) || []).length === 3 &&
+      /periodsRow\(it, 4\)/.test(view) && /periodsRow\(it, 7\)/.test(view) && /periodsRow\(it, 6\)/.test(view) &&
+      /function periodsRow\(it, cols\) \{/.test(view);
+    /* the same five windows in the same order and the same columns as the Peak page's block */
+    const same = /var PERIODS = \[\['today', 'Today so far'\], \['yesterday', 'Yesterday'\], \['d7', 'Last 7 days'\], \['d30', 'Last 30 days'\], \['all', 'All time'\]\];/.test(view) &&
+      /<th class="r">Units not from ads<\/th>/.test(view) && /adtProfitCell\(p\.actual_profit, 0, 0\)/.test(view);
+    /* this file's OWN prefix: not one class borrowed from the Peak page's spliced file */
+    const prefix = !/pkt-/.test(view) && /\.wla-per\{/.test(view) && /\.wla-htbl\{/.test(view);
+    /* the source sentence once, above the first section, and it is the engine's */
+    const note = /box\.innerHTML = jumpBar\(\) \+ note\(\) \+ periodsNote\(\) \+ dupSection\(\)/.test(view) &&
+      /String\(D\.periods_note \|\| ''\)/.test(view) && /String\(D\.periods_problem \|\| ''\)/.test(view);
+    /* a window the answer holds nothing for is said in words, never as a nought, and today and all
+       time are marked as still moving */
+    const honest = /not available yet/.test(view) && /there is nothing to show by period/.test(view) &&
+      /function perMoving\(key, p\) \{ return key === 'today' \|\| !!\(p && p\.includes_today\); \}/.test(view) &&
+      /still updating/.test(view);
+    /* the engine side: the cohort is the rows this read returns, chunked, and it rides in the same
+       answer the page already asks for — the poll and the memo are untouched */
+    const engine = /const periods = await adtPeriodsForItems\(env, keep\.slice\(0, 600\)\.map\(r => String\(r\.item_id \|\| ''\)\), ADTOOL_ITEM_CAMPAIGNS_PERIOD_CHUNK, today, utcDate\(\)\)/.test(src) &&
+      /const ADTOOL_ITEM_CAMPAIGNS_PERIOD_CHUNK = 500;/.test(src) &&
+      /adtoolItemCampaigns: 30000,/.test(src) && /var POLL_MS = 60000;/.test(view) &&
+      /r\.periods = periods\.by_item\[r\.item_id\] \|\| adPeakPeriodsEmpty\(\);/.test(src);
+    return rows && same && prefix && note && honest && engine;
+  })(), null);
+  t('where probe: it answers by key, reads nothing from eBay, carries no money, and prints the SQL beside the shared verdict', (() => {
+    const r = src.slice(src.indexOf('  adsWhereProbe: {'), src.indexOf('  adsOrphanSweep: {'));
+    const keyed = /auth: 'sync'/.test(r) && !/fetch\(/.test(r) && /sent_to_ebay: false/.test(r) &&
+      !/adtool/.test(src.slice(src.indexOf('  adsWhereProbe: {') - 2, src.indexOf('  adsWhereProbe: {') + 20));
+    /* the rows as Product history returns them, and NOT one money key among them */
+    const rows = /rows: \(w\.rows \|\| \[\]\)\.map\(/.test(r) && /read_at: r\.ads_synced_at/.test(r) &&
+      !/spend|roas|revenue|profit/.test(r);
+    /* the verdict, the two sections, and the SQL's own answer beside it */
+    const verdict = /dup: w\.dup \|\| null,/.test(r) && /const page = adDupVerdict\(memb, 'ACTIVE'\);/.test(r) &&
+      /in_duplication_section: page\.n > 1, in_gaps_section: page\.n === 0,/.test(r) &&
+      /env\.DB\.prepare\(ADTOOL_DUP_SQL\)/.test(r) && /agrees_with_sql: sqlN == null \? null : \(\(sqlN > 1\) === page\.duplicated\)/.test(r);
+    /* and when eBay was last asked, off the stamp already on record rather than by asking again */
+    const stamp = /ebay_read_at: readAt, ebay_read_every_s: ADTOOL_CAMPAIGN_WATCH_ITEM_S,/.test(r) &&
+      /adWatchItemKey\(iid\)/.test(r);
+    return keyed && rows && verdict && stamp;
   })(), null);
 
   const passed = results.filter(r => r.ok).length;

@@ -33,7 +33,7 @@
      the engine's: every figure a reader sees on this page is read back from the answer, never typed
      here, so a cap or a cadence that changes changes this page with it. */
   var POLL_MS = 60000;
-  var WL = { account: '', q: '', accounts: [], main: null, dup: null, gap: null, err: {}, busy: false, acting: false, rereading: false };
+  var WL = { account: '', q: '', accounts: [], main: null, dup: null, gap: null, err: {}, busy: false, acting: false, rereading: false, jump: '' };
 
   VIEW_CSS.push([
     '.wla-wrap{max-width:1420px}',
@@ -99,7 +99,29 @@
     '.wla-re{background:transparent;border:1px solid var(--gold-line);color:var(--text-2);border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}',
     '.wla-re:hover{color:var(--gold-a);border-color:rgba(242,176,53,.5)}',
     '.wla-re[disabled]{opacity:.45;cursor:default}',
-    '.wla-re.row{margin-top:4px;padding:2px 8px;font-size:10.5px;font-weight:800}'
+    '.wla-re.row{margin-top:4px;padding:2px 8px;font-size:10.5px;font-weight:800}',
+    /* ── THE BY PERIOD BLOCK (owner, 16 Nov 2026) ─────────────────────────────────────────────────
+       "That page needs the product-history block the Peak rows carry." The same table, drawn the
+       same way, under THIS FILE'S OWN PREFIX: nothing here borrows a class from the Peak page's
+       spliced file and nothing lends one either, which is the shared-view-file law. ── */
+    '.wla-per{border:1px solid var(--gold-line);border-radius:12px;padding:9px 11px;margin:0;background:var(--panel-2)}',
+    '.wla-perhead{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;justify-content:space-between;margin:0 0 6px}',
+    '.wla-dayk{font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:800}',
+    '.wla-open{font-size:10.5px;font-weight:800;color:var(--gold-a);text-decoration:underline;text-underline-offset:2px;white-space:nowrap}',
+    '.wla-moving{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:800;color:var(--gold-a);border:1px solid rgba(242,176,53,.4);white-space:nowrap}',
+    '.wla-htbl{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums}',
+    '.wla-htbl th{text-align:left;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:4px 6px;border-bottom:1px solid var(--gold-line);white-space:nowrap}',
+    '.wla-htbl td{padding:4px 6px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--text-2)}',
+    '.wla-htbl td.hr{color:var(--text);font-weight:700;white-space:nowrap}',
+    '.wla-htbl th.r,.wla-htbl td.r{text-align:right;white-space:nowrap}',
+    '.wla-perrow>td{padding:2px 8px 12px;border-bottom:1px solid rgba(255,255,255,.05)}',
+    '.wla-tbl tr.wla-perrow:hover td{background:transparent}',
+    '.wla-rules{background:var(--panel-2);border:1px dashed var(--gold-line);border-radius:12px;padding:11px 14px;margin-bottom:12px;color:var(--text-2);font-size:12px;line-height:1.6}',
+    '.wla-rules b{color:var(--text)}',
+    '.wla-bad{color:' + LOSS + ';font-weight:700}',
+    /* the brief highlight a jump leaves on the section it lands on, so a reader can see where the
+       page took them without the scroll having to be watched */
+    '.wla-panel.wla-jumped{box-shadow:0 0 0 2px rgba(242,176,53,.55)}'
   ].join(''));
 
   function num(n) { return n == null || n === '' || isNaN(Number(n)) ? null : Number(n); }
@@ -206,6 +228,10 @@
       /* the closure outlives a visit: drop every answer on entry so a page re-opened later asks
          again instead of painting an old reading */
       WL.main = null; WL.dup = null; WL.gap = null; WL.err = {}; WL.rereading = false;
+      /* the section a reload or a copied link asked for, off the route and from nowhere else. It is
+         consumed by the first draw and then forgotten, so a later poll does not keep re-scrolling
+         the page under somebody who has since scrolled somewhere else. */
+      WL.jump = String((window.adtRoute ? adtRoute().param : '') || '').trim();
       var q = $('wlaQ'), go = $('wlaGo'), clear = $('wlaClear');
       go.onclick = function () { WL.q = q.value.trim(); loadAll(); };
       clear.onclick = function () { q.value = ''; WL.q = ''; loadAll(); };
@@ -416,6 +442,89 @@
       'peak: ' + now + ' now' + esc(tail) + '</span>';
   }
 
+  /* ══ EVERY ROW'S OWN BY PERIOD FIGURES (owner, 16 Nov 2026) ═══════════════════════════════════
+     "And that page needs the product-history block the Peak rows carry." This is Product history's
+     By period table, drawn under the row it belongs to in all three sections: the same columns in
+     the same order, the same wording and the same numbers, because the engine builds the five
+     windows through the one function all three pages share. Nothing here adds anything up: every
+     figure is printed as the answer carries it.
+     Today and all time are marked as still updating, because today's ad spend is a part-day reading
+     and all time has today spliced into it. A window the answer has nothing for says so, rather
+     than printing noughts nobody earned. Profit is one listing's own, never a total. ══ */
+  var PERIODS = [['today', 'Today so far'], ['yesterday', 'Yesterday'], ['d7', 'Last 7 days'], ['d30', 'Last 30 days'], ['all', 'All time']];
+  /* Product history's own return print, to the same two places, so one listing reads the same on
+     every page that shows it */
+  function roasTxt(v) { var x = num(v); return x == null ? '—' : x.toFixed(2) + '×'; }
+  function perMoving(key, p) { return key === 'today' || !!(p && p.includes_today); }
+  function perRow(key, label, p) {
+    var mark = perMoving(key, p) ? ' <span class="wla-moving">still updating</span>' : '';
+    if (!p || typeof p !== 'object') {
+      return '<tr><td class="hr">' + esc(label) + mark + '</td><td colspan="7"><span class="wla-sub2">not available yet</span></td></tr>';
+    }
+    /* A WINDOW HOLDING A DAY EBAY'S REPORT HAS NOT LANDED FOR. No ad spend, no units from ads, no
+       return on the spend, and no profit either, because the profit is worked out after the click
+       fee and the click fee is the half that has not arrived. The engine's own sentence goes across
+       the three ad columns and again in the profit column; the orders and the units are the order
+       book's and are printed as ever. */
+    if (p.ads_landing) {
+      var lnote = String(p.landing_note || '');
+      return '<tr><td class="hr">' + esc(label) + mark + '</td>' +
+        '<td class="r" colspan="3"><span class="wla-sub2">' + esc(lnote) + '</span></td>' +
+        '<td class="r">' + cnt(p.orders) + '</td>' +
+        '<td class="r">' + cnt(p.units) + '</td>' +
+        '<td class="r"><span class="wla-sub2">not known</span></td>' +
+        '<td class="r"><span class="wla-sub2">' + esc(lnote) + '</span></td></tr>';
+    }
+    /* the orders the profit could not price: the Ali cost not typed in yet, or eBay's fee not
+       landed. Counted beside the figure and never folded into it, which is how the law works
+       everywhere else on this portal. */
+    var pc = n0(p.pending_cost_orders), pf = n0(p.pending_fee_orders), un = pc + pf;
+    return '<tr><td class="hr">' + esc(label) + mark + '</td>' +
+      '<td class="r">' + gbp(p.spend) + '</td>' +
+      '<td class="r">' + cnt(p.attr_units) + '</td>' +
+      '<td class="r">' + roasTxt(p.roas) + '</td>' +
+      '<td class="r">' + cnt(p.orders) + '</td>' +
+      '<td class="r">' + cnt(p.units) + '</td>' +
+      '<td class="r">' + cnt(p.units_not_from_ads) + '</td>' +
+      '<td class="r">' + adtProfitCell(p.actual_profit, 0, 0) +
+      (un > 0 ? '<div class="wla-sub2" title="' + esc(pc + ' without a cost, ' + pf + ' without fees') + '">' +
+        cnt(un) + ' ' + plural(un, 'order', 'orders') + ' not costed yet</div>' : '') + '</td></tr>';
+  }
+  function periodsBlock(it) {
+    var id = String((it && it.item_id) || ''), P = it && it.periods;
+    var h = '<div class="wla-per"><div class="wla-perhead"><span class="wla-dayk">By period</span>' +
+      (id ? '<a class="wla-open" href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener"' +
+        ' title="open this listing&#39;s full Product history in a new tab">the full Product history ↗</a>' : '') +
+      '</div>';
+    if (!P || typeof P !== 'object') {
+      return h + '<div class="wla-sub2">This answer carries no figures by period for this listing, so none is shown.</div></div>';
+    }
+    var any = PERIODS.filter(function (x) { return P[x[0]] && typeof P[x[0]] === 'object'; }).length;
+    if (!any) {
+      return h + '<div class="wla-sub2">We hold no day and no sales for this listing yet, so there is nothing to show by period.</div></div>';
+    }
+    return h + '<div class="wla-scroll"><table class="wla-htbl"><thead><tr><th>Period</th>' +
+      '<th class="r">Ad spend</th><th class="r">Units from ads</th><th class="r">ROAS</th>' +
+      '<th class="r">Orders</th><th class="r">Units</th><th class="r">Units not from ads</th>' +
+      '<th class="r">Profit</th></tr></thead><tbody>' +
+      PERIODS.map(function (x) { return perRow(x[0], x[1], P[x[0]]); }).join('') +
+      '</tbody></table></div></div>';
+  }
+  /* the By period row itself, spanning the whole width of whichever table it sits under */
+  function periodsRow(it, cols) {
+    return '<tr class="wla-perrow"><td colspan="' + cols + '">' + periodsBlock(it) + '</td></tr>';
+  }
+  /* WHERE THOSE FIGURES COME FROM, said ONCE above the first section and not under each of six
+     hundred rows. The sentence is the engine's, shared with the two other pages that draw this
+     table, so it cannot drift from what the engine actually read. */
+  function periodsNote() {
+    var D = WL.main || {};
+    var t = String(D.periods_note || '').trim(), bad = String(D.periods_problem || '').trim();
+    if (!t && !bad) return '';
+    return '<div class="wla-rules"><b>The figures by period under every row.</b> ' + (t ? esc(t) + '.' : '') +
+      (bad ? ' <span class="wla-bad">' + esc(bad) + '.</span>' : '') + '</div>';
+  }
+
   /* THE CONTRADICTION THIS PAGE CAN SEE. A listing eBay billed in the last 3 days with no live ad on
      record is the shape of the fault that was reported: an archived ad is left out of this page
      altogether, so one wrong ARCHIVED reading shows a listing as advertising nowhere while eBay
@@ -429,10 +538,13 @@
   }
   function stateCell(it) {
     var n = num(it.live_count), h;
+    /* the row's own verdict sentence, in the engine's words, as the hover. It is the one shared rule
+       speaking, so this chip and Product history's cannot say different things about one listing. */
+    var why = esc(String((it && it.live_why) || ''));
     if (n != null && n > 1) {
-      h = '<span class="wla-mark" title="this listing was live in ' + n + ' campaigns at the last reading of each, so its spend is charged by each of them">in ' + n + ' campaigns</span>';
-    } else if (n === 1) { h = '<span class="wla-pill live">in one campaign</span>'; }
-    else { h = '<span class="wla-none">in no campaign</span>'; }
+      h = '<span class="wla-mark" title="' + why + '">in ' + n + ' campaigns</span>';
+    } else if (n === 1) { h = '<span class="wla-pill live" title="' + why + '">in one campaign</span>'; }
+    else { h = '<span class="wla-none" title="' + why + '">in no campaign</span>'; }
     return h + billedButIdle(it);
   }
   /* what this listing has been doing lately, from the two windows the payload already carries */
@@ -471,7 +583,7 @@
         return '<tr class="multi"><td>' + adtProductCell(it) + peakChip(it) + rowReread(it) + '</td>' +
           '<td>' + stateCell(it) + '</td>' +
           '<td>' + historyCell(it) + '</td>' +
-          '<td>' + campaignsCell(it, true) + '</td></tr>';
+          '<td>' + campaignsCell(it, true) + '</td></tr>' + periodsRow(it, 4);
       }).join('') + '</tbody></table></div>';
     if (held != null && held > 0) {
       h += '<div class="wla-sub2" style="margin-top:8px">' + cnt(held) + ' more ' + plural(held, 'listing is', 'listings are') +
@@ -508,7 +620,7 @@
           '<td class="r">' + cnt(it.sold_30d) + '</td>' +
           '<td class="r">' + gbp(it.spend_3d) + '</td>' +
           '<td class="r">' + gbp(it.spend_7d) + '</td>' +
-          '<td>' + campaignsCell(it, false) + '</td></tr>';
+          '<td>' + campaignsCell(it, false) + '</td></tr>' + periodsRow(it, 7);
       }).join('') + '</tbody></table></div>';
     var held = num(WL.main.items_held_back), total = num(WL.main.items_total);
     if (held != null && held > 0) {
@@ -541,7 +653,7 @@
           '<td class="r">' + gbp(it.spend_7d) + '</td>' +
           '<td>' + (num(it.campaign_count) > 0
             ? campaignsCell(it, false)
-            : '<span class="wla-none">no campaign at all</span>') + billedButIdle(it) + '</td></tr>';
+            : '<span class="wla-none">no campaign at all</span>') + billedButIdle(it) + '</td></tr>' + periodsRow(it, 6);
       }).join('') + '</tbody></table></div>';
     var held = num(WL.gap.items_held_back), total = num(WL.gap.items_total);
     if (held != null && held > 0) {
@@ -552,6 +664,14 @@
   }
 
   /* ── the jump bar and the standing note ───────────────────────────────────────────────────── */
+  /* THE THREE CHIPS ARE JUMPS (owner, 16 Nov 2026): "clicking Duplication or Gaps should take me to
+     exactly that place on the page." They were already written as anchors and nothing wired them,
+     and a bare #wlaDup could not be wired: the shell routes on the hash, so a hash naming no view
+     would have sent a reload to the landing page instead of back here. The link therefore carries
+     THIS PAGE'S OWN ROUTE with the section as its parameter, which the shell's router reads as this
+     page, so a reload or a copied link lands on the page AND on the section. The counts are the
+     payload's, untouched. */
+  var SECTIONS = ['wlaDup', 'wlaStands', 'wlaGaps'];
   function jumpBar() {
     var C = counts();
     var bits = [
@@ -560,9 +680,21 @@
       ['wlaGaps', 'Gaps', num(C.in_none), '']
     ];
     return '<div class="wla-jump">' + bits.map(function (b) {
-      return '<a href="#' + b[0] + '" data-wlajump="' + b[0] + '" class="' + b[3] + '">' + esc(b[1]) +
+      return '<a href="#adtoolItemCampaigns/' + b[0] + '" data-wlajump="' + b[0] + '" class="' + b[3] + '">' + esc(b[1]) +
         (b[2] == null ? '' : '<span class="n">' + cnt(b[2]) + '</span>') + '</a>';
     }).join('') + '</div>';
+  }
+  /* scroll a section into view and leave a brief mark on it. Guarded: a section that is not on the
+     page yet (its own read has not landed) is simply not jumped to, and nothing throws. */
+  function jumpTo(id, push) {
+    if (SECTIONS.indexOf(String(id)) < 0) return;
+    var el = $(id); if (!el) return;
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { el.scrollIntoView(); }
+    el.classList.add('wla-jumped');
+    setTimeout(function () { var e2 = $(id); if (e2) e2.classList.remove('wla-jumped'); }, 1600);
+    /* the hash carries the section so a reload lands back on it. Written without a history entry:
+       three chips clicked in turn must not become three steps of the back button. */
+    if (push !== false) { try { history.replaceState(null, '', location.pathname + location.search + '#adtoolItemCampaigns/' + id); } catch (e) { /* the scroll already happened */ } }
   }
   function note() {
     var D = WL.main || {}, C = counts();
@@ -585,6 +717,11 @@
     }
     h += ' <b>Everything on this page is a reading, except the two controls in Duplication: those act on eBay, ' +
       'and each one asks before it goes.</b>';
+    /* WHAT COUNTS AS BEING IN A CAMPAIGN, in the engine's own words (16 Nov). It is the one rule
+       every advertising page now takes its verdict from, so it is printed from the answer rather
+       than described here: a rule that changed would otherwise go on being described the old way. */
+    var lrule = String((D.rules || {}).live || '');
+    if (lrule) h += ' <b>What counts as being in a campaign.</b> ' + esc(lrule);
     /* WHAT MAKES THIS PAGE LIVE, in the engine's words and never in this file's: the cadence, the
        two bounds and the reason the fleet is not watched are all figures over there. */
     var wrule = String((D.rules || {}).watch || '');
@@ -604,8 +741,11 @@
   /* ── draw and wire ────────────────────────────────────────────────────────────────────────── */
   function draw() {
     var box = $('wlaBody'); if (!box) return;
-    box.innerHTML = jumpBar() + note() + dupSection() + standsSection() + gapSection();
+    box.innerHTML = jumpBar() + note() + periodsNote() + dupSection() + standsSection() + gapSection();
     wire(box);
+    /* a reload that named a section lands on it, once. The hash is already right, so it is not
+       written again. */
+    if (WL.jump) { var want = WL.jump; WL.jump = ''; jumpTo(want, false); }
   }
 
   function wire(box) {
@@ -616,6 +756,14 @@
     /* the per-listing re-read, on every row of all three sections */
     var rr = box.querySelectorAll('[data-wlare]');
     for (var k = 0; k < rr.length; k++) rr[k].onclick = function () { reread(this.getAttribute('data-wlare'), this); };
+    /* the three jump chips. A middle-click or a meta-click is left to the browser, which is how
+       every other link in this portal behaves. */
+    var js = box.querySelectorAll('[data-wlajump]');
+    for (var m = 0; m < js.length; m++) js[m].onclick = function (ev) {
+      if (ev && (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button === 1)) return;
+      if (ev && ev.preventDefault) ev.preventDefault();
+      jumpTo(this.getAttribute('data-wlajump'), true);
+    };
   }
 
   function parts(el, attr) { return String(el.getAttribute(attr) || '').split('|'); }

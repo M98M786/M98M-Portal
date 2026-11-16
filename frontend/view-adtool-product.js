@@ -53,6 +53,15 @@
     '.at-age.old{color:var(--text-2)}' +
     '.at-clash{display:inline-block;margin-top:3px;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid rgba(224,86,63,.55);color:' + LOSS + ';white-space:nowrap}' +
     '.at-clash-why{display:block;font-size:10px;color:' + LOSS + ';font-weight:600;line-height:1.5;margin-top:2px;white-space:normal}' +
+    /* HOW MANY CAMPAIGNS ARE CHARGING FOR THIS LISTING (owner, 16 Nov). Gold for one, red for more
+       than one, dashed for none, because more than one is the state that costs money twice. */
+    '.at-dup{display:inline-block;margin-left:8px;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap;vertical-align:middle}' +
+    '.at-dup.ok{color:var(--gold-a);border-color:rgba(242,176,53,.5);background:rgba(242,176,53,.08)}' +
+    '.at-dup.bad{background:' + LOSS + ';border-color:' + LOSS + ';color:#fff}' +
+    '.at-dup.none{border-style:dashed;color:var(--text-3)}' +
+    /* the campaigns this listing was in that are no longer on eBay: ONE dim line under the table,
+       never rows beside the campaigns that are real */
+    '.at-gone{font-size:11px;color:var(--text-3);line-height:1.6;margin-top:8px}.at-gone b{color:var(--text-2);font-weight:700}' +
     '.at-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:12px}' +
     '.at-kpi{background:var(--panel);border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px}' +
     '.at-kpi .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
@@ -212,6 +221,49 @@
   /* this page's status cell: the reading, the date it was taken, how many ad records eBay returned
      for it, and the contradiction when an archived ad was charged in the same campaign. `live` is
      left null on the snapshot table, which carries no live flag, so no row is coloured on a guess. */
+  /* ── WHEN EBAY WAS ASKED ABOUT THIS LISTING (owner, 16 Nov 2026) ──────────────────────────────
+     The engine asks eBay which campaigns hold this listing, and reads those campaigns' ad lists,
+     BEFORE it composes the panel below. It sends a stamp when it asked and its own reason when it
+     did not, so the panel says which of the two the table is and never implies the one it is not.
+     Not a word of the reason is written here: it is the engine's, which is why a bound or a cap that
+     changes changes this sentence with it. */
+  function ebayReadSentence(D) {
+    var E = D && D.ebay_read;
+    if (!E || typeof E !== 'object') return '';
+    if (E.asked) {
+      var at = String(E.at || '').slice(11, 19);
+      return ' <b>Read from eBay ' + (at ? esc(at) : 'just now') + '.</b>' + (E.note ? ' ' + esc(String(E.note)) : '');
+    }
+    return ' <b>Stored reading, eBay not asked: ' + esc(String(E.reason || 'no reason came back')) + '</b>';
+  }
+  /* ── HOW MANY CAMPAIGNS ARE CHARGING FOR THIS LISTING ─────────────────────────────────────────
+     The verdict is the engine's one shared rule (adDupVerdict), the same one the Where page's
+     Duplication section and the Peak rows take theirs from, so this chip and that section cannot
+     disagree about one listing. A verdict the answer does not carry is said in words, never as a
+     nought: nought campaigns and "we could not work it out" are not the same thing. */
+  function dupChip(W) {
+    var Dp = W && W.dup;
+    if (!Dp || typeof Dp !== 'object' || Dp.n == null || isNaN(Number(Dp.n))) {
+      return '<span class="at-dup none" title="this answer carries no campaign verdict for this listing">how many campaigns is not known</span>';
+    }
+    var n = Math.round(Number(Dp.n));
+    return '<span class="at-dup ' + (Dp.duplicated ? 'bad' : n === 1 ? 'ok' : 'none') + '" title="' + esc(String(Dp.rule || '')) + '">' +
+      (n === 0 ? 'in no campaign' : n === 1 ? 'in one campaign' : 'in ' + n + ' campaigns') + '</span>';
+  }
+  /* the campaigns this listing was in that have left eBay: one dim line under the table. They were
+     printed as rows reading "exists (live)", which is how a campaign deleted in August came to be
+     read as an ad that was running. The date is the day the portal established the campaign had
+     gone, and where nothing recorded it the line says so rather than leaving a gap. */
+  function goneLine(W) {
+    var G = (W && W.gone) || [];
+    if (!G.length) return '';
+    return '<div class="at-gone">Was in: ' + G.map(function (g) {
+      var at = String((g && g.gone_at) || '');
+      return '<b>' + esc(String((g && g.name) || '')) + '</b> (no longer on eBay, ' +
+        (at ? 'found gone ' + esc(dfmt(at)) : 'the date is not on record') + ')';
+    }).join(' · ') + '. ' + (G.length === 1 ? 'That campaign is' : 'Those campaigns are') +
+      ' not counted anywhere, because a campaign that is not on eBay cannot be charging for anything.</div>';
+  }
   function adStateCell(c, state, live) {
     var f = adFresh(c), txt = String(state == null || state === '' ? 'unknown' : state);
     var money = null, when = '';
@@ -603,15 +655,19 @@
        while eBay was billing it. The title no longer says now, the tag no longer claims a cadence,
        and every row carries the date of its own reading. */
     var readNote = adPanelNote(Wr || C);
-    h += '<div class="at-panel"><h3>Where its ads sit' + src('campaign map', 'ad status, read per campaign') + '</h3><div class="at-sub">Which campaigns this listing is in, and what its own ad said when that campaign\'s ads were last read. Each status is a reading, not a live check, so the date of the reading is on every row. Cost-per-sale ads have no per-ad status on eBay, so "exists" means running unless archived.' + (readNote ? ' ' + esc(readNote) : '') + (Wr && D.where.note ? ' ' + esc(D.where.note) + '.' : '') + '</div>' +
+    /* 16 Nov: the gone rows are OUT OF THE TABLE and in one dim line under it, the panel header
+       carries the campaign verdict and the eBay stamp, and the sub-line says in the engine's own
+       words how many campaigns are charging and why. The table itself is the campaigns that exist. */
+    var WrLive = Wr ? Wr.filter(function (c) { return !(c && c.gone); }) : null;
+    h += '<div class="at-panel"><h3>Where its ads sit' + src('campaign map', 'ad status, read per campaign') + dupChip(D.where) + '</h3><div class="at-sub">Which campaigns this listing is in, and what its own ad said when that campaign\'s ads were last read. Each status is a reading, not a live check, so the date of the reading is on every row. Cost-per-sale ads have no per-ad status on eBay, so "exists" means running unless archived.' + ((D.where && D.where.dup && D.where.dup.why) ? ' <b>' + esc(String(D.where.dup.why)) + '</b>' : '') + ebayReadSentence(D) + (readNote ? ' ' + esc(readNote) : '') + (Wr && D.where.note ? ' ' + esc(D.where.note) + '.' : '') + '</div>' +
       /* 9 Nov (owner: "I need all time and 30 days campaign data too"). The four columns after the
          7-day pair are the same money over thirty days and over everything this listing has in that
          campaign, each with its window written in the header rather than left to be guessed. A
          campaign with no row in a window says so in words: £0.00 there would read as a month of free
          advertising instead of a month that campaign is not answerable for. */
-      (Wr ? (Wr.length ? '<div style="overflow-x:auto"><table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad, when last read</th><th class="r">Ad rate</th><th class="r">Daily budget</th><th class="r">Spend yesterday</th>' + (atSpendOnly() ? '' : '<th class="r">Sales yesterday</th>') + '<th class="r">Spend, last 7 days</th>' + (atSpendOnly() ? '' : '<th class="r">ROAS, last 7 days</th>') + '<th class="r">Units sold, last 7 days</th><th class="r">Spend, last 30 days</th>' + (atSpendOnly() ? '' : '<th class="r">ROAS, last 30 days</th>') + '<th class="r">Units sold, last 30 days</th><th class="r">Spend, all time</th>' + (atSpendOnly() ? '' : '<th class="r">ROAS, all time</th>') + '<th class="r">Units sold, all time</th><th>Last change</th></tr></thead><tbody>' +
-        Wr.map(function (c) { return '<tr><td>' + adtCampaignLink(c.campaign_id, c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td>' + adStateCell(c, c.ad_state, c.live) + '</td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td>' + (atSpendOnly() ? '' : '<td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td>') + '<td class="r">' + gbp(c.spend_7d) + '</td>' + (atSpendOnly() ? '' : '<td class="r">' + roas(c.roas_7d) + '</td>') + '<td class="r">' + nk(c.units_7d, cnt) + '</td><td class="r">' + nk(c.spend_30d, gbp) + '</td>' + (atSpendOnly() ? '' : '<td class="r">' + nk(c.roas_30d, roas) + '</td>') + '<td class="r">' + nk(c.units_30d, cnt) + '</td><td class="r">' + nk(c.spend_all, gbp) + (c.all_from ? '<div class="at-src" title="the first day this listing has a row in this campaign">from ' + esc(dfmt(String(c.all_from))) + '</div>' : '') + '</td>' + (atSpendOnly() ? '' : '<td class="r">' + nk(c.roas_all, roas) + '</td>') + '<td class="r">' + nk(c.units_all, cnt) + '</td><td>' + (c.last_change ? esc(String(c.last_change).replace('T', ' ').slice(0, 16)) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
-        (D.where.history && D.where.history.length ? '<div class="at-sub" style="margin-top:8px">Status changes: ' + D.where.history.slice(0, 6).map(function (x) { return esc(String(x.seen_at).replace('T', ' ').slice(0, 16)) + ' ' + esc(x.name) + ' ' + esc(x.from_status || '—') + ' → ' + esc(x.to_status); }).join(' · ') + '</div>' : '') : '<div class="at-empty">Not in any campaign we know about.</div>') :
+      (WrLive ? (WrLive.length ? '<div style="overflow-x:auto"><table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad, when last read</th><th class="r">Ad rate</th><th class="r">Daily budget</th><th class="r">Spend yesterday</th>' + (atSpendOnly() ? '' : '<th class="r">Sales yesterday</th>') + '<th class="r">Spend, last 7 days</th>' + (atSpendOnly() ? '' : '<th class="r">ROAS, last 7 days</th>') + '<th class="r">Units sold, last 7 days</th><th class="r">Spend, last 30 days</th>' + (atSpendOnly() ? '' : '<th class="r">ROAS, last 30 days</th>') + '<th class="r">Units sold, last 30 days</th><th class="r">Spend, all time</th>' + (atSpendOnly() ? '' : '<th class="r">ROAS, all time</th>') + '<th class="r">Units sold, all time</th><th>Last change</th></tr></thead><tbody>' +
+        WrLive.map(function (c) { return '<tr><td>' + adtCampaignLink(c.campaign_id, c.name) + '</td><td>' + esc(c.funding === 'COST_PER_CLICK' ? 'CPC (Advanced)' : c.funding === 'COST_PER_SALE' ? 'Cost per sale' : c.funding || '?') + '</td><td>' + esc(c.campaign_status || '?') + '</td><td>' + adStateCell(c, c.ad_state, c.live) + '</td><td class="r">' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '—')) + '</td><td class="r">' + (c.budget != null ? gbp(c.budget, 0) : '—') + '</td><td class="r">' + gbp(c.spend_yesterday) + '</td>' + (atSpendOnly() ? '' : '<td class="r">' + (c.units_yesterday == null ? '—' : c.units_yesterday + ' · ' + gbp(c.revenue_yesterday)) + '</td>') + '<td class="r">' + gbp(c.spend_7d) + '</td>' + (atSpendOnly() ? '' : '<td class="r">' + roas(c.roas_7d) + '</td>') + '<td class="r">' + nk(c.units_7d, cnt) + '</td><td class="r">' + nk(c.spend_30d, gbp) + '</td>' + (atSpendOnly() ? '' : '<td class="r">' + nk(c.roas_30d, roas) + '</td>') + '<td class="r">' + nk(c.units_30d, cnt) + '</td><td class="r">' + nk(c.spend_all, gbp) + (c.all_from ? '<div class="at-src" title="the first day this listing has a row in this campaign">from ' + esc(dfmt(String(c.all_from))) + '</div>' : '') + '</td>' + (atSpendOnly() ? '' : '<td class="r">' + nk(c.roas_all, roas) + '</td>') + '<td class="r">' + nk(c.units_all, cnt) + '</td><td>' + (c.last_change ? esc(String(c.last_change).replace('T', ' ').slice(0, 16)) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+        (D.where.history && D.where.history.length ? '<div class="at-sub" style="margin-top:8px">Status changes: ' + D.where.history.slice(0, 6).map(function (x) { return esc(String(x.seen_at).replace('T', ' ').slice(0, 16)) + ' ' + esc(x.name) + ' ' + esc(x.from_status || '—') + ' → ' + esc(x.to_status); }).join(' · ') + '</div>' : '') + goneLine(D.where) : '<div class="at-empty">Not in any campaign that is still on eBay.</div>' + goneLine(D.where)) :
       (C.length ? '<table class="at-tbl"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>Ad status, when last read</th><th class="r">Ad rate</th><th class="r">Daily budget</th></tr></thead><tbody>' +
         /* the snapshot rows come out of adtool_listings.campaigns_json, where the campaign id is
            stored as `id`. Reading campaign_id here handed adtCampaignLink undefined and every
