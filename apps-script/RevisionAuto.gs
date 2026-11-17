@@ -131,7 +131,7 @@ function revisionQualify() {
     if (String(t.details || '').indexOf(REVQ_MARK) < 0) return;
     if (String(t.status) === TASK_STATUS_COMPLETED) return;
     openAuto++;
-    if (String(t.deadline_pkt || '') && String(t.deadline_pkt) < nowIso2) overdueAuto++;
+    if (String(t.deadline_pkt || '') && taskMs_(t.deadline_pkt) < Date.now() - TASK_GRACE_MS) overdueAuto++;
   });
   if (openAuto >= 25) {
     const props2 = PropertiesService.getScriptProperties();
@@ -213,7 +213,7 @@ function actionRevisionDesk_(payload, ctx) {
       done.push(rec);
     } else {
       const dl = Date.parse(rec.deadline_pkt);
-      rec.overdue = !isNaN(dl) && dl < nowMs;
+      rec.overdue = !isNaN(dl) && dl < nowMs - TASK_GRACE_MS;
       if (rec.overdue) overdue++;
       open.push(rec);
     }

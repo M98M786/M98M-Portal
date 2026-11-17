@@ -247,7 +247,9 @@
   }
   function lsOverdue(iso, status) {
     var ms = Date.parse(lsStr(iso));
-    return !isNaN(ms) && ms < Date.now() && status !== LS_COMPLETED;
+    /* 18 Nov (owner): the quiet day — overdue only once the deadline is a full day gone; the
+       deadline shown stays the real one. Same constant in the engine, Tasks.gs and view-tasks.js. */
+    return !isNaN(ms) && ms + 24 * 3600000 < Date.now() && status !== LS_COMPLETED;
   }
 
   // ---------- §8.2 payload access ----------

@@ -2623,6 +2623,13 @@ const TASK_STATUS_WORKING = 'Working';
 const TASK_STATUS_UPDATED = 'Updated';
 const TASK_STATUS_SUBMITTED = 'Submitted — awaiting approval';   // §8.0b, verbatim
 const TASK_STATUS_COMPLETED = 'Completed';
+/* 18 Nov (owner): THE QUIET DAY — every task deadline carries a one-day grace the staff are not
+   told about; a task counts as OVERDUE only once deadline + 24h has passed. The deadline itself
+   never moves. Third copy of the constant: engine/worker.js TASK_GRACE_MS and view-tasks.js carry
+   the others. NOTE the /exec version pin: browser-called reads here run v200, so their copies of
+   this shift are inert until a version can ship — the live overdue flags come from the ENGINE
+   routes (ENGINE_PREFERRED), which are already shifted. Trigger-run paths here are live on Save. */
+const TASK_GRACE_MS = 24 * 3600000;
 const TASK_STATUSES = [TASK_STATUS_PENDING, TASK_STATUS_WORKING, TASK_STATUS_UPDATED, TASK_STATUS_SUBMITTED, TASK_STATUS_COMPLETED];
 
 // RL-6 column ownership — the only TASKS columns this module writes after creation.
@@ -14254,7 +14261,7 @@ function revisionQualify() {
     if (String(t.details || '').indexOf(REVQ_MARK) < 0) return;
     if (String(t.status) === TASK_STATUS_COMPLETED) return;
     openAuto++;
-    if (String(t.deadline_pkt || '') && String(t.deadline_pkt) < nowIso2) overdueAuto++;
+    if (String(t.deadline_pkt || '') && taskMs_(t.deadline_pkt) < Date.now() - TASK_GRACE_MS) overdueAuto++;
   });
   if (openAuto >= 25) {
     const props2 = PropertiesService.getScriptProperties();
@@ -14336,7 +14343,7 @@ function actionRevisionDesk_(payload, ctx) {
       done.push(rec);
     } else {
       const dl = Date.parse(rec.deadline_pkt);
-      rec.overdue = !isNaN(dl) && dl < nowMs;
+      rec.overdue = !isNaN(dl) && dl < nowMs - TASK_GRACE_MS;
       if (rec.overdue) overdue++;
       open.push(rec);
     }
@@ -26072,12 +26079,12 @@ function actionListDesk_(payload, ctx) {
     const dl = taskMs_(t.deadline_pkt);
     if (status === TASK_STATUS_SUBMITTED) a.submitted++;
     else if (!isNaN(dl)) {
-      if (dl < nowMs) a.overdue++;
+      if (dl < nowMs - TASK_GRACE_MS) a.overdue++;
       else if (dl - nowMs < 86400000) a.due_today++;
     }
     rows.push({ task_id: String(t.task_id), type: type, family: family, account: acct,
       title: String(t.title || '').slice(0, 90), assigned_to: assignee, status: status,
-      deadline_pkt: taskPktIso_(t.deadline_pkt), overdue: !isNaN(dl) && dl < nowMs && status !== TASK_STATUS_SUBMITTED,
+      deadline_pkt: taskPktIso_(t.deadline_pkt), overdue: !isNaN(dl) && dl < nowMs - TASK_GRACE_MS && status !== TASK_STATUS_SUBMITTED,
       item_id: String(t.item_id || '') });
   });
   rows.sort(function (a, b) { return String(a.deadline_pkt).localeCompare(String(b.deadline_pkt)); });
@@ -26094,7 +26101,7 @@ function actionListDesk_(payload, ctx) {
     const assignee = normalizeEmail(t.assigned_to);
     if (!mgmt && assignee !== me && ctx.user.role !== 'Advertising Manager') return;
     const dl = taskMs_(t.deadline_pkt);
-    const late = !isNaN(dl) && dl < nowMs && status !== TASK_STATUS_SUBMITTED;
+    const late = !isNaN(dl) && dl < nowMs - TASK_GRACE_MS && status !== TASK_STATUS_SUBMITTED;
     if (cpcCounts[type] !== undefined) cpcCounts[type]++;
     if (late) cpcCounts.overdue++;
     cpc.push({ task_id: String(t.task_id), type: type, account: String(t.account || ''),

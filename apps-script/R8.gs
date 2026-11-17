@@ -250,12 +250,12 @@ function actionListDesk_(payload, ctx) {
     const dl = taskMs_(t.deadline_pkt);
     if (status === TASK_STATUS_SUBMITTED) a.submitted++;
     else if (!isNaN(dl)) {
-      if (dl < nowMs) a.overdue++;
+      if (dl < nowMs - TASK_GRACE_MS) a.overdue++;
       else if (dl - nowMs < 86400000) a.due_today++;
     }
     rows.push({ task_id: String(t.task_id), type: type, family: family, account: acct,
       title: String(t.title || '').slice(0, 90), assigned_to: assignee, status: status,
-      deadline_pkt: taskPktIso_(t.deadline_pkt), overdue: !isNaN(dl) && dl < nowMs && status !== TASK_STATUS_SUBMITTED,
+      deadline_pkt: taskPktIso_(t.deadline_pkt), overdue: !isNaN(dl) && dl < nowMs - TASK_GRACE_MS && status !== TASK_STATUS_SUBMITTED,
       item_id: String(t.item_id || '') });
   });
   rows.sort(function (a, b) { return String(a.deadline_pkt).localeCompare(String(b.deadline_pkt)); });
@@ -272,7 +272,7 @@ function actionListDesk_(payload, ctx) {
     const assignee = normalizeEmail(t.assigned_to);
     if (!mgmt && assignee !== me && ctx.user.role !== 'Advertising Manager') return;
     const dl = taskMs_(t.deadline_pkt);
-    const late = !isNaN(dl) && dl < nowMs && status !== TASK_STATUS_SUBMITTED;
+    const late = !isNaN(dl) && dl < nowMs - TASK_GRACE_MS && status !== TASK_STATUS_SUBMITTED;
     if (cpcCounts[type] !== undefined) cpcCounts[type]++;
     if (late) cpcCounts.overdue++;
     cpc.push({ task_id: String(t.task_id), type: type, account: String(t.account || ''),

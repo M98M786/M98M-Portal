@@ -85,6 +85,20 @@ const MGMT_ROLES = ['Management', 'Ops Head'];
    enrolled), and Apps Script's nightly qualifier and zero-sales sweep carry the same list on their
    side — the two layers cannot share a constant, so it is written in both and this comment is the
    cross-reference. A HUMAN may still raise a revision on them; only the machinery is barred. */
+/* 18 Nov (owner): THE QUIET DAY. Every task deadline carries a one-day grace the staff are not
+   told about: the deadline SHOWN never moves, but the task only counts as OVERDUE — red marks,
+   overdue tallies, workload "past the deadline" counts — once deadline + 24h has passed.
+   Management's boards may still label the in-between day as grace; staff screens simply do not
+   brand it yet. Implemented by shifting the clock each overdue compare uses, never the stored
+   deadline_pkt. The same constant lives in Apps Script (Tasks.gs TASK_GRACE_MS) and the shell's
+   task views — three layers, no shared constant, so change all or none. */
+const TASK_GRACE_MS = 24 * 3600000;
+/* for the reads that compare PKT ISO STRINGS rather than milliseconds: the same shift, applied to
+   the "now" string — '2026-11-18T09:00:00' graced is '2026-11-17T09:00:00' */
+function gracePkt(nowPktStr) {
+  const t = Date.parse(String(nowPktStr).replace(' ', 'T') + 'Z');
+  return isFinite(t) ? new Date(t - TASK_GRACE_MS).toISOString().slice(0, 19) : String(nowPktStr);
+}
 const REVISION_EXCLUDE_ACCOUNTS = ['Yaseen Bhai', 'Rabia Masood'];
 function revisionAccountBlocked(account) { return REVISION_EXCLUDE_ACCOUNTS.indexOf(String(account || '').trim()) >= 0; }
 /* 14 Oct (owner): the 7-day revision board is read by everyone the revision passes through —
@@ -24849,7 +24863,7 @@ async function metricDeptTasks(env) {
     const ty = String(t.type || 'general');
     rec.by_type[ty] = (rec.by_type[ty] || 0) + 1;   // which tasks are pending for what (owner, 4 Sept)
     const dl = Date.parse(String(t.deadline_pkt || ''));
-    if (!isNaN(dl) && dl < nowMs && status !== 'Submitted — awaiting approval') rec.overdue++;
+    if (!isNaN(dl) && dl < nowMs - TASK_GRACE_MS && status !== 'Submitted — awaiting approval') rec.overdue++;
     const created = String(t.created_at || '');
     if (created && (!rec.oldest || created < rec.oldest)) rec.oldest = created;
   }
@@ -24893,7 +24907,7 @@ async function metricTasks(env) {
     const d = deptOf(t);
     const b = (dept[d] = dept[d] || { open: 0, overdue: 0, oldest: '', by_system: 0, by_management: 0 });
     b.open++;
-    if (String(t.deadline_pkt || '') && String(t.deadline_pkt) < nowPkt) b.overdue++;
+    if (String(t.deadline_pkt || '') && String(t.deadline_pkt) < gracePkt(nowPkt)) b.overdue++;
     const c = String(t.created_at || '');
     if (c && (!b.oldest || c < b.oldest)) b.oldest = c;
     if (/^system:/.test(String(t.assigned_by || ''))) b.by_system++; else b.by_management++;
@@ -25362,7 +25376,7 @@ const ROUTES = {
           status: String(t.status || ''), deadline_pkt: String(t.deadline_pkt || ''), created_at: String(t.created_at || ''),
           decided_at: String(t.decided_at || ''), auto: isAuto };
         if (rec.status === 'Completed') { const dec = Date.parse(rec.decided_at) || made; if (dec > cut7) done7++; done.push(rec); }
-        else { const dl = Date.parse(rec.deadline_pkt); rec.overdue = !isNaN(dl) && dl < now; if (rec.overdue) overdue++; open.push(rec); }
+        else { const dl = Date.parse(rec.deadline_pkt); rec.overdue = !isNaN(dl) && dl < now - TASK_GRACE_MS; if (rec.overdue) overdue++; open.push(rec); }
       }
       open.sort((a, b) => String(a.deadline_pkt).localeCompare(String(b.deadline_pkt)));
       done.sort((a, b) => String(b.decided_at).localeCompare(String(a.decided_at)));
@@ -27643,7 +27657,7 @@ const ROUTES = {
             deadline_pkt: String(t.deadline_pkt || ''), submission_note: String(t.submission_note || ''),
             submitted_at: String(t.submitted_at || ''), approved_by: String(t.approved_by || ''),
             decided_at: String(t.decided_at || ''),
-            overdue: isFinite(dl) && dl < Date.now() + 5 * 3600000 && String(t.status) !== 'Completed' } : null,
+            overdue: isFinite(dl) && dl < Date.now() + 5 * 3600000 - TASK_GRACE_MS && String(t.status) !== 'Completed' } : null,
           updates,
           mine: !!(t && String(t.assigned_to || '').toLowerCase() === me),
         });
@@ -29180,7 +29194,7 @@ const ROUTES = {
           status: t.status, created_at: t.created_at, updated_at: t.updated_at,
           submitted_at: t.submitted_at, submission_note: t.submission_note || '',
           approved_by: t.approved_by, decided_at: t.decided_at, time_taken_min: t.time_taken_min || '',
-          overdue: isFinite(dl) && dl < nowMs && String(t.status) !== 'Completed' },
+          overdue: isFinite(dl) && dl < nowMs - TASK_GRACE_MS && String(t.status) !== 'Completed' },
           dl: isFinite(dl) ? dl : Infinity, act: isFinite(act) ? act : 0 };
       });
       rows.sort((a, b) => (a.dl !== b.dl ? a.dl - b.dl : b.act - a.act));
@@ -29207,7 +29221,7 @@ const ROUTES = {
           status: t.status, created_at: t.created_at, submitted_at: t.submitted_at,
           submission_note: t.submission_note || '', time_taken_min: t.time_taken_min || '',
           approval_lag_min: isFinite(sub) ? Math.max(0, Math.round((nowMs - sub) / 60000)) : '',
-          overdue: isFinite(dl) && dl < nowMs },
+          overdue: isFinite(dl) && dl < nowMs - TASK_GRACE_MS },
           sub: isFinite(sub) ? sub : Infinity };
       });
       rows.sort((a, b) => a.sub - b.sub);
@@ -29390,7 +29404,7 @@ const ROUTES = {
           assigned_at: String(r.created_at || ''), assigned_day: String(r.created_at || '').slice(0, 10),
           due, due_day: due.slice(0, 10),
           /* late = past its deadline and not handed in; a submitted task is waiting on US, not the lister */
-          overdue: open && status !== SUBMITTED && !!due && due.slice(0, 19) < nowPkt,
+          overdue: open && status !== SUBMITTED && !!due && due.slice(0, 19) < gracePkt(nowPkt),
           submitted_at: String(r.submitted_at || ''), done_at: open ? '' : String(r.decided_at || r.updated_at || ''),
           hunt_id: huntId,
         };
@@ -29872,17 +29886,17 @@ const ROUTES = {
           if (type === 'listing_new' && fam[family]) fam[family].pending++;
           if (status === 'Submitted — awaiting approval') a.submitted++;
           else if (!isNaN(dl)) {
-            if (dl < nowMs) a.overdue++;
+            if (dl < nowMs - TASK_GRACE_MS) a.overdue++;
             else if (dl - nowMs < 86400000) a.due_today++;
           }
           rows.push({ task_id: String(t.task_id), type, family, account: acct,
             title: String(t.title || '').slice(0, 90), assigned_to: assignee, status,
-            deadline_pkt: String(t.deadline_pkt || ''), overdue: !isNaN(dl) && dl < nowMs && status !== 'Submitted — awaiting approval',
+            deadline_pkt: String(t.deadline_pkt || ''), overdue: !isNaN(dl) && dl < nowMs - TASK_GRACE_MS && status !== 'Submitted — awaiting approval',
             item_id: String(t.item_id || '') });
         } else if (['cpc_research', 'campaign_set', 'potential_cpc_review'].indexOf(type) >= 0) {
           if (OPEN.indexOf(status) < 0) continue;
           if (!mgmt && assignee !== me && role !== 'Advertising Manager') continue;
-          const late = !isNaN(dl) && dl < nowMs && status !== 'Submitted — awaiting approval';
+          const late = !isNaN(dl) && dl < nowMs - TASK_GRACE_MS && status !== 'Submitted — awaiting approval';
           if (cpcCounts[type] !== undefined) cpcCounts[type]++;
           if (late) cpcCounts.overdue++;
           cpc.push({ task_id: String(t.task_id), type, account: String(t.account || ''),
@@ -30041,7 +30055,7 @@ const ROUTES = {
         }
         if (OPEN.indexOf(String(t.status)) < 0) continue;
         const dl = Date.parse(String(t.deadline_pkt || ''));
-        const overdue = isFinite(dl) && dl < nowMs && String(t.status) !== 'Submitted — awaiting approval';
+        const overdue = isFinite(dl) && dl < nowMs - TASK_GRACE_MS && String(t.status) !== 'Submitted — awaiting approval';
         if (overdue) workflow.overdue_now++;
         workflow.open.push({ task_id: String(t.task_id || ''), type: String(t.type || ''), dept, title: String(t.title || '').slice(0, 80), status: String(t.status), account: String(t.account || ''), deadline_pkt: String(t.deadline_pkt || ''), overdue, created_at: String(t.created_at || '') });
       }

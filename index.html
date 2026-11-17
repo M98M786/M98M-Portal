@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261117-1957';
+var BUILD = '20261117-2010';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -25290,7 +25290,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   }
   function lsOverdue(iso, status) {
     var ms = Date.parse(lsStr(iso));
-    return !isNaN(ms) && ms < Date.now() && status !== LS_COMPLETED;
+    /* 18 Nov (owner): the quiet day — overdue only once the deadline is a full day gone; the
+       deadline shown stays the real one. Same constant in the engine, Tasks.gs and view-tasks.js. */
+    return !isNaN(ms) && ms + 24 * 3600000 < Date.now() && status !== LS_COMPLETED;
   }
 
   // ---------- §8.2 payload access ----------
@@ -40194,8 +40196,47 @@ function saveSchedule() {
   };
   var TK_DEPTS = ['Listing', 'Hunting', 'Advertising', 'Orders', 'CS', 'General'];
   var TK_PAGE = 150;   // rows the first paint carries; one click shows the rest
+  var TK_GRACE_MS = 24 * 3600000;   // the quiet day (owner, 18 Nov) — same constant in the engine and Tasks.gs
   function tkDeptOf(t) { return TK_DEPT_OF_TYPE[tkStr(t.type) || 'general'] || 'General'; }
-  var TKV = { scope: 'mine', sel: {}, dept: 'all', showAll: false, lastData: null };
+  var TKV = { scope: 'mine', sel: {}, dept: 'all', kind: 'all', who: 'all', showAll: false, lastData: null };
+  /* 18 Nov (owner): "individualize it too — which individual holds how many tasks." A second chip
+     row cuts the board person by person. Its counts are taken WITHIN the pressed department, so
+     Advertising → people reads as "who holds the advertising work"; with All departments it is the
+     whole board per person. Names come from the engine's staff list (fetched once, cached here) —
+     the rows themselves carry only the mailbox. */
+  /* 18 Nov (owner, second note): within a department, every KIND of task is its own block — new
+     listings apart from revisions, and the revisions that ARRIVE IN BULK (raised by the system:
+     the nightly auto-qualifier, the zero-sales sweep, the ladder — assigned_by starts 'system')
+     apart from the ones a person raised; and every other type likewise. The drill reads
+     department → kind → person: kind counts live within the pressed department, people within
+     the pressed kind. */
+  var TK_KIND_LABEL = {
+    listing_new: 'New listings', listing_revision: 'Revisions', 'listing_revision:bulk': 'Bulk revisions · system',
+    end_listing: 'End listing', loss_review: 'Loss items', campaign_set: 'Campaign set',
+    cpc_research: 'CPC research', potential_cpc_review: 'Potential CPC',
+    hunt_revision: 'Hunt revisions', sourcing_link: 'Sourcing', supplier_add: 'Supplier',
+    query: 'Queries', general: 'General'
+  };
+  function tkKindOf(t) {
+    var ty = tkStr(t.type) || 'general';
+    if (ty === 'listing_revision' && tkStr(t.assigned_by).indexOf('system') === 0) { return 'listing_revision:bulk'; }
+    return ty;
+  }
+  function tkKindLabel(k) { return TK_KIND_LABEL[k] || k; }
+  var TK_NAMES = null;   // email → name; null until the one fetch lands, never refetched
+  function tkWhoLabel(email) {
+    var e = tkStr(email).toLowerCase();
+    if (!e) { return '(nobody)'; }
+    return (TK_NAMES && TK_NAMES[e]) || e.split('@')[0];
+  }
+  function tkLoadNames() {
+    if (TK_NAMES !== null) { return; }
+    TK_NAMES = {};                                           // one fetch per page visit, win or lose
+    api('assignableStaff', {}).then(function (d) {
+      ((d && d.staff) || []).forEach(function (u) { TK_NAMES[tkStr(u.email).toLowerCase()] = tkStr(u.name) || tkStr(u.email); });
+      if (TKV.scope === 'everyone' && TKV.lastData) { var b = $('tkBody'); if (b) { tkPaintTasks(b, TKV.lastData); } }
+    }).catch(function () {});
+  }
   function tkIsMgmt() { return !!(STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super)); }
   function tkSelIds() { return Object.keys(TKV.sel).filter(function (k) { return TKV.sel[k]; }); }
   function tkUpdateBulkBar() {
@@ -40272,6 +40313,8 @@ function saveSchedule() {
     '.tk-depts .minibtn span{opacity:.65;font-weight:800;margin-left:3px}' +
     '.tk-dept-on{background:var(--gold-a)!important;color:#161616!important;border-color:var(--gold-a)!important}' +
     '.tk-dept-on span{opacity:.8}' +
+    '.tk-kinds{margin-top:-6px}' +
+    '.tk-whos{margin-top:-6px}' +
     '.tk-bulk{position:sticky;top:8px;z-index:5;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;padding:10px 14px;border:1px solid var(--gold-a);border-radius:12px;background:var(--panel-2);box-shadow:0 6px 18px rgba(0,0,0,.25)}' +
     '.tk-bulk.hidden{display:none}' +
     '.tk-sel-cell{width:34px;text-align:center!important;padding-right:0!important}' +
@@ -40425,13 +40468,19 @@ function saveSchedule() {
     return '';
   }
   function tkDueCell(t) {
-    var iso = t.deadline_pkt, ms = tkMs(iso), status = tkStr(t.status), cls = 'due num', late;
+    var iso = t.deadline_pkt, ms = tkMs(iso), status = tkStr(t.status), cls = 'due num', late, inGrace;
     if (!iso) { return '<span class="tk-sub">No deadline</span>'; }
-    late = t.overdue === true || (!isNaN(ms) && ms < Date.now() && status !== TK_COMPLETED);
+    /* 18 Nov (owner): THE QUIET DAY — a task is branded overdue only once its deadline is a full
+       day gone. The deadline shown never moves and staff are not told; management's board alone
+       may name the in-between day for what it is. The engine's own overdue flags carry the same
+       shift, and Apps Script holds the third copy of the constant. */
+    late = t.overdue === true || (!isNaN(ms) && ms + TK_GRACE_MS < Date.now() && status !== TK_COMPLETED);
+    inGrace = !late && !isNaN(ms) && ms < Date.now() && status !== TK_COMPLETED;
     if (late) { cls += ' late'; }
     else if (!isNaN(ms) && tkDay(ms) === tkDay(Date.now())) { cls += ' today'; }
     return '<span class="' + cls + '">' + esc(tkWhen(iso)) + '</span>' +
-      (late ? '<div class="tk-sub" style="color:var(--bad)">Overdue</div>' : '');
+      (late ? '<div class="tk-sub" style="color:var(--bad)">Overdue</div>'
+        : (inGrace && tkIsMgmt() && TKV.scope !== 'mine' ? '<div class="tk-sub" style="color:var(--warn)">Grace day \u00b7 quiet</div>' : ''));
   }
   /** Return() appends "[stamp] Name returned: comment" to comments — the employee must see the last one. */
   function tkReturned(comments) {
@@ -40631,6 +40680,25 @@ function saveSchedule() {
           return '<button class="minibtn' + (TKV.dept === n ? ' tk-dept-on' : '') + '" data-tk-dept="' + n + '">' + n + ' <span>' + dc[n] + '</span></button>';
         }).join('') + '</div>';
       if (TKV.dept !== 'all') { tasks = tasks.filter(function (t) { return tkDeptOf(t) === TKV.dept; }); }
+      var kc = {}, kTot = tasks.length;
+      for (i = 0; i < tasks.length; i++) { var kk = tkKindOf(tasks[i]); kc[kk] = (kc[kk] || 0) + 1; }
+      if (TKV.kind !== 'all' && !kc[TKV.kind]) { TKV.kind = 'all'; }
+      chips += '<div class="tk-depts tk-kinds">' +
+        '<button class="minibtn' + (TKV.kind === 'all' ? ' tk-dept-on' : '') + '" data-tk-kind="all">All kinds <span>' + kTot + '</span></button>' +
+        Object.keys(kc).sort(function (a, b) { return kc[b] - kc[a]; }).map(function (k) {
+          return '<button class="minibtn' + (TKV.kind === k ? ' tk-dept-on' : '') + '" data-tk-kind="' + esc(k).replace(/"/g, '&quot;') + '">' + esc(tkKindLabel(k)) + ' <span>' + kc[k] + '</span></button>';
+        }).join('') + '</div>';
+      if (TKV.kind !== 'all') { tasks = tasks.filter(function (t) { return tkKindOf(t) === TKV.kind; }); }
+      tkLoadNames();
+      var wc = {}, wTot = tasks.length;
+      for (i = 0; i < tasks.length; i++) { var wk = tkStr(tasks[i].assigned_to).toLowerCase(); wc[wk] = (wc[wk] || 0) + 1; }
+      if (TKV.who !== 'all' && !wc[TKV.who]) { TKV.who = 'all'; }   // their last task left this cut — fall back, never an empty lie
+      chips += '<div class="tk-depts tk-whos">' +
+        '<button class="minibtn' + (TKV.who === 'all' ? ' tk-dept-on' : '') + '" data-tk-who="all">Everyone <span>' + wTot + '</span></button>' +
+        Object.keys(wc).sort(function (a, b) { return wc[b] - wc[a]; }).map(function (w) {
+          return '<button class="minibtn' + (TKV.who === w ? ' tk-dept-on' : '') + '" data-tk-who="' + esc(w).replace(/"/g, '&quot;') + '">' + esc(tkWhoLabel(w)) + ' <span>' + wc[w] + '</span></button>';
+        }).join('') + '</div>';
+      if (TKV.who !== 'all') { tasks = tasks.filter(function (t) { return tkStr(t.assigned_to).toLowerCase() === TKV.who; }); }
     }
     if (!tasks.length) {
       box.innerHTML = chips + '<div class="tk-empty">' + (TKV.scope === 'archive' ? 'Nothing completed yet.' : TKV.scope === 'everyone' ? (TKV.dept === 'all' ? 'No open tasks anywhere — the board is clear.' : 'Nothing open in ' + esc(TKV.dept) + '.') : 'No tasks on you right now.') +
@@ -40660,6 +40728,22 @@ function saveSchedule() {
       b.onclick = function () {
         TKV.dept = this.getAttribute('data-tk-dept');
         TKV.showAll = false; TKV.sel = {};   // a new cut is a new page — stale ticks must not ride along
+        tkPaintTasks(box, TKV.lastData);
+      };
+    });
+    [].slice.call(box.querySelectorAll('[data-tk-kind]')).forEach(function (b) {
+      b.onclick = function () {
+        var k = this.getAttribute('data-tk-kind');
+        TKV.kind = (k === TKV.kind) ? 'all' : k;             // pressing the lit kind lets go
+        TKV.showAll = false; TKV.sel = {};
+        tkPaintTasks(box, TKV.lastData);
+      };
+    });
+    [].slice.call(box.querySelectorAll('[data-tk-who]')).forEach(function (b) {
+      b.onclick = function () {
+        var w = this.getAttribute('data-tk-who');
+        TKV.who = (w === TKV.who) ? 'all' : w;               // pressing the lit person lets go
+        TKV.showAll = false; TKV.sel = {};
         tkPaintTasks(box, TKV.lastData);
       };
     });

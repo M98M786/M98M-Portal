@@ -20,6 +20,13 @@ const TASK_STATUS_WORKING = 'Working';
 const TASK_STATUS_UPDATED = 'Updated';
 const TASK_STATUS_SUBMITTED = 'Submitted — awaiting approval';   // §8.0b, verbatim
 const TASK_STATUS_COMPLETED = 'Completed';
+/* 18 Nov (owner): THE QUIET DAY — every task deadline carries a one-day grace the staff are not
+   told about; a task counts as OVERDUE only once deadline + 24h has passed. The deadline itself
+   never moves. Third copy of the constant: engine/worker.js TASK_GRACE_MS and view-tasks.js carry
+   the others. NOTE the /exec version pin: browser-called reads here run v200, so their copies of
+   this shift are inert until a version can ship — the live overdue flags come from the ENGINE
+   routes (ENGINE_PREFERRED), which are already shifted. Trigger-run paths here are live on Save. */
+const TASK_GRACE_MS = 24 * 3600000;
 const TASK_STATUSES = [TASK_STATUS_PENDING, TASK_STATUS_WORKING, TASK_STATUS_UPDATED, TASK_STATUS_SUBMITTED, TASK_STATUS_COMPLETED];
 
 // RL-6 column ownership — the only TASKS columns this module writes after creation.
