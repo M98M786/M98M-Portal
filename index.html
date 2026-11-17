@@ -874,7 +874,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261117-1919';
+var BUILD = '20261117-1957';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -20711,6 +20711,12 @@ VIEWS.dashboard = {
     '.gl-tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
     '.gl-tile b{display:block;font-size:22px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
     '.gl-tile.purple b{color:#9B6AE6}' +
+    /* 18 Nov (owner): the tiles are the filter now */
+    '.gl-tile{cursor:pointer;transition:border-color .12s}' +
+    '.gl-tile:hover{border-color:var(--gold-line-hi)}' +
+    '.gl-tile.on{border-color:var(--gold-a);box-shadow:0 0 0 1px var(--gold-a) inset}' +
+    '.gl-tile.on .k{color:var(--gold-a)}' +
+    '.gl-sortbtn.on{background:var(--gold-a);color:#161616;border-color:var(--gold-a)}' +
     '.gl-card{border:1px solid rgba(150,110,230,.42);background:rgba(150,110,230,.10);border-radius:13px;padding:14px 16px;margin-top:12px}' +
     '.gl-card .t{font-weight:800;font-size:14px}' +
     '.gl-card .m{font-size:11.5px;color:var(--text-3);font-weight:700;margin-top:4px}' +
@@ -20744,7 +20750,10 @@ VIEWS.dashboard = {
         '<div id="glTiles" class="enter d1"><div class="spinner"></div></div>' +
         '<div class="card enter d2"><div class="hd">Drafts waiting to go live ' +
           '<span class="hint">entering the Item ID fires the campaign, supplier and 7-day tasks</span>' +
-          '<span class="hint" id="glShared" style="margin-left:8px;color:var(--gold-a)"></span></div>' +
+          '<span class="hint" id="glShared" style="margin-left:8px;color:var(--gold-a)"></span>' +
+          '<span id="glSorts" style="margin-left:auto;display:flex;gap:6px">' +
+            '<button class="minibtn gl-sortbtn" data-gl-sort="oldest">Oldest first</button>' +
+            '<button class="minibtn gl-sortbtn" data-gl-sort="newest">Newest first</button></span></div>' +
           '<div class="bd" id="glBody"><div class="spinner"></div></div></div>';
     },
     init: function () {
@@ -20754,6 +20763,12 @@ VIEWS.dashboard = {
          into a card is remembered, so no refresh or background merge can take it away. */
       var body = $('glBody');
       if (body) { body.addEventListener('input', glDraftHarvest); body.addEventListener('change', glDraftHarvest); }
+      var sorts = $('glSorts');
+      if (sorts) {
+        sorts.querySelectorAll('[data-gl-sort]').forEach(function (c) {
+          c.onclick = function () { GL_SORT = this.getAttribute('data-gl-sort'); glRenderList(); };
+        });
+      }
       glLoad();
     }
   };
@@ -20789,6 +20804,14 @@ VIEWS.dashboard = {
   function glDraftOf(id) { return GL_DRAFT[id] || {}; }
   function glAttrVal(v) { return esc(glS(v)).replace(/"/g, '&quot;'); }
 
+  /* 18 Nov (owner, voice note on this desk): "click an account's tile and show only that
+     account's drafts; show All too, keep the counts; and sorting, oldest to the newest." The
+     tiles ARE the filter — their counts always cover the whole desk, whatever is pressed — and
+     the list sorts by when each draft was flagged. Repainting the list on a click is safe
+     because of the 6 Oct rule above: GL_DRAFT remembers what was typed and every card puts it
+     back. Oldest first is the default on purpose — the stalest draft is the one to clear. */
+  var GL_ACCT = 'all';
+  var GL_SORT = 'oldest';
   var GL_SEQ = 0;
   var GL_SHOWN = [];             // the drafts currently on screen, so an append can recount the tiles
   var GL_MERGED_AT = 0;          // when the shared-desk sweep last ran (see glSharedMerge)
@@ -20848,14 +20871,50 @@ VIEWS.dashboard = {
     var byAcct = {};
     drafts.forEach(function (x) { var a = glS(x.t.account) || '(none)'; byAcct[a] = (byAcct[a] || 0) + 1; });
     try { STATE.counts.goLive = drafts.length; if (typeof refreshBadges === 'function') { refreshBadges(); } } catch (e) {}
+    /* a pressed account that no longer holds a draft falls back to All rather than filtering
+       the desk down to an empty screen nobody asked for */
+    if (GL_ACCT !== 'all' && !byAcct[GL_ACCT]) { GL_ACCT = 'all'; }
+    var tile = function (acct, label, n, extra) {
+      return '<div class="gl-tile' + (extra || '') + (GL_ACCT === acct ? ' on' : '') + '" data-gl-acct="' + esc(acct).replace(/"/g, '&quot;') + '" title="show only this account\u2019s drafts">' +
+        '<span class="k">' + esc(label) + '</span><b>' + n + '</b></div>';
+    };
     var html = '<div class="gl-tiles">' +
-      '<div class="gl-tile purple"><span class="k">Drafts waiting</span><b>' + drafts.length + '</b></div>' +
-      Object.keys(byAcct).map(function (a) {
-        return '<div class="gl-tile"><span class="k">' + esc(a) + '</span><b>' + byAcct[a] + '</b></div>';
-      }).join('') + '</div>';
+      tile('all', 'Drafts waiting \u00b7 all', drafts.length, ' purple') +
+      Object.keys(byAcct).sort().map(function (a) { return tile(a, a, byAcct[a]); }).join('') + '</div>';
     var existing = host.querySelector('.gl-tiles');
-    if (existing) { existing.outerHTML = html; return; }      // leaves #glPipe and its numbers alone
-    host.innerHTML = html + '<div id="glPipe"></div>';
+    if (existing) { existing.outerHTML = html; } else { host.innerHTML = html + '<div id="glPipe"></div>'; }
+    host.querySelectorAll('[data-gl-acct]').forEach(function (el) {
+      el.onclick = function () {
+        var a = this.getAttribute('data-gl-acct');
+        GL_ACCT = (a === GL_ACCT) ? 'all' : a;               // pressing the lit tile lets go
+        glRenderTiles(GL_SHOWN);
+        glRenderList();
+      };
+    });
+  }
+
+  /** The list, as filtered and sorted. Safe to call any time: typed values come back via GL_DRAFT. */
+  function glRenderList() {
+    var box = $('glBody');
+    if (!box) { return; }
+    var me = glS(STATE.user && STATE.user.email).toLowerCase();
+    var vis = GL_SHOWN.filter(function (x) { return GL_ACCT === 'all' || (glS(x.t.account) || '(none)') === GL_ACCT; });
+    vis.sort(function (a, b) {
+      var ta = Date.parse(glS(a.f.at)) || 0, tb = Date.parse(glS(b.f.at)) || 0;
+      return GL_SORT === 'newest' ? tb - ta : ta - tb;
+    });
+    var sb = $('glSorts');
+    if (sb) {
+      sb.querySelectorAll('[data-gl-sort]').forEach(function (c) { c.classList.toggle('on', c.getAttribute('data-gl-sort') === GL_SORT); });
+    }
+    if (!vis.length) {
+      box.innerHTML = '<div class="hu-hint" style="margin-top:0">' + (GL_SHOWN.length
+        ? 'Nothing waiting on ' + esc(GL_ACCT) + ' \u2014 press its tile again (or All) for the rest.'
+        : 'No drafts waiting. When a lister leaves an item in draft, it lands here with its link.') + '</div>';
+      return;
+    }
+    box.innerHTML = vis.map(function (x) { return glCardHtml(x, me); }).join('');
+    glWire(box);
   }
 
   /* 30 Aug (owner): how many dummies went LIVE — today / 7d / 30d, split General · Dynamic ·
@@ -20916,30 +20975,20 @@ VIEWS.dashboard = {
     GL_SHOWN = drafts;
     glRenderTiles(drafts);
     glPipeline();
-    var box = $('glBody');
-    if (!box) { return; }
-    if (!drafts.length) {
-      box.innerHTML = '<div class="hu-hint" style="margin-top:0">No drafts waiting. When a lister leaves an item in draft, it lands here with its link.</div>';
-      return;
-    }
-    box.innerHTML = drafts.map(function (x) { return glCardHtml(x, me); }).join('');
-    glWire(box);
+    glRenderList();
   }
 
-  /** Drafts the second answer found: appended, so nothing already on screen is disturbed. */
+  /** Drafts the second answer found. Deduped against GL_SHOWN, not the screen: with a tile
+      pressed the screen holds one account, and checking it would re-add everything hidden.
+      The re-render loses nothing typed (GL_DRAFT puts it back). */
   function glAppend(extra) {
-    var box = $('glBody');
-    if (!box) { return; }
-    var me = glS(STATE.user && STATE.user.email).toLowerCase();
-    var add = glDrafts(extra || []).filter(function (x) {
-      return !box.querySelector('[data-gl-card="' + glS(x.t.task_id).replace(/"/g, '') + '"]');
-    });
+    var have = {};
+    GL_SHOWN.forEach(function (x) { have[glS(x.t.task_id)] = 1; });
+    var add = glDrafts(extra || []).filter(function (x) { return !have[glS(x.t.task_id)]; });
     if (!add.length) { return; }
-    if (!GL_SHOWN.length) { box.innerHTML = ''; }          // clears the "No drafts waiting" line
-    box.insertAdjacentHTML('beforeend', add.map(function (x) { return glCardHtml(x, me); }).join(''));
     GL_SHOWN = GL_SHOWN.concat(add);
     glRenderTiles(GL_SHOWN);
-    glWire(box);                                            // onclick assignment — safe to re-run
+    glRenderList();
   }
 
   function glWire(box) {
