@@ -11,12 +11,53 @@
  * an auto-raised one inside 30 days, is skipped. Assigned to the Listing Manager (who routes),
  * 72-hour deadline, reason written into the task so nobody asks why. */
 
+/* 17 Nov (owner): "system will not send automated revisions on yaseen bhai and rabia masood's
+   account." Those two are worked by hand (the 12 Nov scope rule). The same list is written in
+   engine/worker.js (REVISION_EXCLUDE_ACCOUNTS) where ladderWatch enforces it — the two layers
+   cannot share a constant, so change BOTH or neither. A human may still raise a revision on them;
+   only the machinery is barred. */
+const REVISION_EXCLUDE_ACCOUNTS = ['Yaseen Bhai', 'Rabia Masood'];
+function revisionAccountBlocked_(a) { return REVISION_EXCLUDE_ACCOUNTS.indexOf(String(a || '').trim()) >= 0; }
+
 const REVQ_MIN_DAYS_LIVE = 7;
 const REVQ_REVISED_COOLDOWN_DAYS = 14;
 const REVQ_AUTO_COOLDOWN_DAYS = 30;
 const REVQ_MAX_PER_RUN = 15;
 const REVQ_MARK = '[auto-qualify]';
 const REVQ_ASSIGN_ROLES = ['Listing Manager', 'Team Lead', 'Management'];
+
+/* 17 Nov (owner): "and delete if any sent yet." Removes every OPEN system-sent listing_revision
+   on the barred accounts: assigned_by 'system:*' (auto-qualify, zero-sales, ladder) — a revision a
+   HUMAN raised on them is left alone, because only the machinery was barred. The 17 Nov book held
+   ZERO open tasks of any kind on either account, so this usually reports nothing; it exists for
+   whatever trickled in since, and it is idempotent. Mirror: deleted sheet rows are retired from D1
+   by pushEngineTasks' full reconcile, called best-effort at the end. */
+function purgeAutoRevisionsYaseenRabia() {
+  const sh = tasksSheet_();
+  const vals = sh.getDataRange().getValues();
+  const head = vals[0].map(String);
+  const col = function (k) { return head.indexOf(k); };
+  const cT = col('type'), cA = col('account'), cS = col('status'), cI = col('task_id'), cB = col('assigned_by');
+  if (cT < 0 || cA < 0 || cS < 0 || cI < 0) return 'ABORT: TASKS columns missing';
+  const gone = [];
+  const rows = [];
+  for (let i = 1; i < vals.length; i++) {
+    if (String(vals[i][cT]) !== 'listing_revision') continue;
+    if (!revisionAccountBlocked_(vals[i][cA])) continue;
+    if (String(vals[i][cS]) === TASK_STATUS_COMPLETED) continue;
+    if (String(vals[i][cB] || '').indexOf('system') !== 0) continue;   // humans' revisions stay
+    rows.push(i + 1);
+    gone.push(String(vals[i][cI]) + ' (' + String(vals[i][cA]) + ', by ' + String(vals[i][cB]) + ')');
+  }
+  rows.sort(function (x, y) { return y - x; });                        // bottom-up, or the row numbers shift
+  rows.forEach(function (r) { sh.deleteRow(r); });
+  try { logActivity_('system', 'PURGE_AUTO_REVISIONS', 'Yaseen Bhai + Rabia Masood', '', String(gone.length) + ' deleted', gone.join(', ').slice(0, 900)); } catch (e) {}
+  let mirror = '';
+  if (gone.length) { try { mirror = ' · mirror: ' + String(pushEngineTasks()); } catch (e) { mirror = ' · mirror push failed (the hourly reconcile will retire them)'; } }
+  const res = gone.length ? 'deleted ' + gone.length + ' system-sent revision(s): ' + gone.join(', ') : 'nothing to delete — no open system-sent revision on either account';
+  Logger.log(res + mirror);
+  return res + mirror;
+}
 
 function revqRows_(dump) {
   const h = dump.header || [];
@@ -51,6 +92,7 @@ function revisionQualify() {
   const revisedCut = now - REVQ_REVISED_COOLDOWN_DAYS * 86400000;
 
   const candidates = items.filter(function (it) {
+    if (revisionAccountBlocked_(it.account)) return false;   // 17 Nov: hand-worked accounts
     if (String(it.status) !== 'ACTIVE') return false;
     const started = Date.parse(String(it.start_time || '').replace(' ', 'T') + 'Z');
     if (isNaN(started) || started > liveCut) return false;         // too young (or unknown age: skip)

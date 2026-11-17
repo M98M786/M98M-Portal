@@ -1660,6 +1660,16 @@ function runLossEscalationSweep() {
       logActivity_('system', 'HUNTER_PORTAL_M98MFOUR', 'm98mfour@gmail.com', '', 'run from the 5-minute sweep', huntingPortalForM98mfour());
     }
   } catch (e) { logActivity_('trigger', 'ERROR:hunterPortalM98mfour', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  /* 17 Nov (owner): purge system-sent revisions on the hand-worked accounts, once, from this
+     clock — the flag is set BEFORE the call so a crash cannot loop it. The result line is logged
+     by the one-shot itself ahead of any slow mirror work (the 11 Nov lesson). */
+  try {
+    const p17n = PropertiesService.getScriptProperties();
+    if (p17n.getProperty('PURGE_AUTOREV_YR_17NOV') !== 'done' && typeof purgeAutoRevisionsYaseenRabia === 'function') {
+      p17n.setProperty('PURGE_AUTOREV_YR_17NOV', 'done');
+      logActivity_('system', 'PURGE_AUTOREV_YR_17NOV', '', '', 'run from the 5-minute sweep', purgeAutoRevisionsYaseenRabia());
+    }
+  } catch (e) { logActivity_('trigger', 'ERROR:purgeAutoRevYR', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   /* 22 Oct: seed the "pending send" set from the activity log once, flag-guarded on this 5-minute
      clock so it lands without the editor Run button (the Approved archive needs it to show genuine
      new-flow approvals; without it the set is empty). Idempotent; delete at the next tidy-up. */

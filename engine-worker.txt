@@ -79,6 +79,14 @@ function stripEarnings(data) {
 }
 /* EARNINGS-PURE-END */
 const MGMT_ROLES = ['Management', 'Ops Head'];
+/* 17 Nov (owner): "system will not send automated revisions on yaseen bhai and rabia masood's
+   account." These two accounts are worked by hand (the 12 Nov scope rule), so the revision
+   machinery leaves them alone: ladderWatch never enrols their listings (and clears any already
+   enrolled), and Apps Script's nightly qualifier and zero-sales sweep carry the same list on their
+   side — the two layers cannot share a constant, so it is written in both and this comment is the
+   cross-reference. A HUMAN may still raise a revision on them; only the machinery is barred. */
+const REVISION_EXCLUDE_ACCOUNTS = ['Yaseen Bhai', 'Rabia Masood'];
+function revisionAccountBlocked(account) { return REVISION_EXCLUDE_ACCOUNTS.indexOf(String(account || '').trim()) >= 0; }
 /* 14 Oct (owner): the 7-day revision board is read by everyone the revision passes through —
    the Advertising Manager who decides it, the Item Lister who does it, and Management who signs
    it off. It carries no money, so the lister may read the whole board. */
@@ -4715,6 +4723,7 @@ async function ladderWatch(env) {
     "WHERE COALESCE(p.listed_at, '') != '' AND NOT EXISTS (SELECT 1 FROM listing_ladder l WHERE l.item_id = p.item_id)"
   ).all().catch(() => ({ results: [] }));
   for (const r of (pv.results || [])) {
+    if (revisionAccountBlocked(r.account)) continue;   // 17 Nov: hand-worked accounts never enter the ladder
     const eb = String(r.ebay_start || '').trim();
     const t = eb ? new Date(eb.replace(' ', 'T') + (eb.indexOf('Z') < 0 ? 'Z' : '')) : new Date(String(r.listed_at));
     if (isNaN(t.getTime())) continue;
@@ -4726,6 +4735,14 @@ async function ladderWatch(env) {
     ).bind(String(r.item_id), String(r.account || ''), String(r.title || '').slice(0, 200), String(r.lister_email || ''),
       go, ladderPlus(t, 7), ladderPlus(t, 14), ladderPlus(t, 14)).run();
   }
+  /* 17 Nov: listings of the hand-worked accounts that were enrolled BEFORE the bar leave the
+     ladder, so the revision desks stop offering them to staff. Decisions already taken keep
+     their history in ladder_decisions; this clears only the queue. Idempotent — after the first
+     tick it matches nothing. */
+  try {
+    await env.DB.prepare('DELETE FROM listing_ladder WHERE account IN (' + REVISION_EXCLUDE_ACCOUNTS.map(() => '?').join(',') + ')')
+      .bind(...REVISION_EXCLUDE_ACCOUNTS).run();
+  } catch (e) {}
   /* MIGRATION (owner, 10 Sept: "send all the current 72 hours revision to zain"): items whose
      72-hour revision TASK is still open on the boards predate the ladder — seed them too, with
      their real go-live where provenance knows it, so they queue for Zain immediately. */
@@ -4736,6 +4753,7 @@ async function ladderWatch(env) {
     'AND NOT EXISTS (SELECT 1 FROM listing_ladder l WHERE l.item_id = t.item_id) LIMIT 60'
   ).all().catch(() => ({ results: [] }));
   for (const r of (mig.results || [])) {
+    if (revisionAccountBlocked(r.account)) continue;
     const eb2 = String(r.ebay_start || '').trim();
     let t = eb2 ? new Date(eb2.replace(' ', 'T') + (eb2.indexOf('Z') < 0 ? 'Z' : '')) : new Date(String(r.listed_at));
     if (isNaN(t.getTime())) t = new Date(Date.now() - 4 * 86400000);   // unknown go-live: old enough to be due now

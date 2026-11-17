@@ -26,7 +26,25 @@
 
   /* scope: 'mine' (own open tasks) · 'everyone' (management — every open task, with manage controls)
      · 'archive' (completed — own, or everyone for management). Owner 5 Sept. */
-  var TKV = { scope: 'mine', sel: {} };
+  /* 17 Nov (owner, on All tasks — manage): "i need department to department options, and perfect,
+     fast working page." Two causes of the slowness, one of them ours: the list drew EVERY open task
+     as a full row — 437 heavy rows the day this was built — and offered no way to look at one
+     department's work. The rows now paint capped (the rest behind one click) and a chip bar cuts
+     the board department by department, using the same type→department map the backend's R8 pages
+     use (R8_DEPT_OF_TYPE — the two cannot share a constant, so change both or neither). */
+  var TK_DEPT_OF_TYPE = {
+    listing_new: 'Listing', listing_revision: 'Listing', end_listing: 'Listing',
+    campaign_set: 'Advertising', cpc_research: 'Advertising', potential_cpc_review: 'Advertising',
+    loss_review: 'Advertising',
+    supplier_add: 'Orders',
+    sourcing_link: 'Hunting', hunt_revision: 'Hunting',
+    query: 'CS',
+    general: 'General'
+  };
+  var TK_DEPTS = ['Listing', 'Hunting', 'Advertising', 'Orders', 'CS', 'General'];
+  var TK_PAGE = 150;   // rows the first paint carries; one click shows the rest
+  function tkDeptOf(t) { return TK_DEPT_OF_TYPE[tkStr(t.type) || 'general'] || 'General'; }
+  var TKV = { scope: 'mine', sel: {}, dept: 'all', showAll: false, lastData: null };
   function tkIsMgmt() { return !!(STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super)); }
   function tkSelIds() { return Object.keys(TKV.sel).filter(function (k) { return TKV.sel[k]; }); }
   function tkUpdateBulkBar() {
@@ -99,6 +117,10 @@
   }
 
   VIEW_CSS.push(
+    '.tk-depts{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}' +
+    '.tk-depts .minibtn span{opacity:.65;font-weight:800;margin-left:3px}' +
+    '.tk-dept-on{background:var(--gold-a)!important;color:#161616!important;border-color:var(--gold-a)!important}' +
+    '.tk-dept-on span{opacity:.8}' +
     '.tk-bulk{position:sticky;top:8px;z-index:5;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;padding:10px 14px;border:1px solid var(--gold-a);border-radius:12px;background:var(--panel-2);box-shadow:0 6px 18px rgba(0,0,0,.25)}' +
     '.tk-bulk.hidden{display:none}' +
     '.tk-sel-cell{width:34px;text-align:center!important;padding-right:0!important}' +
@@ -428,6 +450,7 @@
   }
 
   function tkPaintTasks(box, d) {
+    TKV.lastData = d;   // the chips repaint from memory — no refetch for a filter click
     var all = (d && d.tasks) || [], i, open = 0, tasks;
     if (TKV.scope === 'archive') {
       tasks = all.filter(function (t) { return tkStr(t.status) === TK_COMPLETED; });
@@ -445,19 +468,50 @@
         : TKV.scope === 'archive' ? 'Archive — ' + tasks.length + ' completed <span class="hint">' + (tkIsMgmt() ? 'everyone’s' : 'your') + ' finished work</span>'
         : 'Assigned to me <span class="hint">No task completes itself — every submission waits for approval</span>');
     }
+    /* the department cut, for the manage board: counts are taken over the WHOLE board first, so a
+       chip always says what it holds even while another chip is pressed */
+    var chips = '';
+    if (TKV.scope === 'everyone') {
+      var dc = {}, dAll = tasks.length;
+      for (i = 0; i < tasks.length; i++) { var dp = tkDeptOf(tasks[i]); dc[dp] = (dc[dp] || 0) + 1; }
+      chips = '<div class="tk-depts">' +
+        '<button class="minibtn' + (TKV.dept === 'all' ? ' tk-dept-on' : '') + '" data-tk-dept="all">All <span>' + dAll + '</span></button>' +
+        TK_DEPTS.filter(function (n) { return dc[n]; }).map(function (n) {
+          return '<button class="minibtn' + (TKV.dept === n ? ' tk-dept-on' : '') + '" data-tk-dept="' + n + '">' + n + ' <span>' + dc[n] + '</span></button>';
+        }).join('') + '</div>';
+      if (TKV.dept !== 'all') { tasks = tasks.filter(function (t) { return tkDeptOf(t) === TKV.dept; }); }
+    }
     if (!tasks.length) {
-      box.innerHTML = '<div class="tk-empty">' + (TKV.scope === 'archive' ? 'Nothing completed yet.' : TKV.scope === 'everyone' ? 'No open tasks anywhere — the board is clear.' : 'No tasks on you right now.') +
+      box.innerHTML = chips + '<div class="tk-empty">' + (TKV.scope === 'archive' ? 'Nothing completed yet.' : TKV.scope === 'everyone' ? (TKV.dept === 'all' ? 'No open tasks anywhere — the board is clear.' : 'Nothing open in ' + esc(TKV.dept) + '.') : 'No tasks on you right now.') +
         '<span>' + (TKV.scope === 'mine' ? 'New work lands here the moment someone assigns it.' : '') + '</span></div>';
+      tkWireDeptChips(box);
       return;
     }
     var showWho = TKV.scope !== 'mine';
     var selectable = tkIsMgmt();
-    box.innerHTML = '<div class="scroll"><table class="tk-tbl">' +
+    /* the cap is what makes the first paint quick: a filtered department is usually under it, and
+       the full board is one click away rather than the price of every visit */
+    var total = tasks.length, capped = TKV.scope !== 'mine' && !TKV.showAll && total > TK_PAGE;
+    var shown = capped ? tasks.slice(0, TK_PAGE) : tasks;
+    box.innerHTML = chips + '<div class="scroll"><table class="tk-tbl">' +
       '<thead><tr>' + (selectable ? '<th class="tk-sel-cell"><input type="checkbox" class="tk-selall" title="Select all on this page"></th>' : '') +
         '<th>Task</th><th>Account</th><th>Item ID</th><th>Deadline</th><th>Status</th><th></th></tr></thead>' +
-      '<tbody>' + tasks.map(function (t) { return tkRow(t, showWho, selectable); }).join('') + '</tbody></table></div>';
+      '<tbody>' + shown.map(function (t) { return tkRow(t, showWho, selectable); }).join('') + '</tbody></table></div>' +
+      (capped ? '<div style="padding:12px 0 2px;text-align:center"><button class="minibtn" id="tkShowAll">Show all ' + total + ' — the first ' + TK_PAGE + ' are above</button></div>' : '');
+    tkWireDeptChips(box);
+    var sa = box.querySelector('#tkShowAll');
+    if (sa) { sa.onclick = function () { TKV.showAll = true; tkPaintTasks(box, TKV.lastData); }; }
     tkWireRows(box);
     tkUpdateBulkBar();
+  }
+  function tkWireDeptChips(box) {
+    [].slice.call(box.querySelectorAll('[data-tk-dept]')).forEach(function (b) {
+      b.onclick = function () {
+        TKV.dept = this.getAttribute('data-tk-dept');
+        TKV.showAll = false; TKV.sel = {};   // a new cut is a new page — stale ticks must not ride along
+        tkPaintTasks(box, TKV.lastData);
+      };
+    });
   }
 
   function tkLoadTasks() {

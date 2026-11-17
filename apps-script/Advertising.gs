@@ -991,6 +991,7 @@ function runZeroSalesSweepInner_() {
   let made = 0, scanned = 0, skippedAccts = [];
   (connectionHealth().perAccount || []).forEach(function (a) {
    const account = String(a.account || '');
+   if (typeof revisionAccountBlocked_ === 'function' && revisionAccountBlocked_(account)) return;   // 17 Nov: hand-worked accounts
    try {
     const read = advReadPpcTab_(account, ADV_ALARM_MAX);
     if (!read.ok) return;
