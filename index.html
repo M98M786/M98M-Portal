@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' https: data:; font-src https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://accounts.google.com https://*.workers.dev; frame-src https://accounts.google.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' https: data:; font-src https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://accounts.google.com https://*.workers.dev https://engine.m98mltd.co.uk; frame-src https://accounts.google.com; base-uri 'none'; form-action 'none'">
 <title>M98M Operations Intelligence System</title><!--ADS_TITLE-->
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
@@ -751,6 +751,23 @@ var ENGINE_WRITE_ACTIONS = ['priceDecide','campaignRemoveItem','autoMsgSet','ack
 /* The Engine's address is stable infrastructure — baked as the fallback so sign-in and config
    can reach it BEFORE any config exists (the AS front door proved it can vanish under everyone). */
 var ENGINE_URL_DEFAULT = 'https://m98m-engine.m98m786.workers.dev/';
+/* 18 Nov (Zaid, then Umar, then "some of the staff": the engine unreachable from their machines
+   on EVERY try while the portal page itself loads fine): the engine's second door — the same
+   Worker on our own domain. The portal is plain GitHub Pages and the engine's only address was
+   on workers.dev, a name some Pakistani networks block outright; a retry cannot help a host that
+   is blocked by name. When the default door dies before the request leaves the browser, one try
+   goes to this one; if it answers, the browser is PINNED to it (localStorage) so every later call
+   — reads, writes, the next tab — uses one host and never flaps. A pinned door that itself goes
+   dark is unpinned and the default tried again. The hostname is attached to the Worker in the
+   Cloudflare dashboard (Workers & Pages → m98m-engine → Settings → Domains & Routes → Custom
+   domain); until that is done this address does not resolve and the try fails fast and quietly. */
+var ENGINE_URL_ALT = 'https://engine.m98mltd.co.uk/';
+var ENGINE_HOST_KEY = 'm98m:engineHost';
+function engineBase(){
+  try{ if(localStorage.getItem(ENGINE_HOST_KEY) === ENGINE_URL_ALT){ return ENGINE_URL_ALT; } }catch(e){}
+  return (STATE.config && STATE.config.engine_url) || ENGINE_URL_DEFAULT;
+}
+function enginePin(u){ try{ if(u === ENGINE_URL_ALT){ localStorage.setItem(ENGINE_HOST_KEY, u); } else { localStorage.removeItem(ENGINE_HOST_KEY); } }catch(e){} }
 /* 18 Nov (Zaid's portal: "Failed to fetch" on every sign-in while everyone else was fine).
    Reproduced in the in-app browser: the FIRST request to the engine from a fresh browser dies
    after ~4 s with a QUIC protocol error — Chrome opens workers.dev over HTTP/3 (UDP 443), some
@@ -765,27 +782,37 @@ var ENGINE_URL_DEFAULT = 'https://m98m-engine.m98m786.workers.dev/';
    here (ENGINE_WRITE_ACTIONS) — a doubled write is worse than a failed one — their callers keep
    the single try and the "refresh before retrying" message. Nothing is shown to the person: the
    2 Nov lesson is that a fallback that announces itself reads as a breakage. */
-var ENGINE_NET_RETRIES = 2;
+var ENGINE_NET_RETRIES = 1;   // one retry on the default door, then the second door — a dead host must not cost twelve seconds
 function engineCall(action, payload, timeoutMs){
-  var url = (STATE.config && STATE.config.engine_url) || ENGINE_URL_DEFAULT;
+  var url = engineBase();
   var canRetry = ENGINE_WRITE_ACTIONS.indexOf(action) < 0;
-  var once = function(){
+  var once = function(u){
     var ac = new AbortController();
     var t = setTimeout(function(){ ac.abort(); }, timeoutMs);
-    return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
+    return fetch(u, { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} }), signal: ac.signal })
       .then(function(r){ return r.json(); })
       .then(function(j){ clearTimeout(t); if(!j.ok){ if(j.error==='auth' && STATE.session){ authSelfHeal(); } throw new Error(j.error||'request failed'); } return j.data; },
             function(e){ clearTimeout(t); throw e; });
   };
   var attempt = function(left){
-    return once().catch(function(e){
+    return once(url).catch(function(e){
       var netFail = e && e.name === 'TypeError';            // "Failed to fetch": the connection never formed
       if(!canRetry || !netFail || left <= 0){ throw e; }
       return new Promise(function(res){ setTimeout(res, 250); }).then(function(){ return attempt(left - 1); });
     });
   };
-  return attempt(ENGINE_NET_RETRIES);
+  return attempt(ENGINE_NET_RETRIES).catch(function(e){
+    var netFail = e && e.name === 'TypeError';
+    if(!canRetry || !netFail){ throw e; }
+    if(url !== ENGINE_URL_ALT){
+      /* the default door is dark for this browser: try the second door once, pin it if it answers */
+      return once(ENGINE_URL_ALT).then(function(d){ enginePin(ENGINE_URL_ALT); return d; });
+    }
+    /* the pinned second door is dark: let go of it and give the default one more chance */
+    enginePin(null);
+    return once(ENGINE_URL_DEFAULT);
+  });
 }
 /* 13 Sept: a 2.5 s first try sent the checkpoint LIST to Apps Script on any slow engine moment
    while the SUBMIT stayed on the engine — two different answers for "your slots", and the submit
@@ -900,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261118-1229';
+var BUILD = '20261118-1416';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
