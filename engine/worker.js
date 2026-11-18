@@ -132,7 +132,7 @@ class LocationError extends Error {}
    unparseable date leaves the gate ARMED — this fails closed, never open.
    TO END IT EARLY: set this to a past instant (or '') and deploy. TO RE-ARM FOR GOOD: put the new
    office address into the OFFICE_IP variable and let this date pass. */
-const OFFICE_GATE_OFF_UNTIL = '2026-11-05T00:00:00Z';   // 05:00 PKT on 5 Nov — two full working days
+const OFFICE_GATE_OFF_UNTIL = '2026-11-21T00:00:00Z';   // 18 Nov (owner): "remove portal's IP firewall for 2 days" — off through Thu 20 Nov, re-arms 05:00 PKT Fri 21 Nov
 function officeGateOff(now) {
   const t = Date.parse(OFFICE_GATE_OFF_UNTIL || '');
   return !!t && (now || Date.now()) < t;
