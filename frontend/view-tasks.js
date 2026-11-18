@@ -98,14 +98,132 @@
       '<button class="minibtn" data-bulk="delete" style="border-color:var(--bad);color:var(--bad)">Delete</button>' +
       '<button class="minibtn" data-bulk="clear">Clear</button>';
   }
+  /* ---------- 19 Nov (owner): "it takes me to that black Chrome page and asks for an email —
+     do both inside the portal: names of the department's people for Reassign, a calendar for the
+     deadline." One small sheet component, three questions. ---------- */
+  function tkSheet(title, sub, bodyHtml, onOpen) {
+    tkSheetClose();
+    var veil = document.createElement('div'); veil.className = 'tk-veil'; veil.id = 'tkVeil';
+    veil.innerHTML = '<div class="tk-sheet" role="dialog" aria-modal="true"><h3>' + title + '</h3>' +
+      (sub ? '<div class="tk-sub">' + sub + '</div>' : '') + bodyHtml + '</div>';
+    veil.onclick = function (ev) { if (ev.target === veil) { tkSheetClose(); } };
+    document.body.appendChild(veil);
+    var esc1 = function (ev) { if (ev.key === 'Escape') { tkSheetClose(); } };
+    document.addEventListener('keydown', esc1); veil._esc = esc1;
+    if (onOpen) { onOpen(veil); }
+    return veil;
+  }
+  function tkSheetClose() {
+    var v = $('tkVeil'); if (!v) { return; }
+    if (v._esc) { document.removeEventListener('keydown', v._esc); }
+    v.remove();
+  }
+  /* which roles do a department's tasks go to — the same people the Send form offers */
+  var TK_DEPT_ROLES = {
+    Listing: ['Item Lister', 'Listing Manager', 'Team Lead'],
+    Hunting: ['Product Hunter', 'Team Lead'],
+    Advertising: ['Advertising Manager', 'Team Lead', 'Management', 'Ops Head'],
+    Orders: ['Order Processor', 'Team Lead'],
+    CS: ['CS', 'Team Lead'],
+    General: null
+  };
+  var TK_STAFF = null;   // [{email,name,role}] from assignableStaff, fetched once for the pickers
+  function tkLoadStaff(cb) {
+    if (TK_STAFF) { cb(TK_STAFF); return; }
+    api('assignableStaff', {}).then(function (d) {
+      TK_STAFF = ((d && d.staff) || []).map(function (u) { return { email: tkStr(u.email).toLowerCase(), name: tkStr(u.name) || tkStr(u.email), role: tkStr(u.role) }; });
+      cb(TK_STAFF);
+    }).catch(function () { cb([]); });
+  }
+  function tkSelTasks() {
+    var want = {}; tkSelIds().forEach(function (id) { want[id] = 1; });
+    return (((TKV.lastData || {}).tasks) || []).filter(function (t) { return want[tkStr(t.task_id)]; });
+  }
+  /* the department(s) of the selected tasks → the roles offered first */
+  function tkDeptsOfSelection() {
+    var seen = {}; tkSelTasks().forEach(function (t) { seen[tkDeptOf(t)] = 1; });
+    return Object.keys(seen);
+  }
+  function tkPickPerson(n, done) {
+    var depts = tkDeptsOfSelection();
+    var label = depts.length === 1 ? depts[0] : (depts.length ? depts.join(' + ') : 'this department');
+    tkLoadStaff(function (staff) {
+      var roles = depts.length === 1 ? TK_DEPT_ROLES[depts[0]] : null;   // mixed departments → everyone
+      var all = false;
+      var render = function (veil) {
+        var q = tkStr((veil.querySelector('#tkPq') || {}).value).toLowerCase();
+        var list = staff.filter(function (u) {
+          if (!all && roles && roles.indexOf(u.role) < 0) { return false; }
+          if (q && (u.name + ' ' + u.email + ' ' + u.role).toLowerCase().indexOf(q) < 0) { return false; }
+          return true;
+        });
+        var box = veil.querySelector('#tkPeople');
+        box.innerHTML = list.length ? list.map(function (u) {
+          return '<button class="tk-person" data-pick="' + esc(u.email) + '"><b>' + esc(u.name) + '</b><span>' + esc(u.role) + '</span></button>';
+        }).join('') : '<div class="tk-sub">Nobody in ' + esc(label) + ' matches — tick "Everyone".</div>';
+        [].slice.call(box.querySelectorAll('[data-pick]')).forEach(function (b) {
+          b.onclick = function () { var email = this.getAttribute('data-pick'); tkSheetClose(); done(email); };
+        });
+        var tog = veil.querySelector('#tkPall'); if (tog) { tog.classList.toggle('tk-dept-on', all); tog.textContent = all ? 'Everyone ✓' : 'Everyone'; }
+      };
+      tkSheet('Reassign ' + n + ' task' + (n === 1 ? '' : 's'),
+        'to someone in <b>' + esc(label) + '</b> — pick a name',
+        '<div class="tk-sheet-h"><input class="tk-in" id="tkPq" placeholder="type a name…" style="max-width:220px">' +
+          (roles ? '<button class="minibtn" id="tkPall">Everyone</button>' : '') + '</div>' +
+        '<div class="tk-people" id="tkPeople"></div>' +
+        '<div class="tk-sheet-ft"><button class="minibtn" id="tkPx">Cancel</button></div>',
+        function (veil) {
+          render(veil);
+          var q = veil.querySelector('#tkPq'); if (q) { q.oninput = function () { render(veil); }; q.focus(); }
+          var tog = veil.querySelector('#tkPall'); if (tog) { tog.onclick = function () { all = !all; render(veil); }; }
+          veil.querySelector('#tkPx').onclick = tkSheetClose;
+        });
+    });
+  }
+  /* PKT wall-clock helpers for the calendar: the portal speaks Pakistan time everywhere */
+  function tkPktNow() { return new Date(Date.now() + 5 * 3600000); }
+  function tkPktLocal(d) { return d.toISOString().slice(0, 16); }            // 'YYYY-MM-DDTHH:MM' for datetime-local
+  function tkPickDeadline(n, done) {
+    var base = tkPktNow(); base.setUTCHours(21, 0, 0, 0); base = new Date(base.getTime() + 86400000);   // tomorrow 21:00 PKT
+    var quick = [['Tomorrow 21:00', 1], ['+2 days', 2], ['+3 days', 3], ['+7 days', 7]];
+    tkSheet('New deadline for ' + n + ' task' + (n === 1 ? '' : 's'),
+      'Pakistan time — pick from the calendar or a quick choice',
+      '<div class="tk-quick">' + quick.map(function (qk) { return '<button class="minibtn" data-q="' + qk[1] + '">' + qk[0] + '</button>'; }).join('') + '</div>' +
+      '<input class="tk-dt" id="tkDt" type="datetime-local" step="900">' +
+      '<div class="tk-sheet-ft"><button class="minibtn" id="tkDx">Cancel</button><button class="btn-gold" id="tkDok">Set deadline</button></div>',
+      function (veil) {
+        var inp = veil.querySelector('#tkDt'); inp.value = tkPktLocal(base); inp.min = tkPktLocal(tkPktNow());
+        [].slice.call(veil.querySelectorAll('[data-q]')).forEach(function (b) {
+          b.onclick = function () { var d = tkPktNow(); d.setUTCHours(21, 0, 0, 0); d = new Date(d.getTime() + Number(this.getAttribute('data-q')) * 86400000); inp.value = tkPktLocal(d); };
+        });
+        veil.querySelector('#tkDx').onclick = tkSheetClose;
+        veil.querySelector('#tkDok').onclick = function () {
+          var v = tkStr(inp.value);
+          if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) { toast('Pick a date and time first.'); return; }
+          tkSheetClose(); done(v.slice(0, 16));
+        };
+        try { inp.focus(); } catch (e) {}
+      });
+  }
+  function tkConfirmDelete(n, done) {
+    tkSheet('Delete ' + n + ' task' + (n === 1 ? '' : 's') + '?', 'This removes them from the sheet for everyone. It cannot be undone.',
+      '<div class="tk-sheet-ft"><button class="minibtn" id="tkCx">Keep them</button><button class="minibtn" id="tkCok" style="border-color:var(--bad);color:var(--bad)">Delete</button></div>',
+      function (veil) { veil.querySelector('#tkCx').onclick = tkSheetClose; veil.querySelector('#tkCok').onclick = function () { tkSheetClose(); done(); }; });
+  }
+
   /* Run one taskAdmin op across every selected task, in series, then reload once. */
   function tkBulkOp(op) {
+    /* the three questions, asked inside the portal; the answer re-enters here with `extra` filled */
+    var ids0 = tkSelIds();
+    if (!ids0.length) { return; }
+    if (op === 'delete') { tkConfirmDelete(ids0.length, function () { tkBulkRun('delete', {}); }); return; }
+    if (op === 'extend') { tkPickDeadline(ids0.length, function (dt) { tkBulkRun('edit', { deadline_pkt: dt }); }); return; }
+    if (op === 'reassign') { tkPickPerson(ids0.length, function (email) { tkBulkRun('edit', { assigned_to: email }); }); return; }
+    tkBulkRun(op, {});
+  }
+  function tkBulkRun(op, extra) {
     var ids = tkSelIds();
     if (!ids.length) { return; }
-    var extra = {};
-    if (op === 'delete' && !window.confirm('Delete ' + ids.length + ' task(s) permanently? This cannot be undone.')) { return; }
-    if (op === 'extend') { var d = window.prompt('New deadline for ' + ids.length + ' task(s) — PKT, format 2026-09-12 21:00'); if (!d) { return; } extra.deadline_pkt = tkStr(d).trim().replace(' ', 'T'); op = 'edit'; }
-    if (op === 'reassign') { var em = window.prompt('Reassign ' + ids.length + ' task(s) to (email):'); if (!em) { return; } extra.assigned_to = tkStr(em).trim(); op = 'edit'; }
     var bar = $('tkBulkBar'); if (bar) { bar.innerHTML = '<b>Working on ' + ids.length + '…</b> <span class="tk-sub">one request for all of them</span>'; }
     /* 12 Sept (owner: "keeps saying Working on 25… sleeps for a century… tasks still there").
        Was: one taskAdmin round trip PER task (25 locks, 25 full sheet reads), then a reload from a
@@ -122,27 +240,50 @@
     var payload = { op: op, task_ids: ids };
     for (var k in extra) { payload[k] = extra[k]; }
     var isDelete = op === 'delete';
+    /* 19 Nov (owner: "I delete, one second, two… five minutes later it is still sitting there").
+       The sheet is the slow part and the shell waited for it before doing anything to the mirror
+       the list is drawn from. Now the mirror is made honest FIRST — deletes are purged from it
+       and edits/ends are written onto the rows already in memory — so a refresh shows the truth
+       at once; the sheet write runs behind, and a slow sheet is given time rather than reported
+       as a failure. Only a real refusal puts the rows back. */
     var purge = function (list) {
       return isDelete && list.length ? engineCall('tasksMirrorPurge', { task_ids: list }, 20000).catch(function () {}) : Promise.resolve();
     };
-    var finish = function (msg) { toast(msg); TKV.sel = {}; tkLoadTasks(); };
+    var local = function () {   // the optimistic truth, in memory, drawn right now
+      var rows = ((TKV.lastData || {}).tasks) || [], want = {}; ids.forEach(function (id) { want[id] = 1; });
+      if (isDelete) { TKV.lastData.tasks = rows.filter(function (t) { return !want[tkStr(t.task_id)]; }); }
+      else { rows.forEach(function (t) {
+        if (!want[tkStr(t.task_id)]) { return; }
+        if (op === 'end' || op === 'withdraw') { t.status = TK_COMPLETED; }
+        if (extra.deadline_pkt) { t.deadline_pkt = extra.deadline_pkt; t.overdue = false; }
+        if (extra.assigned_to) { t.assigned_to = extra.assigned_to; }
+      }); }
+      TKV.sel = {};
+      var box = $('tkBody'); if (box && TKV.lastData) { tkPaintTasks(box, TKV.lastData); }
+    };
+    if (TKV.lastData) { local(); }
+    var started = purge(ids);                                   // the mirror forgets a deleted task immediately
+    var label = isDelete ? 'deleted' : op === 'end' ? 'ended' : op === 'withdraw' ? 'withdrawn' : (extra.assigned_to ? 'reassigned to ' + tkWhoLabel(extra.assigned_to) : extra.deadline_pkt ? 'given the new deadline' : 'updated');
+    toast(ids.length + ' ' + label + ' — saving to the sheet…');
+    var settle = function (msg, delayMs) { toast(msg); setTimeout(function () { tkLoadTasks(); }, delayMs || 0); };
     api('taskAdminBulk', payload).then(function (r) {
       var done = (r && r.done) || [], missing = (r && r.missing) || [];
-      return purge(done.concat(missing)).then(function () {
-        finish(done.length + ' ' + (isDelete ? 'deleted' : op === 'end' ? 'ended' : op === 'withdraw' ? 'withdrawn' : 'updated') +
-          (missing.length ? ' · ' + missing.length + ' were already gone from the sheet (cleared stale copies)' : '') + '.');
+      return started.then(function () { return purge(missing); }).then(function () {
+        settle(done.length + ' ' + label + (missing.length ? ' · ' + missing.length + ' were already gone from the sheet (cleared stale copies)' : '') + ' ✓', 400);
       });
     }).catch(function (e) {
       var msg = String((e && e.message) || '');
-      var transient = /overloaded|timeout|did not answer|taking long|aborted|busy|request failed|unexpected token|failed to fetch|networkerror/i.test(msg);
-      if (isDelete && transient) {
-        /* the single sheet pass almost certainly landed server-side; make the list honest now */
-        purge(ids).then(function () { finish('Deleted — the sheet was slow to answer; cleared them from the list.'); });
+      var transient = /overloaded|timeout|did not answer|taking long|aborted|busy|request failed|unexpected token|failed to fetch|networkerror|slow/i.test(msg);
+      if (transient) {
+        /* the sheet is slow, not refusing: the write lands in its own time (12 Sept: it always
+           did). The screen already shows the result; one quiet reload in a minute reconciles. */
+        settle('Saved on screen — the sheet is slow today; it will catch up on its own.', 60000);
         return;
       }
       hidden.forEach(function (c) { c.style.display = ''; });
       if (bar) { tkUpdateBulkBar(); }
       toast('Failed: ' + (msg || 'try again'));
+      tkLoadTasks();                                            // a refusal: put the truth back
     });
   }
   function tkScopeBar() {
@@ -156,6 +297,18 @@
   }
 
   VIEW_CSS.push(
+    /* 19 Nov (owner): the bulk bar's questions are asked INSIDE the portal, never by the browser */
+    '.tk-veil{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:9vh 16px 16px}' +
+    '.tk-sheet{width:min(560px,100%);background:var(--panel);border:1px solid var(--gold-line-hi);border-radius:16px;box-shadow:0 24px 70px rgba(0,0,0,.55);padding:18px 18px 16px;max-height:82vh;overflow:auto}' +
+    '.tk-sheet h3{margin:0 0 4px;font-size:16px}.tk-sheet .tk-sub{margin-bottom:12px}' +
+    '.tk-people{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));margin:10px 0 12px}' +
+    '.tk-person{text-align:left;padding:10px 12px;border:1px solid var(--gold-line);border-radius:11px;background:var(--panel-2);color:var(--text);font:inherit;cursor:pointer}' +
+    '.tk-person:hover{border-color:var(--gold-a)}.tk-person b{display:block;font-weight:800}.tk-person span{font-size:10.5px;color:var(--text-3);font-weight:700;text-transform:uppercase;letter-spacing:.06em}' +
+    '.tk-person.on{border-color:var(--gold-a);box-shadow:0 0 0 1px var(--gold-a) inset}' +
+    '.tk-sheet-h{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0 2px}.tk-sheet-h .tk-sub{margin:0 auto 0 0}' +
+    '.tk-quick{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 10px}' +
+    '.tk-dt{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel-2);color:var(--text);font:inherit;font-weight:700;font-size:15px;color-scheme:dark}' +
+    '.tk-sheet-ft{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}' +
     '.tk-depts{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}' +
     '.tk-depts .minibtn span{opacity:.65;font-weight:800;margin-left:3px}' +
     '.tk-dept-on{background:var(--gold-a)!important;color:#161616!important;border-color:var(--gold-a)!important}' +

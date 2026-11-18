@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261118-1416';
+var BUILD = '20261118-2026';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1053,7 +1053,7 @@ function versionWatch(){
     }
     /* committed to reloading NOW: mark the stamp so the reloaded page — which may still be the
        OLD build for ~10 min of GitHub CDN lag — does not reload again in a loop. */
-    try{ if(pendingStamp) sessionStorage.setItem('m98m:reloadedFor', pendingStamp); }catch(e){}
+    try{ if(pendingStamp) sessionStorage.setItem('m98m:reloadedFor', pendingStamp + '|' + Date.now()); }catch(e){}
     /* GitHub Pages caches index.html (~10 min), so a plain location.reload() can re-serve the SAME
        stale build. Force a genuinely fresh document with a one-time cache-busting query (5 Sept). */
     try{ location.replace(location.pathname + '?v=' + Date.now() + location.hash); }
@@ -1065,9 +1065,15 @@ function versionWatch(){
       .then(function(v){
         v = (v || '').trim();
         if(!v || v.length > 40 || v === BUILD) return;
-        var seen = null;
-        try{ seen = sessionStorage.getItem('m98m:reloadedFor'); }catch(e){}
-        if(seen === v) return; /* already reloaded for this stamp and still old = CDN lag, not a loop */
+        /* 19 Nov (Hasib's manage board never got the new chips; Zaid's sidebar read a 13 Nov build
+           on 18 Nov): the "already reloaded for this stamp" guard was PERMANENT for the tab. The
+           first check after a push lands inside GitHub's ~10-minute cache lag, the reload fetches
+           the OLD page again, the stamp is marked seen — and that tab never tries that stamp
+           again, for days. The guard now expires after 15 minutes: at most one reload per stamp
+           per quarter hour, never a loop, and a tab catches up once the cache has. */
+        var seen = null, seenAt = 0;
+        try{ var raw = sessionStorage.getItem('m98m:reloadedFor') || ''; seen = raw.split('|')[0]; seenAt = Number(raw.split('|')[1] || 0); }catch(e){}
+        if(seen === v && Date.now() - seenAt < 15*60*1000) return;
         pendingStamp = v;
         safeReload();
       }).catch(function(){});
