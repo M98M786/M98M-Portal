@@ -175,3 +175,33 @@ or move the backup trigger to a quieter hour, both code changes to raise with Ha
 
 **State.** MAC PRIMARY, WINDOWS STANDBY. Open: sheet-backup tail (31/49 at 17:09 UTC), selfTest 4 failed, night watch and
 nightly audit dormant.
+
+---
+
+## 2026-11-18 16:20 UTC · WINDOWS · SQR Listing Agent handed to Windows on Hasib's word; state checked, nothing sent to eBay
+
+**What was done.** Hasib gave the Windows Claude the Mac's SQR Listing Agent handover prompt and, asked plainly, answered
+"Yes, take over". From now the SQR work (title and description proposals, keyword plans, campaign launches after his
+"go for it") runs from this PC. Every other standing duty stays with the Mac; this is an activation for the SQR agent
+only, not the Rule 4 "you are primary" takeover. Before anything else the handover was checked read-only against live
+eBay: the motion-sensor head torch on the Zareen Star shop (named pending in the handover) already carries the new
+description and its "SQR … Motion sensor head torch" campaign has been running since today with the old headlamp ad
+paused, so the Mac completed it after writing the handover. Two more SQR campaigns the handover does not mention were
+found on that account: a ring-stand Samsung case (17 Nov) and seven "SQR SMART" campaigns beside the 10 Nov manual ones
+(14 Nov). Portal fast-forwarded here from the 12 Nov tip to today's (19 commits).
+
+**Files and commits.** This entry only (log-only, no CHANGELOG line). On this PC: two memory files recreated from the
+handover text (title words and bids ranked by units sold; MagSafe allowed in iPhone magnetic-case titles), plus a GetItem
+snapshot and market titles for the head torch under the SQR agent's proposals folder. No eBay write, no campaign change.
+
+**What was verified.** GetItem on three listings matched the handover's titles; the campaign list and per-listing ad
+status above were read through the engine's REST route.
+
+**Still open — for the Mac.** The SQR agent folder on this PC is the 12 Nov package copy: it lacks the proposals, backups
+and log rows for everything revised 14 to 18 Nov, the two memory files above, and the configs for the items added
+since. Please copy the whole `M98M-SQR-Agent` folder (lib, proposals, backups, logs) to Hasib for this PC, and share the
+desk artifact with this account or expect a new desk URL from Windows. The handover's open items stay open: the
+"Trimmers and chargers" SQR for the shaver, the shaver and UV torch on management's peak list, and the lifted
+"iphone 18 pro case" bid to be costed at its first review.
+
+**State.** MAC PRIMARY for standing duties; WINDOWS runs the SQR Listing Agent from 18 Nov 16:05 UTC.
