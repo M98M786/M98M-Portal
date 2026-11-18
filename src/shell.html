@@ -751,15 +751,41 @@ var ENGINE_WRITE_ACTIONS = ['priceDecide','campaignRemoveItem','autoMsgSet','ack
 /* The Engine's address is stable infrastructure — baked as the fallback so sign-in and config
    can reach it BEFORE any config exists (the AS front door proved it can vanish under everyone). */
 var ENGINE_URL_DEFAULT = 'https://m98m-engine.m98m786.workers.dev/';
+/* 18 Nov (Zaid's portal: "Failed to fetch" on every sign-in while everyone else was fine).
+   Reproduced in the in-app browser: the FIRST request to the engine from a fresh browser dies
+   after ~4 s with a QUIC protocol error — Chrome opens workers.dev over HTTP/3 (UDP 443), some
+   networks drop or mangle that, the connection never forms and fetch rejects with the bare
+   TypeError "Failed to fetch". The very next request, milliseconds later, answers in under 100 ms
+   because Chrome has marked QUIC broken for the origin and falls back to TCP. The shell was
+   giving up on the first failure, so the boot config and the sign-in `whoami` both died and the
+   portal read as down for that one person.
+   So a READ now gets up to two silent retries on a network-level failure. Only a TypeError —
+   the request never left the browser — qualifies: an AbortError is OUR timeout on a request
+   that may well have landed, and a refusal from the engine is an answer. WRITES are never retried
+   here (ENGINE_WRITE_ACTIONS) — a doubled write is worse than a failed one — their callers keep
+   the single try and the "refresh before retrying" message. Nothing is shown to the person: the
+   2 Nov lesson is that a fallback that announces itself reads as a breakage. */
+var ENGINE_NET_RETRIES = 2;
 function engineCall(action, payload, timeoutMs){
   var url = (STATE.config && STATE.config.engine_url) || ENGINE_URL_DEFAULT;
-  var ac = new AbortController();
-  var t = setTimeout(function(){ ac.abort(); }, timeoutMs);
-  return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} }), signal: ac.signal })
-    .then(function(r){ return r.json(); })
-    .then(function(j){ clearTimeout(t); if(!j.ok){ if(j.error==='auth' && STATE.session){ authSelfHeal(); } throw new Error(j.error||'request failed'); } return j.data; },
-          function(e){ clearTimeout(t); throw e; });
+  var canRetry = ENGINE_WRITE_ACTIONS.indexOf(action) < 0;
+  var once = function(){
+    var ac = new AbortController();
+    var t = setTimeout(function(){ ac.abort(); }, timeoutMs);
+    return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} }), signal: ac.signal })
+      .then(function(r){ return r.json(); })
+      .then(function(j){ clearTimeout(t); if(!j.ok){ if(j.error==='auth' && STATE.session){ authSelfHeal(); } throw new Error(j.error||'request failed'); } return j.data; },
+            function(e){ clearTimeout(t); throw e; });
+  };
+  var attempt = function(left){
+    return once().catch(function(e){
+      var netFail = e && e.name === 'TypeError';            // "Failed to fetch": the connection never formed
+      if(!canRetry || !netFail || left <= 0){ throw e; }
+      return new Promise(function(res){ setTimeout(res, 250); }).then(function(){ return attempt(left - 1); });
+    });
+  };
+  return attempt(ENGINE_NET_RETRIES);
 }
 /* 13 Sept: a 2.5 s first try sent the checkpoint LIST to Apps Script on any slow engine moment
    while the SUBMIT stayed on the engine — two different answers for "your slots", and the submit
