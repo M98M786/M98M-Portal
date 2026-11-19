@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 2026-11-19 - TRACKING UPLOAD: the courier is never guessed from the number again
+
+Owner: "stop guessing DHL". The upload used to name the courier from the shape of the tracking number -
+every JJD number went up as DHL, sixteen-digit numbers as Hermes, the rest as Other - and that guess was
+what the shipping confirmation told the buyer. Since 1 Nov, 2,613 of 3,308 uploads said DHL; eBay's own
+record of the same parcels says InPost Shops, Evri or Royal Mail. The push now sends the courier a person
+picked in the portal when eBay's accepted list carries it (an exact pick from that list wins as typed),
+otherwise Other, and eBay's own recognition names the courier on the order. After the push the fulfilment
+is read back and eBay's answer is what the trackings ledger keeps, so the Orders screen's "carrier" label
+and the tracking-fetch log show what eBay shows. The Messages tool has read the courier live from eBay
+since 18 Nov, so buyer notes were already right; this closes the source.
+
 ## 2026-11-06 - ADVERTISING OVERVIEW: the hour-by-hour chart takes its own period bar
 
 Owner: "develop the period option above the hour-by-hour graph - previous days and month data - the

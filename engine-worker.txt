@@ -23563,23 +23563,23 @@ if (prior && String(prior.tracking) === tracking && /^LIVE/.test(String(prior.pu
 }
 const tok0 = await ebayAccessToken(ctx.env, account);
 const accepted = await acceptedCarriers(ctx.env, account, tok0);
-const nominate = () => {
-  if (/^[A-Z]{2}\d{9}GB$/i.test(tracking)) return 'RoyalMail';
-  if (/^(H0|C0|T0)\d{14}$/i.test(tracking) || /^\d{16}$/.test(tracking)) return 'Hermes';
-  if (/^JD\d{16,}$/i.test(tracking)) return 'Yodel';
-  if (/^(JJD|JVGL)/i.test(tracking)) return 'DHL';
-  if (/^1Z/i.test(tracking)) return 'UPS';
-  return '';
-};
+/* The courier is NEVER guessed from the number's shape. Owner (19 Nov 2026): "stop guessing DHL" — the old
+   pattern rule sent every JJD number up as DHL (2,613 of 3,308 uploads since 1 Nov) while eBay's own record of
+   those parcels says InPost Shops, Evri or Royal Mail. We send the courier a person picked in the portal when
+   eBay's accepted list carries it; otherwise 'Other', and eBay's own recognition names the courier on the order
+   (seen on 19 Nov: "DHL" uploads came back InPost Shops ×102, "Other" uploads came back Evri ×16). After the
+   push the fulfilment is read back and eBay's answer is what the ledger keeps, so courier_ebay means what it says. */
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const alias = { evri: 'hermes', royalmail: 'royalmail', rm: 'royalmail' };
 const pickFromList = want => {
-  const w = alias[norm(want)] || norm(want);
-  if (!w) return '';
-  const hit = accepted.find(c => norm(c) === w) || accepted.find(c => norm(c).indexOf(w) >= 0 || w.indexOf(norm(c)) >= 0);
-  return hit || '';
+  const w0 = norm(want);
+  if (!w0) return '';
+  const exact = accepted.find(c => norm(c) === w0);                 // a pick from eBay's own list wins as typed
+  if (exact) return exact;
+  const w = alias[w0] || w0;
+  return accepted.find(c => norm(c) === w) || accepted.find(c => norm(c).indexOf(w) >= 0 || w.indexOf(norm(c)) >= 0) || '';
 };
-let carrier = pickFromList(p.courier) || pickFromList(nominate());
+let carrier = pickFromList(p.courier);
 if (!carrier) carrier = accepted.find(c => norm(c) === 'other') || 'Other';
 const fulfillment = { lineItems: [], shippedDate: new Date().toISOString(), shippingCarrierCode: carrier, trackingNumber: tracking };
 const tok = tok0;
@@ -23600,10 +23600,24 @@ const pr = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encod
   method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
   body: JSON.stringify(fulfillment) });
 const ptxt = await pr.text();
+/* What eBay shows as the courier now that the tracking is on the order — kept in the ledger in place of what we
+   sent. Best-effort: the push already succeeded, and the Messages tool reads this live from eBay anyway. */
+let shown = '';
+if (pr.ok) {
+  try {
+    const rb = await fetch('https://api.ebay.com/sell/fulfillment/v1/order/' + encodeURIComponent(orderId) + '/shipping_fulfillment',
+      { headers: { authorization: 'Bearer ' + tok }, signal: AbortSignal.timeout(8000) });
+    if (rb.ok) {
+      const rj = await rb.json(); const fs = rj.fulfillments || [];
+      const f = fs.find(x => String(x.shipmentTrackingNumber || '').trim().toLowerCase() === tracking.toLowerCase()) || fs[0];
+      shown = f ? String(f.shippingCarrierCode || '').trim().slice(0, 30) : '';
+    }
+  } catch (e) { shown = ''; }
+}
 await ctx.env.DB.prepare(
   "INSERT INTO trackings (order_id, tracking, courier_ebay, pushed_at, push_status) VALUES (?1, ?2, ?3, datetime('now'), ?4) " +
   "ON CONFLICT(order_id) DO UPDATE SET tracking=?2, courier_ebay=?3, pushed_at=datetime('now'), push_status=?4"
-).bind(orderId, tracking, carrier, pr.ok ? 'LIVE:' + pr.status : 'FAIL:' + pr.status).run();
+).bind(orderId, tracking, shown || carrier, pr.ok ? 'LIVE:' + pr.status : 'FAIL:' + pr.status).run();
 if (!pr.ok) throw new Error('SAY: eBay rejected the tracking (' + pr.status + '): ' + ptxt.slice(0, 160));
 /* R7-3 (Hasib: "I uploaded the tracking … but it didn't update in the sheet"): a successful
    eBay push now ALSO writes the day tab's own Tracking cell + flips its Delivery Status to
@@ -23622,7 +23636,7 @@ try {
   const sb = await sr.json().catch(() => ({}));
   sheetSaid = sb.ok ? sb.data : { ok: false, reason: String(sb.error || sr.status) };
 } catch (e) { sheetSaid = { ok: false, reason: String(e && e.message || e).slice(0, 120) }; }
-return { shadow: false, pushed: true, carrier_auto: carrier, status: pr.status, sheet: sheetSaid,
+return { shadow: false, pushed: true, carrier_auto: shown || carrier, carrier_sent: carrier, carrier_ebay: shown, status: pr.status, sheet: sheetSaid,
   carriers: accepted.slice(0, 200) };
 }
 
