@@ -240,7 +240,7 @@ the shipping note waits the full 48 h and is then dropped rather than naming no 
 **State.** MAC PRIMARY. The shared clone stays on its feature branch with another session's uncommitted work untouched;
 this change was built and committed from a separate worktree of main.
 
-## 2026-11-20 00:25 UTC · MAC · Order books: cancelled orders stay in the sheet and turn YELLOW (owner, 19 Nov)
+## 2026-11-19 19:25 UTC · MAC · Order books: cancelled orders stay in the sheet and turn YELLOW (owner, 19 Nov)
 
 **What was done.** Owner's rule, 19 Nov late evening: an order is pasted into its day tab as it comes; when eBay
 shows a cancellation on it (buyer's request waiting on us, or already cancelled) its row(s) turn yellow and stay as

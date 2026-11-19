@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 2026-11-20 - ORDER BOOKS: a cancelled order stays in the sheet, painted yellow
+## 2026-11-19 - ORDER BOOKS: a cancelled order stays in the sheet, painted yellow
 
 Owner's rule of 19 Nov: every order is pasted into its day tab as it arrives; the moment eBay shows a
 cancellation on it (a buyer's request waiting on us, or an order already cancelled) its row or rows turn
