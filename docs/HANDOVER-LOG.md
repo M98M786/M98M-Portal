@@ -266,3 +266,20 @@ executions to be read for errors right after this entry.
 
 **Still open.** Rabia go-live (owner). Portal's order desk reads the books by header text and ignores row colour, so
 nothing there changes; if the desk should hide or flag yellow rows, that is a separate ask.
+
+## 2026-11-19 19:40 UTC · MAC · Cancellation watch v3.5.1: first run timed out on Azhar Bhai's book; paint now looks only at the order's own day tab (±1)
+
+**What happened.** The first post-patch run on Azhar Bhai's book (00:13 PKT) failed: "Service Spreadsheets timed out
+while accessing document". Cause in my new code: an order not found in its own day tab fell back to scanning
+EVERY day tab's column B — that book carries July plus September-to-November tabs, and the first run's 48-hour
+window held many orders, so the Spreadsheet service gave up. Saif's first run took 257 s for the same reason
+(it completed). The other five completed normally.
+
+**Fix (all seven projects, saved and confirmed v3.5.1).** The paint looks only in the order's own day tab and the
+day before/after it (the sync never writes an order anywhere else); orders older than 30 days or before the
+book's go-live date are skipped; at most 40 orders are painted/cleared per run and a capped run does not move
+the scan window on, so the rest are finished next run; contiguous rows of one order are painted in one call.
+Steady state is light: the second Amna run after the patch took 18 s.
+
+**Verified.** Seven "Saved to Drive" confirmations, the v3.5.1 marker read back from each editor model, Rabia's
+copy hash-identical to the local file. Next trigger cycle read for errors after this entry.
