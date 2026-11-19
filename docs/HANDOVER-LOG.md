@@ -239,3 +239,30 @@ the shipping note waits the full 48 h and is then dropped rather than naming no 
 
 **State.** MAC PRIMARY. The shared clone stays on its feature branch with another session's uncommitted work untouched;
 this change was built and committed from a separate worktree of main.
+
+## 2026-11-20 00:25 UTC · MAC · Order books: cancelled orders stay in the sheet and turn YELLOW (owner, 19 Nov)
+
+**What was done.** Owner's rule, 19 Nov late evening: an order is pasted into its day tab as it comes; when eBay
+shows a cancellation on it (buyer's request waiting on us, or already cancelled) its row(s) turn yellow and stay as
+the record, so the processor does not order it; nothing is removed. The seven automated order books' bound Apps
+Script projects all got the same "cancellation watch": every 15-minute sync now also reads the orders eBay changed
+recently (last 6 h at least, 48 h on the first run, 30 days at most), merges them in so a cancelled order still
+gets pasted, then paints every row carrying that order number yellow across the whole used width, in the order's
+own day tab first and any day tab second. A hidden `_Cancelled` ledger (order, state, time, tab, rows) stops the
+re-paint each run; a request eBay later rejects has its yellow removed again. The old "skip fully-cancelled orders
+at paste time" line is gone on all seven. An editor helper re-scans the last N days on demand. Patched by a
+guarded three-anchor patcher inside the Apps Script editor (each anchor had to match exactly once, syntax-checked,
+save confirmed, two projects re-read after a hard reload): Amna, Saif Bhai, Hafiza Sadia, AZHAR ABRT, Sir Hasib,
+Azhar Bhai (the untitled project) and Rabia Masood. Rabia's project was found EMPTY (the 3 Nov code was never
+pasted; no trigger exists) — the full patched source is in it now, but her sync still needs the owner's go-live
+steps (authorise, eBay sign-in, signing key, start trigger).
+
+**Files and commits.** Outside the repo: `M98M-Order-Sync/cancel-watch.gs` (the block), `patch-cancel.js` (the
+patcher), `rabia-order-sync.gs` + `clasp-rabia/Code.js` now carry the patched source. This entry + one CHANGELOG line.
+
+**Verified.** Local patch test on Rabia's source; in-editor syntax check on all seven; "Saved to Drive" on all
+seven; ABRT and Azhar Bhai re-read after reload with both hooks and the block present. Next trigger cycle's
+executions to be read for errors right after this entry.
+
+**Still open.** Rabia go-live (owner). Portal's order desk reads the books by header text and ignores row colour, so
+nothing there changes; if the desk should hide or flag yellow rows, that is a separate ask.

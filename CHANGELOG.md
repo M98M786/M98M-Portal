@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2026-11-20 - ORDER BOOKS: a cancelled order stays in the sheet, painted yellow
+
+Owner's rule of 19 Nov: every order is pasted into its day tab as it arrives; the moment eBay shows a
+cancellation on it (a buyer's request waiting on us, or an order already cancelled) its row or rows turn
+yellow and stay there as the record, so the processor does not order it and nothing is ever removed. All
+seven automated order books' bound scripts carry the same cancellation watch now: each 15-minute sync also
+reads the orders eBay changed recently, pastes a cancelled one it never saw, paints yellow, and un-paints a
+request eBay later rejects. Rabia Masood's project was found empty and holds the full code now, still
+awaiting the owner's go-live steps.
+
 ## 2026-11-19 - TRACKING UPLOAD: the courier is never guessed from the number again
 
 Owner: "stop guessing DHL". The upload used to name the courier from the shape of the tracking number -
