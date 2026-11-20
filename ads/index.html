@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1847';
+var BUILD = '20261120-1849';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -8595,7 +8595,7 @@ window.M98M_ADS_ONLY = true;
      because that is what he asked for. It travels to the engine on every open and the engine's memo
      key carries it, so switching window is a normal request and not a page of its own. The window is
      deliberately NOT stashed anywhere: this page keeps nothing between tabs (see the note above). */
-  var AT = { item: '', data: null, tab: 'week', pattern: { kind: 'all' }, echarts: null, charts: [] };
+  var AT = { item: '', data: null, tab: 'week', dmode: 'day', pattern: { kind: 'all' }, echarts: null, charts: [] };
   /* 10 Nov (owner): pinned into Husnain's portal. A Team Lead may read one listing's history —
      spend, clicks, orders, units, the campaign events — with every earning stripped by the engine
      (it sets spend_only, and keys its own cache bucket so an Advertising Manager's answer, which
@@ -9255,7 +9255,12 @@ window.M98M_ADS_ONLY = true;
     /* 20 Nov (owner: "totally rebuild these graphs"): three bars an hour and three bars a day — units
        sold green, the ad spend of that hour or day red, the average ad spend white. */
     h += '<div class="at-panel"><h3>Yesterday\'s behaviour' + src('orders') + src('sampled', 'our own readings', true) + '</h3><div class="at-sub">' + esc(D.hourly_note) + '. Units sold in each hour (green), the ad spend in that hour (red) and what that hour usually costs this listing (white' + (D.hour_avg_spend && D.hour_avg_spend.note ? ': ' + esc(D.hour_avg_spend.note) : '') + ').</div><div id="atHour" class="at-chart"></div></div>';
-    h += '<div class="at-panel"><h3>All-time daily' + src('orders') + src('eBay ads report') + '</h3><div class="at-sub">Units sold each day (green), the ad spend of that day (red) and the 7-day average ad spend (white).</div><div id="atDaily" class="at-chart tall"></div></div>';
+    /* 20 Nov (owner): "two options so the graph can be studied week-wise and month by month too" —
+       the same three bars summed per ISO week or per month, the white bar then being the average
+       ad spend per day held in that week or month */
+    h += '<div class="at-panel"><h3>All-time daily' + src('orders') + src('eBay ads report') + '</h3><div class="at-sub">Units sold (green), ad spend (red) and the average ad spend (white): day by day with a 7-day average, or summed by week or by month with the average per day.</div>' +
+      '<div class="at-tabs at-dtabs">' + [['day', 'Day by day'], ['week', 'Week by week'], ['month', 'Month by month']].map(function (t) { return '<button data-dmode="' + t[0] + '" class="' + (AT.dmode === t[0] ? 'on' : '') + '">' + t[1] + '</button>'; }).join('') + '</div>' +
+      '<div id="atDaily" class="at-chart tall"></div></div>';
     /* week / month */
     h += '<div class="at-panel"><div class="at-tabs"><button class="' + (AT.tab === 'week' ? 'on' : '') + '" data-tab="week">Week to week</button><button class="' + (AT.tab === 'month' ? 'on' : '') + '" data-tab="month">Month to month</button></div><div id="atWM" class="at-chart short"></div></div>';
     /* ── THE FOUR PATTERN BLOCKS, OVER THE WINDOW THE READER CHOSE (owner, 9 Nov) ────────────────
@@ -9308,7 +9313,9 @@ window.M98M_ADS_ONLY = true;
       '<textarea id="atNote" placeholder="Add a note (what was changed, where, why)"></textarea><button class="at-btn" id="atNoteBtn">Log note</button></div></div>';
     h += '<div class="at-note" style="margin-top:4px">Computed ' + esc(String(D.computed_at).slice(11, 19)) + ' UTC · ' + esc(D.source) + ' · ' + D.sample_size + ' listing-days of data · answered in ' + AT.ms + ' ms' + workedOut(D) + '</div>';
     $('atBody').innerHTML = h;
-    var tabs = document.querySelectorAll('.at-tabs button');
+    var dtabs = document.querySelectorAll('.at-dtabs button');
+    for (var di = 0; di < dtabs.length; di++) dtabs[di].onclick = function () { AT.dmode = this.getAttribute('data-dmode') || 'day'; for (var dj = 0; dj < dtabs.length; dj++) dtabs[dj].classList.toggle('on', dtabs[dj] === this); drawDaily(); };
+    var tabs = document.querySelectorAll('.at-tabs:not(.at-dtabs) button');
     for (var i = 0; i < tabs.length; i++) tabs[i].onclick = function () { AT.tab = this.getAttribute('data-tab'); for (var j = 0; j < tabs.length; j++) tabs[j].classList.toggle('on', tabs[j] === this); drawWM(); };
     /* the window selector. The pickers fire on change, and a half-typed month or date is ignored
        rather than sent: the engine would refuse it and the refusal would land as an error toast on
@@ -9410,11 +9417,36 @@ window.M98M_ADS_ONLY = true;
   /* a round ceiling for a money axis: 1, 2, 2.5 or 5 × a power of ten, just above the value */
   function niceMoney(m) { if (!(m > 0)) return 1; var step = Math.pow(10, Math.floor(Math.log(m) / Math.LN10)); var c = [1, 2, 2.5, 5, 10]; for (var i = 0; i < c.length; i++) { if (c[i] * step >= m) return c[i] * step; } return 10 * step; }
   function rowName(text, color, top) { return { type: 'text', left: 4, top: top, style: { text: text, fill: color, fontSize: 9, fontWeight: 800, fontFamily: 'Instrument Sans, system-ui, sans-serif' } }; }
+  function isoWeekKey(ymd) {
+    var d = new Date(ymd + 'T12:00:00Z'); var dow = (d.getUTCDay() + 6) % 7;
+    var th = new Date(d.getTime()); th.setUTCDate(d.getUTCDate() - dow + 3);
+    var w1 = new Date(Date.UTC(th.getUTCFullYear(), 0, 4)); var w = 1 + Math.round(((th - w1) / 86400000 - 3 + ((w1.getUTCDay() + 6) % 7)) / 7);
+    var mon = new Date(d.getTime()); mon.setUTCDate(d.getUTCDate() - dow);
+    return { key: th.getUTCFullYear() + '-W' + String(w).padStart(2, '0'), label: 'W' + String(w).padStart(2, '0') + ' \u00b7 ' + dfmt(mon.toISOString().slice(0, 10)) };
+  }
+  function monthKey(ymd) { var m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; return { key: ymd.slice(0, 7), label: m[Number(ymd.slice(5, 7)) - 1] + ' ' + ymd.slice(0, 4) }; }
+  /* the rows the chart draws for the mode chosen: a day each, or every day held summed into its ISO
+     week or its month; `held` is how many days the sum covers, which the average per day divides by */
+  function dailyRows(days, mode) {
+    if (mode !== 'week' && mode !== 'month') {
+      var spendD = days.map(function (d) { return Math.round((Number(d.spend) || 0) * 100) / 100; });
+      return days.map(function (d, i) { var a = spendD.slice(Math.max(0, i - 6), i + 1); return { label: d.day.slice(5), tip: d.day, units: Number(d.units) || 0, spend: spendD[i], avg: Math.round(a.reduce(function (t, v) { return t + v; }, 0) / a.length * 100) / 100, held: 1 }; });
+    }
+    var out = [], by = {};
+    days.forEach(function (d) {
+      var k = mode === 'week' ? isoWeekKey(d.day) : monthKey(d.day);
+      var g = by[k.key]; if (!g) { g = by[k.key] = { label: k.label, tip: k.key, units: 0, spend: 0, avg: 0, held: 0, first: d.day, last: d.day }; out.push(g); }
+      g.units += Number(d.units) || 0; g.spend += Number(d.spend) || 0; g.held++; g.last = d.day;
+    });
+    out.forEach(function (g) { g.spend = Math.round(g.spend * 100) / 100; g.avg = g.held ? Math.round(g.spend / g.held * 100) / 100 : 0; g.tip = g.tip + ' \u00b7 ' + g.held + ' day' + (g.held === 1 ? '' : 's') + ' held (' + dfmt(g.first) + ' to ' + dfmt(g.last) + ')'; });
+    return out;
+  }
   function drawDaily() {
-    var days = AT.data.days; var x = days.map(function (d) { return d.day.slice(5); });
-    var units = days.map(function (d) { return Number(d.units) || 0; }); var spend = days.map(function (d) { return Math.round((Number(d.spend) || 0) * 100) / 100; });
-    var avg = spend.map(function (_, i) { var a = spend.slice(Math.max(0, i - 6), i + 1); return Math.round(a.reduce(function (t, v) { return t + v; }, 0) / a.length * 100) / 100; });
-    var n = days.length, upright = n > 22 ? 90 : 0;
+    var mode = AT.dmode || 'day';
+    var rows = dailyRows(AT.data.days, mode);
+    var x = rows.map(function (r) { return r.label; });
+    var units = rows.map(function (r) { return r.units; }), spend = rows.map(function (r) { return r.spend; }), avg = rows.map(function (r) { return r.avg; });
+    var n = rows.length, upright = n > 22 ? 90 : 0;
     var money = function (v) { return v > 0 ? '\u00a3' + v.toFixed(2) : ''; };
     var rowH = upright ? 34 : 16;                         /* an upright "£10.92" is ~34px tall, a flat row ~16px */
     var unitsRowH = 16, legendH = 26;
@@ -9423,12 +9455,15 @@ window.M98M_ADS_ONLY = true;
     if (el) { el.style.height = (top + 230) + 'px'; }
     /* the rows, measured from the plot upwards: the average nearest the bars, spend above it, units on top */
     var offAvg = 0, offSpend = rowH, offUnits = rowH * 2 + 4;
-    /* the row names sit at the left edge, level with their row (the plot's top is `top` px down) */
     var yOf = function (off, h) { return top - off - h + 2; };
+    var spendName = mode === 'week' ? 'Ad spend that week' : mode === 'month' ? 'Ad spend that month' : 'Ad spend that day';
+    var avgName = mode === 'day' ? '7-day average ad spend' : 'Average ad spend per day';
+    var avgRow = mode === 'day' ? '7-day avg' : 'avg per day';
     mount('atDaily', chartBase({ grid: { left: 70, right: 54, top: top, bottom: 28 },
-      graphic: [rowName('units sold', GREEN, yOf(offUnits, unitsRowH)), rowName('ad spend', LOSS, yOf(offSpend, upright ? rowH - 10 : rowH)), rowName('7-day avg', 'rgba(255,255,255,.85)', yOf(offAvg, upright ? rowH - 10 : rowH))],
+      tooltip: { trigger: 'axis', backgroundColor: 'rgba(4,6,10,.92)', borderColor: 'rgba(255,255,255,.14)', textStyle: { color: '#fff', fontSize: 12 }, formatter: function (ps) { var i = ps && ps.length ? ps[0].dataIndex : 0, r = rows[i]; if (!r) return ''; return r.tip + '<br>' + r.units + ' unit' + (r.units === 1 ? '' : 's') + ' sold<br>' + spendName.toLowerCase() + ' \u00a3' + r.spend.toFixed(2) + '<br>' + avgName.toLowerCase() + ' \u00a3' + r.avg.toFixed(2); } },
+      graphic: [rowName('units sold', GREEN, yOf(offUnits, unitsRowH)), rowName('ad spend', LOSS, yOf(offSpend, upright ? rowH - 10 : rowH)), rowName(avgRow, 'rgba(255,255,255,.85)', yOf(offAvg, upright ? rowH - 10 : rowH))],
       xAxis: [
-        { type: 'category', data: x, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } },
+        { type: 'category', data: x, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, interval: n > 40 ? 'auto' : 0 } },
         rowAxis(x, avg.map(money), 'rgba(255,255,255,.85)', upright, offAvg),
         rowAxis(x, spend.map(money), LOSS, upright, offSpend),
         rowAxis(x, units.map(function (u) { return u > 0 ? String(u) : ''; }), GREEN, 0, offUnits)
@@ -9436,9 +9471,9 @@ window.M98M_ADS_ONLY = true;
       yAxis: [{ type: 'value', max: Math.max(2, Math.ceil(Math.max.apply(null, [0].concat(units)) * 1.1)), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 }, { type: 'value', max: niceMoney(Math.max.apply(null, [0].concat(spend, avg)) * 1.08), splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }],
       legend: BAR_LEGEND,
       series: [
-        { name: 'Units sold', type: 'bar', data: units, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 13, barGap: '20%', barCategoryGap: '40%' },
-        { name: 'Ad spend that day', type: 'bar', yAxisIndex: 1, data: spend, itemStyle: { color: LOSS, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 13 },
-        { name: '7-day average ad spend', type: 'bar', yAxisIndex: 1, data: avg, itemStyle: { color: WHITEBAR, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 13 }
+        { name: 'Units sold', type: 'bar', data: units, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: mode === 'day' ? 13 : 26, barGap: '20%', barCategoryGap: '40%' },
+        { name: spendName, type: 'bar', yAxisIndex: 1, data: spend, itemStyle: { color: LOSS, borderRadius: [3, 3, 0, 0] }, barMaxWidth: mode === 'day' ? 13 : 26 },
+        { name: avgName, type: 'bar', yAxisIndex: 1, data: avg, itemStyle: { color: WHITEBAR, borderRadius: [3, 3, 0, 0] }, barMaxWidth: mode === 'day' ? 13 : 26 }
       ] }));
     if (el && window.echarts) { var inst = window.echarts.getInstanceByDom(el); if (inst) inst.resize(); }
   }
