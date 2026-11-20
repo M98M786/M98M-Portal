@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-11-20 - SIGNALS PAGE DELETED
+
+Owner: "Delete Signals, no longer needed". The Signals page leaves the sidebar and the pinned list, the
+signal pins no longer mount on Home, and the Business overview's link to it is gone. The feed itself,
+the clock-in and clock-out taps in the top bar, the Customer service and Advertising department signal
+pages, and the went-negative section of the Ads command centre are unchanged.
+
 ## 2026-11-20 - PRODUCT HISTORY: the recently-advertised chip strip is gone
 
 Owner: "remove this from the Product history page". The row of recently advertised listing chips under

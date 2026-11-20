@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-2343';
+var BUILD = '20261120-2352';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -29729,7 +29729,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     dups.forEach(function (d) {
       h += '<div>🔴 <b>' + oN(d.n) + ' item(s) in more than one ACTIVE campaign</b> on ' + esc(oS(d.account)) + ' — double ad fees</div>';
     });
-    h += '<div style="margin-top:6px"><a href="#" data-o2-nav="campaignWatch">Campaign watch →</a> · <a href="#" data-o2-nav="activeListings">Active listings →</a> · <a href="#" data-o2-nav="signals">Signals →</a></div>';
+    h += '<div style="margin-top:6px"><a href="#" data-o2-nav="campaignWatch">Campaign watch →</a> · <a href="#" data-o2-nav="activeListings">Active listings →</a></div>';
     box.innerHTML = h; box.style.display = '';
   }
 
@@ -37727,7 +37727,10 @@ function saveSchedule() {
 
 /* ---------- view-signals.js ---------- */
 /* Phase 6 — §27 SIGNALS on the screen, plus the §28.1 two taps in the top bar.
- * Exports: renderSignalCards(container) for the HOME screen · VIEWS.signals (everything pinned).
+ * 20 Nov (owner): "Delete Signals, no longer needed" — the Signals page and the home pins are gone.
+ * This file still carries the §28.1 attendance taps in the top bar and the two department signal
+ * pages (csSignals, adSignals), which read the same feed and are untouched.
+ * Exports: renderSignalCards(container), now a no-op that clears any pins left on the HOME screen.
  * Backend: mySignals, acknowledgeSignal · clockIn, clockOut, myAttendance.
  *
  * §27 calls these "the loudest elements on any screen", so the pinned cards are drawn ABOVE the
@@ -38473,19 +38476,9 @@ function saveSchedule() {
   /** Called by the HOME screen. Safe to call with no argument: the pins then mount themselves at the
       top of the main column. Idempotent per render, so home calling it does not double up. */
   window.renderSignalCards = function (container) {
-    var host = sgHost(container);
-    if (!host) { return; }
-    SG.mountedEpoch = SG.epoch;
-    host.className = 'sig-pins';
-    if (SG.data) { sgPaintPins(host); }
-    sgLoad().then(function () {
-      if (!document.body.contains(host)) { return; }
-      sgPaintPins(host);
-    })['catch'](function (e) {
-      if (!document.body.contains(host) || sgList().length) { return; }
-      // A signal nobody can see is worse than a slow home screen: say so rather than show nothing.
-      host.innerHTML = '<div class="sig-warnline">Signals could not be loaded — ' + esc(e.message) + '</div>';
-    });
+    /* 20 Nov (owner): no pins on Home any more; anything an older home screen mounted is emptied */
+    var el = container ? ((typeof container === 'string') ? document.getElementById(container) : container) : document.getElementById('sigPins');
+    if (el) { el.innerHTML = ''; }
   };
 
   // ============================== the Signals screen ==============================
@@ -38547,37 +38540,6 @@ function saveSchedule() {
     })['catch'](function (e) { toast('Not refreshed: ' + e.message); })
       .then(function () { if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; } });
   }
-
-  VIEWS.signals = {
-    label: 'Signals',
-    icon: '<path d="M12 4 3 19.5h18L12 4z"/><path d="M12 10.5v4M12 17.6h.01"/>',
-    roles: '*',
-    order: 8,
-    render: function () {
-      return '<div class="hgroup enter d1"><h1>Signals</h1>' +
-          '<span class="sub">Pinned until you acknowledge them · grouped by department · Pakistan time</span>' +
-          '<button class="minibtn" id="sigAckAll" style="margin-left:auto">Acknowledge all</button>' +
-          '<button class="minibtn" data-sig-do="recompute" id="sigRefresh">Refresh</button>' +
-        '</div>' +
-        '<div class="sig-sum" id="sigSum">Loading…</div>' +
-        '<div class="sig-list" id="sigAll"><div class="spinner"></div></div>';
-    },
-    init: function () {
-      var box = document.getElementById('sigAll'), btn = document.getElementById('sigRefresh');
-      if (btn) { btn.onclick = function () { sgRefresh(btn); }; }
-      var ackAll = document.getElementById('sigAckAll');
-      if (ackAll) { ackAll.onclick = function () { sgAckAll(ackAll); }; }
-      if (!box) { return; }
-      if (SG.data) { sgPaintAll(box); }
-      sgLoad().then(function () {
-        if (!document.body.contains(box)) { return; }
-        sgPaintAll(box);
-      })['catch'](function (e) {
-        if (!document.body.contains(box)) { return; }
-        box.innerHTML = '<div class="sig-warnline">Signals could not be loaded — ' + esc(e.message) + '</div>';
-      });
-    }
-  };
 
   // ============================== department signal pages (owner, 12 Sept) ==============================
   /* "Make a separate page of customer service signals and a separate page of advertising signals;
@@ -46306,7 +46268,7 @@ function enterApp(user){
      first group a signed-in address matches is the one that paints. */
   var PIN_GROUPS = [
     { emails: ['zaidkaleem987@gmail.com', 'm98m786@gmail.com', 'mrhasibullah91@gmail.com', 'mrhasibullah@googlemail.com'],
-      keys: ['traffic', 'overview', 'adtoolOverview', 'dashboard', 'signals', 'adsCentre', 'activeListings',
+      keys: ['traffic', 'overview', 'adtoolOverview', 'dashboard', 'adsCentre', 'activeListings',
              'adtoolProduct', 'adtoolItemCampaigns', 'adtoolPeak', 'adtoolStopped', 'potentialCpc', 'goLive', 'huntQueue'] },
     /* Husnain Naeem. Price revision and Product history are new to this role and open with every
        earning stripped by the engine (the owner: "go with the privacy of calculation breakdown in
@@ -46348,7 +46310,7 @@ function enterApp(user){
     { name:'Management',  keys:[
         'mgmtDesk','deptBoard',
         'dashboard','overview','kpis','dailyReport','accountReport','accountHealth','vatBreakdown','itemRisk','profitability','priceDesk','productSourcing',
-        'signals','alerts','truthCheck',
+        'alerts','truthCheck',
         'staffAdmin','staffOversight','staffReviews',
         /* less important — kept in a line at the end */
         'rota','reports','reportsGrid','staffReports','perf','team','meetings','agenda'] },
