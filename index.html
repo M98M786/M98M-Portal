@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1845';
+var BUILD = '20261120-1847';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -11011,11 +11011,13 @@ VIEW_CSS.push(
      nearest the bars (white), the day's spend above it (red), units sold on top (green). Each row is
      a category axis drawn at the top whose labels are the figures, so a column can never drift from
      its bars; money figures stand upright when the days are too narrow for them to lie flat. */
-  function rowAxis(x, vals, color, name, rotate, offset) {
+  function rowAxis(x, vals, color, rotate, offset) {
     return { type: 'category', data: x, position: 'top', offset: offset, axisLine: { show: false }, axisTick: { show: false }, axisPointer: { show: false },
-      name: name, nameLocation: 'start', nameGap: 10, nameTextStyle: { color: color, fontSize: 9, fontWeight: 800, align: 'right', verticalAlign: rotate ? 'bottom' : 'middle' },
       axisLabel: { interval: 0, rotate: rotate, color: color, fontSize: 9, fontWeight: 700, margin: 4, formatter: function (v, i) { return vals[i] == null ? '' : vals[i]; } } };
   }
+  /* a round ceiling for a money axis: 1, 2, 2.5 or 5 × a power of ten, just above the value */
+  function niceMoney(m) { if (!(m > 0)) return 1; var step = Math.pow(10, Math.floor(Math.log(m) / Math.LN10)); var c = [1, 2, 2.5, 5, 10]; for (var i = 0; i < c.length; i++) { if (c[i] * step >= m) return c[i] * step; } return 10 * step; }
+  function rowName(text, color, top) { return { type: 'text', left: 4, top: top, style: { text: text, fill: color, fontSize: 9, fontWeight: 800, fontFamily: 'Instrument Sans, system-ui, sans-serif' } }; }
   function drawDaily() {
     var days = AT.data.days; var x = days.map(function (d) { return d.day.slice(5); });
     var units = days.map(function (d) { return Number(d.units) || 0; }); var spend = days.map(function (d) { return Math.round((Number(d.spend) || 0) * 100) / 100; });
@@ -11023,17 +11025,23 @@ VIEW_CSS.push(
     var n = days.length, upright = n > 22 ? 90 : 0;
     var money = function (v) { return v > 0 ? '\u00a3' + v.toFixed(2) : ''; };
     var rowH = upright ? 34 : 16;                         /* an upright "£10.92" is ~34px tall, a flat row ~16px */
-    var top = 24 + rowH * 3 + 8;                          /* legend strip + the three rows */
+    var unitsRowH = 16, legendH = 26;
+    var top = legendH + rowH * 2 + unitsRowH + 10;        /* legend strip + the three rows */
     var el = document.getElementById('atDaily');
     if (el) { el.style.height = (top + 230) + 'px'; }
-    mount('atDaily', chartBase({ grid: { left: 64, right: 54, top: top, bottom: 28 },
+    /* the rows, measured from the plot upwards: the average nearest the bars, spend above it, units on top */
+    var offAvg = 0, offSpend = rowH, offUnits = rowH * 2 + 4;
+    /* the row names sit at the left edge, level with their row (the plot's top is `top` px down) */
+    var yOf = function (off, h) { return top - off - h + 2; };
+    mount('atDaily', chartBase({ grid: { left: 70, right: 54, top: top, bottom: 28 },
+      graphic: [rowName('units sold', GREEN, yOf(offUnits, unitsRowH)), rowName('ad spend', LOSS, yOf(offSpend, upright ? rowH - 10 : rowH)), rowName('7-day avg', 'rgba(255,255,255,.85)', yOf(offAvg, upright ? rowH - 10 : rowH))],
       xAxis: [
         { type: 'category', data: x, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } },
-        rowAxis(x, avg.map(money), 'rgba(255,255,255,.85)', '7-day avg', upright, 0),
-        rowAxis(x, spend.map(money), LOSS, 'ad spend', upright, rowH),
-        rowAxis(x, units.map(function (u) { return u > 0 ? String(u) : ''; }), GREEN, 'units', 0, rowH * 2 + (upright ? 6 : 0))
+        rowAxis(x, avg.map(money), 'rgba(255,255,255,.85)', upright, offAvg),
+        rowAxis(x, spend.map(money), LOSS, upright, offSpend),
+        rowAxis(x, units.map(function (u) { return u > 0 ? String(u) : ''; }), GREEN, 0, offUnits)
       ],
-      yAxis: [{ type: 'value', max: Math.max(2, Math.ceil(Math.max.apply(null, [0].concat(units)) * 1.1)), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 }, { type: 'value', max: moneyMax(spend.concat(avg)) / 1.6 * 1.1, splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }],
+      yAxis: [{ type: 'value', max: Math.max(2, Math.ceil(Math.max.apply(null, [0].concat(units)) * 1.1)), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 }, { type: 'value', max: niceMoney(Math.max.apply(null, [0].concat(spend, avg)) * 1.08), splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }],
       legend: BAR_LEGEND,
       series: [
         { name: 'Units sold', type: 'bar', data: units, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 13, barGap: '20%', barCategoryGap: '40%' },
