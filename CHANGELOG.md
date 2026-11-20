@@ -169,3 +169,6 @@ builds 20260901-00xx–01xx.
 
 ## 2026-11-20 — Business overview: 3, 4, 5, 6 and 14-day chips
 - `oRange` resolves any `dN` chip as the last N UK days ending today (same law as 7 and 30), so the dispatch clock, Collective, Profitability, Advertising and the prior-window deltas all follow the new chips through the one path.
+
+## 2026-11-20 — Ads command centre: a red row carries its Product history
+- Under every red row (£3+ today, no order) the board draws the listing's own Product history blocks in the page's order — By period, All-time daily (inline SVG, no chart library) and Where its ads sit — small enough to sit in one box with the row. Read per listing through `adtoolListing`, one after another, kept ten minutes.
