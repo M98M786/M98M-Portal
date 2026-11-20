@@ -684,7 +684,7 @@
        the same three bars summed per ISO week or per month, the white bar then being the average
        ad spend per day held in that week or month */
     h += '<div class="at-panel"><h3>All-time daily' + src('orders') + src('eBay ads report') + '</h3><div class="at-sub">Units sold (green), ad spend (red) and the average ad spend (white): day by day with a 7-day average, or summed by week or by month with the average per day.</div>' +
-      '<div class="at-tabs at-dtabs">' + [['day', 'Day by day'], ['week', 'Week by week'], ['month', 'Month by month']].map(function (t) { return '<button data-dmode="' + t[0] + '" class="' + (AT.dmode === t[0] ? 'on' : '') + '">' + t[1] + '</button>'; }).join('') + '</div>' +
+      dailyTabsHtml(AT.dmode) +
       '<div id="atDaily" class="at-chart tall"></div></div>';
     /* week / month */
     h += '<div class="at-panel"><div class="at-tabs"><button class="' + (AT.tab === 'week' ? 'on' : '') + '" data-tab="week">Week to week</button><button class="' + (AT.tab === 'month' ? 'on' : '') + '" data-tab="month">Month to month</button></div><div id="atWM" class="at-chart short"></div></div>';
@@ -870,9 +870,16 @@
     out.forEach(function (g) { g.spend = Math.round(g.spend * 100) / 100; g.avg = g.held ? Math.round(g.spend / g.held * 100) / 100 : 0; g.tip = g.tip + ' \u00b7 ' + g.held + ' day' + (g.held === 1 ? '' : 's') + ' held (' + dfmt(g.first) + ' to ' + dfmt(g.last) + ')'; });
     return out;
   }
-  function drawDaily() {
-    var mode = AT.dmode || 'day';
-    var rows = dailyRows(AT.data.days, mode);
+  /* THE ONE DRAWING (owner, 20 Nov: "this graph should be shown in the Ads command centre exactly how
+     it is reflected in the Product history page, for this and all products"). drawDailyInto draws the
+     chart into ANY element from a listing's day rows; this page calls it for its own panel and the
+     command centre calls it for every red row's box, through window.ADT_DAILY. One function, so the
+     two can never drift apart. */
+  var DAILY_LIVE = [];   /* every chart drawn, so a window resize lays its rows again */
+  function drawDailyInto(el, days, mode) {
+    if (!el || !window.echarts) return;
+    mode = mode || 'day';
+    var rows = dailyRows(days || [], mode);
     var x = rows.map(function (r) { return r.label; });
     var units = rows.map(function (r) { return r.units; }), spend = rows.map(function (r) { return r.spend; }), avg = rows.map(function (r) { return r.avg; });
     var n = rows.length, upright = n > 22;
@@ -882,13 +889,13 @@
     var rowH = upright ? (longest >= 7 ? 46 : 36) : 16;
     var unitsRowH = 16, legendH = 26;
     var top = legendH + rowH * 2 + unitsRowH + 10;        /* legend strip + the three rows */
-    var el = document.getElementById('atDaily');
-    if (el) { el.style.height = (top + 230) + 'px'; }
+    el.style.height = (top + 230) + 'px';
     var spendName = mode === 'week' ? 'Ad spend that week' : mode === 'month' ? 'Ad spend that month' : 'Ad spend that day';
     var avgName = mode === 'day' ? '7-day average ad spend' : 'Average ad spend per day';
     var avgRow = mode === 'day' ? '7-day avg' : 'avg per day';
     var FONT = '700 9px Instrument Sans, system-ui, sans-serif';
-    mount('atDaily', chartBase({ grid: { left: 70, right: 54, top: top, bottom: 28 },
+    var inst = window.echarts.getInstanceByDom(el) || window.echarts.init(el, null, { renderer: 'canvas' });
+    inst.setOption(chartBase({ grid: { left: 70, right: 54, top: top, bottom: 28 },
       tooltip: { trigger: 'axis', backgroundColor: 'rgba(4,6,10,.92)', borderColor: 'rgba(255,255,255,.14)', textStyle: { color: '#fff', fontSize: 12 }, formatter: function (ps) { var i = ps && ps.length ? ps[0].dataIndex : 0, r = rows[i]; if (!r) return ''; return r.tip + '<br>' + r.units + ' unit' + (r.units === 1 ? '' : 's') + ' sold<br>' + spendName.toLowerCase() + ' \u00a3' + r.spend.toFixed(2) + '<br>' + avgName.toLowerCase() + ' \u00a3' + r.avg.toFixed(2); } },
       xAxis: { type: 'category', data: x, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, interval: n > 40 ? 'auto' : 0 } },
       /* round ceilings on both scales, so the top tick never prints on top of the one below it; no axis
@@ -899,34 +906,45 @@
         { name: 'Units sold', type: 'bar', data: units, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: mode === 'day' ? 13 : 26, barGap: '20%', barCategoryGap: '40%' },
         { name: spendName, type: 'bar', yAxisIndex: 1, data: spend, itemStyle: { color: LOSS, borderRadius: [3, 3, 0, 0] }, barMaxWidth: mode === 'day' ? 13 : 26 },
         { name: avgName, type: 'bar', yAxisIndex: 1, data: avg, itemStyle: { color: WHITEBAR, borderRadius: [3, 3, 0, 0] }, barMaxWidth: mode === 'day' ? 13 : 26 }
-      ] }));
-    /* THE THREE ROWS, drawn by hand so the red row and the white row are built the one way (owner,
-       20 Nov: "ad spend should be shown the same way as the average number, upwards"): every figure
-       starts on its row line, centred on its column, and reads upward from there when upright; the
-       units row lies flat on top. The columns are asked from the chart itself, so they sit over the
-       bars at any width, and they are laid again whenever the window changes size. */
-    if (!el || !window.echarts) return;
-    var inst = window.echarts.getInstanceByDom(el); if (!inst) return;
+      ] }), true);
     inst.resize();
-    var lay = function () {
-      var g = [rowName('units sold', GREEN, top - rowH * 2 - 4 - unitsRowH + 2), rowName('ad spend', LOSS, top - rowH - 4 - (upright ? rowH - 10 : rowH) + 2), rowName(avgRow, 'rgba(255,255,255,.85)', top - 4 - (upright ? rowH - 10 : rowH) + 2)];
-      var yAvg = top - 4, ySpend = top - rowH - 4, yUnits = top - rowH * 2 - 4 - unitsRowH / 2 - 2;
-      var fig = function (xp, y, text, fill) {
-        if (!text) return;
-        if (upright) g.push({ type: 'text', x: xp, y: y, rotation: Math.PI / 2, style: { text: text, fill: fill, font: FONT, align: 'left', verticalAlign: 'middle' }, silent: true });
-        else g.push({ type: 'text', x: xp, y: y, style: { text: text, fill: fill, font: FONT, align: 'center', verticalAlign: 'bottom' }, silent: true });
-      };
-      for (var i = 0; i < n; i++) {
-        var xp = inst.convertToPixel({ xAxisIndex: 0 }, i); if (xp == null || isNaN(xp)) continue;
-        fig(xp, yAvg, money(avg[i]), 'rgba(255,255,255,.85)');
-        fig(xp, ySpend, money(spend[i]), LOSS);
-        if (units[i] > 0) g.push({ type: 'text', x: xp, y: yUnits, style: { text: String(units[i]), fill: GREEN, font: FONT, align: 'center', verticalAlign: 'middle' }, silent: true });
-      }
-      inst.setOption({ graphic: { elements: g } }, { replaceMerge: ['graphic'] });
+    /* THE THREE ROWS, drawn by hand so the red row and the white row are built the one way: every
+       figure starts on its row line, centred on its column, and reads upward from there when upright;
+       the units row lies flat on top. The columns are asked from the chart itself, so they sit over
+       the bars at any width. */
+    var g = [rowName('units sold', GREEN, top - rowH * 2 - 4 - unitsRowH + 2), rowName('ad spend', LOSS, top - rowH - 4 - (upright ? rowH - 10 : rowH) + 2), rowName(avgRow, 'rgba(255,255,255,.85)', top - 4 - (upright ? rowH - 10 : rowH) + 2)];
+    var yAvg = top - 4, ySpend = top - rowH - 4, yUnits = top - rowH * 2 - 4 - unitsRowH / 2 - 2;
+    var fig = function (xp, y, text, fill) {
+      if (!text) return;
+      if (upright) g.push({ type: 'text', x: xp, y: y, rotation: Math.PI / 2, style: { text: text, fill: fill, font: FONT, align: 'left', verticalAlign: 'middle' }, silent: true });
+      else g.push({ type: 'text', x: xp, y: y, style: { text: text, fill: fill, font: FONT, align: 'center', verticalAlign: 'bottom' }, silent: true });
     };
-    lay();
-    if (!AT.dailyResizeWired) { AT.dailyResizeWired = true; var tmr = null; window.addEventListener('resize', function () { if (!document.getElementById('atDaily') || !AT.data) return; clearTimeout(tmr); tmr = setTimeout(drawDaily, 150); }); }
+    for (var i = 0; i < n; i++) {
+      var xp = inst.convertToPixel({ xAxisIndex: 0 }, i); if (xp == null || isNaN(xp)) continue;
+      fig(xp, yAvg, money(avg[i]), 'rgba(255,255,255,.85)');
+      fig(xp, ySpend, money(spend[i]), LOSS);
+      if (units[i] > 0) g.push({ type: 'text', x: xp, y: yUnits, style: { text: String(units[i]), fill: GREEN, font: FONT, align: 'center', verticalAlign: 'middle' }, silent: true });
+    }
+    inst.setOption({ graphic: { elements: g } }, { replaceMerge: ['graphic'] });
+    /* remembered for the resize pass; a chart whose element has gone is dropped then */
+    DAILY_LIVE = DAILY_LIVE.filter(function (d) { return d.el !== el && document.body.contains(d.el); });
+    DAILY_LIVE.push({ el: el, days: days, mode: mode });
+    return inst;
   }
+  (function () {
+    var tmr = null;
+    window.addEventListener('resize', function () {
+      clearTimeout(tmr);
+      tmr = setTimeout(function () { DAILY_LIVE.slice().forEach(function (d) { if (document.body.contains(d.el)) drawDailyInto(d.el, d.days, d.mode); }); }, 150);
+    });
+  })();
+  /* the tab strip the chart is driven by, the same markup on both pages */
+  function dailyTabsHtml(mode, extraClass) {
+    return '<div class="at-tabs at-dtabs' + (extraClass ? ' ' + extraClass : '') + '">' + [['day', 'Day by day'], ['week', 'Week by week'], ['month', 'Month by month']].map(function (t) { return '<button data-dmode="' + t[0] + '" class="' + ((mode || 'day') === t[0] ? 'on' : '') + '">' + t[1] + '</button>'; }).join('') + '</div>';
+  }
+  window.ADT_DAILY = { draw: drawDailyInto, tabs: dailyTabsHtml, rows: dailyRows, ensure: loadECharts,
+    sub: 'Units sold (green), ad spend (red) and the average ad spend (white): day by day with a 7-day average, or summed by week or by month with the average per day.' };
+  function drawDaily() { drawDailyInto(document.getElementById('atDaily'), AT.data.days, AT.dmode || 'day'); }
   /* 20 Nov (owner: "rather than a line showing profit, show it as a bar graph in green"): profit is the
      third bar of each week or month, green, on its own £ scale on the right, with the figure on the
      bar. A week that lost money is a bar below the line, drawn red so a loss never reads as a gain;
