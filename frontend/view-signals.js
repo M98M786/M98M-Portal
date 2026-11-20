@@ -224,7 +224,11 @@
      command centre". The feed still carries them (the centre reads the same feed); this page and the
      home pins simply leave them out, so the badge and the summary count what is drawn here; the
      page says nothing about them either (owner, later the same day). */
-  function sgList() { return ((SG.data && SG.data.signals) || []).filter(function (r) { return sgStr(r.type) !== SG_NEGATIVE; }); }
+  /* 20 Nov, later (owner): "Advertising no longer needed, signal delete" — the whole advertising group
+     (worst CPC performer, wrong advertising) leaves this page with it. The Advertising department's
+     own signal page still reads the feed unfiltered. */
+  var SG_HIDE_TYPES = [SG_NEGATIVE, SG_WORST_CPC, 'Wrong Advertising'];
+  function sgList() { return ((SG.data && SG.data.signals) || []).filter(function (r) { return SG_HIDE_TYPES.indexOf(sgStr(r.type)) < 0; }); }
   /* the one-tap actions, for a page that draws a signal elsewhere (the Ads command centre): opens the
      first screen that owns the step and that this person may see; false when none does */
   window.sgSignalGo = function (label) {

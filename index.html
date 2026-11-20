@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-2223';
+var BUILD = '20261120-2233';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -37964,7 +37964,11 @@ function saveSchedule() {
      command centre". The feed still carries them (the centre reads the same feed); this page and the
      home pins simply leave them out, so the badge and the summary count what is drawn here; the
      page says nothing about them either (owner, later the same day). */
-  function sgList() { return ((SG.data && SG.data.signals) || []).filter(function (r) { return sgStr(r.type) !== SG_NEGATIVE; }); }
+  /* 20 Nov, later (owner): "Advertising no longer needed, signal delete" — the whole advertising group
+     (worst CPC performer, wrong advertising) leaves this page with it. The Advertising department's
+     own signal page still reads the feed unfiltered. */
+  var SG_HIDE_TYPES = [SG_NEGATIVE, SG_WORST_CPC, 'Wrong Advertising'];
+  function sgList() { return ((SG.data && SG.data.signals) || []).filter(function (r) { return SG_HIDE_TYPES.indexOf(sgStr(r.type)) < 0; }); }
   /* the one-tap actions, for a page that draws a signal elsewhere (the Ads command centre): opens the
      first screen that owns the step and that this person may see; false when none does */
   window.sgSignalGo = function (label) {

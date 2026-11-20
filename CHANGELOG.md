@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-11-20 - SIGNALS: the advertising group leaves the Signals page
+
+Owner, after the went-negative cards moved to the Ads command centre: "Advertising no longer needed,
+signal delete". The Signals page, the home pins and the badge now leave out the whole advertising
+group - went negative yesterday, worst CPC performer yesterday and wrong advertising - and the summary
+line says nothing about them. The Advertising department's own signal page is unchanged.
+
 ## 2026-11-20 - PRODUCT HISTORY: best and worst times, under the hour-by-weekday grid
 
 Owner: "integrate the graph bottom with best or worst time slots". Under the grid the page now says
