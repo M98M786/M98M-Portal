@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1442';
+var BUILD = '20261120-1453';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2734,7 +2734,13 @@ VIEW_CSS.push(
     '.acc-tbl > tbody > tr.ac-sub > td{padding:0 10px 12px;text-align:left;white-space:normal;background:var(--bad-soft,rgba(255,80,80,.05))}' +
     '.acc-tbl > tbody > tr.ac-sub > td:first-child{border-left:3px solid var(--bad);min-width:0}' +
     '.acc-tbl > tbody > tr.ac-sub:hover > td{background:var(--bad-soft,rgba(255,80,80,.05))}' +
-    '.ac-d{border:1px solid var(--gold-line);border-radius:12px;background:var(--panel-2);padding:10px 12px;font-size:11px;color:var(--text-2);line-height:1.45}' +
+    '.ac-d{width:0;min-width:100%;box-sizing:border-box;overflow:hidden;border:1px solid var(--gold-line);border-radius:12px;background:var(--panel-2);padding:10px 12px;font-size:11px;color:var(--text-2);line-height:1.45}' +
+    /* one campaign = one short card: who/what/status on a line, then its money by window underneath,
+       so the eighteen columns of the Product history table fit the box without a sideways scroll */
+    '.ac-dcamp{border:1px solid var(--gold-line);border-radius:10px;padding:8px 10px;margin:6px 0 0;background:var(--panel)}' +
+    '.ac-dch{display:flex;gap:6px 16px;flex-wrap:wrap;align-items:center;font-size:10.5px;margin:0 0 6px;color:var(--text)}' +
+    '.ac-dch .ac-dkv{font-size:8.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);font-weight:800;margin-right:4px}' +
+    '.ac-dt.ac-dwin{min-width:0;width:auto}' +
     '.ac-d h4{margin:0 0 3px;font-size:11.5px;font-weight:800;color:var(--text);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}' +
     '.ac-dsrc{font-size:8.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:800;border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;white-space:nowrap}' +
     '.ac-dsrc.on{color:var(--gold-a);border-color:rgba(242,176,53,.5)}' +
@@ -2775,7 +2781,7 @@ VIEW_CSS.push(
     var pfOf = function (s) { return Number(s.pending_fee_orders !== undefined ? s.pending_fee_orders : s.pending_fee) || 0; };
     var h = '<div class="ac-dsec"><h4>By period ' + dSrc('eBay ads report') + dSrc('orders') + '</h4>' +
       '<div class="ac-dsub">' + (so ? 'Today so far, yesterday, the last 7 and 30 days, and all time: what this listing spent on ads and what it sold.' : 'Today so far, yesterday, the last 7 and 30 days, and all time. Profit after eBay fees, product cost, ad spend and returns, the same way the Sales Analysis sheet works it out. Orders we cannot cost yet are left out and counted separately.') + '</div>' +
-      '<div class="scroll"><table class="ac-dt"><thead><tr><th>Period</th><th>Ad spend</th><th>Units from ads</th>' + (so ? '' : '<th>ROAS</th>') + '<th>Orders</th><th>Units</th><th>Units not from ads</th>' + (so ? '' : '<th>Profit</th>') + '</tr></thead><tbody>' +
+      '<div><table class="ac-dt ac-dwin"><thead><tr><th>Period</th><th>Ad spend</th><th>Units from ads</th>' + (so ? '' : '<th>ROAS</th>') + '<th>Orders</th><th>Units</th><th>Units not from ads</th>' + (so ? '' : '<th>Profit</th>') + '</tr></thead><tbody>' +
       w.map(function (x) {
         var s = x[1] || {}, pc = pcOf(s), pf = pfOf(s);
         var notAds = Math.max(0, (Number(s.units) || 0) - (Number(s.attr_units) || 0));
@@ -2839,26 +2845,35 @@ VIEW_CSS.push(
     var nk = function (v, f) { return v == null ? '<span class="ac-dsm">no row</span>' : f(v); };
     if (live) {
       if (!live.length) { return h + '<div class="ac-dwait">Not in any campaign that is still on eBay.</div></div>'; }
-      h += '<div class="scroll"><table class="ac-dt"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad, when last read</th><th>Ad rate</th><th>Daily budget</th><th>Spend yesterday</th>' + (so ? '' : '<th>Sales yesterday</th>') +
-        '<th>Spend, last 7 days</th>' + (so ? '' : '<th>ROAS, last 7 days</th>') + '<th>Units sold, last 7 days</th><th>Spend, last 30 days</th>' + (so ? '' : '<th>ROAS, last 30 days</th>') + '<th>Units sold, last 30 days</th><th>Spend, all time</th>' + (so ? '' : '<th>ROAS, all time</th>') + '<th>Units sold, all time</th><th>Last change</th></tr></thead><tbody>' +
-        live.map(function (c) {
-          var state = String(c.ad_state || c.ad_status || '?');
-          var stateCell = '<span class="ac-dpill">' + esc(state) + (c.live ? ' \u00b7 live' : '') + '</span>' + (c.ads_synced_at || c.synced_at ? '<span class="ac-dsm">read ' + esc(dStamp(c.ads_synced_at || c.synced_at)) + '</span>' : '');
-          return '<tr><td>' + (typeof adtCampaignLink === 'function' ? adtCampaignLink(c.campaign_id, c.name) : esc(String(c.name || c.campaign_id))) + '</td><td>' + esc(dTypeTxt(c.funding)) + '</td><td>' + esc(c.campaign_status || '?') + '</td><td>' + stateCell + '</td>' +
-            '<td>' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '\u2014')) + '</td><td>' + (c.budget != null ? dGbp(c.budget, 0) : '\u2014') + '</td><td>' + dGbp(c.spend_yesterday) + '</td>' +
-            (so ? '' : '<td>' + (c.units_yesterday == null ? '\u2014' : dCnt(c.units_yesterday) + ' \u00b7 ' + dGbp(c.revenue_yesterday)) + '</td>') +
-            '<td>' + dGbp(c.spend_7d) + '</td>' + (so ? '' : '<td>' + dRoas(c.roas_7d) + '</td>') + '<td>' + nk(c.units_7d, dCnt) + '</td>' +
-            '<td>' + nk(c.spend_30d, dGbp) + '</td>' + (so ? '' : '<td>' + nk(c.roas_30d, dRoas) + '</td>') + '<td>' + nk(c.units_30d, dCnt) + '</td>' +
-            '<td>' + nk(c.spend_all, dGbp) + (c.all_from ? '<span class="ac-dsm">from ' + esc(dDay(c.all_from)) + '</span>' : '') + '</td>' + (so ? '' : '<td>' + nk(c.roas_all, dRoas) + '</td>') + '<td>' + nk(c.units_all, dCnt) + '</td>' +
-            '<td>' + esc(dStamp(c.last_change)) + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
+      h += live.map(function (c) {
+        var state = String(c.ad_state || c.ad_status || '?');
+        var kv = function (k, v) { return '<span><span class="ac-dkv">' + k + '</span>' + v + '</span>'; };
+        var head = '<div class="ac-dch">' +
+          '<span style="font-weight:800">' + (typeof adtCampaignLink === 'function' ? adtCampaignLink(c.campaign_id, c.name) : esc(String(c.name || c.campaign_id))) + '</span>' +
+          kv('Type', esc(dTypeTxt(c.funding))) + kv('Campaign status', esc(c.campaign_status || '?')) +
+          kv('This ad, when last read', '<span class="ac-dpill">' + esc(state) + (c.live ? ' \u00b7 live' : '') + '</span>' + (c.ads_synced_at || c.synced_at ? ' <span class="ac-dsm" style="display:inline">read ' + esc(dStamp(c.ads_synced_at || c.synced_at)) + '</span>' : '')) +
+          kv('Ad rate', esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '\u2014'))) +
+          kv('Daily budget', c.budget != null ? dGbp(c.budget, 0) : '\u2014') +
+          kv('Last change', esc(dStamp(c.last_change))) + '</div>';
+        var yR = (dNum(c.spend_yesterday) > 0 && c.revenue_yesterday != null) ? Number(c.revenue_yesterday) / Number(c.spend_yesterday) : null;
+        var rows = [
+          ['Yesterday', dGbp(c.spend_yesterday), so ? null : dRoas(yR), c.units_yesterday == null ? '\u2014' : dCnt(c.units_yesterday), so ? null : (c.revenue_yesterday == null ? '\u2014' : dGbp(c.revenue_yesterday))],
+          ['Last 7 days', dGbp(c.spend_7d), so ? null : dRoas(c.roas_7d), nk(c.units_7d, dCnt), so ? null : ''],
+          ['Last 30 days', nk(c.spend_30d, dGbp), so ? null : nk(c.roas_30d, dRoas), nk(c.units_30d, dCnt), so ? null : ''],
+          ['All time' + (c.all_from ? ' (from ' + esc(dDay(c.all_from)) + ')' : ''), nk(c.spend_all, dGbp), so ? null : nk(c.roas_all, dRoas), nk(c.units_all, dCnt), so ? null : '']
+        ];
+        return '<div class="ac-dcamp">' + head +
+          '<table class="ac-dt ac-dwin"><thead><tr><th>Window</th><th>Spend</th>' + (so ? '' : '<th>ROAS</th>') + '<th>Units sold</th>' + (so ? '' : '<th>Sales</th>') + '</tr></thead><tbody>' +
+          rows.map(function (r) { return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td>' + (so ? '' : '<td>' + r[2] + '</td>') + '<td>' + r[3] + '</td>' + (so ? '' : '<td>' + r[4] + '</td>') + '</tr>'; }).join('') +
+          '</tbody></table></div>';
+      }).join('');
       if (D.where.history && D.where.history.length) {
         h += '<div class="ac-dsub" style="margin:6px 0 0">Status changes: ' + D.where.history.slice(0, 6).map(function (x) { return esc(dStamp(x.seen_at)) + ' ' + esc(String(x.name || '')) + ' ' + esc(x.from_status || '\u2014') + ' \u2192 ' + esc(x.to_status || '\u2014'); }).join(' \u00b7 ') + '</div>';
       }
       return h + '</div>';
     }
     if (!C.length) { return h + '<div class="ac-dwait">Not in any campaign we know about.</div></div>'; }
-    return h + '<div class="scroll"><table class="ac-dt"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>Ad status, when last read</th><th>Ad rate</th><th>Daily budget</th></tr></thead><tbody>' +
+    return h + '<div><table class="ac-dt ac-dwin"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>Ad status, when last read</th><th>Ad rate</th><th>Daily budget</th></tr></thead><tbody>' +
       C.map(function (c) { var st = c.funding === 'COST_PER_SALE' ? (c.ad_status === 'ARCHIVED' ? 'archived' : 'exists (live)') : (c.ad_status || 'unknown'); return '<tr><td>' + (typeof adtCampaignLink === 'function' ? adtCampaignLink(c.campaign_id || c.id, c.name) : esc(String(c.name || ''))) + '</td><td>' + esc(dTypeTxt(c.funding)) + '</td><td>' + esc(c.status || '?') + '</td><td>' + esc(st) + '</td><td>' + esc(c.bid ? c.bid + '%' : '\u2014') + '</td><td>' + (c.budget != null ? dGbp(c.budget, 0) : '\u2014') + '</td></tr>'; }).join('') +
       '</tbody></table></div></div>';
   }
