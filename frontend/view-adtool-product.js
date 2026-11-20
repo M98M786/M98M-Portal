@@ -835,9 +835,13 @@
      nearest the bars (white), the day's spend above it (red), units sold on top (green). Each row is
      a category axis drawn at the top whose labels are the figures, so a column can never drift from
      its bars; money figures stand upright when the days are too narrow for them to lie flat. */
+  /* Owner, 20 Nov: "ad spend should be shown the same way as the average number, upwards". Every
+     upright row is anchored the same way: the figure starts on its row line and reads upward from
+     there, same size and weight, so the red row and the white row are the one shape in two colours. */
   function rowAxis(x, vals, color, rotate, offset) {
-    return { type: 'category', data: x, position: 'top', offset: offset, axisLine: { show: false }, axisTick: { show: false }, axisPointer: { show: false },
-      axisLabel: { interval: 0, rotate: rotate, color: color, fontSize: 9, fontWeight: 700, margin: 4, formatter: function (v, i) { return vals[i] == null ? '' : vals[i]; } } };
+    var lab = { interval: 0, rotate: rotate, color: color, fontSize: 9, fontWeight: 700, margin: 4, formatter: function (v, i) { return vals[i] == null ? '' : vals[i]; } };
+    if (rotate) { lab.align = 'left'; lab.verticalAlign = 'middle'; }
+    return { type: 'category', data: x, position: 'top', offset: offset, axisLine: { show: false }, axisTick: { show: false }, axisPointer: { show: false }, axisLabel: lab };
   }
   /* a round ceiling for a money axis: 1, 2, 2.5 or 5 × a power of ten, just above the value */
   function niceMoney(m) { if (!(m > 0)) return 1; var step = Math.pow(10, Math.floor(Math.log(m) / Math.LN10)); var c = [1, 2, 2.5, 5, 10]; for (var i = 0; i < c.length; i++) { if (c[i] * step >= m) return c[i] * step; } return 10 * step; }
@@ -896,7 +900,8 @@
         rowAxis(x, units.map(function (u) { return u > 0 ? String(u) : ''; }), GREEN, 0, offUnits)
       ],
       /* no axis names on this chart: the three named rows sit exactly where the names would print */
-      yAxis: [{ type: 'value', max: Math.max(2, Math.ceil(Math.max.apply(null, [0].concat(units)) * 1.1)), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, minInterval: 1 }, { type: 'value', max: niceMoney(Math.max.apply(null, [0].concat(spend, avg)) * 1.08), splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' } }],
+      /* round ceilings on both scales, so the top tick never prints on top of the one below it */
+      yAxis: [{ type: 'value', max: Math.max(2, Math.ceil(niceMoney(Math.max.apply(null, [0].concat(units)) * 1.08))), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, minInterval: 1 }, { type: 'value', max: niceMoney(Math.max.apply(null, [0].concat(spend, avg)) * 1.08), splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' } }],
       legend: BAR_LEGEND,
       series: [
         { name: 'Units sold', type: 'bar', data: units, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: mode === 'day' ? 13 : 26, barGap: '20%', barCategoryGap: '40%' },
