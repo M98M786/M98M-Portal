@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-11-20 - PRODUCT HISTORY: best and worst times, under the hour-by-weekday grid
+
+Owner: "integrate the graph bottom with best or worst time slots". Under the grid the page now says
+outright what the two pattern blocks imply: the best and worst time slot by units a day (with the ad
+spend of each), the slot that turns ad money into units best and worst, the three strongest hours of
+the clock summed over every weekday, the hours in which nothing sold (or the three quietest), the best
+and weakest weekday per date held, and the three hottest weekday-hour cells. All of it is read off the
+slot rows and the grid already on the page.
+
 ## 2026-11-20 - PRODUCT HISTORY: the window selector, the weekday profile and the dates block are gone
 
 Owner: "delete these graphs, no longer needed". The Patterns panel with its window picker (All time,
