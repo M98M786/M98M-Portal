@@ -222,9 +222,9 @@
 
   /* 20 Nov (owner): "show 'Went negative yesterday' not in the Signals page anymore but in the Ads
      command centre". The feed still carries them (the centre reads the same feed); this page and the
-     home pins simply leave them out, so the badge and the summary count what is drawn here. */
+     home pins simply leave them out, so the badge and the summary count what is drawn here; the
+     page says nothing about them either (owner, later the same day). */
   function sgList() { return ((SG.data && SG.data.signals) || []).filter(function (r) { return sgStr(r.type) !== SG_NEGATIVE; }); }
-  function sgHiddenCount() { return ((SG.data && SG.data.signals) || []).length - sgList().length; }
   /* the one-tap actions, for a page that draws a signal elsewhere (the Ads command centre): opens the
      first screen that owns the step and that this person may see; false when none does */
   window.sgSignalGo = function (label) {
@@ -762,7 +762,6 @@
     var d = SG.data || {}, bits = [];
     bits.push('<b class="num">' + esc(String(sgList().length)) + '</b> pinned to you');
     if (sgStr(d.date)) { bits.push('yesterday · ' + esc(sgDay(d.date))); }
-    if (sgHiddenCount()) { bits.push(esc(String(sgHiddenCount())) + ' went-negative ' + (sgHiddenCount() === 1 ? 'listing is' : 'listings are') + ' on the Ads command centre'); }
     if (Number(d.acknowledged)) { bits.push(esc(String(d.acknowledged)) + ' already acknowledged by you'); }
     if (d.truncated) { bits.push('showing the ' + esc(String(Number(d.count) || 0)) + ' loudest of ' + esc(String(Number(d.total) || 0))); }
     return bits.join(' <span>·</span> ');

@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-2217';
+var BUILD = '20261120-2223';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -37962,9 +37962,9 @@ function saveSchedule() {
 
   /* 20 Nov (owner): "show 'Went negative yesterday' not in the Signals page anymore but in the Ads
      command centre". The feed still carries them (the centre reads the same feed); this page and the
-     home pins simply leave them out, so the badge and the summary count what is drawn here. */
+     home pins simply leave them out, so the badge and the summary count what is drawn here; the
+     page says nothing about them either (owner, later the same day). */
   function sgList() { return ((SG.data && SG.data.signals) || []).filter(function (r) { return sgStr(r.type) !== SG_NEGATIVE; }); }
-  function sgHiddenCount() { return ((SG.data && SG.data.signals) || []).length - sgList().length; }
   /* the one-tap actions, for a page that draws a signal elsewhere (the Ads command centre): opens the
      first screen that owns the step and that this person may see; false when none does */
   window.sgSignalGo = function (label) {
@@ -38502,7 +38502,6 @@ function saveSchedule() {
     var d = SG.data || {}, bits = [];
     bits.push('<b class="num">' + esc(String(sgList().length)) + '</b> pinned to you');
     if (sgStr(d.date)) { bits.push('yesterday · ' + esc(sgDay(d.date))); }
-    if (sgHiddenCount()) { bits.push(esc(String(sgHiddenCount())) + ' went-negative ' + (sgHiddenCount() === 1 ? 'listing is' : 'listings are') + ' on the Ads command centre'); }
     if (Number(d.acknowledged)) { bits.push(esc(String(d.acknowledged)) + ' already acknowledged by you'); }
     if (d.truncated) { bits.push('showing the ' + esc(String(Number(d.count) || 0)) + ' loudest of ' + esc(String(Number(d.total) || 0))); }
     return bits.join(' <span>·</span> ');
