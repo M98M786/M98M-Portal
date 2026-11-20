@@ -852,7 +852,9 @@
       series: [
         { name: 'Units', type: 'bar', data: units, label: UNIT_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, barGap: '20%', barCategoryGap: '40%' },
         { name: 'Units from ads', type: 'bar', data: ads, label: Object.assign({}, UNIT_PILL, { backgroundColor: 'rgba(255,255,255,.88)', color: '#14110a' }), labelLayout: BAR_LAYOUT, itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 },
-        { name: 'Profit \u00a3', type: 'bar', yAxisIndex: 1, data: profit, label: PROFIT_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: function (p) { return Number(p.value) < 0 ? LOSS : GREEN; }, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 }
+        /* `color` on the series is what the legend swatch takes; with only a per-bar colour function the
+           swatch fell back to the palette's blue */
+        { name: 'Profit \u00a3', type: 'bar', yAxisIndex: 1, data: profit, color: GREEN, label: PROFIT_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: function (p) { return Number(p.value) < 0 ? LOSS : GREEN; }, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 }
       ] }));
   }
   function drawWd() {
