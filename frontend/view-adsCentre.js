@@ -109,6 +109,8 @@ VIEW_CSS.push(
     '.ac-negh{display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;font-size:11px;color:var(--text-2);font-weight:700;margin:0 0 6px}' +
     '.ac-negh b{color:var(--warn);text-transform:uppercase;letter-spacing:.06em;font-size:10.5px}' +
     '.ac-negsep{height:14px}' +
+    '.acc-tbl > tbody > tr.ac-negd > td{padding:9px 10px 4px;text-align:left;font-size:10px;letter-spacing:.07em;text-transform:uppercase;font-weight:800;color:var(--warn);background:transparent;border-bottom:1px solid var(--gold-line);white-space:nowrap}' +
+    '.acc-tbl > tbody > tr.ac-negd > td span{color:var(--text-3);letter-spacing:0;text-transform:none;font-weight:700;margin-left:8px}' +
     '.ac-neg td{background:rgba(242,176,53,.11)}' +
     '.ac-neg td:first-child{border-left:3px solid var(--warn)}' +
     '.acc-tbl > tbody > tr.ac-sub.ac-subn > td{background:rgba(242,176,53,.06)}' +
@@ -144,7 +146,7 @@ VIEW_CSS.push(
   function acNegRows() {
     return (AC.neg || []).filter(function (s) {
       if (s.acked_by_me || (s.acknowledged_by_others && s.acknowledged_by_others.length) || (s.ack_history && s.ack_history.length)) { return false; }
-      if (!/^\d{9,13}$/.test(String(s.item_id || ''))) { return false; }
+      if (!String(s.item_id || '').trim()) { return false; }
       if (AC.acct) { var a = acNorm(s.account), w = acNorm(AC.acct); if (!(a === w || (a && w && (a.indexOf(w) >= 0 || w.indexOf(a) >= 0)))) { return false; } }
       return true;
     }).sort(function (a, b) { if (String(a.date) !== String(b.date)) { return String(a.date) < String(b.date) ? 1 : -1; } return acNegVal(a) - acNegVal(b); });
@@ -226,7 +228,7 @@ VIEW_CSS.push(
     return s ? { intro: acNegIntro(s), acts: acNegActs(s) } : null;
   }
   /* the Product history answers, per listing, for the red rows' boxes; {data, err, at} */
-  var AC_DET = {}, AC_DET_TTL = 10 * 60 * 1000, AC_DET_MAX = 30;
+  var AC_DET = {}, AC_DET_TTL = 10 * 60 * 1000, AC_DET_MAX = 80;
   function dNum(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
   function dGbp(v, dp) { var n = dNum(v); if (n == null) { return '\u2014'; } var a = Math.abs(n); return (n < 0 ? '\u2212\u00a3' : '\u00a3') + (dp === 0 ? Math.round(a).toLocaleString('en-GB') : a.toFixed(2)); }
   function dCnt(v) { var n = dNum(v); return n == null ? '\u2014' : Math.round(n).toLocaleString('en-GB'); }
@@ -485,13 +487,25 @@ VIEW_CSS.push(
       var byId = {}; rows.forEach(function (r) { byId[String(r.item_id)] = r; });
       h += '<div class="ac-negh"><b>Went negative</b><span>' + neg.length + ' listing' + (neg.length === 1 ? '' : 's') + ' lost money on the day named and nobody has acted on ' + (neg.length === 1 ? 'it' : 'them') + ' yet \u00b7 from the Signals feed \u00b7 acknowledging one, with a comment, takes it off this list</span></div>' +
         '<div class="scroll"><table class="acc-tbl">' + head + '<tbody>';
+      var lastDay = null, perDay = {}; neg.forEach(function (s) { perDay[String(s.date)] = (perDay[String(s.date)] || 0) + 1; });
       neg.forEach(function (s) {
-        var id = String(s.item_id), r = byId[id];
-        var cell = { item_id: id, account: (r && r.account) || s.account, title: (r && r.title) || s.title, image: (r && r.image) || s.image || null, waste: !!(r && r.waste) };
+        var id = String(s.item_id), known = /^\d{9,13}$/.test(id), r = known ? byId[id] : null;
+        if (String(s.date) !== lastDay) {
+          lastDay = String(s.date);
+          h += '<tr class="ac-negd"><td colspan="' + cols.length + '">Went negative ' + esc(acNegWhen(s).replace(/^on /, '')) + '<span>' + perDay[lastDay] + ' listing' + (perDay[lastDay] === 1 ? '' : 's') + ', not acted on</span></td></tr>';
+        }
+        var cell = { item_id: known ? id : '', account: (r && r.account) || s.account, title: (r && r.title) || s.title || id, image: (r && r.image) || s.image || null, waste: !!(r && r.waste) };
         h += '<tr class="ac-neg">' + cols.map(function (c, i) {
           return '<td>' + (i === 0 ? acItemCell(cell, acNegLine(s)) : (r ? c.cell(r) : '<span style="color:var(--text-3)">\u2014</span>')) + '</td>';
         }).join('') + '</tr>';
-        h += '<tr class="ac-sub ac-subn"><td colspan="' + cols.length + '"><div class="ac-d" data-ac-det="' + esc(id) + '" data-ac-neg="' + esc(acNegKey(s)) + '">' + acDetailHtml(id, { intro: acNegIntro(s), acts: acNegActs(s) }) + '</div></td></tr>';
+        if (known) {
+          h += '<tr class="ac-sub ac-subn"><td colspan="' + cols.length + '"><div class="ac-d" data-ac-det="' + esc(id) + '" data-ac-neg="' + esc(acNegKey(s)) + '">' + acDetailHtml(id, { intro: acNegIntro(s), acts: acNegActs(s) }) + '</div></td></tr>';
+        } else {
+          /* the Main Sheet knew this listing only by its title, so there is no number to fetch a
+             Product history with: the signal's own words and its actions, and nothing invented */
+          h += '<tr class="ac-sub ac-subn"><td colspan="' + cols.length + '"><div class="ac-d" data-ac-neg="' + esc(acNegKey(s)) + '">' +
+            '<div class="ac-dsub" style="margin:0 0 6px">' + acNegIntro(s).replace(/ Its Product history.*$/, '') + ' The Main Sheet carries no eBay number for it, so no Product history can be drawn here.</div>' + acNegActs(s) + '</div></td></tr>';
+        }
       });
       h += '</tbody></table></div>' + (rows.length ? '<div class="ac-negsep"></div>' : '');
     }
