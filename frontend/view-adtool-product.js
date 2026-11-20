@@ -896,7 +896,8 @@
         rowAxis(x, units.map(function (u) { return u > 0 ? String(u) : ''; }), GREEN, 0, offUnits)
       ],
       /* no axis names on this chart: the three named rows sit exactly where the names would print */
-      yAxis: [{ type: 'value', max: Math.max(2, Math.ceil(Math.max.apply(null, [0].concat(units)) * 1.1)), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, minInterval: 1 }, { type: 'value', max: niceMoney(Math.max.apply(null, [0].concat(spend, avg)) * 1.08), splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' } }],
+      /* round ceilings on both scales, so the top tick never prints on top of the one below it */
+      yAxis: [{ type: 'value', max: Math.max(2, Math.ceil(niceMoney(Math.max.apply(null, [0].concat(units)) * 1.08))), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, minInterval: 1 }, { type: 'value', max: niceMoney(Math.max.apply(null, [0].concat(spend, avg)) * 1.08), splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' } }],
       legend: BAR_LEGEND,
       series: [
         { name: 'Units sold', type: 'bar', data: units, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: mode === 'day' ? 13 : 26, barGap: '20%', barCategoryGap: '40%' },

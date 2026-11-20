@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1851';
+var BUILD = '20261120-1853';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9471,7 +9471,8 @@ window.M98M_ADS_ONLY = true;
         rowAxis(x, units.map(function (u) { return u > 0 ? String(u) : ''; }), GREEN, 0, offUnits)
       ],
       /* no axis names on this chart: the three named rows sit exactly where the names would print */
-      yAxis: [{ type: 'value', max: Math.max(2, Math.ceil(Math.max.apply(null, [0].concat(units)) * 1.1)), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, minInterval: 1 }, { type: 'value', max: niceMoney(Math.max.apply(null, [0].concat(spend, avg)) * 1.08), splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' } }],
+      /* round ceilings on both scales, so the top tick never prints on top of the one below it */
+      yAxis: [{ type: 'value', max: Math.max(2, Math.ceil(niceMoney(Math.max.apply(null, [0].concat(units)) * 1.08))), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, minInterval: 1 }, { type: 'value', max: niceMoney(Math.max.apply(null, [0].concat(spend, avg)) * 1.08), splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' } }],
       legend: BAR_LEGEND,
       series: [
         { name: 'Units sold', type: 'bar', data: units, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: mode === 'day' ? 13 : 26, barGap: '20%', barCategoryGap: '40%' },
