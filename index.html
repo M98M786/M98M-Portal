@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1438';
+var BUILD = '20261120-1440';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2728,9 +2728,12 @@ VIEW_CSS.push(
     '.ac-split-note{font-size:11px;color:var(--text-3);font-weight:600;margin-top:9px;line-height:1.5}' +
     /* 20 Nov (owner): under every RED row, the listing's own Product history blocks — By period,
        All-time daily, Where its ads sit — drawn small enough to sit in one box with the row. */
-    '.acc-tbl tr.ac-sub td{padding:0 10px 12px;text-align:left;white-space:normal;background:var(--bad-soft,rgba(255,80,80,.05))}' +
-    '.acc-tbl tr.ac-sub td:first-child{border-left:3px solid var(--bad);min-width:0}' +
-    '.acc-tbl tr.ac-sub:hover td{background:var(--bad-soft,rgba(255,80,80,.05))}' +
+    /* the outer board's cell rules are written for ITS cells; the child combinator keeps them off the
+       small tables inside the box, which would otherwise inherit the red wash, the red left border and
+       the 240px first column */
+    '.acc-tbl > tbody > tr.ac-sub > td{padding:0 10px 12px;text-align:left;white-space:normal;background:var(--bad-soft,rgba(255,80,80,.05))}' +
+    '.acc-tbl > tbody > tr.ac-sub > td:first-child{border-left:3px solid var(--bad);min-width:0}' +
+    '.acc-tbl > tbody > tr.ac-sub:hover > td{background:var(--bad-soft,rgba(255,80,80,.05))}' +
     '.ac-d{border:1px solid var(--gold-line);border-radius:12px;background:var(--panel-2);padding:10px 12px;font-size:11px;color:var(--text-2);line-height:1.45}' +
     '.ac-d h4{margin:0 0 3px;font-size:11.5px;font-weight:800;color:var(--text);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}' +
     '.ac-dsrc{font-size:8.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:800;border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;white-space:nowrap}' +
@@ -2738,15 +2741,16 @@ VIEW_CSS.push(
     '.ac-dsub{font-size:10px;color:var(--text-3);line-height:1.5;margin:0 0 6px}' +
     '.ac-dsec{padding:8px 0 2px;border-top:1px solid var(--gold-line)}.ac-dsec:first-child{border-top:0;padding-top:0}' +
     '.ac-dopen{margin-left:auto;font-size:10px;font-weight:800;color:var(--gold-a);text-decoration:underline;text-underline-offset:2px;white-space:nowrap}' +
-    '.ac-dt{width:100%;border-collapse:collapse;font-size:10.5px;font-variant-numeric:tabular-nums}' +
+    '.ac-dt{width:auto;min-width:640px;border-collapse:collapse;font-size:10.5px;font-variant-numeric:tabular-nums}' +
+    '.ac-dt th,.ac-dt td{background:transparent;border-left:0;min-width:0}' +
     '.ac-dt th{font-size:8.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:3px 6px;border-bottom:1px solid var(--gold-line);text-align:right;white-space:nowrap}' +
     '.ac-dt th:first-child,.ac-dt td:first-child{text-align:left}' +
     '.ac-dt td{padding:3px 6px;border-bottom:1px solid rgba(255,255,255,.05);text-align:right;white-space:nowrap;color:var(--text-2)}' +
-    '.ac-dt td:first-child{color:var(--text);font-weight:700}' +
+    '.ac-dt td:first-child{color:var(--text);font-weight:700;white-space:nowrap;min-width:0}' +
     '.ac-dt td .ac-dsm{display:block;font-size:9px;color:var(--text-3);font-weight:600;white-space:normal}' +
     '.ac-dmov{display:inline-block;margin-left:5px;padding:0 5px;border-radius:5px;font-size:8px;letter-spacing:.05em;text-transform:uppercase;font-weight:800;color:var(--gold-a);border:1px solid rgba(242,176,53,.4);vertical-align:1px}' +
     '.ac-dpill{display:inline-block;padding:1px 7px;border-radius:9px;font-size:9.5px;font-weight:800;border:1px solid rgba(242,176,53,.5);color:var(--gold-a)}' +
-    '.ac-dchart svg{width:100%;height:auto;display:block}' +
+    '.ac-dchart{max-width:1100px}.ac-dchart svg{width:100%;height:auto;display:block}' +
     '.ac-dleg{display:flex;gap:12px;flex-wrap:wrap;font-size:9.5px;color:var(--text-3);font-weight:700;margin:0 0 4px}.ac-dleg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:4px;vertical-align:-1px}' +
     '.ac-dwait{color:var(--text-3);font-size:11px;padding:4px 0}'
   );
@@ -2796,7 +2800,7 @@ VIEW_CSS.push(
     var h = '<div class="ac-dsec"><h4>All-time daily ' + dSrc('orders') + dSrc('eBay ads report') + '</h4>' +
       '<div class="ac-dsub">Units from all channels (gold), the 7-day average (white), units from ads (dots) and ad spend (faint bars).</div>';
     if (!days.length) { return h + '<div class="ac-dwait">No day held for this listing yet.</div></div>'; }
-    var W = 1000, H = 190, L = 34, R = 40, T = 10, B = 24, n = days.length;
+    var W = 1000, H = 150, L = 34, R = 40, T = 8, B = 20, n = days.length;
     var pw = W - L - R, ph = H - T - B, slot = pw / n;
     var units = days.map(function (d) { return Number(d.units) || 0; }), attr = days.map(function (d) { return Number(d.attr_units) || 0; }), spend = days.map(function (d) { return Number(d.spend) || 0; });
     var avg = units.map(function (_, i) { var a = units.slice(Math.max(0, i - 6), i + 1); return a.reduce(function (t, v) { return t + v; }, 0) / a.length; });
