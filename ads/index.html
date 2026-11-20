@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1823';
+var BUILD = '20261120-1828';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9415,21 +9415,27 @@ window.M98M_ADS_ONLY = true;
      third bar of each week or month, green, on its own £ scale on the right, with the figure on the
      bar. A week that lost money is a bar below the line, drawn red so a loss never reads as a gain;
      a week with no costed profit yet draws no bar at all. */
-  var PROFIT_PILL = Object.assign({}, PILL, { backgroundColor: 'rgba(47,177,112,.95)', color: '#fff', fontSize: 8.5, padding: [1, 4, 1, 4], formatter: function (o) { var v = Number(o.value); if (o.value == null || isNaN(v)) return ''; return (v < 0 ? '\u2212\u00a3' : '\u00a3') + Math.abs(v).toFixed(2); } });
+  /* Owner, on seeing it: "what the hell is that half-built bar". A signed axis put £0 in the middle of the
+     plot, so every profit bar hung from mid-height and a small profit was a sliver in the air. The bar
+     now stands on the floor like the other two: its height is the SIZE of the profit, its colour says
+     the sign (green made money, red lost it), and the pill carries the signed figure. */
+  var PROFIT_PILL = Object.assign({}, PILL, { backgroundColor: 'rgba(47,177,112,.95)', color: '#fff', fontSize: 8.5, padding: [1, 4, 1, 4], formatter: function (o) { var v = Number(o.data && o.data.signed != null ? o.data.signed : o.value); if (isNaN(v)) return ''; return (v < 0 ? '\u2212\u00a3' : '\u00a3') + Math.abs(v).toFixed(2); } });
+  var LOSS_PILL = Object.assign({}, PROFIT_PILL, { backgroundColor: LOSS });
   function drawWM() {
     var rows = AT.tab === 'week' ? AT.data.weeks : AT.data.months; var key = AT.tab === 'week' ? 'iso_week' : 'month';
     var units = rows.map(function (r) { return Number(r.units) || 0; }), ads = rows.map(function (r) { return Number(r.attr_units) || 0; });
     var profit = rows.map(function (r) { return r.actual_profit == null ? null : Math.round(Number(r.actual_profit) * 100) / 100; });
-    var pAbs = profit.map(function (v) { return v == null ? 0 : Math.abs(v); }), pMax = moneyMax(pAbs), pMin = Math.min.apply(null, [0].concat(profit.filter(function (v) { return v != null; })));
+    var pAbs = profit.map(function (v) { return v == null ? 0 : Math.abs(v); }), pMax = moneyMax(pAbs);
+    var pData = profit.map(function (v) { return v == null ? null : { value: Math.abs(v), signed: v, itemStyle: { color: v < 0 ? LOSS : GREEN, borderRadius: [3, 3, 0, 0] }, label: v < 0 ? LOSS_PILL : PROFIT_PILL }; });
     mount('atWM', chartBase({ grid: BAR_GRID, xAxis: { type: 'category', data: rows.map(function (r) { return r[key]; }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, legend: BAR_LEGEND,
       yAxis: [{ type: 'value', max: unitsMax(units), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 },
-        { type: 'value', max: pMax, min: pMin < 0 ? -pMax : 0, splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'profit', nameTextStyle: { color: '#66707c' } }],
+        { type: 'value', max: pMax, min: 0, splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'profit or loss', nameTextStyle: { color: '#66707c' } }],
       series: [
         { name: 'Units', type: 'bar', data: units, label: UNIT_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, barGap: '20%', barCategoryGap: '40%' },
         { name: 'Units from ads', type: 'bar', data: ads, label: Object.assign({}, UNIT_PILL, { backgroundColor: 'rgba(255,255,255,.88)', color: '#14110a' }), labelLayout: BAR_LAYOUT, itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 },
         /* `color` on the series is what the legend swatch takes; with only a per-bar colour function the
            swatch fell back to the palette's blue */
-        { name: 'Profit \u00a3', type: 'bar', yAxisIndex: 1, data: profit, color: GREEN, label: PROFIT_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: function (p) { return Number(p.value) < 0 ? LOSS : GREEN; }, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 }
+        { name: 'Profit \u00a3 (red = loss)', type: 'bar', yAxisIndex: 1, data: pData, color: GREEN, label: PROFIT_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 }
       ] }));
   }
   function drawWd() {
