@@ -8149,7 +8149,7 @@ async function adtoolListingCompute(env, iid, p) {
     /* the one day the hour chart draws: the newest day row at or before yesterday, inside the window */
     env.DB.prepare('SELECT day, hour, orders, units, revenue, spend_s, clicks_s, attr_units_s, spend_r, clicks_r, attr_units_r, samples, hourly_status FROM adtool_listing_hour WHERE item_id = ?1 AND day >= ?2 AND day = (SELECT MAX(day) FROM adtool_listing_day WHERE item_id = ?1 AND day <= ?3) ORDER BY day, hour').bind(iid, hourFrom, yday),
     /* and the 28-day profile the heat map, the slots and the hourly note are summed from */
-    env.DB.prepare('SELECT day, hour, orders, units, revenue, hourly_status FROM adtool_listing_hour WHERE item_id = ?1 AND day >= ?2 ORDER BY day, hour').bind(iid, hourFrom),
+    env.DB.prepare('SELECT day, hour, orders, units, revenue, spend_s, spend_r, hourly_status FROM adtool_listing_hour WHERE item_id = ?1 AND day >= ?2 ORDER BY day, hour').bind(iid, hourFrom),
     env.DB.prepare('SELECT iso_week, days, orders, units, revenue, actual_profit, pending_cost_orders, pending_fee_orders, clicks, spend, attr_units, attr_revenue FROM adtool_listing_week WHERE item_id = ?1 ORDER BY iso_week').bind(iid),
     env.DB.prepare('SELECT month, days, orders, units, revenue, actual_profit, pending_cost_orders, pending_fee_orders, clicks, spend, attr_units, attr_revenue FROM adtool_listing_month WHERE item_id = ?1 ORDER BY month').bind(iid),
     env.DB.prepare('SELECT type, note, by_email, at FROM adtool_actions WHERE item_id = ?1 ORDER BY at DESC LIMIT 30').bind(iid),
@@ -8247,7 +8247,15 @@ async function adtoolListingCompute(env, iid, p) {
   const heat = []; for (let d = 0; d < 7; d++) heat.push(new Array(24).fill(0));
   const slots = [0, 1, 2, 3].map(s => ({ slot: s, orders: 0, units: 0, revenue: 0 }));
   let sampledHours = 0, reconciledHours = 0;
-  for (const h of hourProfile) { const w2 = adtWeekdayOf(h.day); heat[w2][h.hour] += h.units; const sl = slots[adtSlot(h.hour)]; sl.orders += h.orders; sl.units += h.units; sl.revenue += h.revenue; if (h.hourly_status === 'sampled' || h.hourly_status === 'partial') sampledHours++; if (h.hourly_status === 'reconciled') reconciledHours++; }
+  /* 20 Nov (owner: "white bar = average ad spend"): the same 28 days of hours, summed per UK hour and
+     divided by the number of days that hold any ad reading, so the white bar beside a yesterday hour
+     is what that hour usually costs this listing. A day with no reading is not a day of nought spend
+     and is left out of the divisor. */
+  const avgSp = new Array(24).fill(0), avgDays = {};
+  for (const h of hourProfile) { const w2 = adtWeekdayOf(h.day); heat[w2][h.hour] += h.units; const sl = slots[adtSlot(h.hour)]; sl.orders += h.orders; sl.units += h.units; sl.revenue += h.revenue; if (h.hourly_status === 'sampled' || h.hourly_status === 'partial') sampledHours++; if (h.hourly_status === 'reconciled') reconciledHours++;
+    const spv = h.spend_r != null ? h.spend_r : h.spend_s; if (spv != null) { avgSp[h.hour] += Number(spv) || 0; avgDays[h.day] = 1; } }
+  const avgSpDays = Object.keys(avgDays).length;
+  const hourAvgSpend = { hours: avgSp.map(v => avgSpDays ? round2(v / avgSpDays) : null), days: avgSpDays, from: hourFrom, to: yday, note: avgSpDays ? 'each hour\u2019s ad spend averaged over the ' + avgSpDays + ' day' + (avgSpDays === 1 ? '' : 's') + ' in the last 28 that hold an ad reading' : 'no ad readings in the last 28 days, so no average' };
   const slotTotal = slots.reduce((t, s) => t + s.orders, 0);
   for (const s of slots) { s.share = slotTotal ? round2(s.orders / slotTotal) : null; s.orders_day = round2(s.orders / 28); s.revenue_day = round2(s.revenue / 28); s.revenue = round2(s.revenue); }
   /* dates of the month, all time */
@@ -8301,6 +8309,7 @@ async function adtoolListingCompute(env, iid, p) {
     /* WHAT THE HOURS IN THIS ANSWER COVER, said in the answer rather than left to be guessed: the
        `hours` rows are one day, the day the hour chart draws, and the profile behind the heat map,
        the slots and the note below was summed over the 28 days named here. */
+    hour_avg_spend: hourAvgSpend,
     hours_window: { from: hourFrom, to: yday, days: 28, hours_day: hours.length ? String(hours[0].day) : '', profile_rows: hourProfile.length,
       note: 'the hour rows sent are the one day the hour chart draws; the heat map, the time slots and the hourly note are summed on the engine over the 28 days named here' },
     hourly_note: sampledHours + reconciledHours ? ('hourly ad figures are the tool’s own samples from 17 Sep 2026 (' + reconciledHours + ' hours reconciled to the final report, ' + sampledHours + ' still sampled)') : 'no sampled ad hours yet for this listing',

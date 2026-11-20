@@ -677,8 +677,10 @@
     /* yesterday hour by hour + all-time daily. "Yesterday's behaviour" had the 28-day time slots
        beside it; the slots are one of the four pattern blocks and have gone down to the window
        selector with the other three, so the 24-hour chart has the width to itself. */
-    h += '<div class="at-panel"><h3>Yesterday\'s behaviour' + src('orders') + src('sampled', 'our own readings', true) + '</h3><div class="at-sub">' + esc(D.hourly_note) + '. The pale line is what this weekday usually does by that hour.</div><div id="atHour" class="at-chart"></div></div>';
-    h += '<div class="at-panel"><h3>All-time daily' + src('orders') + src('eBay ads report') + '</h3><div class="at-sub">Units from all channels (gold), the 7-day average (white), units from ads (dots) and ad spend (faint bars).</div><div id="atDaily" class="at-chart tall"></div></div>';
+    /* 20 Nov (owner: "totally rebuild these graphs"): three bars an hour and three bars a day — units
+       sold green, the ad spend of that hour or day red, the average ad spend white. */
+    h += '<div class="at-panel"><h3>Yesterday\'s behaviour' + src('orders') + src('sampled', 'our own readings', true) + '</h3><div class="at-sub">' + esc(D.hourly_note) + '. Units sold in each hour (green), the ad spend in that hour (red) and what that hour usually costs this listing (white' + (D.hour_avg_spend && D.hour_avg_spend.note ? ': ' + esc(D.hour_avg_spend.note) : '') + ').</div><div id="atHour" class="at-chart"></div></div>';
+    h += '<div class="at-panel"><h3>All-time daily' + src('orders') + src('eBay ads report') + '</h3><div class="at-sub">Units sold each day (green), the ad spend of that day (red) and the 7-day average ad spend (white).</div><div id="atDaily" class="at-chart tall"></div></div>';
     /* week / month */
     h += '<div class="at-panel"><div class="at-tabs"><button class="' + (AT.tab === 'week' ? 'on' : '') + '" data-tab="week">Week to week</button><button class="' + (AT.tab === 'month' ? 'on' : '') + '" data-tab="month">Month to month</button></div><div id="atWM" class="at-chart short"></div></div>';
     /* ── THE FOUR PATTERN BLOCKS, OVER THE WINDOW THE READER CHOSE (owner, 9 Nov) ────────────────
@@ -779,28 +781,43 @@
     });
     return h + '</div>';
   }
+  /* 20 Nov (owner): three bars an hour. Units sold on the left scale in green; the hour's own ad spend
+     in red and what that hour usually costs (the engine's 28-day average) in white, both on the right
+     £ scale. The pale "usual units" line and the cumulative spend line are gone. */
+  var GREEN = '#2fb170', WHITEBAR = 'rgba(255,255,255,.72)';
+  var MONEY_PILL = Object.assign({}, PILL, { backgroundColor: LOSS, color: '#fff', formatter: function (o) { return o.value == null || !(Number(o.value) > 0) ? '' : '\u00a3' + Number(o.value).toFixed(2); } });
+  var UNIT_PILL = Object.assign({}, PILL, { backgroundColor: GREEN, color: '#fff', formatter: pillInt });
   function drawHour() {
     var D = AT.data; var days = D.days; var yday = days.length ? days[days.length - 1].day : '';
     var hrs = D.hours.filter(function (x) { return x.day === yday; });
-    var ord = new Array(24).fill(0), sp = new Array(24).fill(0), anyS = false;
-    hrs.forEach(function (x) { ord[x.hour] = x.units; var v = x.spend_r != null ? x.spend_r : x.spend_s; if (v) { sp[x.hour] = v; anyS = true; } });
-    var series = [{ name: 'Units', type: 'bar', data: ord, label: Object.assign({}, PILL, { formatter: pillInt }), labelLayout: LAYOUT, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14 }];
-    if (D.profile && D.profile.hour_weekday && D.profile.hour_weekday.shares && yday) { var wdi = dowOf(yday); var tot = ord.reduce(function (t, v) { return t + v; }, 0); var rowShares = D.profile.hour_weekday.shares.slice(wdi * 24, wdi * 24 + 24); var rs = rowShares.reduce(function (t, v) { return t + v; }, 0) || 1; series.push({ name: 'What this weekday usually does', type: 'line', data: rowShares.map(function (v) { return Math.round(v / rs * tot * 100) / 100; }), lineStyle: { color: 'rgba(255,255,255,.35)', width: 1.5, type: 'dashed' }, symbol: 'none' }); }
-    var y = [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' } }];
-    if (anyS) { y.push({ type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '£{value}' }, name: 'ad spend so far', nameTextStyle: { color: '#66707c' } }); series.push({ name: 'Ad spend so far', type: 'line', yAxisIndex: 1, data: sp.map(function (v) { return Math.round(v * 100) / 100; }), lineStyle: { color: WHITE55, width: 2 }, itemStyle: { color: WHITE55 }, symbolSize: 5, smooth: false }); }
-    mount('atHour', chartBase({ xAxis: { type: 'category', data: Array.from({ length: 24 }, function (_, i) { return String(i).padStart(2, '0'); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, yAxis: y, legend: { show: anyS, top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } }, series: series, title: { text: yday ? DOW[dowOf(yday)] + ' ' + dfmt(yday) : '', left: 0, top: 0, textStyle: { color: '#9aa4b1', fontSize: 11, fontWeight: 'normal' } } }));
+    var ord = new Array(24).fill(0), sp = new Array(24).fill(0);
+    hrs.forEach(function (x) { ord[x.hour] = x.units; var v = x.spend_r != null ? x.spend_r : x.spend_s; sp[x.hour] = v == null ? 0 : Math.round(Number(v) * 100) / 100; });
+    var avg = (D.hour_avg_spend && D.hour_avg_spend.hours) ? D.hour_avg_spend.hours.map(function (v) { return v == null ? 0 : Math.round(Number(v) * 100) / 100; }) : new Array(24).fill(0);
+    var series = [
+      { name: 'Units sold', type: 'bar', data: ord, label: UNIT_PILL, labelLayout: LAYOUT, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 12, barGap: '10%' },
+      { name: 'Ad spend in that hour', type: 'bar', yAxisIndex: 1, data: sp, label: MONEY_PILL, labelLayout: LAYOUT, itemStyle: { color: LOSS, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 12 },
+      { name: 'Average ad spend for the hour', type: 'bar', yAxisIndex: 1, data: avg, itemStyle: { color: WHITEBAR, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 12 }
+    ];
+    var y = [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 },
+      { type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }];
+    mount('atHour', chartBase({ grid: { left: 44, right: 52, top: 26, bottom: 28 }, xAxis: { type: 'category', data: Array.from({ length: 24 }, function (_, i) { return String(i).padStart(2, '0'); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, yAxis: y, legend: { show: true, top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } }, series: series, title: { text: yday ? DOW[dowOf(yday)] + ' ' + dfmt(yday) : '', left: 0, top: 0, textStyle: { color: '#9aa4b1', fontSize: 11, fontWeight: 'normal' } } }));
   }
   function dowOf(ymd) { var d = new Date(ymd + 'T12:00:00Z'); return (d.getUTCDay() + 6) % 7; }
+  /* 20 Nov (owner): three bars a day — units sold green (left scale), that day's ad spend red and the
+     7-day average ad spend white (right £ scale). The gold units line, its band, the units-from-ads
+     dots and the 7-day units average are gone. */
   function drawDaily() {
     var days = AT.data.days; var x = days.map(function (d) { return d.day.slice(5); });
-    var units = days.map(function (d) { return d.units; }); var attr = days.map(function (d) { return d.attr_units; }); var spend = days.map(function (d) { return d.spend; });
-    var avg = units.map(function (_, i) { var a = units.slice(Math.max(0, i - 6), i + 1); return Math.round(a.reduce(function (t, v) { return t + v; }, 0) / a.length * 10) / 10; });
-    /* this chart used to run on past the last real day with a forecast band on the end. The spec
-       takes sales forecasting out of the portal, so the line now stops where the figures stop. */
-    mount('atDaily', chartBase({ xAxis: { type: 'category', data: x, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } },
-      yAxis: [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' } }, { type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '£{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }],
+    var units = days.map(function (d) { return Number(d.units) || 0; }); var spend = days.map(function (d) { return Math.round((Number(d.spend) || 0) * 100) / 100; });
+    var avg = spend.map(function (_, i) { var a = spend.slice(Math.max(0, i - 6), i + 1); return Math.round(a.reduce(function (t, v) { return t + v; }, 0) / a.length * 100) / 100; });
+    mount('atDaily', chartBase({ grid: { left: 44, right: 52, top: 26, bottom: 28 }, xAxis: { type: 'category', data: x, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } },
+      yAxis: [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 }, { type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }],
       legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } },
-      series: [{ name: 'Ad spend', type: 'bar', yAxisIndex: 1, data: spend, itemStyle: { color: NEUTRAL }, barMaxWidth: 10 }, { name: 'Units (all channels)', type: 'line', data: units, lineStyle: { color: GOLD, width: 2 }, itemStyle: { color: GOLD }, symbolSize: 4, areaStyle: { color: BAND } }, { name: '7-day average', type: 'line', data: avg, lineStyle: { color: WHITE55, width: 2 }, symbol: 'none' }, { name: 'Units from ads', type: 'scatter', data: attr, itemStyle: { color: GOLD2 }, symbolSize: 5 }] }));
+      series: [
+        { name: 'Units sold', type: 'bar', data: units, label: UNIT_PILL, labelLayout: LAYOUT, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14, barGap: '10%' },
+        { name: 'Ad spend that day', type: 'bar', yAxisIndex: 1, data: spend, label: MONEY_PILL, labelLayout: LAYOUT, itemStyle: { color: LOSS, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14 },
+        { name: '7-day average ad spend', type: 'bar', yAxisIndex: 1, data: avg, itemStyle: { color: WHITEBAR, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14 }
+      ] }));
   }
   function drawWM() {
     var rows = AT.tab === 'week' ? AT.data.weeks : AT.data.months; var key = AT.tab === 'week' ? 'iso_week' : 'month';

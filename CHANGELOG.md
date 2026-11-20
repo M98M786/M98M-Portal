@@ -172,3 +172,6 @@ builds 20260901-00xx–01xx.
 
 ## 2026-11-20 — Ads command centre: a red row carries its Product history
 - Under every red row (£3+ today, no order) the board draws the listing's own Product history blocks in the page's order — By period, All-time daily (inline SVG, no chart library) and Where its ads sit — small enough to sit in one box with the row. Read per listing through `adtoolListing`, one after another, kept ten minutes.
+
+## 2026-11-20 — Product history charts rebuilt as green / red / white bars
+- Yesterday's behaviour and All-time daily (and the red-row copy in the Ads command centre) now draw units sold as green bars, the ad spend of that hour or day as red bars, and the average ad spend as white bars. `adtoolListing` returns `hour_avg_spend` (each hour's spend averaged over the days in the last 28 that hold an ad reading); the daily average is the 7-day mean of spend.
