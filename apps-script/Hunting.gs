@@ -656,9 +656,39 @@ function huntAppendTask_(fields) {
   }
   const sh = getPortalDb_(false).getSheetByName('TASKS');
   const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h); });
-  sh.appendRow(head.map(function (h) {
+  const row = head.map(function (h) {
     return Object.prototype.hasOwnProperty.call(fields, h) ? fields[h] : '';
-  }));
+  });
+  sh.appendRow(row);
+  /* 20 Nov: the row as written, keyed by header — the engine push takes it as the record instead
+     of re-reading the whole tab to find it again */
+  const rec = {}; head.forEach(function (h, i) { rec[h] = row[i]; });
+  return rec;
+}
+
+/* 20 Nov: which listing_new task, if any, already holds this hunt — found with the sheet's own text
+   search over the details column (server-side, milliseconds at any size) and then confirmed from the
+   JSON of only the rows it names, exactly as the old full read decided it. */
+function huntTaskHolding_(huntId) {
+  huntId = String(huntId || '').trim();
+  if (!huntId) return null;
+  const sh = getPortalDb_(false).getSheetByName('TASKS');
+  const lr = sh.getLastRow();
+  if (lr < 2) return null;
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const iType = head.indexOf('type'), iDet = head.indexOf('details'), iId = head.indexOf('task_id'),
+        iSt = head.indexOf('status'), iTo = head.indexOf('assigned_to');
+  if (iType < 0 || iDet < 0) return null;
+  const hits = sh.getRange(2, iDet + 1, lr - 1, 1).createTextFinder(huntId).matchCase(true).findAll();
+  for (let i = 0; i < hits.length; i++) {
+    const row = sh.getRange(hits[i].getRow(), 1, 1, head.length).getValues()[0];
+    if (String(row[iType] || '') !== 'listing_new') continue;
+    let hid = '';
+    try { hid = String((JSON.parse(String(row[iDet] || '{}')) || {}).hunt_id || ''); } catch (e) {}
+    if (hid !== huntId) continue;
+    return { task_id: String(row[iId] || ''), status: String(row[iSt] || ''), to: String(row[iTo] || '') };
+  }
+  return null;
 }
 
 // ---------- records ----------
@@ -1087,12 +1117,16 @@ function huntMirrorValues_(cols) {
 /* 3 Sept: the ONE cheap engine push that keeps the portal's hunt queue live. JSON-native so
  * criteria_flags (an array) survives — String()-flattening it was what crashed the queue. Never
  * throws; the 15-min huntsSweep_ is the backstop if this misses. */
-function huntMirrorPush_(rec) {
+function huntMirrorVals_(rec) {
   const hv = {};
   Object.keys(rec).forEach(function (k) {
     const x = rec[k];
     hv[k] = (x instanceof Date) ? Utilities.formatDate(x, 'Etc/GMT', 'yyyy-MM-dd HH:mm:ss') : (x == null ? '' : x);
   });
+  return hv;
+}
+function huntMirrorPush_(rec) {
+  const hv = huntMirrorVals_(rec);
   /* 11 Sept: ONE retry. The submit has already landed in the sheet, so this is pure best-effort
      to make the hunt visible to management NOW rather than at the next sweep — but a single
      dropped call under load was exactly why Irfan's hunts "didn't update on time", so give it a
@@ -1708,19 +1742,16 @@ function actionHuntSendToLister_(payload, ctx) {
   let deadline = taskPktIso_(payload.deadline_pkt);
   if (!deadline) deadline = taskPktIso_(new Date(Date.now() + 24 * 3600000));   // default: 24h, PKT
 
-  // guard against a double-send: any listing_new task already referencing this hunt
-  let existing = null;
-  readTab_('TASKS').forEach(function (t) {
-    if (existing) return;
-    if (String(t.type || '') !== 'listing_new') return;
-    let hid = '';
-    try { hid = String((JSON.parse(String(t.details || '{}')) || {}).hunt_id || ''); } catch (e) {}
-    if (hid === String(payload.hunt_id)) existing = { task_id: String(t.task_id || ''), status: String(t.status || ''), to: String(t.assigned_to || '') };
-  });
+  /* 20 Nov (owner: "processing speed ridiculously slow"): the SLOW_ACTION ledger showed every Send
+     at 7-10.6 s, and TWO full reads of TASKS (thousands of rows, each carrying a JSON product pack)
+     were most of it — this guard was one, engineTaskPush_'s re-read of the row just written the
+     other. The guard now asks the sheet to FIND the hunt id (a server-side text search over the
+     details column, milliseconds) and reads only the rows it names. Same answer, same message. */
+  const existing = huntTaskHolding_(String(payload.hunt_id || ''));
   if (existing) throw new Error(SAFE_ERROR_PREFIX + 'this item is already with ' + (existing.to.split('@')[0] || 'a lister') + ' (' + existing.status + ') — refresh the archive');
 
   const stamp = now_();
-  let rec = null, taskId = 'T' + Utilities.getUuid().slice(0, 8), limited = null;
+  let rec = null, taskId = 'T' + Utilities.getUuid().slice(0, 8), limited = null, taskRec = null;
   const pre = huntFind_(huntSheet_(), payload.hunt_id);      // heavy read outside the lock
   const lock = LockService.getScriptLock();
   try {
@@ -1735,22 +1766,31 @@ function actionHuntSendToLister_(payload, ctx) {
     huntWrite_(sh, found, patch);
     rec[HC_ACCOUNT] = account; rec[HC_CPC] = advertising;
     limited = huntLimitedPayload_(rec);
-    huntAppendTask_({
+    taskRec = huntAppendTask_({
       task_id: taskId, type: 'listing_new', account: account, item_id: '',
       title: String(rec[HC_TITLE] || '').slice(0, 400),
       details: JSON.stringify({ hunt_id: rec.hunt_id, limited: limited }),
       assigned_by: ctx.ident.email, assigned_to: lister.email,
       deadline_pkt: deadline, status: TASK_STATUS_PENDING, created_at: stamp, updated_at: stamp,
-    });
+    }) || null;
   } finally { lock.releaseLock(); }
 
   rec.approval_status = HUNT_APPROVED;
-  try { huntMirrorPush_(rec); } catch (e) {}
   try { pendingSendRemove_(rec.hunt_id); } catch (e) {}   // it is with a lister now — out of the send queue
   const title = String(rec[HC_TITLE] || rec.hunt_id).slice(0, 120);
   logActivity_(ctx.ident.email, 'HUNT_SEND_TO_LISTER', rec.hunt_id, 'approved', lister.email,
     account + ' · ' + advertising + ' · due ' + deadline + ' · task ' + taskId);
-  try { engineTaskPush_(taskId, null); } catch (e) {}
+  /* 20 Nov: the hunt mirror and the task push used to be two sequential Google→engine hops (and
+     the task one re-read all of TASKS to find the row this request had just written). One parallel
+     round trip with the row in hand; a reply that is not ok falls back to the old single retry. */
+  let replies = [];
+  try {
+    const calls = [{ action: 'syncHunts', payload: { rows: [{ vals: huntMirrorVals_(rec) }] } }];
+    if (taskRec) calls.push({ action: 'syncTasks', payload: { tasks: [taskRec] } });
+    replies = enginePostAll_(calls) || [];
+  } catch (e) { replies = []; }
+  if (!(replies[0] && replies[0].ok)) { try { huntMirrorPush_(rec); } catch (e) {} }
+  if (taskRec && !(replies[1] && replies[1].ok)) { try { engineTaskPush_(taskId, taskRec); } catch (e) {} }
   try {
     notify_(lister.email, 'Task assigned',
       '🔵 New listing task · ' + account + ' — "' + title + '" (' + advertising + '), due ' + deadline +

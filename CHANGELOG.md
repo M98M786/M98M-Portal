@@ -158,3 +158,8 @@ builds 20260901-00xx–01xx.
 
 ## 2026-11-12 — Handover log: the shared brain of the two Claudes
 - `docs/HANDOVER-LOG.md` added (WINDOWS). The Mac Claude (primary) and the Windows Claude (backup) each append one dated entry per change or finding, newest at the bottom, and push it with the change. First entry: the Windows backup set up from the 11 Nov package, the read-only keyed verification of 12 Nov, and two flags recorded for the Mac (`selfTest` 4 failed on 12 Nov; the 11 Nov sheet backup stopped at 23 of 49 tables).
+
+## 2026-11-20 — Send to listers: the Send itself, 7-10 s → one TASKS text search
+- `actionHuntSendToLister_` read the whole TASKS tab twice per send (the double-send guard, and `engineTaskPush_` re-reading the row just written) and made two sequential Google→engine hops. The guard is now a server-side TextFinder over the details column (`huntTaskHolding_`), `huntAppendTask_` hands back the row it wrote, and hunt mirror + task push go in one parallel `enginePostAll_`. The SLOW_ACTION ledger had every Send at 7.0-10.6 s.
+- Page: a send no longer re-reads the archive, the heavy Sent list and the workload and redraws every card (which wiped the picks on the other cards); the card goes, the counts move, the Sent list gets its row, only the workload boxes are re-read.
+- Backend code is saved in the Apps Script project (head); the web app still serves version 200 until a new version is deployed — the project is at Google's 200-version cap, so an old version must be deleted first.
