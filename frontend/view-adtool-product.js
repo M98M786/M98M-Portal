@@ -800,7 +800,7 @@
     ];
     var y = [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 },
       { type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }];
-    mount('atHour', chartBase({ xAxis: { type: 'category', data: Array.from({ length: 24 }, function (_, i) { return String(i).padStart(2, '0'); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, yAxis: y, legend: { show: true, top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } }, series: series, title: { text: yday ? DOW[dowOf(yday)] + ' ' + dfmt(yday) : '', left: 0, top: 0, textStyle: { color: '#9aa4b1', fontSize: 11, fontWeight: 'normal' } } }));
+    mount('atHour', chartBase({ grid: { left: 44, right: 52, top: 26, bottom: 28 }, xAxis: { type: 'category', data: Array.from({ length: 24 }, function (_, i) { return String(i).padStart(2, '0'); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, yAxis: y, legend: { show: true, top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } }, series: series, title: { text: yday ? DOW[dowOf(yday)] + ' ' + dfmt(yday) : '', left: 0, top: 0, textStyle: { color: '#9aa4b1', fontSize: 11, fontWeight: 'normal' } } }));
   }
   function dowOf(ymd) { var d = new Date(ymd + 'T12:00:00Z'); return (d.getUTCDay() + 6) % 7; }
   /* 20 Nov (owner): three bars a day — units sold green (left scale), that day's ad spend red and the
@@ -810,7 +810,7 @@
     var days = AT.data.days; var x = days.map(function (d) { return d.day.slice(5); });
     var units = days.map(function (d) { return Number(d.units) || 0; }); var spend = days.map(function (d) { return Math.round((Number(d.spend) || 0) * 100) / 100; });
     var avg = spend.map(function (_, i) { var a = spend.slice(Math.max(0, i - 6), i + 1); return Math.round(a.reduce(function (t, v) { return t + v; }, 0) / a.length * 100) / 100; });
-    mount('atDaily', chartBase({ xAxis: { type: 'category', data: x, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } },
+    mount('atDaily', chartBase({ grid: { left: 44, right: 52, top: 26, bottom: 28 }, xAxis: { type: 'category', data: x, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } },
       yAxis: [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 }, { type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }],
       legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } },
       series: [
