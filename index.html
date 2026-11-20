@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-2206';
+var BUILD = '20261120-2215';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -10847,12 +10847,69 @@ VIEW_CSS.push(
           (s.sampled_days ? '<div class="at-src" title="days in this window with an hourly reading in this slot">' + s.sampled_days + (s.sampled_days === 1 ? ' day read' : ' days read') + '</div>' : '') + '</td></tr>';
       }).join('') + '</tbody></table></div>';
   }
+  /* 20 Nov (owner): "integrate the graph bottom with best or worst time slots". Under the grid, the
+     verdicts the two blocks above it already imply, said outright: the best and worst slot by units a
+     day (and the slot that turns ad money into units best), the strongest and quietest hours of the
+     clock summed over every weekday, the best and weakest weekday per date held, and the three hottest
+     cells. Everything here is read off the slot rows and the grid; nothing is fetched or estimated. */
+  function hh(x) { return (x < 10 ? '0' : '') + x + ':00'; }
+  function hourRanges(list) {
+    var out = [], i = 0;
+    while (i < list.length) { var a = list[i], b = a; while (i + 1 < list.length && list[i + 1] === b + 1) { i++; b = list[i]; } out.push(a === b ? hh(a) : hh(a) + '\u2013' + hh(b + 1)); i++; }
+    return out.join(', ');
+  }
+  function timesVerdict(P) {
+    var S = P && P.slots && P.slots.rows, HW = P && P.hour_weekday, grid = HW && HW.units;
+    if (!grid || !grid.length) return '';
+    var tile = function (k, v, d, bad) { return '<div class="at-kpi"><div class="k">' + k + '</div><div class="v" style="font-size:15px' + (bad ? ';color:' + LOSS : '') + '">' + v + '</div><div class="d">' + d + '</div></div>'; };
+    var pct = function (v) { return v == null ? '' : Math.round(Number(v) * 100) + '% of units'; };
+    var n2 = function (v) { return Math.round(Number(v) * 100) / 100; };
+    var tiles = [];
+    if (S && S.length) {
+      var rs = S.filter(function (r) { return r.units_day != null; }).slice().sort(function (a, b) { return Number(b.units_day) - Number(a.units_day); });
+      if (rs.length > 1) {
+        var b = rs[0], w = rs[rs.length - 1];
+        var line = function (r) { return pct(r.share) + ' \u00b7 ' + n2(r.units_day) + ' units a day' + (r.spend_day != null ? ' \u00b7 ads ' + gbp(r.spend_day) + ' a day' : ''); };
+        tiles.push(tile('Best time slot', esc(SLOTS[b.slot]), line(b)));
+        tiles.push(tile('Worst time slot', esc(SLOTS[w.slot]), line(w), true));
+        var val = rs.filter(function (r) { return Number(r.spend_day) > 0.005; }).sort(function (a, c) { return Number(c.units_day) / Number(c.spend_day) - Number(a.units_day) / Number(a.spend_day); });
+        if (val.length > 1) {
+          var vb = val[0], vw = val[val.length - 1];
+          tiles.push(tile('Best value for ad money', esc(SLOTS[vb.slot]), n2(Number(vb.units_day) / Number(vb.spend_day)) + ' units per \u00a31 of ads \u00b7 worst ' + esc(SLOTS[vw.slot]) + ' at ' + n2(Number(vw.units_day) / Number(vw.spend_day))));
+        }
+      }
+    }
+    var hourSum = [], daySum = [], cells = [], dates = HW.dates || [], total = 0;
+    for (var x = 0; x < 24; x++) hourSum[x] = 0;
+    grid.forEach(function (r, d) {
+      daySum[d] = 0;
+      r.forEach(function (v, x) { v = Number(v) || 0; hourSum[x] += v; daySum[d] += v; total += v; if (v > 0) cells.push({ d: d, x: x, v: v }); });
+    });
+    if (total > 0) {
+      var hs = hourSum.map(function (v, x) { return { x: x, v: v }; }).sort(function (a, b) { return b.v - a.v || a.x - b.x; });
+      var top = hs.filter(function (o) { return o.v > 0; }).slice(0, 3);
+      tiles.push(tile('Strongest hours', top.map(function (o) { return hh(o.x); }).join(', '), top.map(function (o) { return o.v + ' units at ' + hh(o.x); }).join(' \u00b7 ') + ', summed over every weekday'));
+      var zero = []; for (var z = 0; z < 24; z++) if (!hourSum[z]) zero.push(z);
+      if (zero.length) tiles.push(tile('Quietest hours', hourRanges(zero), 'not one unit sold in ' + (zero.length === 1 ? 'this hour' : 'these ' + zero.length + ' hours') + ' in this window', true));
+      else { var low = hs.slice().reverse().slice(0, 3); tiles.push(tile('Quietest hours', low.map(function (o) { return hh(o.x); }).join(', '), low.map(function (o) { return o.v + ' units at ' + hh(o.x); }).join(' \u00b7 '), true)); }
+      var ds = daySum.map(function (v, d) { var n = Number(dates[d]) || 0; return { d: d, v: v, n: n, rate: n ? v / n : null }; }).filter(function (o) { return o.rate != null; }).sort(function (a, b) { return b.rate - a.rate; });
+      if (ds.length > 1) {
+        var bd = ds[0], wd = ds[ds.length - 1];
+        tiles.push(tile('Best weekday', esc(DOW[bd.d]), n2(bd.rate) + ' units a day \u00b7 ' + bd.v + ' units over ' + bd.n + ' ' + esc(DOW[bd.d]) + (bd.n === 1 ? '' : 's')));
+        tiles.push(tile('Weakest weekday', esc(DOW[wd.d]), n2(wd.rate) + ' units a day \u00b7 ' + wd.v + ' units over ' + wd.n + ' ' + esc(DOW[wd.d]) + (wd.n === 1 ? '' : 's'), true));
+      }
+      var hot = cells.sort(function (a, b) { return b.v - a.v || a.d - b.d || a.x - b.x; }).slice(0, 3);
+      if (hot.length) tiles.push(tile('Hottest cells', hot.map(function (c) { return esc(DOW[c.d]) + ' ' + hh(c.x); }).join(', '), hot.map(function (c) { var n = Number(dates[c.d]) || 0; return c.v + ' units ' + esc(DOW[c.d]) + ' ' + hh(c.x) + (n ? ' over ' + n + ' dates' : ''); }).join(' \u00b7 ')));
+    }
+    if (!tiles.length) return '';
+    return '<div class="at-sub" style="margin:12px 0 6px;font-weight:800;color:var(--text)">Best and worst times \u00b7 ' + esc(patLabel(P, 'hour_weekday')) + '</div><div class="at-kpis">' + tiles.join('') + '</div>';
+  }
   function heatPanel(P) {
     var HW = P && P.hour_weekday;
     var h = '<div class="at-panel"><h3>Hour × weekday · ' + esc(patLabel(P, 'hour_weekday')) + src('orders') + '</h3>' +
       '<div class="at-sub">Units per hour cell, black to gold. Sunday is the last row. The figure beside each day is how many of that weekday this window holds, so a bright cell on a single date cannot be read as a habit.</div>';
     if (!HW || !HW.units) return h + '<div class="at-empty">Not known: the hourly figures for this window could not be read.</div></div>';
-    return h + heat(HW.units, HW.dates, HW.orders) + '</div>';
+    return h + heat(HW.units, HW.dates, HW.orders) + timesVerdict(P) + '</div>';
   }
   function draw() {
     var D = AT.data, H = D.header, K = D.kpis || {};
