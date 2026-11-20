@@ -60,8 +60,170 @@ VIEW_CSS.push(
     '.ac-bar-lg b{font-weight:800}' +
     '.ac-lg-p b{color:var(--gold-a)}.ac-lg-o b{color:var(--ok,#2fb170)}' +
     '.ac-bar-tot{margin-left:auto;color:var(--text-3);font-weight:800}' +
-    '.ac-split-note{font-size:11px;color:var(--text-3);font-weight:600;margin-top:9px;line-height:1.5}'
+    '.ac-split-note{font-size:11px;color:var(--text-3);font-weight:600;margin-top:9px;line-height:1.5}' +
+    /* 20 Nov (owner): under every RED row, the listing's own Product history blocks — By period,
+       All-time daily, Where its ads sit — drawn small enough to sit in one box with the row. */
+    '.acc-tbl tr.ac-sub td{padding:0 10px 12px;text-align:left;white-space:normal;background:var(--bad-soft,rgba(255,80,80,.05))}' +
+    '.acc-tbl tr.ac-sub td:first-child{border-left:3px solid var(--bad);min-width:0}' +
+    '.acc-tbl tr.ac-sub:hover td{background:var(--bad-soft,rgba(255,80,80,.05))}' +
+    '.ac-d{border:1px solid var(--gold-line);border-radius:12px;background:var(--panel-2);padding:10px 12px;font-size:11px;color:var(--text-2);line-height:1.45}' +
+    '.ac-d h4{margin:0 0 3px;font-size:11.5px;font-weight:800;color:var(--text);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}' +
+    '.ac-dsrc{font-size:8.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);font-weight:800;border:1px solid var(--gold-line);border-radius:6px;padding:1px 6px;white-space:nowrap}' +
+    '.ac-dsrc.on{color:var(--gold-a);border-color:rgba(242,176,53,.5)}' +
+    '.ac-dsub{font-size:10px;color:var(--text-3);line-height:1.5;margin:0 0 6px}' +
+    '.ac-dsec{padding:8px 0 2px;border-top:1px solid var(--gold-line)}.ac-dsec:first-child{border-top:0;padding-top:0}' +
+    '.ac-dopen{margin-left:auto;font-size:10px;font-weight:800;color:var(--gold-a);text-decoration:underline;text-underline-offset:2px;white-space:nowrap}' +
+    '.ac-dt{width:100%;border-collapse:collapse;font-size:10.5px;font-variant-numeric:tabular-nums}' +
+    '.ac-dt th{font-size:8.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);font-weight:800;padding:3px 6px;border-bottom:1px solid var(--gold-line);text-align:right;white-space:nowrap}' +
+    '.ac-dt th:first-child,.ac-dt td:first-child{text-align:left}' +
+    '.ac-dt td{padding:3px 6px;border-bottom:1px solid rgba(255,255,255,.05);text-align:right;white-space:nowrap;color:var(--text-2)}' +
+    '.ac-dt td:first-child{color:var(--text);font-weight:700}' +
+    '.ac-dt td .ac-dsm{display:block;font-size:9px;color:var(--text-3);font-weight:600;white-space:normal}' +
+    '.ac-dmov{display:inline-block;margin-left:5px;padding:0 5px;border-radius:5px;font-size:8px;letter-spacing:.05em;text-transform:uppercase;font-weight:800;color:var(--gold-a);border:1px solid rgba(242,176,53,.4);vertical-align:1px}' +
+    '.ac-dpill{display:inline-block;padding:1px 7px;border-radius:9px;font-size:9.5px;font-weight:800;border:1px solid rgba(242,176,53,.5);color:var(--gold-a)}' +
+    '.ac-dchart svg{width:100%;height:auto;display:block}' +
+    '.ac-dleg{display:flex;gap:12px;flex-wrap:wrap;font-size:9.5px;color:var(--text-3);font-weight:700;margin:0 0 4px}.ac-dleg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:4px;vertical-align:-1px}' +
+    '.ac-dwait{color:var(--text-3);font-size:11px;padding:4px 0}'
   );
+  /* the Product history answers, per listing, for the red rows' boxes; {data, err, at} */
+  var AC_DET = {}, AC_DET_TTL = 10 * 60 * 1000, AC_DET_MAX = 30;
+  function dNum(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
+  function dGbp(v, dp) { var n = dNum(v); if (n == null) { return '\u2014'; } var a = Math.abs(n); return (n < 0 ? '\u2212\u00a3' : '\u00a3') + (dp === 0 ? Math.round(a).toLocaleString('en-GB') : a.toFixed(2)); }
+  function dCnt(v) { var n = dNum(v); return n == null ? '\u2014' : Math.round(n).toLocaleString('en-GB'); }
+  function dRoas(v) { var n = dNum(v); return n == null ? '\u2014' : n.toFixed(2) + '\u00d7'; }
+  function dDay(s) { s = String(s || '').slice(0, 10); return /^\d{4}-\d\d-\d\d$/.test(s) ? s.slice(8) + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(s.slice(5, 7)) - 1] : '\u2014'; }
+  function dProfit(v) { return typeof adtProfitCell === 'function' ? adtProfitCell(v, 0, 0) : dGbp(v); }
+  function dSrc(t, on) { return '<span class="ac-dsrc' + (on ? ' on' : '') + '">' + esc(t) + '</span>'; }
+  function dTypeTxt(f) { f = String(f || ''); return f === 'COST_PER_CLICK' ? 'CPC (Advanced)' : f === 'COST_PER_SALE' ? 'Cost per sale' : (f || '?'); }
+  function dStamp(s) { s = String(s || ''); return s ? s.replace('T', ' ').slice(0, 16) : '\u2014'; }
+  /* 1 · By period — the Product history table, the same rows and columns, smaller */
+  function dPeriods(D) {
+    var K = D.kpis || {}, so = !!D.spend_only;
+    var firstDay = (D.days && D.days.length && D.days[0] && D.days[0].day) ? dDay(D.days[0].day) : '';
+    var w = [['Yesterday', K.yesterday || {}], ['Last 7 days', K.d7 || {}], ['Last 30 days', K.d30 || {}], ['All time' + (firstDay ? ' (from ' + firstDay + ')' : ''), K.all || {}]];
+    if (K.today && typeof K.today === 'object') { w.unshift(['Today so far', K.today]); }
+    var pcOf = function (s) { return Number(s.pending_cost_orders !== undefined ? s.pending_cost_orders : s.pending) || 0; };
+    var pfOf = function (s) { return Number(s.pending_fee_orders !== undefined ? s.pending_fee_orders : s.pending_fee) || 0; };
+    var h = '<div class="ac-dsec"><h4>By period ' + dSrc('eBay ads report') + dSrc('orders') + '</h4>' +
+      '<div class="ac-dsub">' + (so ? 'Today so far, yesterday, the last 7 and 30 days, and all time: what this listing spent on ads and what it sold.' : 'Today so far, yesterday, the last 7 and 30 days, and all time. Profit after eBay fees, product cost, ad spend and returns, the same way the Sales Analysis sheet works it out. Orders we cannot cost yet are left out and counted separately.') + '</div>' +
+      '<div class="scroll"><table class="ac-dt"><thead><tr><th>Period</th><th>Ad spend</th><th>Units from ads</th>' + (so ? '' : '<th>ROAS</th>') + '<th>Orders</th><th>Units</th><th>Units not from ads</th>' + (so ? '' : '<th>Profit</th>') + '</tr></thead><tbody>' +
+      w.map(function (x) {
+        var s = x[1] || {}, pc = pcOf(s), pf = pfOf(s);
+        var notAds = Math.max(0, (Number(s.units) || 0) - (Number(s.attr_units) || 0));
+        var moving = x[0] === 'Today so far' || !!s.includes_today;
+        var lab = esc(x[0]) + (moving ? '<span class="ac-dmov">still updating</span>' : '');
+        if (s.ads_landing) {
+          var ln = esc(String(s.landing_note || 'eBay has not published this day yet'));
+          return '<tr><td>' + lab + '</td><td colspan="' + (so ? 2 : 3) + '"><span class="ac-dsm">' + ln + '</span></td><td>' + dCnt(s.orders || 0) + '</td><td>' + dCnt(s.units || 0) + '</td><td>\u2014</td>' + (so ? '' : '<td><span class="ac-dsm">' + ln + '</span></td>') + '</tr>';
+        }
+        var ro = s.roas != null ? s.roas : (Number(s.spend) > 0 && s.attr_revenue != null ? Number(s.attr_revenue) / Number(s.spend) : null);
+        return '<tr><td>' + lab + '</td><td>' + dGbp(s.spend) + '</td><td>' + dCnt(s.attr_units || 0) + '</td>' + (so ? '' : '<td>' + dRoas(ro) + '</td>') +
+          '<td>' + dCnt(s.orders || 0) + '</td><td>' + dCnt(s.units || 0) + '</td><td>' + dCnt(notAds) + '</td>' +
+          (so ? '' : '<td>' + dProfit(s.actual_profit !== undefined ? s.actual_profit : s.actual) + (pc + pf > 0 ? '<span class="ac-dsm">' + (pc + pf) + ' order' + (pc + pf === 1 ? '' : 's') + ' not costed yet</span>' : '') + '</td>') + '</tr>';
+      }).join('') + '</tbody></table></div></div>';
+    return h;
+  }
+  /* 2 · All-time daily — the Product history chart, drawn as inline SVG so the box needs no chart
+     library: ad spend as faint bars on a right-hand £ scale, units from all channels as the gold line
+     with its band, the 7-day average in white, units from ads as gold dots. */
+  function dDaily(D) {
+    var days = (D.days || []).filter(function (d) { return d && d.day; });
+    var h = '<div class="ac-dsec"><h4>All-time daily ' + dSrc('orders') + dSrc('eBay ads report') + '</h4>' +
+      '<div class="ac-dsub">Units from all channels (gold), the 7-day average (white), units from ads (dots) and ad spend (faint bars).</div>';
+    if (!days.length) { return h + '<div class="ac-dwait">No day held for this listing yet.</div></div>'; }
+    var W = 1000, H = 190, L = 34, R = 40, T = 10, B = 24, n = days.length;
+    var pw = W - L - R, ph = H - T - B, slot = pw / n;
+    var units = days.map(function (d) { return Number(d.units) || 0; }), attr = days.map(function (d) { return Number(d.attr_units) || 0; }), spend = days.map(function (d) { return Number(d.spend) || 0; });
+    var avg = units.map(function (_, i) { var a = units.slice(Math.max(0, i - 6), i + 1); return a.reduce(function (t, v) { return t + v; }, 0) / a.length; });
+    var maxU = Math.max(1, Math.max.apply(null, units.concat(attr))), maxS = Math.max(0.01, Math.max.apply(null, spend));
+    var xs = function (i) { return L + slot * (i + 0.5); }, yu = function (v) { return T + ph - (v / maxU) * ph; }, ys = function (v) { return T + ph - (v / maxS) * ph; };
+    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
+    var ticks = maxU <= 6 ? maxU : 4;
+    for (var g = 0; g <= ticks; g++) { var gv = maxU * g / ticks, gy = yu(gv); s += '<line x1="' + L + '" y1="' + gy.toFixed(1) + '" x2="' + (W - R) + '" y2="' + gy.toFixed(1) + '" stroke="rgba(255,255,255,.06)"/><text x="' + (L - 6) + '" y="' + (gy + 3).toFixed(1) + '" text-anchor="end" font-size="9" fill="#66707c">' + (Math.round(gv * 10) / 10) + '</text>'; }
+    s += '<text x="' + (W - R + 6) + '" y="' + (T + 3) + '" font-size="9" fill="#66707c">\u00a3' + (Math.round(maxS * 100) / 100) + '</text><text x="' + (W - R + 6) + '" y="' + (T + ph + 3) + '" font-size="9" fill="#66707c">\u00a30</text>';
+    var bw = Math.max(2, Math.min(10, slot * 0.35));
+    days.forEach(function (d, i) { if (spend[i] > 0) { s += '<rect x="' + (xs(i) - bw / 2).toFixed(1) + '" y="' + ys(spend[i]).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + (T + ph - ys(spend[i])).toFixed(1) + '" fill="rgba(255,255,255,.16)"><title>' + esc(d.day) + ' \u00b7 ad spend ' + dGbp(spend[i]) + '</title></rect>'; } });
+    var path = units.map(function (v, i) { return (i ? 'L' : 'M') + xs(i).toFixed(1) + ',' + yu(v).toFixed(1); }).join('');
+    s += '<path d="' + path + 'L' + xs(n - 1).toFixed(1) + ',' + (T + ph) + 'L' + xs(0).toFixed(1) + ',' + (T + ph) + 'Z" fill="rgba(242,176,53,.12)"/>';
+    s += '<path d="' + path + '" fill="none" stroke="#f2b035" stroke-width="2"/>';
+    s += '<path d="' + avg.map(function (v, i) { return (i ? 'L' : 'M') + xs(i).toFixed(1) + ',' + yu(v).toFixed(1); }).join('') + '" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="2"/>';
+    days.forEach(function (d, i) {
+      s += '<circle cx="' + xs(i).toFixed(1) + '" cy="' + yu(units[i]).toFixed(1) + '" r="3" fill="#f2b035"><title>' + esc(d.day) + ' \u00b7 ' + units[i] + ' unit' + (units[i] === 1 ? '' : 's') + ' \u00b7 ' + attr[i] + ' from ads \u00b7 ad spend ' + dGbp(spend[i]) + '</title></circle>';
+      if (attr[i] > 0) { s += '<circle cx="' + xs(i).toFixed(1) + '" cy="' + yu(attr[i]).toFixed(1) + '" r="3.5" fill="#d9a63b" fill-opacity=".9"><title>' + esc(d.day) + ' \u00b7 ' + attr[i] + ' from ads</title></circle>'; }
+    });
+    var every = Math.max(1, Math.ceil(n / 16));
+    days.forEach(function (d, i) { if (i % every === 0 || i === n - 1) { s += '<text x="' + xs(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9" fill="#66707c">' + esc(String(d.day).slice(5)) + '</text>'; } });
+    s += '</svg>';
+    return h + '<div class="ac-dleg"><span><i style="background:rgba(255,255,255,.22)"></i>Ad spend</span><span><i style="background:#f2b035"></i>Units (all channels)</span><span><i style="background:rgba(255,255,255,.55)"></i>7-day average</span><span><i style="background:#d9a63b;border-radius:50%"></i>Units from ads</span></div><div class="ac-dchart">' + s + '</div></div>';
+  }
+  /* 3 · Where its ads sit — the campaign rows as the Product history prints them */
+  function dWhere(D) {
+    var Wr = D.where && D.where.rows ? D.where.rows : null, C = D.campaigns || [], so = !!D.spend_only;
+    var live = Wr ? Wr.filter(function (c) { return !(c && c.gone); }) : null;
+    var nLive = live ? live.filter(function (c) { return c.campaign_running !== false && String(c.campaign_status || '').toUpperCase() !== 'ENDED'; }).length : 0;
+    var h = '<div class="ac-dsec"><h4>Where its ads sit ' + dSrc('ad status, read per campaign') + (live ? dSrc(nLive === 1 ? 'in one campaign' : 'in ' + nLive + ' campaigns', true) : '') + '</h4>' +
+      '<div class="ac-dsub">Which campaigns this listing is in, and what its own ad said when that campaign\u2019s ads were last read. Each status is a reading, not a live check, so the date of the reading is on every row.' +
+      (D.where && D.where.dup && D.where.dup.why ? ' <b>' + esc(String(D.where.dup.why)) + '</b>' : '') +
+      (D.ebay_read ? ' Read from eBay ' + esc(String(D.ebay_read).replace('T', ' ').slice(11, 19) || String(D.ebay_read)) + '.' : '') +
+      (Wr && D.where.note ? ' ' + esc(String(D.where.note)) + '.' : '') + '</div>';
+    var nk = function (v, f) { return v == null ? '<span class="ac-dsm">no row</span>' : f(v); };
+    if (live) {
+      if (!live.length) { return h + '<div class="ac-dwait">Not in any campaign that is still on eBay.</div></div>'; }
+      h += '<div class="scroll"><table class="ac-dt"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>This ad, when last read</th><th>Ad rate</th><th>Daily budget</th><th>Spend yesterday</th>' + (so ? '' : '<th>Sales yesterday</th>') +
+        '<th>Spend, last 7 days</th>' + (so ? '' : '<th>ROAS, last 7 days</th>') + '<th>Units sold, last 7 days</th><th>Spend, last 30 days</th>' + (so ? '' : '<th>ROAS, last 30 days</th>') + '<th>Units sold, last 30 days</th><th>Spend, all time</th>' + (so ? '' : '<th>ROAS, all time</th>') + '<th>Units sold, all time</th><th>Last change</th></tr></thead><tbody>' +
+        live.map(function (c) {
+          var state = String(c.ad_state || c.ad_status || '?');
+          var stateCell = '<span class="ac-dpill">' + esc(state) + (c.live ? ' \u00b7 live' : '') + '</span>' + (c.ads_synced_at || c.synced_at ? '<span class="ac-dsm">read ' + esc(dStamp(c.ads_synced_at || c.synced_at)) + '</span>' : '');
+          return '<tr><td>' + (typeof adtCampaignLink === 'function' ? adtCampaignLink(c.campaign_id, c.name) : esc(String(c.name || c.campaign_id))) + '</td><td>' + esc(dTypeTxt(c.funding)) + '</td><td>' + esc(c.campaign_status || '?') + '</td><td>' + stateCell + '</td>' +
+            '<td>' + esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '\u2014')) + '</td><td>' + (c.budget != null ? dGbp(c.budget, 0) : '\u2014') + '</td><td>' + dGbp(c.spend_yesterday) + '</td>' +
+            (so ? '' : '<td>' + (c.units_yesterday == null ? '\u2014' : dCnt(c.units_yesterday) + ' \u00b7 ' + dGbp(c.revenue_yesterday)) + '</td>') +
+            '<td>' + dGbp(c.spend_7d) + '</td>' + (so ? '' : '<td>' + dRoas(c.roas_7d) + '</td>') + '<td>' + nk(c.units_7d, dCnt) + '</td>' +
+            '<td>' + nk(c.spend_30d, dGbp) + '</td>' + (so ? '' : '<td>' + nk(c.roas_30d, dRoas) + '</td>') + '<td>' + nk(c.units_30d, dCnt) + '</td>' +
+            '<td>' + nk(c.spend_all, dGbp) + (c.all_from ? '<span class="ac-dsm">from ' + esc(dDay(c.all_from)) + '</span>' : '') + '</td>' + (so ? '' : '<td>' + nk(c.roas_all, dRoas) + '</td>') + '<td>' + nk(c.units_all, dCnt) + '</td>' +
+            '<td>' + esc(dStamp(c.last_change)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+      if (D.where.history && D.where.history.length) {
+        h += '<div class="ac-dsub" style="margin:6px 0 0">Status changes: ' + D.where.history.slice(0, 6).map(function (x) { return esc(dStamp(x.seen_at)) + ' ' + esc(String(x.name || '')) + ' ' + esc(x.from_status || '\u2014') + ' \u2192 ' + esc(x.to_status || '\u2014'); }).join(' \u00b7 ') + '</div>';
+      }
+      return h + '</div>';
+    }
+    if (!C.length) { return h + '<div class="ac-dwait">Not in any campaign we know about.</div></div>'; }
+    return h + '<div class="scroll"><table class="ac-dt"><thead><tr><th>Campaign</th><th>Type</th><th>Campaign status</th><th>Ad status, when last read</th><th>Ad rate</th><th>Daily budget</th></tr></thead><tbody>' +
+      C.map(function (c) { var st = c.funding === 'COST_PER_SALE' ? (c.ad_status === 'ARCHIVED' ? 'archived' : 'exists (live)') : (c.ad_status || 'unknown'); return '<tr><td>' + (typeof adtCampaignLink === 'function' ? adtCampaignLink(c.campaign_id || c.id, c.name) : esc(String(c.name || ''))) + '</td><td>' + esc(dTypeTxt(c.funding)) + '</td><td>' + esc(c.status || '?') + '</td><td>' + esc(st) + '</td><td>' + esc(c.bid ? c.bid + '%' : '\u2014') + '</td><td>' + (c.budget != null ? dGbp(c.budget, 0) : '\u2014') + '</td></tr>'; }).join('') +
+      '</tbody></table></div></div>';
+  }
+  function acDetailHtml(id) {
+    var e = AC_DET[id];
+    var open = '<a class="ac-dopen" href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener">the full Product history \u2197</a>';
+    if (!e || (!e.data && !e.err)) { return '<div class="ac-dwait">Reading this listing\u2019s Product history\u2026</div>'; }
+    if (e.err) { return '<div class="ac-dwait">The Product history could not be read: ' + esc(e.err) + ' ' + open + '</div>'; }
+    var D = e.data;
+    return '<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin:0 0 6px"><span class="ac-dsub" style="margin:0">This row is red: \u00a33+ spent today with no order. Its Product history, in the page\u2019s own order:</span>' + open + '</div>' +
+      dPeriods(D) + dDaily(D) + dWhere(D);
+  }
+  /* the red rows' Product histories are read one after another, never all at once, and kept for ten
+     minutes so the two-minute board refresh does not re-ask for every one of them */
+  function acDetailsLoad(box) {
+    var els = box.querySelectorAll('[data-ac-det]'), ids = [], now = Date.now();
+    for (var i = 0; i < els.length && ids.length < AC_DET_MAX; i++) {
+      var id = els[i].getAttribute('data-ac-det'), e = AC_DET[id];
+      if (!e || (!e.loading && (!e.at || now - e.at > AC_DET_TTL))) { ids.push(id); }
+    }
+    var next = function () {
+      var id = ids.shift(); if (!id) { return; }
+      AC_DET[id] = AC_DET[id] || {}; AC_DET[id].loading = true;
+      api('adtoolListing', { item_id: id }).then(function (d) {
+        AC_DET[id] = { data: d || {}, err: '', at: Date.now() };
+      })['catch'](function (err) {
+        AC_DET[id] = { data: null, err: (err && err.message) || 'no answer', at: Date.now() };
+      }).then(function () {
+        var el = box.querySelector('[data-ac-det="' + id + '"]');
+        if (el) { el.innerHTML = acDetailHtml(id); }
+        next();
+      });
+    };
+    next();
+  }
 
   function acGBP(v) { var n = Number(v) || 0; return '£' + n.toFixed(2); }
   function acROAS(rev, sp) { return Number(sp) > 0.005 ? (Number(rev) / Number(sp)).toFixed(1) + '\u00d7' : '\u2014'; }
@@ -176,9 +338,15 @@ VIEW_CSS.push(
     acSortRows(rows).forEach(function (r) {
       h += '<tr' + (r.waste ? ' class="ac-waste"' : '') + '>' +
         cols.map(function (c) { return '<td>' + c.cell(r) + '</td>'; }).join('') + '</tr>';
+      /* 20 Nov (owner): a red row carries its Product history underneath, in one box */
+      var did = String(r.item_id == null ? '' : r.item_id).trim();
+      if (r.waste && /^\d{9,13}$/.test(did)) {
+        h += '<tr class="ac-sub"><td colspan="' + cols.length + '"><div class="ac-d" data-ac-det="' + esc(did) + '">' + acDetailHtml(did) + '</div></td></tr>';
+      }
     });
     h += '</tbody></table></div>';
     box.innerHTML = h;
+    acDetailsLoad(box);
     var ths = box.querySelectorAll('th[data-ac-k]');
     for (var i = 0; i < ths.length; i++) ths[i].onclick = function () {
       var k = this.getAttribute('data-ac-k'), col = acCol(k);
