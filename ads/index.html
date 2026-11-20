@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1811';
+var BUILD = '20261120-1813';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9366,14 +9366,17 @@ window.M98M_ADS_ONLY = true;
      labelled like the others. */
   var GREEN = '#2fb170', WHITEBAR = 'rgba(255,255,255,.72)';
   var BAR_LAYOUT = { moveOverlap: 'shiftY', hideOverlap: false };
-  function moneyPill(bg, ink) { return Object.assign({}, PILL, { backgroundColor: bg, color: ink, fontSize: 8.5, padding: [1, 4, 1, 4], formatter: function (o) { return o.value == null || !(Number(o.value) > 0) ? '' : '\u00a3' + Number(o.value).toFixed(2); } }); }
+  /* the two money pills stand UPRIGHT (rotated 90°): a "£10.92" pill is wider than the whole three-bar
+     group, so flat pills could only overlap or hide; upright they are a dozen pixels wide and all
+     three fit the group with room, each over its own bar, reading bottom to top */
+  function moneyPill(bg, ink) { return Object.assign({}, PILL, { backgroundColor: bg, color: ink, fontSize: 8.5, padding: [1, 4, 1, 4], rotate: 90, align: 'left', verticalAlign: 'middle', distance: 5, formatter: function (o) { return o.value == null || !(Number(o.value) > 0) ? '' : '\u00a3' + Number(o.value).toFixed(2); } }); }
   var MONEY_PILL = moneyPill(LOSS, '#fff');
   var AVG_PILL = moneyPill('rgba(255,255,255,.88)', '#14110a');
   var UNIT_PILL = Object.assign({}, PILL, { backgroundColor: GREEN, color: '#fff', fontSize: 8.5, padding: [1, 4, 1, 4], formatter: pillInt });
   /* headroom: the scale runs to 1.45× the tallest bar (and to a whole unit on the units side), so three
      stacked pills fit above the tallest group without touching the legend strip */
-  function unitsMax(arr) { var m = Math.max.apply(null, [0].concat(arr)); return Math.max(2, Math.ceil(m * 1.45)); }
-  function moneyMax(arr) { var m = Math.max.apply(null, [0].concat(arr)); if (!(m > 0)) return 1; var t = m * 1.45, step = Math.pow(10, Math.floor(Math.log(t) / Math.LN10)); return Math.ceil(t / (step / 2)) * (step / 2); }
+  function unitsMax(arr) { var m = Math.max.apply(null, [0].concat(arr)); return Math.max(2, Math.ceil(m * 1.6)); }
+  function moneyMax(arr) { var m = Math.max.apply(null, [0].concat(arr)); if (!(m > 0)) return 1; var t = m * 1.6, step = Math.pow(10, Math.floor(Math.log(t) / Math.LN10)); return Math.ceil(t / (step / 2)) * (step / 2); }
   var BAR_GRID = { left: 46, right: 54, top: 54, bottom: 28 };
   var BAR_LEGEND = { top: 0, right: 0, itemWidth: 14, itemHeight: 9, itemGap: 14, textStyle: { color: '#9aa4b1', fontSize: 11 } };
   function drawHour() {
