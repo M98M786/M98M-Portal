@@ -29423,7 +29423,19 @@ const ROUTES = {
           hunt_id: huntId,
         };
       });
-      return { tasks, as_of: new Date().toISOString(), now_pkt: nowPkt, history_days: 60 };
+      /* 20 Nov (owner: "separate numbers — new listings, listings rejected by the lister due to
+         issues, and the revisions sent to each lister"). A lister who cannot list what was sent
+         presses Need info, which raises a hunt_revision task against the hunter with the LISTER as
+         assigned_by — that is the "sent back for issues" count. A revision for a lister is a
+         listing_revision task assigned to them. Same 60-day window as the listings themselves. */
+      const slim = (r) => { const st = String(r.status || ''); return { task_id: r.task_id, assigned_to: String(r.assigned_to || '').toLowerCase(), assigned_by: String(r.assigned_by || '').toLowerCase(), status: st, open: st !== 'Completed', created_at: String(r.created_at || ''), title: String(r.title || '').slice(0, 120) }; };
+      const rev = await ctx.env.DB.prepare(
+        "SELECT task_id, assigned_to, assigned_by, status, created_at, title FROM tasks WHERE type = 'listing_revision' AND (status != 'Completed' OR COALESCE(NULLIF(decided_at, ''), NULLIF(updated_at, ''), created_at) >= ?1) ORDER BY created_at DESC LIMIT 3000"
+      ).bind(sinceDay).all().catch(() => ({ results: [] }));
+      const iss = await ctx.env.DB.prepare(
+        "SELECT task_id, assigned_to, assigned_by, status, created_at, title FROM tasks WHERE type = 'hunt_revision' AND (status != 'Completed' OR COALESCE(NULLIF(decided_at, ''), NULLIF(updated_at, ''), created_at) >= ?1) ORDER BY created_at DESC LIMIT 3000"
+      ).bind(sinceDay).all().catch(() => ({ results: [] }));
+      return { tasks, revisions: (rev.results || []).map(slim), issues: (iss.results || []).map(slim), as_of: new Date().toISOString(), now_pkt: nowPkt, history_days: 60 };
     },
   },
 

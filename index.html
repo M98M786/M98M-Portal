@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1158';
+var BUILD = '20261120-1239';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -15799,6 +15799,13 @@ function createMeeting() {
     '.aa-l.busy{border-color:rgba(255,159,67,.45)}.aa-l.busy b{color:var(--warn)}' +
     '.aa-l.heavy{border-color:rgba(240,96,90,.5)}.aa-l.heavy b{color:var(--bad)}' +
     '.aa-l .late{color:var(--bad);font-weight:800}' +
+    /* 20 Nov (owner): the three separate numbers under the big one */
+    '.aa-l3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:9px;padding-top:8px;border-top:1px solid var(--gold-line)}' +
+    '.aa-l3 span{display:block;min-width:0}' +
+    '.aa-l3 b{display:block;font-size:17px;font-weight:800;margin:0 0 1px;line-height:1.1;font-variant-numeric:tabular-nums}' +
+    '.aa-l3 em{display:block;font-style:normal;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:800;line-height:1.3}' +
+    '.aa-l3 i{display:block;font-style:normal;font-size:10px;color:var(--text-2);font-weight:600;margin-top:2px}' +
+    '.aa-l3 .iss b{color:var(--warn)}.aa-l3 .rev b{color:var(--gold-a)}' +
     '.aa-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}' +
     '.aa-card{border:1px solid var(--gold-line);border-radius:14px;background:var(--panel-2);overflow:hidden;display:flex;flex-direction:column}' +
     '.aa-card .aa-hd{display:flex;gap:11px;padding:12px 13px;border-bottom:1px solid var(--gold-line)}' +
@@ -15947,6 +15954,9 @@ function createMeeting() {
     if (typeof engineCall !== 'function') { return; }
     engineCall('listingLoad', {}, 20000).then(function (d) {
       AA.load = (d && d.tasks) || [];
+      AA.loadRev = (d && d.revisions) || [];
+      AA.loadIss = (d && d.issues) || [];
+      AA.loadDays = (d && d.history_days) || 60;
       AA.loadErr = '';
       aaPaintLoad();
     }).catch(function (e) {
@@ -15962,11 +15972,30 @@ function createMeeting() {
       return;
     }
     var by = {};
+    var mk = function () { return { waiting: 0, notStarted: 0, working: 0, submitted: 0, overdue: 0, oldest: null, newAll: 0, newDone: 0, iss: 0, issOpen: 0, rev: 0, revOpen: 0 }; };
+    /* 20 Nov (owner): the three separate numbers. New listings received in the window and how many
+       of those are listed; listings the lister sent back for issues (their Need-info raises a
+       hunt_revision against the hunter, with the lister as the sender); revisions sent to them. */
+    AA.load.forEach(function (t) {
+      var k0 = aaStr(t.assigned_to).toLowerCase(); if (!k0) { return; }
+      var b0 = by[k0] || (by[k0] = mk());
+      b0.newAll++; if (!t.open) { b0.newDone++; }
+    });
+    (AA.loadIss || []).forEach(function (t) {
+      var k1 = aaStr(t.assigned_by).toLowerCase(); if (!k1) { return; }
+      var b1 = by[k1] || (by[k1] = mk());
+      b1.iss++; if (t.open) { b1.issOpen++; }
+    });
+    (AA.loadRev || []).forEach(function (t) {
+      var k2 = aaStr(t.assigned_to).toLowerCase(); if (!k2) { return; }
+      var b2 = by[k2] || (by[k2] = mk());
+      b2.rev++; if (t.open) { b2.revOpen++; }
+    });
     AA.load.forEach(function (t) {
       if (!t.open) { return; }
       var k = aaStr(t.assigned_to).toLowerCase();
       if (!k) { return; }
-      var b = by[k] || (by[k] = { waiting: 0, notStarted: 0, working: 0, submitted: 0, overdue: 0, oldest: null });
+      var b = by[k] || (by[k] = mk());
       /* a submitted task is waiting on US to approve it, not on the lister's draft link */
       if (t.status === AA_SUBMITTED) { b.submitted++; return; }
       b.waiting++;
@@ -15980,15 +16009,17 @@ function createMeeting() {
     });
     /* exactly the people the Send form can choose — the boxes and the dropdown must agree */
     var rows = AA.listers.map(function (l) {
-      var b = by[aaStr(l.email).toLowerCase()] || { waiting: 0, notStarted: 0, working: 0, submitted: 0, overdue: 0, oldest: null };
+      var b = by[aaStr(l.email).toLowerCase()] || mk();
       return { name: aaStr(l.name).split(' \u2014 ')[0], role: aaStr(l.role), b: b };
     }).sort(function (x, y) { return x.b.waiting - y.b.waiting; });
     if (!rows.length) { box.innerHTML = ''; return; }
     var total = rows.reduce(function (n, r) { return n + r.b.waiting; }, 0);
+    var days = AA.loadDays || 60;
     box.innerHTML =
       '<div class="aa-load-h"><b>Waiting with the listers right now</b>' +
         '<span>' + total + ' listing' + (total === 1 ? '' : 's') + ' on their desks \u00b7 most room first. ' +
-        'A listing leaves a lister the moment its draft link is added, so what they are holding IS what has no draft link yet.</span></div>' +
+        'A listing leaves a lister the moment its draft link is added, so what they are holding IS what has no draft link yet. ' +
+        'Under each name: new listings received in the last ' + days + ' days, listings they sent back for issues (Need info), and revisions sent to them.</span></div>' +
       '<div class="aa-lgrid">' + rows.map(function (r) {
         var b = r.b;
         var cls = b.waiting === 0 ? ' free' : (b.waiting >= 20 ? ' heavy' : (b.waiting >= 8 ? ' busy' : ''));
@@ -16001,6 +16032,11 @@ function createMeeting() {
           '<div class="r">' + esc(r.role) + '</div>' +
           '<b>' + b.waiting + '</b>' +
           '<div class="w">' + (b.waiting === 0 ? 'nothing waiting \u2014 free' : 'waiting for a draft link') + '</div>' +
+          '<div class="aa-l3">' +
+            '<span class="new"><b>' + b.newAll + '</b><em>New listings</em><i>' + b.newDone + ' listed \u00b7 ' + (b.newAll - b.newDone) + ' open</i></span>' +
+            '<span class="iss"><b>' + b.iss + '</b><em>Sent back \u00b7 issues</em><i>' + (b.iss ? b.issOpen + ' still with the hunter' : 'none') + '</i></span>' +
+            '<span class="rev"><b>' + b.rev + '</b><em>Revisions sent</em><i>' + (b.rev ? b.revOpen + ' open' : 'none') + '</i></span>' +
+          '</div>' +
           (b.overdue ? '<div class="d"><span class="late">' + b.overdue + ' past the deadline</span>' + (bits.length ? ' \u00b7 ' + esc(bits.join(' \u00b7 ')) : '') + '</div>'
                      : (bits.length ? '<div class="d">' + esc(bits.join(' \u00b7 ')) + '</div>' : '')) +
         '</div>';
