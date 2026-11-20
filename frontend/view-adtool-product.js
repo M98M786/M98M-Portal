@@ -947,14 +947,14 @@
     inst.setOption({ graphic: { elements: g } }, { replaceMerge: ['graphic'] });
     /* remembered for the resize pass; a chart whose element has gone is dropped then */
     DAILY_LIVE = DAILY_LIVE.filter(function (d) { return d.el !== el && document.body.contains(d.el); });
-    DAILY_LIVE.push({ el: el, days: days, mode: mode });
+    DAILY_LIVE.push({ el: el, redraw: function () { drawDailyInto(el, days, mode); } });
     return inst;
   }
   (function () {
     var tmr = null;
     window.addEventListener('resize', function () {
       clearTimeout(tmr);
-      tmr = setTimeout(function () { DAILY_LIVE.slice().forEach(function (d) { if (document.body.contains(d.el)) drawDailyInto(d.el, d.days, d.mode); }); }, 150);
+      tmr = setTimeout(function () { DAILY_LIVE.slice().forEach(function (d) { if (document.body.contains(d.el)) d.redraw(); }); }, 150);
     });
   })();
   /* the tab strip the chart is driven by, the same markup on both pages */
@@ -979,17 +979,45 @@
     var units = rows.map(function (r) { return Number(r.units) || 0; }), ads = rows.map(function (r) { return Number(r.attr_units) || 0; });
     var profit = rows.map(function (r) { return r.actual_profit == null ? null : Math.round(Number(r.actual_profit) * 100) / 100; });
     var pAbs = profit.map(function (v) { return v == null ? 0 : Math.abs(v); }), pMax = moneyMax(pAbs);
-    var pData = profit.map(function (v) { return v == null ? null : { value: Math.abs(v), signed: v, itemStyle: { color: v < 0 ? LOSS : GREEN, borderRadius: [3, 3, 0, 0] }, label: v < 0 ? LOSS_PILL : PROFIT_PILL }; });
-    mount('atWM', chartBase({ grid: BAR_GRID, xAxis: { type: 'category', data: rows.map(function (r) { return r[key]; }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, legend: BAR_LEGEND,
-      yAxis: [{ type: 'value', max: unitsMax(units), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 },
-        { type: 'value', max: pMax, min: 0, splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'profit or loss', nameTextStyle: { color: '#66707c' } }],
+    var pData = profit.map(function (v) { return v == null ? null : { value: Math.abs(v), signed: v, itemStyle: { color: v < 0 ? LOSS : GREEN, borderRadius: [3, 3, 0, 0] } }; });
+    /* Owner, 20 Nov: "space out the bars, enough is available, no details should overlap other
+       information". The figures leave the bars and sit in three rows above the plot, the same way
+       the daily chart does: profit nearest the bars (green, red for a loss, signed), units from ads
+       above it, units on top; and the bar groups are spread across the width. */
+    var n = rows.length, upright = n > 22;
+    var moneyS = function (v) { return v == null ? '' : (v < 0 ? '\u2212\u00a3' : '\u00a3') + Math.abs(v).toFixed(2); };
+    var longest = Math.max.apply(null, [0].concat(profit.map(function (v) { return moneyS(v).length; })));
+    var rowH = upright ? (longest >= 8 ? 50 : 40) : 16, legendH = 26;
+    var top = legendH + rowH + 16 * 2 + 10;
+    var el = document.getElementById('atWM');
+    if (el) { el.style.height = (top + 200) + 'px'; }
+    var FONT = '700 9px Instrument Sans, system-ui, sans-serif';
+    mount('atWM', chartBase({ grid: { left: 70, right: 54, top: top, bottom: 28 }, xAxis: { type: 'category', data: rows.map(function (r) { return r[key]; }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, interval: 0 } }, legend: BAR_LEGEND,
+      yAxis: [{ type: 'value', max: Math.max(2, Math.ceil(niceMoney(Math.max.apply(null, [0].concat(units)) * 1.08))), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, minInterval: 1 },
+        { type: 'value', max: pMax, min: 0, splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' } }],
       series: [
-        { name: 'Units', type: 'bar', data: units, label: UNIT_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, barGap: '20%', barCategoryGap: '40%' },
-        { name: 'Units from ads', type: 'bar', data: ads, label: Object.assign({}, UNIT_PILL, { backgroundColor: 'rgba(255,255,255,.88)', color: '#14110a' }), labelLayout: BAR_LAYOUT, itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 },
-        /* `color` on the series is what the legend swatch takes; with only a per-bar colour function the
-           swatch fell back to the palette's blue */
-        { name: 'Profit \u00a3 (red = loss)', type: 'bar', yAxisIndex: 1, data: pData, color: GREEN, label: PROFIT_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26 }
+        { name: 'Units', type: 'bar', data: units, itemStyle: { color: GOLD, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 22, barGap: '30%', barCategoryGap: '45%' },
+        { name: 'Units from ads', type: 'bar', data: ads, itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 22 },
+        { name: 'Profit \u00a3 (red = loss)', type: 'bar', yAxisIndex: 1, data: pData, color: GREEN, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 22 }
       ] }));
+    if (!el || !window.echarts) return;
+    var inst = window.echarts.getInstanceByDom(el); if (!inst) return;
+    inst.resize();
+    var yProfit = top - 4, yAds = top - rowH - 4 - 8, yUnits = top - rowH - 16 - 4 - 8;
+    var g = [rowName('units', GOLD, yUnits - 6), rowName('from ads', 'rgba(255,255,255,.75)', yAds - 6), rowName('profit', GREEN, top - 4 - (upright ? rowH - 10 : rowH) + 2)];
+    for (var i = 0; i < n; i++) {
+      var xp = inst.convertToPixel({ xAxisIndex: 0 }, i); if (xp == null || isNaN(xp)) continue;
+      if (profit[i] != null) {
+        var fill = profit[i] < 0 ? LOSS : GREEN;
+        if (upright) g.push({ type: 'text', x: xp, y: yProfit, rotation: Math.PI / 2, style: { text: moneyS(profit[i]), fill: fill, font: FONT, align: 'left', verticalAlign: 'middle' }, silent: true });
+        else g.push({ type: 'text', x: xp, y: yProfit, style: { text: moneyS(profit[i]), fill: fill, font: FONT, align: 'center', verticalAlign: 'bottom' }, silent: true });
+      }
+      if (ads[i] > 0) g.push({ type: 'text', x: xp, y: yAds, style: { text: String(ads[i]), fill: 'rgba(255,255,255,.85)', font: FONT, align: 'center', verticalAlign: 'middle' }, silent: true });
+      if (units[i] > 0) g.push({ type: 'text', x: xp, y: yUnits, style: { text: String(units[i]), fill: GOLD, font: FONT, align: 'center', verticalAlign: 'middle' }, silent: true });
+    }
+    inst.setOption({ graphic: { elements: g } }, { replaceMerge: ['graphic'] });
+    DAILY_LIVE = DAILY_LIVE.filter(function (d) { return d.el !== el && document.body.contains(d.el); });
+    DAILY_LIVE.push({ el: el, redraw: drawWM });
   }
   function drawWd() {
     var P = patOf(AT.data), wd = (P && P.weekday && P.weekday.rows) || [];
