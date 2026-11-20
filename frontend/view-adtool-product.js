@@ -873,7 +873,9 @@
     var units = rows.map(function (r) { return r.units; }), spend = rows.map(function (r) { return r.spend; }), avg = rows.map(function (r) { return r.avg; });
     var n = rows.length, upright = n > 22 ? 90 : 0;
     var money = function (v) { return v > 0 ? '\u00a3' + v.toFixed(2) : ''; };
-    var rowH = upright ? 34 : 16;                         /* an upright "£10.92" is ~34px tall, a flat row ~16px */
+    /* an upright money figure is as tall as it is long: "£10.92" needs ~36px, "£134.35" ~44px */
+    var longest = Math.max.apply(null, [0].concat(spend.concat(avg).map(function (v) { return money(v).length; })));
+    var rowH = upright ? (longest >= 7 ? 46 : 36) : 16;
     var unitsRowH = 16, legendH = 26;
     var top = legendH + rowH * 2 + unitsRowH + 10;        /* legend strip + the three rows */
     var el = document.getElementById('atDaily');
@@ -893,7 +895,8 @@
         rowAxis(x, spend.map(money), LOSS, upright, offSpend),
         rowAxis(x, units.map(function (u) { return u > 0 ? String(u) : ''; }), GREEN, 0, offUnits)
       ],
-      yAxis: [{ type: 'value', max: Math.max(2, Math.ceil(Math.max.apply(null, [0].concat(units)) * 1.1)), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 }, { type: 'value', max: niceMoney(Math.max.apply(null, [0].concat(spend, avg)) * 1.08), splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }],
+      /* no axis names on this chart: the three named rows sit exactly where the names would print */
+      yAxis: [{ type: 'value', max: Math.max(2, Math.ceil(Math.max.apply(null, [0].concat(units)) * 1.1)), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, minInterval: 1 }, { type: 'value', max: niceMoney(Math.max.apply(null, [0].concat(spend, avg)) * 1.08), splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' } }],
       legend: BAR_LEGEND,
       series: [
         { name: 'Units sold', type: 'bar', data: units, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: mode === 'day' ? 13 : 26, barGap: '20%', barCategoryGap: '40%' },
