@@ -25527,7 +25527,7 @@ const ROUTES = {
       const bindR = acctF ? [from, to, acctF] : [from, to];
       const today = await ctx.env.DB.prepare(
         'SELECT t.account, t.item_id, ROUND(t.spend + t.cpc_spend, 2) AS spend_t, (t.clicks + t.cpc_clicks) AS clicks_t, ' +
-        '(t.sales + t.cpc_sales) AS sold_t, t.updated_at, i.title, i.price, i.status AS listing_status ' +
+        '(t.sales + t.cpc_sales) AS sold_t, t.updated_at, i.title, i.price, i.status AS listing_status, i.image ' +
         'FROM ads_today t LEFT JOIN items_api i ON i.item_id = t.item_id WHERE t.day = ?1' + (acctF ? ' AND t.account = ?2' : '')
       ).bind(...(acctF ? [day, acctF] : [day])).all();
       const series = await ctx.env.DB.prepare(
@@ -25608,6 +25608,8 @@ const ROUTES = {
         if (String(t.updated_at || '') > updated) updated = String(t.updated_at || '');
         const row = {
           account: t.account, item_id: t.item_id, title: t.title || '', price: t.price,
+          /* 20 Nov (owner): "on each product also show the image of that product" */
+          image: t.image ? String(t.image) : null,
           listing_status: t.listing_status || '',
           spend_today: t.spend_t || 0, clicks_today: t.clicks_t || 0, sold_today: t.sold_t || 0,
           cpc_today: t.clicks_t ? round2(t.spend_t / t.clicks_t) : 0,
@@ -25672,13 +25674,17 @@ const ROUTES = {
          cannot read it must still draw. */
       const landDays = await ctx.env.DB.prepare('SELECT DISTINCT day FROM adtool_listing_day WHERE day >= ?1 AND day <= ?2 AND spend IS NULL ORDER BY day')
         .bind(from, to).all().then(r => ((r && r.results) || []).map(x => String(x.day))).catch(() => []);
+      /* the rows that spent over the window but are silent today come without a title or picture;
+         the item list fills both in one query per 90 rows (never one per row) */
+      const itemsOut = items.slice(0, 300);
+      try { await adtProductCells(ctx.env, itemsOut); } catch (e) { for (const r of itemsOut) if (r.image === undefined) r.image = null; }
       const centre = { day, updated_at: updated, combined, days: histDays, from, to, account: acctF, period, window_source: windowSource,
         ads_landing: landDays.length > 0, landing_days: landDays, landing_note: adLandingWords(landDays),
         peak_stops_today: peakStops,
         series: seriesOut,
         series_by_account: sbaOut,
         accounts: Object.values(accounts).sort((a, b) => b.spend - a.spend),
-        items: items.slice(0, 300),
+        items: itemsOut,
         split: split, split_total: splitTotal, split_incomplete: splitIncomplete,
         note: 'refreshed every 5 minutes; each cycle is as fresh as eBay built its last report (typically 5-10 minutes behind live). Organic vs promoted uses eBay-attributed sale revenue — promoted is what eBay credits to the ads, organic is the rest.' };
       return canSeeEarnings(ctx.user) ? centre : stripEarnings(centre);

@@ -68,6 +68,8 @@
     '.at-kpi .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px}' +
     '.at-kpi .d{font-size:11.5px;color:var(--text-2);margin-top:2px}' +
     '.at-head{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}' +
+    /* 20 Nov (owner): the product's picture, large enough to recognise, at the head of its own page */
+    '.at-head .adt-pc-img{width:76px;height:76px;border-radius:10px}' +
     '.at-head .t{font-size:18px;font-weight:800;line-height:1.25;flex:1 1 420px}' +
     '.at-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}' +
     '.at-tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid var(--gold-line);color:var(--text-2)}' +
