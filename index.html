@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1853';
+var BUILD = '20261120-1900';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -11018,9 +11018,13 @@ VIEW_CSS.push(
      nearest the bars (white), the day's spend above it (red), units sold on top (green). Each row is
      a category axis drawn at the top whose labels are the figures, so a column can never drift from
      its bars; money figures stand upright when the days are too narrow for them to lie flat. */
+  /* Owner, 20 Nov: "ad spend should be shown the same way as the average number, upwards". Every
+     upright row is anchored the same way: the figure starts on its row line and reads upward from
+     there, same size and weight, so the red row and the white row are the one shape in two colours. */
   function rowAxis(x, vals, color, rotate, offset) {
-    return { type: 'category', data: x, position: 'top', offset: offset, axisLine: { show: false }, axisTick: { show: false }, axisPointer: { show: false },
-      axisLabel: { interval: 0, rotate: rotate, color: color, fontSize: 9, fontWeight: 700, margin: 4, formatter: function (v, i) { return vals[i] == null ? '' : vals[i]; } } };
+    var lab = { interval: 0, rotate: rotate, color: color, fontSize: 9, fontWeight: 700, margin: 4, formatter: function (v, i) { return vals[i] == null ? '' : vals[i]; } };
+    if (rotate) { lab.align = 'left'; lab.verticalAlign = 'middle'; }
+    return { type: 'category', data: x, position: 'top', offset: offset, axisLine: { show: false }, axisTick: { show: false }, axisPointer: { show: false }, axisLabel: lab };
   }
   /* a round ceiling for a money axis: 1, 2, 2.5 or 5 × a power of ten, just above the value */
   function niceMoney(m) { if (!(m > 0)) return 1; var step = Math.pow(10, Math.floor(Math.log(m) / Math.LN10)); var c = [1, 2, 2.5, 5, 10]; for (var i = 0; i < c.length; i++) { if (c[i] * step >= m) return c[i] * step; } return 10 * step; }
