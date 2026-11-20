@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-11-20 - PRODUCT HISTORY: the recently-advertised chip strip is gone
+
+Owner: "remove this from the Product history page". The row of recently advertised listing chips under
+the search box, and the search call that filled it on every open, are removed. The search box and the
+Matches table it answers with are unchanged.
+
 ## 2026-11-20 - SIGNALS: the advertising group leaves the Signals page
 
 Owner, after the went-negative cards moved to the Ads command centre: "Advertising no longer needed,
