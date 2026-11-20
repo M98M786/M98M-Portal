@@ -650,7 +650,7 @@
     dups.forEach(function (d) {
       h += '<div>🔴 <b>' + oN(d.n) + ' item(s) in more than one ACTIVE campaign</b> on ' + esc(oS(d.account)) + ' — double ad fees</div>';
     });
-    h += '<div style="margin-top:6px"><a href="#" data-o2-nav="campaignWatch">Campaign watch →</a> · <a href="#" data-o2-nav="activeListings">Active listings →</a> · <a href="#" data-o2-nav="signals">Signals →</a></div>';
+    h += '<div style="margin-top:6px"><a href="#" data-o2-nav="campaignWatch">Campaign watch →</a> · <a href="#" data-o2-nav="activeListings">Active listings →</a></div>';
     box.innerHTML = h; box.style.display = '';
   }
 

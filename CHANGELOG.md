@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2026-11-20 - SIGNALS PAGE DELETED
+
+Owner: "Delete Signals, no longer needed". The Signals page leaves the sidebar and the pinned list, the
+signal pins no longer mount on Home, and the Business overview's link to it is gone. The feed itself,
+the clock-in and clock-out taps in the top bar, the Customer service and Advertising department signal
+pages, and the went-negative section of the Ads command centre are unchanged.
+
+## 2026-11-20 - PRODUCT HISTORY: the recently-advertised chip strip is gone
+
+Owner: "remove this from the Product history page". The row of recently advertised listing chips under
+the search box, and the search call that filled it on every open, are removed. The search box and the
+Matches table it answers with are unchanged.
+
 ## 2026-11-20 - SIGNALS: the advertising group leaves the Signals page
 
 Owner, after the went-negative cards moved to the Ads command centre: "Advertising no longer needed,

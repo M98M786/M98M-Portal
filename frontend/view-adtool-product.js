@@ -326,8 +326,8 @@
            unsaved field", which is exactly the carry-over between tabs this page was rewritten to
            end. */
         '<div class="at-search"><input id="atQ" type="search" data-nodraft placeholder="Item id or title, then press Enter" autocomplete="off"><button class="at-btn" id="atGo" style="margin-top:0">Open</button></div>' +
-        '<div class="at-recent" id="atRecent"></div>' +
-        '<div id="atBody"><div class="at-empty">Type an item id or part of a title. Recently advertised listings appear above.</div></div>' +
+        /* 20 Nov (owner): the strip of recently advertised listings under the search box is gone */
+        '<div id="atBody"><div class="at-empty">Type an item id or part of a title, then press Enter.</div></div>' +
         '</div>';
     },
     init: function () {
@@ -345,7 +345,6 @@
         if (/^\d{9,13}$/.test(v)) { open(v); } else { search(v); }
       };
       q.onkeydown = function (e) { if (e.key === 'Enter') go.onclick(); };
-      api('adtoolSearch', { q: '' }).then(function (d) { recent(d.results || []); }).catch(function (e) { $('atRecent').innerHTML = '<span class="at-empty">' + esc(e.message || 'Search is not available.') + '</span>'; });
       if (AT.item) load(AT.item);
     }
   };
@@ -360,17 +359,6 @@
     if (location.hash === '#' + want) { AT.item = id; load(id); } else { location.hash = want; }
   }
 
-  /* the recently advertised chips: real links, so the title opens in this tab and the ↗ beside it
-     opens a tab of its own — the same pair every listing row in the portal now carries */
-  function recent(list) {
-    $('atRecent').innerHTML = (list || []).map(function (r) {
-      var id = String(r.item_id == null ? '' : r.item_id);
-      if (!/^\d{9,13}$/.test(id)) return '';
-      return '<span class="at-chip"><a href="#adtoolProduct/' + esc(id) + '" data-adt-open="' + esc(id) + '" title="' + esc(r.title || id) + '">' +
-        esc(id) + ' · ' + esc(String(r.title || '').slice(0, 34)) + '</a>' +
-        '<a href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener" title="open this listing\'s Product history in a new tab">↗</a></span>';
-    }).join('');
-  }
   function search(q) {
     if (!q) return;
     $('atBody').innerHTML = '<div class="at-empty">Searching…</div>';
