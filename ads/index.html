@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1932';
+var BUILD = '20261120-2143';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -8643,6 +8643,8 @@ window.M98M_ADS_ONLY = true;
     '.at-kpi .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px}' +
     '.at-kpi .d{font-size:11.5px;color:var(--text-2);margin-top:2px}' +
     '.at-head{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}' +
+    /* 20 Nov (owner): the product's picture, large enough to recognise, at the head of its own page */
+    '.at-head .adt-pc-img{width:76px;height:76px;border-radius:10px}' +
     '.at-head .t{font-size:18px;font-weight:800;line-height:1.25;flex:1 1 420px}' +
     '.at-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}' +
     '.at-tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid var(--gold-line);color:var(--text-2)}' +
@@ -12498,7 +12500,10 @@ window.M98M_ADS_ONLY = true;
   function acSpendOnly(d) { return !!(d && d.spend_only); }
   /* sort: {key:'', dir:-1} means "nothing chosen", which is the board's own order — the waste rows
      first, then the biggest spend today. A choice is remembered per browser under AC_SORT_KEY. */
-  var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', landNote: '', sort: { key: '', dir: -1 } };
+  var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', landNote: '', sort: { key: '', dir: -1 },
+    /* 20 Nov (owner): the went-negative signals, read from the Signals feed and drawn here instead */
+    neg: [], negAt: 0, negLoading: null, negDate: '' };
+  var AC_NEG_TYPE = 'WENT NEGATIVE YESTERDAY';
   /* the window in words, for every heading that names it: today, yesterday, the dates picked, or the last N days */
   function acWin(d) {
     d = d || {};
@@ -12581,8 +12586,133 @@ VIEW_CSS.push(
     '.ac-dchart-ec{width:100%;min-height:200px}' +
     '.ac-d .at-dtabs{margin:0 0 6px}.ac-d .at-dtabs button{padding:4px 9px;font-size:11px}' +
     '.ac-dleg{display:flex;gap:12px;flex-wrap:wrap;font-size:9.5px;color:var(--text-3);font-weight:700;margin:0 0 4px}.ac-dleg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:4px;vertical-align:-1px}' +
-    '.ac-dwait{color:var(--text-3);font-size:11px;padding:4px 0}'
+    '.ac-dwait{color:var(--text-3);font-size:11px;padding:4px 0}' +
+    /* 20 Nov (owner): the product's picture on every row, and the WENT NEGATIVE rows in their own
+       colour (amber), before today's red rows, each with the same box underneath */
+    '.ac-item{display:flex;gap:9px;align-items:flex-start;min-width:0}' +
+    '.ac-item .adt-pc-img{width:42px;height:42px;border-radius:8px;flex:none}' +
+    '.ac-item > div{min-width:0}' +
+    '.ac-nline{font-size:9.5px;font-weight:800;color:var(--warn);margin-top:3px;white-space:normal;line-height:1.4}' +
+    '.ac-nline span{color:var(--text-3);font-weight:700}' +
+    '.ac-negh{display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;font-size:11px;color:var(--text-2);font-weight:700;margin:0 0 6px}' +
+    '.ac-negh b{color:var(--warn);text-transform:uppercase;letter-spacing:.06em;font-size:10.5px}' +
+    '.ac-negsep{height:14px}' +
+    '.ac-neg td{background:rgba(242,176,53,.11)}' +
+    '.ac-neg td:first-child{border-left:3px solid var(--warn)}' +
+    '.acc-tbl > tbody > tr.ac-sub.ac-subn > td{background:rgba(242,176,53,.06)}' +
+    '.acc-tbl > tbody > tr.ac-sub.ac-subn > td:first-child{border-left:3px solid var(--warn)}' +
+    '.acc-tbl > tbody > tr.ac-sub.ac-subn:hover > td{background:rgba(242,176,53,.06)}' +
+    '.ac-nacts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0 8px}' +
+    '.ac-nacts .minibtn{padding:4px 9px;font-size:10.5px}' +
+    '.ac-nackb{margin-left:auto;border-color:var(--gold-line-hi)}' +
+    '.ac-nform{margin:0 0 8px}' +
+    '.ac-nform textarea{width:100%;box-sizing:border-box;min-height:44px;border:1px solid var(--gold-line);border-radius:8px;background:var(--panel);color:var(--text);padding:6px 8px;font:inherit;font-size:11px}'
   );
+  /* ── the went-negative signals, read from the same feed as the Signals page ──
+     "Present that data before today's negative-going product, only those products on which no action is
+     taken" (owner, 20 Nov). A signal counts as acted on the moment anyone acknowledges it; until then it
+     sits here, newest day first, the biggest loss first within a day. */
+  function acNegLoad(force) {
+    var now = Date.now();
+    if (!force && AC.negAt && now - AC.negAt < 60000) { return Promise.resolve(AC.neg); }
+    if (AC.negLoading) { return AC.negLoading; }
+    AC.negLoading = api('mySignals', {}).then(function (d) {
+      AC.neg = ((d && d.signals) || []).filter(function (s) { return s && String(s.type || '') === AC_NEG_TYPE; });
+      AC.negDate = String((d && d.date) || '');
+      AC.negAt = Date.now(); AC.negLoading = null;
+      if ($('acItems')) { acPaintItems(); }
+      return AC.neg;
+    })['catch'](function () { AC.negLoading = null; AC.negAt = Date.now(); return AC.neg; });
+    return AC.negLoading;
+  }
+  function acNegKey(s) { return [s.account, s.type, s.date, s.item_id].map(function (v) { return String(v == null ? '' : v); }).join('|'); }
+  function acNegFind(key) { for (var i = 0; i < (AC.neg || []).length; i++) { if (acNegKey(AC.neg[i]) === key) { return AC.neg[i]; } } return null; }
+  function acNegVal(s) { var v = s['Actual Profit']; if (v == null || v === '') { v = s.value; } return Number(v) || 0; }
+  function acNorm(v) { return String(v == null ? '' : v).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+  function acNegRows() {
+    return (AC.neg || []).filter(function (s) {
+      if (s.acked_by_me || (s.acknowledged_by_others && s.acknowledged_by_others.length) || (s.ack_history && s.ack_history.length)) { return false; }
+      if (!/^\d{9,13}$/.test(String(s.item_id || ''))) { return false; }
+      if (AC.acct) { var a = acNorm(s.account), w = acNorm(AC.acct); if (!(a === w || (a && w && (a.indexOf(w) >= 0 || w.indexOf(a) >= 0)))) { return false; } }
+      return true;
+    }).sort(function (a, b) { if (String(a.date) !== String(b.date)) { return String(a.date) < String(b.date) ? 1 : -1; } return acNegVal(a) - acNegVal(b); });
+  }
+  function acNegWhen(s) { var d = dDay(s.date); return String(s.date) === AC.negDate ? 'yesterday, ' + d : 'on ' + d; }
+  /* the signal's own figures, as the card printed them: actual profit, then whichever of order earning,
+     raw profit and ad fees the feed sent */
+  function acNegBits(s) {
+    var bits = [];
+    if (s['Order Earning'] != null && s['Order Earning'] !== '') { bits.push('order earning ' + dGbp(s['Order Earning'])); }
+    if (s['Raw Profit'] != null && s['Raw Profit'] !== '') { bits.push('raw profit ' + dGbp(s['Raw Profit'])); }
+    if (s.ad_fees != null && s.ad_fees !== '') { bits.push('ad fees incl VAT ' + dGbp(s.ad_fees)); }
+    return bits;
+  }
+  function acNegLine(s) {
+    var who = String(s.owner_name || s.owner_email || '').trim();
+    return 'WENT NEGATIVE ' + esc(String(s.date) === AC.negDate ? 'YESTERDAY' : dDay(s.date).toUpperCase()) + ' \u00b7 ACTUAL PROFIT ' + esc(dGbp(acNegVal(s))) +
+      (acNegBits(s).length ? ' <span>\u00b7 ' + esc(acNegBits(s).join(' \u00b7 ')) + '</span>' : '') +
+      (who ? ' <span>\u00b7 listed by ' + esc(who) + '</span>' : '');
+  }
+  function acNegIntro(s) {
+    var bits = acNegBits(s);
+    return 'This listing went negative ' + esc(acNegWhen(s)) + ': actual profit <b style="color:var(--warn)">' + esc(dGbp(acNegVal(s))) + '</b>' +
+      (bits.length ? ' (' + esc(bits.join(', ')) + ')' : '') + '. Nobody has acted on it yet. Its Product history, in the page\u2019s own order:';
+  }
+  /* the card's one-tap actions and the acknowledge-with-a-comment form, as the Signals page had them */
+  function acNegActs(s) {
+    var k = esc(acNegKey(s));
+    var acts = (s.actions || []).map(function (a) { return String(a || '').trim(); }).filter(Boolean);
+    return '<div class="ac-nacts">' + acts.map(function (a) { return '<button class="minibtn" data-ac-nact="go" data-ac-nkey="' + k + '" data-ac-nlabel="' + esc(a) + '">' + esc(a) + '</button>'; }).join('') +
+      '<button class="minibtn ac-nackb" data-ac-nact="ackopen" data-ac-nkey="' + k + '">Acknowledge\u2026</button></div>' +
+      '<div class="ac-nform hidden" data-ac-nform="' + k + '"><textarea rows="2" placeholder="What did you find or do about this? (required)"></textarea>' +
+      '<div class="ac-nacts" style="margin-top:6px"><button class="minibtn ac-nackb" style="margin-left:0" data-ac-nact="ack" data-ac-nkey="' + k + '">Acknowledge with this comment</button>' +
+      '<button class="minibtn" data-ac-nact="ackcancel" data-ac-nkey="' + k + '">Cancel</button></div></div>';
+  }
+  function acNegForm(box, key) {
+    var fs = box.querySelectorAll('[data-ac-nform]');
+    for (var i = 0; i < fs.length; i++) { if (fs[i].getAttribute('data-ac-nform') === key) { return fs[i]; } }
+    return null;
+  }
+  function acNegAck(s, form, btn) {
+    var ta = form ? form.querySelector('textarea') : null, note = ta ? String(ta.value || '').trim() : '';
+    if (!note) { toast('Write a comment first \u2014 what did you find or do about this listing?'); if (ta) { ta.focus(); } return; }
+    if (s._busy) { return; }
+    s._busy = true; btn.disabled = true; btn.textContent = 'Clearing\u2026';
+    api('acknowledgeSignal', { account: s.account, type: s.type, date: s.date, item_id: s.item_id, note: note }).then(function () {
+      var key = acNegKey(s);
+      AC.neg = (AC.neg || []).filter(function (x) { return acNegKey(x) !== key; });
+      toast('Acknowledged \u00b7 ' + String(s.title || s.item_id) + ' \u2014 off this list and logged.');
+      acPaintItems();
+    })['catch'](function (e) {
+      s._busy = false; btn.disabled = false; btn.textContent = 'Acknowledge with this comment';
+      toast('Not acknowledged: ' + ((e && e.message) || 'no answer'));
+    });
+  }
+  function acNegWire(box) {
+    box.onclick = function (ev) {
+      var el = ev.target && ev.target.closest ? ev.target.closest('[data-ac-nact]') : null;
+      if (!el || !box.contains(el)) { return; }
+      var act = el.getAttribute('data-ac-nact'), key = el.getAttribute('data-ac-nkey'), s = acNegFind(key), form = acNegForm(box, key);
+      if (!s) { return; }
+      if (act === 'ackopen' || act === 'ackcancel') {
+        if (form) { form.classList.toggle('hidden', act === 'ackcancel'); if (act === 'ackopen') { var ta = form.querySelector('textarea'); if (ta) { ta.focus(); } } }
+        return;
+      }
+      if (act === 'go') {
+        var lab = el.getAttribute('data-ac-nlabel') || '';
+        if (typeof window.sgSignalGo === 'function' && window.sgSignalGo(lab)) { toast(lab + ' \u00b7 ' + String(s.item_id) + ' \u2014 it stays on the command centre until someone acknowledges it.'); }
+        else { toast('That screen is not part of your version \u2014 ask Management to action \u201c' + lab + '\u201d.'); }
+        return;
+      }
+      if (act === 'ack') { acNegAck(s, form, el); }
+    };
+  }
+  /* the box's opening line and its action strip: a went-negative box carries the signal's own words
+     and its actions; a red row's box carries the waste sentence */
+  function acIntroFor(el) {
+    var key = el && el.getAttribute ? el.getAttribute('data-ac-neg') : '', s = key ? acNegFind(key) : null;
+    return s ? { intro: acNegIntro(s), acts: acNegActs(s) } : null;
+  }
   /* the Product history answers, per listing, for the red rows' boxes; {data, err, at} */
   var AC_DET = {}, AC_DET_TTL = 10 * 60 * 1000, AC_DET_MAX = 30;
   function dNum(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
@@ -12683,14 +12813,16 @@ VIEW_CSS.push(
       C.map(function (c) { var st = c.funding === 'COST_PER_SALE' ? (c.ad_status === 'ARCHIVED' ? 'archived' : 'exists (live)') : (c.ad_status || 'unknown'); return '<tr><td>' + (typeof adtCampaignLink === 'function' ? adtCampaignLink(c.campaign_id || c.id, c.name) : esc(String(c.name || ''))) + '</td><td>' + esc(dTypeTxt(c.funding)) + '</td><td>' + esc(c.status || '?') + '</td><td>' + esc(st) + '</td><td>' + esc(c.bid ? c.bid + '%' : '\u2014') + '</td><td>' + (c.budget != null ? dGbp(c.budget, 0) : '\u2014') + '</td></tr>'; }).join('') +
       '</tbody></table></div></div>';
   }
-  function acDetailHtml(id) {
+  function acDetailHtml(id, o) {
     var e = AC_DET[id];
     var open = '<a class="ac-dopen" href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener">the full Product history \u2197</a>';
-    if (!e || (!e.data && !e.err)) { return '<div class="ac-dwait">Reading this listing\u2019s Product history\u2026</div>'; }
-    if (e.err) { return '<div class="ac-dwait">The Product history could not be read: ' + esc(e.err) + ' ' + open + '</div>'; }
+    var intro = o && o.intro ? o.intro : 'This row is red: \u00a33+ spent today with no order. Its Product history, in the page\u2019s own order:';
+    var acts = o && o.acts ? o.acts : '';
+    var top = '<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin:0 0 6px"><span class="ac-dsub" style="margin:0">' + intro + '</span>' + open + '</div>' + acts;
+    if (!e || (!e.data && !e.err)) { return top + '<div class="ac-dwait">Reading this listing\u2019s Product history\u2026</div>'; }
+    if (e.err) { return top + '<div class="ac-dwait">The Product history could not be read: ' + esc(e.err) + '</div>'; }
     var D = e.data;
-    return '<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin:0 0 6px"><span class="ac-dsub" style="margin:0">This row is red: \u00a33+ spent today with no order. Its Product history, in the page\u2019s own order:</span>' + open + '</div>' +
-      dPeriods(D) + dDaily(D, id) + dWhere(D);
+    return top + dPeriods(D) + dDaily(D, id) + dWhere(D);
   }
   /* the red rows' Product histories are read one after another, never all at once, and kept for ten
      minutes so the two-minute board refresh does not re-ask for every one of them */
@@ -12708,8 +12840,9 @@ VIEW_CSS.push(
       })['catch'](function (err) {
         AC_DET[id] = { data: null, err: (err && err.message) || 'no answer', at: Date.now() };
       }).then(function () {
-        var el = box.querySelector('[data-ac-det="' + id + '"]');
-        if (el) { el.innerHTML = acDetailHtml(id); acDailyMount(el, id); }
+        /* the same listing can be a went-negative row AND a red row: every box asking for it is filled */
+        var els2 = box.querySelectorAll('[data-ac-det="' + id + '"]');
+        for (var j = 0; j < els2.length; j++) { els2[j].innerHTML = acDetailHtml(id, acIntroFor(els2[j])); acDailyMount(els2[j], id); }
         next();
       });
     };
@@ -12731,18 +12864,7 @@ VIEW_CSS.push(
   var AC_COLS = [
     { key: 'title', label: 'Item', text: true, sorts: 'the listing title, A to Z',
       val: function (r) { return String(r.title || r.item_id || ''); },
-      cell: function (r) {
-        var id = String(r.item_id == null ? '' : r.item_id).trim();
-        var known = /^\d{9,13}$/.test(id);
-        var title = esc(String(r.title || r.item_id || '').slice(0, 80));
-        return (known
-          ? '<a href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener" style="color:inherit" title="open this listing\u2019s Product history in a new tab">' + title + '</a>'
-          : title) +
-          '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(id) + ' \u00b7 ' + esc(String(r.account)) +
-          (known ? ' \u00b7 <a class="ac-eb" href="https://www.ebay.co.uk/itm/' + esc(id) + '" target="_blank" rel="noopener noreferrer" title="open on eBay">eBay \u2197</a>' +
-            ' \u00b7 <a class="ac-eb" href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener" title="open this listing\u2019s Product history in a new tab">History \u2197</a>' : '') +
-          (r.waste ? ' \u00b7 <b style="color:var(--bad)">\u00a33+ TODAY, NO ORDER \u2014 PAUSE OR FIX</b>' : '') + '</div>';
-      } },
+      cell: function (r) { return acItemCell(r, ''); } },
     { key: 'spend_today', label: 'Spend today', sorts: 'what the listing has spent on ads today',
       val: function (r) { return acNum(r.spend_today); }, cell: function (r) { return acGBP(r.spend_today); } },
     { key: 'clicks_today', label: 'Clicks', sorts: 'clicks on the ad today',
@@ -12759,6 +12881,23 @@ VIEW_CSS.push(
       val: function (r) { return acNum(r.sold_14d); }, cell: function (r) { return r.sold_14d || 0; } }
   ];
 
+  /* the Item cell: the product's picture (20 Nov, owner), the title opening its Product history, the
+     number, the account, the two links, the waste verdict, and, on a went-negative row, the signal's line */
+  function acItemCell(r, extra) {
+    var id = String(r.item_id == null ? '' : r.item_id).trim();
+    var known = /^\d{9,13}$/.test(id);
+    var title = esc(String(r.title || r.item_id || '').slice(0, 80));
+    var img = typeof safeUrl === 'function' ? safeUrl(r.image) : '';
+    var pic = img ? '<img class="adt-pc-img" src="' + esc(img) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '<span class="adt-pc-img adt-pc-none" aria-hidden="true">\ud83d\udce6</span>';
+    return '<div class="ac-item">' + pic + '<div>' + (known
+          ? '<a href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener" style="color:inherit" title="open this listing\u2019s Product history in a new tab">' + title + '</a>'
+          : title) +
+          '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(id) + ' \u00b7 ' + esc(String(r.account)) +
+          (known ? ' \u00b7 <a class="ac-eb" href="https://www.ebay.co.uk/itm/' + esc(id) + '" target="_blank" rel="noopener noreferrer" title="open on eBay">eBay \u2197</a>' +
+            ' \u00b7 <a class="ac-eb" href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener" title="open this listing\u2019s Product history in a new tab">History \u2197</a>' : '') +
+          (r.waste ? ' \u00b7 <b style="color:var(--bad)">\u00a33+ TODAY, NO ORDER \u2014 PAUSE OR FIX</b>' : '') + '</div>' +
+          (extra ? '<div class="ac-nline">' + extra + '</div>' : '') + '</div></div>';
+  }
   function acCol(key) {
     for (var i = 0; i < AC_COLS.length; i++) { if (AC_COLS[i].key === key) { return AC_COLS[i]; } }
     return null;
@@ -12807,8 +12946,8 @@ VIEW_CSS.push(
   function acPaintItems() {
     var box = $('acItems');
     if (!box) { return; }
-    var rows = AC.items || [];
-    if (!rows.length) {
+    var rows = AC.items || [], neg = acNegRows();
+    if (!rows.length && !neg.length) {
       /* "Nothing is recorded" and "eBay has not sent it" are different answers and a reader acts on
          them differently: the first reads as a quiet day. Where the engine says the report for the
          day has not landed, its own sentence is what goes here. */
@@ -12821,25 +12960,52 @@ VIEW_CSS.push(
     /* with Today chosen the window IS today, so the three window columns would repeat the three
        beside them; they are left out rather than printed twice */
     var cols = AC.win === 'today' ? AC_COLS.filter(function (c) { return !/_14d$/.test(c.key); }) : AC_COLS;
-    var h = '<div class="scroll"><table class="acc-tbl"><thead><tr>' + cols.map(function (c) {
+    var head = '<thead><tr>' + cols.map(function (c) {
       var on = AC.sort.key === c.key;
       return '<th class="acc-s" data-ac-k="' + esc(c.key) + '" title="' + esc('Sort by ' + c.sorts) + '">' +
         esc(acLabel(c)) + (on ? '<span class="acc-ar">' + (AC.sort.dir < 0 ? '\u25bc' : '\u25b2') + '</span>' : '') + '</th>';
-    }).join('') + '</tr></thead><tbody>';
-    acSortRows(rows).forEach(function (r) {
-      h += '<tr' + (r.waste ? ' class="ac-waste"' : '') + '>' +
-        cols.map(function (c) { return '<td>' + c.cell(r) + '</td>'; }).join('') + '</tr>';
-      /* 20 Nov (owner): a red row carries its Product history underneath, in one box */
-      var did = String(r.item_id == null ? '' : r.item_id).trim();
-      if (r.waste && /^\d{9,13}$/.test(did)) {
-        h += '<tr class="ac-sub"><td colspan="' + cols.length + '"><div class="ac-d" data-ac-det="' + esc(did) + '">' + acDetailHtml(did) + '</div></td></tr>';
-      }
-    });
-    h += '</tbody></table></div>';
+    }).join('') + '</tr></thead>';
+    var h = '';
+    /* 20 Nov (owner): the WENT NEGATIVE listings nobody has acted on, before today's red rows, in
+       their own colour, each with the same Product history box underneath; the board's own figures
+       fill the other columns where the listing is on today's board */
+    if (neg.length) {
+      var byId = {}; rows.forEach(function (r) { byId[String(r.item_id)] = r; });
+      h += '<div class="ac-negh"><b>Went negative</b><span>' + neg.length + ' listing' + (neg.length === 1 ? '' : 's') + ' lost money on the day named and nobody has acted on ' + (neg.length === 1 ? 'it' : 'them') + ' yet \u00b7 from the Signals feed \u00b7 acknowledging one, with a comment, takes it off this list</span></div>' +
+        '<div class="scroll"><table class="acc-tbl">' + head + '<tbody>';
+      neg.forEach(function (s) {
+        var id = String(s.item_id), r = byId[id];
+        var cell = { item_id: id, account: (r && r.account) || s.account, title: (r && r.title) || s.title, image: (r && r.image) || s.image || null, waste: !!(r && r.waste) };
+        h += '<tr class="ac-neg">' + cols.map(function (c, i) {
+          return '<td>' + (i === 0 ? acItemCell(cell, acNegLine(s)) : (r ? c.cell(r) : '<span style="color:var(--text-3)">\u2014</span>')) + '</td>';
+        }).join('') + '</tr>';
+        h += '<tr class="ac-sub ac-subn"><td colspan="' + cols.length + '"><div class="ac-d" data-ac-det="' + esc(id) + '" data-ac-neg="' + esc(acNegKey(s)) + '">' + acDetailHtml(id, { intro: acNegIntro(s), acts: acNegActs(s) }) + '</div></td></tr>';
+      });
+      h += '</tbody></table></div>' + (rows.length ? '<div class="ac-negsep"></div>' : '');
+    }
+    if (rows.length) {
+      h += '<div class="scroll"><table class="acc-tbl">' + head + '<tbody>';
+      acSortRows(rows).forEach(function (r) {
+        h += '<tr' + (r.waste ? ' class="ac-waste"' : '') + '>' +
+          cols.map(function (c) { return '<td>' + c.cell(r) + '</td>'; }).join('') + '</tr>';
+        /* 20 Nov (owner): a red row carries its Product history underneath, in one box */
+        var did = String(r.item_id == null ? '' : r.item_id).trim();
+        if (r.waste && /^\d{9,13}$/.test(did)) {
+          h += '<tr class="ac-sub"><td colspan="' + cols.length + '"><div class="ac-d" data-ac-det="' + esc(did) + '">' + acDetailHtml(did) + '</div></td></tr>';
+        }
+      });
+      h += '</tbody></table></div>';
+    } else {
+      h += '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' +
+        (AC.landNote ? esc(AC.landNote) + '.'
+          : AC.period === 'yesterday' ? 'Nothing is recorded for yesterday yet.'
+          : 'No ad activity recorded yet today \u2014 eBay produces the first same-day report at about 08:05 UK, so nothing can be read before then.') + '</div>';
+    }
     box.innerHTML = h;
     /* boxes already holding their answer draw their chart now; the rest draw when it lands */
     Array.prototype.forEach.call(box.querySelectorAll('[data-ac-det]'), function (d) { acDailyMount(d, d.getAttribute('data-ac-det')); });
     acDetailsLoad(box);
+    acNegWire(box);
     var ths = box.querySelectorAll('th[data-ac-k]');
     for (var i = 0; i < ths.length; i++) ths[i].onclick = function () {
       var k = this.getAttribute('data-ac-k'), col = acCol(k);
@@ -12857,6 +13023,7 @@ VIEW_CSS.push(
     var payload = AC.period ? { period: AC.period } : { days: AC.days };
     if (AC.acct) { payload.account = AC.acct; }
     if (!AC.period && AC.from && AC.to) { payload.from = AC.from; payload.to = AC.to; }
+    acNegLoad();
     api('adsBoard', payload).then(function (d) {
       d = d || {};
       var c = d.combined || {};
@@ -15333,7 +15500,18 @@ VIEW_CSS.push(
     if (typeof refreshBadges === 'function') { refreshBadges(); }
   }
 
-  function sgList() { return (SG.data && SG.data.signals) || []; }
+  /* 20 Nov (owner): "show 'Went negative yesterday' not in the Signals page anymore but in the Ads
+     command centre". The feed still carries them (the centre reads the same feed); this page and the
+     home pins simply leave them out, so the badge and the summary count what is drawn here. */
+  function sgList() { return ((SG.data && SG.data.signals) || []).filter(function (r) { return sgStr(r.type) !== SG_NEGATIVE; }); }
+  function sgHiddenCount() { return ((SG.data && SG.data.signals) || []).length - sgList().length; }
+  /* the one-tap actions, for a page that draws a signal elsewhere (the Ads command centre): opens the
+     first screen that owns the step and that this person may see; false when none does */
+  window.sgSignalGo = function (label) {
+    var keys = SG_ACTION_VIEWS[sgStr(label)] || [], j, v;
+    for (j = 0; j < keys.length; j++) { v = VIEWS[keys[j]]; if (v && sgCanSee(v) && sgOpen(keys[j])) { return true; } }
+    return false;
+  };
   function sgKey(rec) {
     return sgStr(rec.account) + '|' + sgStr(rec.type) + '|' + sgStr(rec.date) + '|' + sgStr(rec.item_id);
   }
@@ -15366,14 +15544,14 @@ VIEW_CSS.push(
     // the copy stale so the refresh underneath still happens.
     if (!SG.data && typeof cacheRead === 'function') {
       var had = cacheRead('mySignals', {});
-      if (had) { SG.data = had; SG.at = now - SG_TTL_MS - 1; sgBadge(Number(had.count) || 0); }
+      if (had) { SG.data = had; SG.at = now - SG_TTL_MS - 1; sgBadge(sgList().length); }
     }
     if (!o.fresh && !o.recompute && SG.data && now - SG.at < SG_TTL_MS) { return Promise.resolve(SG.data); }
     if (!o.recompute && SG.loading) { return SG.loading; }
     p = api('mySignals', o.recompute ? { refresh: true } : {}).then(function (d) {
       SG.data = d || {}; SG.at = Date.now(); SG.loading = null;
       if (typeof cacheWrite === 'function') { cacheWrite('mySignals', {}, SG.data); }
-      sgBadge(Number(SG.data.count) || 0);
+      sgBadge(sgList().length);
       return SG.data;
     })['catch'](function (e) { SG.loading = null; throw e; });
     SG.loading = p;
@@ -15862,8 +16040,9 @@ VIEW_CSS.push(
 
   function sgSummary() {
     var d = SG.data || {}, bits = [];
-    bits.push('<b class="num">' + esc(String(Number(d.count) || 0)) + '</b> pinned to you');
+    bits.push('<b class="num">' + esc(String(sgList().length)) + '</b> pinned to you');
     if (sgStr(d.date)) { bits.push('yesterday · ' + esc(sgDay(d.date))); }
+    if (sgHiddenCount()) { bits.push(esc(String(sgHiddenCount())) + ' went-negative ' + (sgHiddenCount() === 1 ? 'listing is' : 'listings are') + ' on the Ads command centre'); }
     if (Number(d.acknowledged)) { bits.push(esc(String(d.acknowledged)) + ' already acknowledged by you'); }
     if (d.truncated) { bits.push('showing the ' + esc(String(Number(d.count) || 0)) + ' loudest of ' + esc(String(Number(d.total) || 0))); }
     return bits.join(' <span>·</span> ');

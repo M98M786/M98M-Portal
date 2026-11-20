@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 2026-11-20 - ADS COMMAND CENTRE: the went-negative listings move here from Signals, with pictures on every row
+
+Owner: "show 'Went negative yesterday' not in the Signals page anymore but in the Ads command centre, in a
+different background colour, presented the same way as the red rows' box, adopting the product image;
+present that data before today's negative-going products, only those on which no action is taken; and
+on the Product history page and the command centre show the image of each product." The centre now reads
+the same Signals feed and draws every WENT NEGATIVE listing nobody has acknowledged yet as an amber row
+above today's red rows, newest day first and the biggest loss first within a day: the row names the day,
+the actual profit, the order earning, the raw profit and the ad fees as the card did, the board's own
+columns fill in where the listing is on today's board, and underneath sits the same box as a red row (By
+period, All-time daily with its Day / One week / Last week / Week / Month tabs, Where its ads sit) with the
+card's one-tap actions and the acknowledge-with-a-comment form, which takes the row off the list and logs
+it exactly as the Signals page did. The Signals page and the home pins leave those cards out and say how
+many are on the command centre instead. Every row of the board, and the Product history page head, now
+carries the listing's picture from the item list.
+
 ## 2026-11-19 - ORDER BOOKS: a cancelled order stays in the sheet, painted yellow
 
 Owner's rule of 19 Nov: every order is pasted into its day tab as it arrives; the moment eBay shows a
