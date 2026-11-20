@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1458';
+var BUILD = '20261120-1732';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -12464,21 +12464,10 @@ VIEW_CSS.push(
           kv('Ad rate', esc(c.ad_bid ? c.ad_bid + '%' : (c.campaign_bid ? c.campaign_bid + '% (campaign)' : '\u2014'))) +
           kv('Daily budget', c.budget != null ? dGbp(c.budget, 0) : '\u2014') +
           kv('Last change', esc(dStamp(c.last_change))) + '</div>';
-        var yR = (dNum(c.spend_yesterday) > 0 && c.revenue_yesterday != null) ? Number(c.revenue_yesterday) / Number(c.spend_yesterday) : null;
-        var rows = [
-          ['Yesterday', dGbp(c.spend_yesterday), so ? null : dRoas(yR), c.units_yesterday == null ? '\u2014' : dCnt(c.units_yesterday), so ? null : (c.revenue_yesterday == null ? '\u2014' : dGbp(c.revenue_yesterday))],
-          ['Last 7 days', dGbp(c.spend_7d), so ? null : dRoas(c.roas_7d), nk(c.units_7d, dCnt), so ? null : ''],
-          ['Last 30 days', nk(c.spend_30d, dGbp), so ? null : nk(c.roas_30d, dRoas), nk(c.units_30d, dCnt), so ? null : ''],
-          ['All time' + (c.all_from ? ' (from ' + esc(dDay(c.all_from)) + ')' : ''), nk(c.spend_all, dGbp), so ? null : nk(c.roas_all, dRoas), nk(c.units_all, dCnt), so ? null : '']
-        ];
-        return '<div class="ac-dcamp">' + head +
-          '<table class="ac-dt ac-dwin"><thead><tr><th>Window</th><th>Spend</th>' + (so ? '' : '<th>ROAS</th>') + '<th>Units sold</th>' + (so ? '' : '<th>Sales</th>') + '</tr></thead><tbody>' +
-          rows.map(function (r) { return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td>' + (so ? '' : '<td>' + r[2] + '</td>') + '<td>' + r[3] + '</td>' + (so ? '' : '<td>' + r[4] + '</td>') + '</tr>'; }).join('') +
-          '</tbody></table></div>';
+        /* 20 Nov (owner): on this page the card stops at this line — the money by window and the
+           status-change history stay on the Product history page, which the box links to */
+        return '<div class="ac-dcamp" style="margin-top:6px">' + head.replace('margin:0 0 6px', 'margin:0') + '</div>';
       }).join('');
-      if (D.where.history && D.where.history.length) {
-        h += '<div class="ac-dsub" style="margin:6px 0 0">Status changes: ' + D.where.history.slice(0, 6).map(function (x) { return esc(dStamp(x.seen_at)) + ' ' + esc(String(x.name || '')) + ' ' + esc(x.from_status || '\u2014') + ' \u2192 ' + esc(x.to_status || '\u2014'); }).join(' \u00b7 ') + '</div>';
-      }
       return h + '</div>';
     }
     if (!C.length) { return h + '<div class="ac-dwait">Not in any campaign we know about.</div></div>'; }
