@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261118-2037';
+var BUILD = '20261120-1208';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -16055,25 +16055,38 @@ function createMeeting() {
       }).join('') + '</div>';
   }
 
+  /* 20 Nov (owner: "processing speed ridiculously slow"): a send used to re-read the whole archive
+     (pending list, the heavy Sent list and the workload) and redraw every card, which also wiped the
+     account/lister picks already made on the other cards. The card is gone and the server holds the
+     task, so the counts move here, the Sent list gets its new row, and only the workload boxes are
+     re-read. Refresh still re-reads everything. */
+  function aaNowPkt() {
+    var pk = new Date(Date.now() + 5 * 3600000);
+    var p = function (n) { return ('0' + n).slice(-2); };
+    return pk.getUTCFullYear() + '-' + p(pk.getUTCMonth() + 1) + '-' + p(pk.getUTCDate()) + 'T' + p(pk.getUTCHours()) + ':' + p(pk.getUTCMinutes()) + ':' + p(pk.getUTCSeconds()) + '+05:00';
+  }
+  function aaAfterSent(id, r, account, lister) {
+    var d = AA.data, title = '';
+    if (d) {
+      (d.pending_send || []).forEach(function (h) { if (aaStr(h.hunt_id) === id) { title = aaStr(h['Title']); } });
+      d.pending_send = (d.pending_send || []).filter(function (h) { return aaStr(h.hunt_id) !== id; });
+      d.counts = d.counts || {}; d.counts.pending_send = d.pending_send.length;
+      if (STATE.counts) { STATE.counts.approvedArchive = d.counts.pending_send; }
+      if (typeof refreshBadges === 'function') { try { refreshBadges(); } catch (e) {} }
+    }
+    if (AA.sentData) {
+      var sd = AA.sentData; sd.sent = sd.sent || []; sd.counts = sd.counts || {};
+      sd.sent.unshift({ hunt_id: id, title: title, account: account, lister: (r && r.assigned_to) || lister, status: 'Pending', task_id: r && r.task_id, created_at: aaNowPkt() });
+      sd.counts.sent = (Number(sd.counts.sent) || 0) + 1;
+      sd.counts.with_listers = (Number(sd.counts.with_listers) || 0) + 1;
+    }
+    aaPaintTop();
+    if (AA.tab === 'sent' || !d || !d.pending_send.length) { aaPaint(); }   /* the Sent table, or the empty state */
+    setTimeout(aaLoadLoad, 1500);
+  }
   function aaPaint() {
+    aaPaintTop();
     var d = AA.data;
-    var tiles = $('aaTiles'); if (tiles && d) {
-      var sc = AA.sentData && AA.sentData.counts;
-      var withL = sc ? sc.with_listers : null, listed = sc ? sc.listed : null;
-      tiles.innerHTML =
-        '<div class="aa-tile"><span class="k">Approved · pending send</span><b class="goldtext">' + (d.counts ? d.counts.pending_send : 0) + '</b></div>' +
-        '<div class="aa-tile"><span class="k">With listers · in progress</span><b style="color:var(--warn)">' + (withL == null ? '…' : withL) + '</b></div>' +
-        '<div class="aa-tile"><span class="k">Listed</span><b style="color:var(--ok)">' + (listed == null ? '…' : listed) + '</b></div>';
-    }
-    aaPaintLoad();   // AA.listers arrives with the archive, so the boxes are drawn with it
-    var tabs = $('aaTabs'); if (tabs && d) {
-      tabs.innerHTML =
-        '<button class="aa-tab' + (AA.tab === 'pending' ? ' on' : '') + '" data-aa-tab="pending">Pending send <span style="opacity:.7">' + (d.counts ? d.counts.pending_send : 0) + '</span></button>' +
-        '<button class="aa-tab' + (AA.tab === 'sent' ? ' on' : '') + '" data-aa-tab="sent">Sent to listers <span style="opacity:.7">' + ((AA.sentData && AA.sentData.counts) ? AA.sentData.counts.sent : '…') + '</span></button>';
-      Array.prototype.forEach.call(tabs.querySelectorAll('[data-aa-tab]'), function (b) {
-        b.onclick = function () { AA.tab = this.getAttribute('data-aa-tab'); if (AA.tab === 'sent' && !AA.sentData) { aaLoadSent(); } aaPaint(); };
-      });
-    }
     var body = $('aaBody'); if (!body || !d) { return; }
     if (AA.tab === 'pending') {
       var items = d.pending_send || [];
@@ -16096,6 +16109,27 @@ function createMeeting() {
         }).join('') + '</tbody></table></div>';
     }
   }
+  /* the tiles, the workload boxes and the two tabs — everything above the cards */
+  function aaPaintTop() {
+    var d = AA.data;
+    var tiles = $('aaTiles'); if (tiles && d) {
+      var sc = AA.sentData && AA.sentData.counts;
+      var withL = sc ? sc.with_listers : null, listed = sc ? sc.listed : null;
+      tiles.innerHTML =
+        '<div class="aa-tile"><span class="k">Approved · pending send</span><b class="goldtext">' + (d.counts ? d.counts.pending_send : 0) + '</b></div>' +
+        '<div class="aa-tile"><span class="k">With listers · in progress</span><b style="color:var(--warn)">' + (withL == null ? '…' : withL) + '</b></div>' +
+        '<div class="aa-tile"><span class="k">Listed</span><b style="color:var(--ok)">' + (listed == null ? '…' : listed) + '</b></div>';
+    }
+    aaPaintLoad();   // AA.listers arrives with the archive, so the boxes are drawn with it
+    var tabs = $('aaTabs'); if (tabs && d) {
+      tabs.innerHTML =
+        '<button class="aa-tab' + (AA.tab === 'pending' ? ' on' : '') + '" data-aa-tab="pending">Pending send <span style="opacity:.7">' + (d.counts ? d.counts.pending_send : 0) + '</span></button>' +
+        '<button class="aa-tab' + (AA.tab === 'sent' ? ' on' : '') + '" data-aa-tab="sent">Sent to listers <span style="opacity:.7">' + ((AA.sentData && AA.sentData.counts) ? AA.sentData.counts.sent : '…') + '</span></button>';
+      Array.prototype.forEach.call(tabs.querySelectorAll('[data-aa-tab]'), function (b) {
+        b.onclick = function () { AA.tab = this.getAttribute('data-aa-tab'); if (AA.tab === 'sent' && !AA.sentData) { aaLoadSent(); } aaPaint(); };
+      });
+    }
+  }
 
   function aaWireSend(box) {
     Array.prototype.forEach.call(box.querySelectorAll('[data-aa-send]'), function (b) {
@@ -16115,8 +16149,7 @@ function createMeeting() {
           lister_email: lister, deadline_pkt: due ? aaStr(due.value) : '' }).then(function (r) {
           if (card) { card.style.transition = 'opacity .3s'; card.style.opacity = '0'; setTimeout(function () { if (card.parentNode) { card.parentNode.removeChild(card); } }, 300); }
           toast('Sent to ' + (aaStr(r && r.assigned_to).split('@')[0] || 'the lister') + ' ✓');
-          /* reconcile counts after a moment (the task mirror lands) */
-          setTimeout(aaLoad, 1500);
+          aaAfterSent(id, r, account, lister);
         }).catch(function (e) {
           btn.disabled = false; btn.textContent = 'Send to lister';
           toast('NOT sent — ' + String((e && e.message) || ''));

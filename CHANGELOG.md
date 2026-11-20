@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2026-11-19 - ORDER BOOKS: a cancelled order stays in the sheet, painted yellow
+
+Owner's rule of 19 Nov: every order is pasted into its day tab as it arrives; the moment eBay shows a
+cancellation on it (a buyer's request waiting on us, or an order already cancelled) its row or rows turn
+yellow and stay there as the record, so the processor does not order it and nothing is ever removed. All
+seven automated order books' bound scripts carry the same cancellation watch now: each 15-minute sync also
+reads the orders eBay changed recently, pastes a cancelled one it never saw, paints yellow, and un-paints a
+request eBay later rejects. Rabia Masood's project was found empty and holds the full code now, still
+awaiting the owner's go-live steps.
+
+## 2026-11-19 - TRACKING UPLOAD: the courier is never guessed from the number again
+
+Owner: "stop guessing DHL". The upload used to name the courier from the shape of the tracking number -
+every JJD number went up as DHL, sixteen-digit numbers as Hermes, the rest as Other - and that guess was
+what the shipping confirmation told the buyer. Since 1 Nov, 2,613 of 3,308 uploads said DHL; eBay's own
+record of the same parcels says InPost Shops, Evri or Royal Mail. The push now sends the courier a person
+picked in the portal when eBay's accepted list carries it (an exact pick from that list wins as typed),
+otherwise Other, and eBay's own recognition names the courier on the order. After the push the fulfilment
+is read back and eBay's answer is what the trackings ledger keeps, so the Orders screen's "carrier" label
+and the tracking-fetch log show what eBay shows. The Messages tool has read the courier live from eBay
+since 18 Nov, so buyer notes were already right; this closes the source.
+
 ## 2026-11-06 - ADVERTISING OVERVIEW: the hour-by-hour chart takes its own period bar
 
 Owner: "develop the period option above the hour-by-hour graph - previous days and month data - the
@@ -136,3 +158,8 @@ builds 20260901-00xx–01xx.
 
 ## 2026-11-12 — Handover log: the shared brain of the two Claudes
 - `docs/HANDOVER-LOG.md` added (WINDOWS). The Mac Claude (primary) and the Windows Claude (backup) each append one dated entry per change or finding, newest at the bottom, and push it with the change. First entry: the Windows backup set up from the 11 Nov package, the read-only keyed verification of 12 Nov, and two flags recorded for the Mac (`selfTest` 4 failed on 12 Nov; the 11 Nov sheet backup stopped at 23 of 49 tables).
+
+## 2026-11-20 — Send to listers: the Send itself, 7-10 s → one TASKS text search
+- `actionHuntSendToLister_` read the whole TASKS tab twice per send (the double-send guard, and `engineTaskPush_` re-reading the row just written) and made two sequential Google→engine hops. The guard is now a server-side TextFinder over the details column (`huntTaskHolding_`), `huntAppendTask_` hands back the row it wrote, and hunt mirror + task push go in one parallel `enginePostAll_`. The SLOW_ACTION ledger had every Send at 7.0-10.6 s.
+- Page: a send no longer re-reads the archive, the heavy Sent list and the workload and redraws every card (which wiped the picks on the other cards); the card goes, the counts move, the Sent list gets its row, only the workload boxes are re-read.
+- Backend code is saved in the Apps Script project (head); the web app still serves version 200 until a new version is deployed — the project is at Google's 200-version cap, so an old version must be deleted first.

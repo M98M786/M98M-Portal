@@ -205,3 +205,81 @@ desk artifact with this account or expect a new desk URL from Windows. The hando
 "iphone 18 pro case" bid to be costed at its first review.
 
 **State.** MAC PRIMARY for standing duties; WINDOWS runs the SQR Listing Agent from 18 Nov 16:05 UTC.
+
+## 2026-11-19 14:50 UTC · MAC · Tracking upload stops guessing the courier; Messages tool reads it from eBay (owner, 19 Nov)
+
+**What.** Owner (voice note, 19 Nov): shipping confirmations were telling buyers "DHL"; the courier must be the one eBay
+shows on the order after the upload, sent as it is, with no auto-selection by us. Two changes. (1) The Messages tool
+(its own Worker, outside this repo; deployed 18 Nov 20:32 UTC): the shipped note asks eBay for the order's fulfilment
+at queue time and prints eBay's carrier name verbatim; while eBay shows no courier the note waits for a later
+five-minute scan inside the 48-hour window; the decision log records eBay's answer beside the engine's old value.
+(2) Engine `pushTracking` (commit 25fef37): the pattern guess (JJD→DHL, sixteen digits→Hermes, JD→Yodel, else Other) is
+gone; the push sends the courier a person picked in the portal when eBay's accepted list carries it (an exact pick
+wins as typed), otherwise Other; after the push the fulfilment is read back and eBay's carrier is what the trackings
+ledger keeps; the push result carries carrier_sent and carrier_ebay beside carrier_auto (now eBay's answer).
+
+**Numbers.** Since 1 Nov the engine stamped DHL on 2,613 of 3,308 uploads and Other on 581; eBay's record of the same
+kinds of parcels says InPost Shops, Evri or Royal Mail — never DHL. First full batch on the Messages change (19 Nov,
+10:27–11:52 UTC): 257 shipping notes across all six accounts, carrier lines InPost Shops 197 · Evri 48 · Royal Mail
+12 · DHL 0; corrections logged DHL→InPost Shops ×102, Other→Evri ×16, RoyalMail→"Royal Mail" ×6; nothing waited,
+nothing failed.
+
+**Files and commits.** engine/worker.js + engine-worker.txt (kept identical) + CHANGELOG line: commit 25fef37. This log
+entry: the commit after it. Engine deployed from a clean worktree of main with the untracked deploy helper right after
+the push; live script checked byte-identical to the commit.
+
+**What was verified.** Before the change the engine source on main was byte-identical to the live Worker, so the base
+is the live code; Node 20 ES-module parse check; the Messages change verified on the real batch above. The engine
+change proves itself on the next tracking batch (around 12:00 UTC): new LIVE rows in the trackings ledger should carry
+eBay's names and the push result's carrier_ebay should be filled.
+
+**Still open — owner's call.** Rabia Masood and Yaseen Bhai have no message templates enabled in the Messages tool, so
+buyers on those two accounts get no order, shipping or thank-you messages. If eBay ever answers "Other" for a parcel,
+the shipping note waits the full 48 h and is then dropped rather than naming no courier — not seen yet.
+
+**State.** MAC PRIMARY. The shared clone stays on its feature branch with another session's uncommitted work untouched;
+this change was built and committed from a separate worktree of main.
+
+## 2026-11-19 19:25 UTC · MAC · Order books: cancelled orders stay in the sheet and turn YELLOW (owner, 19 Nov)
+
+**What was done.** Owner's rule, 19 Nov late evening: an order is pasted into its day tab as it comes; when eBay
+shows a cancellation on it (buyer's request waiting on us, or already cancelled) its row(s) turn yellow and stay as
+the record, so the processor does not order it; nothing is removed. The seven automated order books' bound Apps
+Script projects all got the same "cancellation watch": every 15-minute sync now also reads the orders eBay changed
+recently (last 6 h at least, 48 h on the first run, 30 days at most), merges them in so a cancelled order still
+gets pasted, then paints every row carrying that order number yellow across the whole used width, in the order's
+own day tab first and any day tab second. A hidden `_Cancelled` ledger (order, state, time, tab, rows) stops the
+re-paint each run; a request eBay later rejects has its yellow removed again. The old "skip fully-cancelled orders
+at paste time" line is gone on all seven. An editor helper re-scans the last N days on demand. Patched by a
+guarded three-anchor patcher inside the Apps Script editor (each anchor had to match exactly once, syntax-checked,
+save confirmed, two projects re-read after a hard reload): Amna, Saif Bhai, Hafiza Sadia, AZHAR ABRT, Sir Hasib,
+Azhar Bhai (the untitled project) and Rabia Masood. Rabia's project was found EMPTY (the 3 Nov code was never
+pasted; no trigger exists) — the full patched source is in it now, but her sync still needs the owner's go-live
+steps (authorise, eBay sign-in, signing key, start trigger).
+
+**Files and commits.** Outside the repo: `M98M-Order-Sync/cancel-watch.gs` (the block), `patch-cancel.js` (the
+patcher), `rabia-order-sync.gs` + `clasp-rabia/Code.js` now carry the patched source. This entry + one CHANGELOG line.
+
+**Verified.** Local patch test on Rabia's source; in-editor syntax check on all seven; "Saved to Drive" on all
+seven; ABRT and Azhar Bhai re-read after reload with both hooks and the block present. Next trigger cycle's
+executions to be read for errors right after this entry.
+
+**Still open.** Rabia go-live (owner). Portal's order desk reads the books by header text and ignores row colour, so
+nothing there changes; if the desk should hide or flag yellow rows, that is a separate ask.
+
+## 2026-11-19 19:40 UTC · MAC · Cancellation watch v3.5.1: first run timed out on Azhar Bhai's book; paint now looks only at the order's own day tab (±1)
+
+**What happened.** The first post-patch run on Azhar Bhai's book (00:13 PKT) failed: "Service Spreadsheets timed out
+while accessing document". Cause in my new code: an order not found in its own day tab fell back to scanning
+EVERY day tab's column B — that book carries July plus September-to-November tabs, and the first run's 48-hour
+window held many orders, so the Spreadsheet service gave up. Saif's first run took 257 s for the same reason
+(it completed). The other five completed normally.
+
+**Fix (all seven projects, saved and confirmed v3.5.1).** The paint looks only in the order's own day tab and the
+day before/after it (the sync never writes an order anywhere else); orders older than 30 days or before the
+book's go-live date are skipped; at most 40 orders are painted/cleared per run and a capped run does not move
+the scan window on, so the rest are finished next run; contiguous rows of one order are painted in one call.
+Steady state is light: the second Amna run after the patch took 18 s.
+
+**Verified.** Seven "Saved to Drive" confirmations, the v3.5.1 marker read back from each editor model, Rabia's
+copy hash-identical to the local file. Next trigger cycle read for errors after this entry.
