@@ -139,32 +139,32 @@ VIEW_CSS.push(
   function dDaily(D) {
     var days = (D.days || []).filter(function (d) { return d && d.day; });
     var h = '<div class="ac-dsec"><h4>All-time daily ' + dSrc('orders') + dSrc('eBay ads report') + '</h4>' +
-      '<div class="ac-dsub">Units from all channels (gold), the 7-day average (white), units from ads (dots) and ad spend (faint bars).</div>';
+      '<div class="ac-dsub">Units sold each day (green), the ad spend of that day (red) and the 7-day average ad spend (white).</div>';
     if (!days.length) { return h + '<div class="ac-dwait">No day held for this listing yet.</div></div>'; }
+    /* 20 Nov (owner): three bars a day — units sold green on the left scale, that day's ad spend red
+       and the 7-day average ad spend white on the right £ scale */
     var W = 1000, H = 150, L = 34, R = 40, T = 8, B = 20, n = days.length;
     var pw = W - L - R, ph = H - T - B, slot = pw / n;
-    var units = days.map(function (d) { return Number(d.units) || 0; }), attr = days.map(function (d) { return Number(d.attr_units) || 0; }), spend = days.map(function (d) { return Number(d.spend) || 0; });
-    var avg = units.map(function (_, i) { var a = units.slice(Math.max(0, i - 6), i + 1); return a.reduce(function (t, v) { return t + v; }, 0) / a.length; });
-    var maxU = Math.max(1, Math.max.apply(null, units.concat(attr))), maxS = Math.max(0.01, Math.max.apply(null, spend));
+    var units = days.map(function (d) { return Number(d.units) || 0; }), spend = days.map(function (d) { return Number(d.spend) || 0; });
+    var avg = spend.map(function (_, i) { var a = spend.slice(Math.max(0, i - 6), i + 1); return a.reduce(function (t, v) { return t + v; }, 0) / a.length; });
+    var maxU = Math.max(1, Math.max.apply(null, units)), maxS = Math.max(0.01, Math.max.apply(null, spend.concat(avg)));
     var xs = function (i) { return L + slot * (i + 0.5); }, yu = function (v) { return T + ph - (v / maxU) * ph; }, ys = function (v) { return T + ph - (v / maxS) * ph; };
     var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
     var ticks = maxU <= 6 ? maxU : 4;
     for (var g = 0; g <= ticks; g++) { var gv = maxU * g / ticks, gy = yu(gv); s += '<line x1="' + L + '" y1="' + gy.toFixed(1) + '" x2="' + (W - R) + '" y2="' + gy.toFixed(1) + '" stroke="rgba(255,255,255,.06)"/><text x="' + (L - 6) + '" y="' + (gy + 3).toFixed(1) + '" text-anchor="end" font-size="9" fill="#66707c">' + (Math.round(gv * 10) / 10) + '</text>'; }
     s += '<text x="' + (W - R + 6) + '" y="' + (T + 3) + '" font-size="9" fill="#66707c">\u00a3' + (Math.round(maxS * 100) / 100) + '</text><text x="' + (W - R + 6) + '" y="' + (T + ph + 3) + '" font-size="9" fill="#66707c">\u00a30</text>';
-    var bw = Math.max(2, Math.min(10, slot * 0.35));
-    days.forEach(function (d, i) { if (spend[i] > 0) { s += '<rect x="' + (xs(i) - bw / 2).toFixed(1) + '" y="' + ys(spend[i]).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + (T + ph - ys(spend[i])).toFixed(1) + '" fill="rgba(255,255,255,.16)"><title>' + esc(d.day) + ' \u00b7 ad spend ' + dGbp(spend[i]) + '</title></rect>'; } });
-    var path = units.map(function (v, i) { return (i ? 'L' : 'M') + xs(i).toFixed(1) + ',' + yu(v).toFixed(1); }).join('');
-    s += '<path d="' + path + 'L' + xs(n - 1).toFixed(1) + ',' + (T + ph) + 'L' + xs(0).toFixed(1) + ',' + (T + ph) + 'Z" fill="rgba(242,176,53,.12)"/>';
-    s += '<path d="' + path + '" fill="none" stroke="#f2b035" stroke-width="2"/>';
-    s += '<path d="' + avg.map(function (v, i) { return (i ? 'L' : 'M') + xs(i).toFixed(1) + ',' + yu(v).toFixed(1); }).join('') + '" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="2"/>';
+    var bw = Math.max(2, Math.min(9, slot * 0.26)), gap = 1;
+    var bar = function (x, y, w, fill, tip) { return '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + Math.max(0, T + ph - y).toFixed(1) + '" rx="1.5" fill="' + fill + '"><title>' + esc(tip) + '</title></rect>'; };
     days.forEach(function (d, i) {
-      s += '<circle cx="' + xs(i).toFixed(1) + '" cy="' + yu(units[i]).toFixed(1) + '" r="3" fill="#f2b035"><title>' + esc(d.day) + ' \u00b7 ' + units[i] + ' unit' + (units[i] === 1 ? '' : 's') + ' \u00b7 ' + attr[i] + ' from ads \u00b7 ad spend ' + dGbp(spend[i]) + '</title></circle>';
-      if (attr[i] > 0) { s += '<circle cx="' + xs(i).toFixed(1) + '" cy="' + yu(attr[i]).toFixed(1) + '" r="3.5" fill="#d9a63b" fill-opacity=".9"><title>' + esc(d.day) + ' \u00b7 ' + attr[i] + ' from ads</title></circle>'; }
+      var x0 = xs(i) - (bw * 3 + gap * 2) / 2;
+      if (units[i] > 0) { s += bar(x0, yu(units[i]), bw, '#2fb170', d.day + ' \u00b7 ' + units[i] + ' unit' + (units[i] === 1 ? '' : 's') + ' sold'); }
+      if (spend[i] > 0) { s += bar(x0 + bw + gap, ys(spend[i]), bw, '#e0563f', d.day + ' \u00b7 ad spend ' + dGbp(spend[i])); }
+      if (avg[i] > 0) { s += bar(x0 + (bw + gap) * 2, ys(avg[i]), bw, 'rgba(255,255,255,.72)', d.day + ' \u00b7 7-day average ad spend ' + dGbp(avg[i])); }
     });
     var every = Math.max(1, Math.ceil(n / 16));
     days.forEach(function (d, i) { if (i % every === 0 || i === n - 1) { s += '<text x="' + xs(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9" fill="#66707c">' + esc(String(d.day).slice(5)) + '</text>'; } });
     s += '</svg>';
-    return h + '<div class="ac-dleg"><span><i style="background:rgba(255,255,255,.22)"></i>Ad spend</span><span><i style="background:#f2b035"></i>Units (all channels)</span><span><i style="background:rgba(255,255,255,.55)"></i>7-day average</span><span><i style="background:#d9a63b;border-radius:50%"></i>Units from ads</span></div><div class="ac-dchart">' + s + '</div></div>';
+    return h + '<div class="ac-dleg"><span><i style="background:#2fb170"></i>Units sold</span><span><i style="background:#e0563f"></i>Ad spend that day</span><span><i style="background:rgba(255,255,255,.72)"></i>7-day average ad spend</span></div><div class="ac-dchart">' + s + '</div></div>';
   }
   /* 3 · Where its ads sit — the campaign rows as the Product history prints them */
   function dWhere(D) {
