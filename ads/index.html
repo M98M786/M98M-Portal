@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1753';
+var BUILD = '20261120-1813';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -9358,10 +9358,24 @@ window.M98M_ADS_ONLY = true;
   }
   /* 20 Nov (owner): three bars an hour. Units sold on the left scale in green; the hour's own ad spend
      in red and what that hour usually costs (the engine's 28-day average) in white, both on the right
-     £ scale. The pale "usual units" line and the cumulative spend line are gone. */
+     £ scale. Every bar carries its figure. The pale "usual units" line and the cumulative spend line
+     are gone. Owner, later the same day: "bar length covering words — evenly space them so details
+     don't get hidden, and show the average number on the white box": both scales now stop well above
+     the tallest bar so a pill never reaches the legend, the legend sits in its own strip above the
+     plot, pills that would collide are shifted apart instead of hidden, and the white bars are
+     labelled like the others. */
   var GREEN = '#2fb170', WHITEBAR = 'rgba(255,255,255,.72)';
-  var MONEY_PILL = Object.assign({}, PILL, { backgroundColor: LOSS, color: '#fff', formatter: function (o) { return o.value == null || !(Number(o.value) > 0) ? '' : '\u00a3' + Number(o.value).toFixed(2); } });
-  var UNIT_PILL = Object.assign({}, PILL, { backgroundColor: GREEN, color: '#fff', formatter: pillInt });
+  var BAR_LAYOUT = { moveOverlap: 'shiftY', hideOverlap: false };
+  function moneyPill(bg, ink) { return Object.assign({}, PILL, { backgroundColor: bg, color: ink, fontSize: 8.5, padding: [1, 4, 1, 4], formatter: function (o) { return o.value == null || !(Number(o.value) > 0) ? '' : '\u00a3' + Number(o.value).toFixed(2); } }); }
+  var MONEY_PILL = moneyPill(LOSS, '#fff');
+  var AVG_PILL = moneyPill('rgba(255,255,255,.88)', '#14110a');
+  var UNIT_PILL = Object.assign({}, PILL, { backgroundColor: GREEN, color: '#fff', fontSize: 8.5, padding: [1, 4, 1, 4], formatter: pillInt });
+  /* headroom: the scale runs to 1.45× the tallest bar (and to a whole unit on the units side), so three
+     stacked pills fit above the tallest group without touching the legend strip */
+  function unitsMax(arr) { var m = Math.max.apply(null, [0].concat(arr)); return Math.max(2, Math.ceil(m * 1.45)); }
+  function moneyMax(arr) { var m = Math.max.apply(null, [0].concat(arr)); if (!(m > 0)) return 1; var t = m * 1.45, step = Math.pow(10, Math.floor(Math.log(t) / Math.LN10)); return Math.ceil(t / (step / 2)) * (step / 2); }
+  var BAR_GRID = { left: 46, right: 54, top: 54, bottom: 28 };
+  var BAR_LEGEND = { top: 0, right: 0, itemWidth: 14, itemHeight: 9, itemGap: 14, textStyle: { color: '#9aa4b1', fontSize: 11 } };
   function drawHour() {
     var D = AT.data; var days = D.days; var yday = days.length ? days[days.length - 1].day : '';
     var hrs = D.hours.filter(function (x) { return x.day === yday; });
@@ -9369,29 +9383,29 @@ window.M98M_ADS_ONLY = true;
     hrs.forEach(function (x) { ord[x.hour] = x.units; var v = x.spend_r != null ? x.spend_r : x.spend_s; sp[x.hour] = v == null ? 0 : Math.round(Number(v) * 100) / 100; });
     var avg = (D.hour_avg_spend && D.hour_avg_spend.hours) ? D.hour_avg_spend.hours.map(function (v) { return v == null ? 0 : Math.round(Number(v) * 100) / 100; }) : new Array(24).fill(0);
     var series = [
-      { name: 'Units sold', type: 'bar', data: ord, label: UNIT_PILL, labelLayout: LAYOUT, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 12, barGap: '10%' },
-      { name: 'Ad spend in that hour', type: 'bar', yAxisIndex: 1, data: sp, label: MONEY_PILL, labelLayout: LAYOUT, itemStyle: { color: LOSS, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 12 },
-      { name: 'Average ad spend for the hour', type: 'bar', yAxisIndex: 1, data: avg, itemStyle: { color: WHITEBAR, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 12 }
+      { name: 'Units sold', type: 'bar', data: ord, label: UNIT_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 11, barGap: '20%', barCategoryGap: '40%' },
+      { name: 'Ad spend in that hour', type: 'bar', yAxisIndex: 1, data: sp, label: MONEY_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: LOSS, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 11 },
+      { name: 'Average ad spend for the hour', type: 'bar', yAxisIndex: 1, data: avg, label: AVG_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: WHITEBAR, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 11 }
     ];
-    var y = [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 },
-      { type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }];
-    mount('atHour', chartBase({ grid: { left: 44, right: 52, top: 26, bottom: 28 }, xAxis: { type: 'category', data: Array.from({ length: 24 }, function (_, i) { return String(i).padStart(2, '0'); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, yAxis: y, legend: { show: true, top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } }, series: series, title: { text: yday ? DOW[dowOf(yday)] + ' ' + dfmt(yday) : '', left: 0, top: 0, textStyle: { color: '#9aa4b1', fontSize: 11, fontWeight: 'normal' } } }));
+    var y = [{ type: 'value', max: unitsMax(ord), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 },
+      { type: 'value', max: moneyMax(sp.concat(avg)), splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }];
+    mount('atHour', chartBase({ grid: BAR_GRID, xAxis: { type: 'category', data: Array.from({ length: 24 }, function (_, i) { return String(i).padStart(2, '0'); }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, yAxis: y, legend: BAR_LEGEND, series: series, title: { text: yday ? DOW[dowOf(yday)] + ' ' + dfmt(yday) : '', left: 0, top: 0, textStyle: { color: '#9aa4b1', fontSize: 11, fontWeight: 'normal' } } }));
   }
   function dowOf(ymd) { var d = new Date(ymd + 'T12:00:00Z'); return (d.getUTCDay() + 6) % 7; }
   /* 20 Nov (owner): three bars a day — units sold green (left scale), that day's ad spend red and the
-     7-day average ad spend white (right £ scale). The gold units line, its band, the units-from-ads
-     dots and the 7-day units average are gone. */
+     7-day average ad spend white (right £ scale), every bar labelled, the same headroom and label
+     spacing as the hour chart. */
   function drawDaily() {
     var days = AT.data.days; var x = days.map(function (d) { return d.day.slice(5); });
     var units = days.map(function (d) { return Number(d.units) || 0; }); var spend = days.map(function (d) { return Math.round((Number(d.spend) || 0) * 100) / 100; });
     var avg = spend.map(function (_, i) { var a = spend.slice(Math.max(0, i - 6), i + 1); return Math.round(a.reduce(function (t, v) { return t + v; }, 0) / a.length * 100) / 100; });
-    mount('atDaily', chartBase({ grid: { left: 44, right: 52, top: 26, bottom: 28 }, xAxis: { type: 'category', data: x, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } },
-      yAxis: [{ type: 'value', splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 }, { type: 'value', splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }],
-      legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } },
+    mount('atDaily', chartBase({ grid: BAR_GRID, xAxis: { type: 'category', data: x, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } },
+      yAxis: [{ type: 'value', max: unitsMax(units), splitLine: { lineStyle: { color: GRID } }, axisLabel: { color: '#66707c', fontSize: 10 }, name: 'units', nameTextStyle: { color: '#66707c' }, minInterval: 1 }, { type: 'value', max: moneyMax(spend.concat(avg)), splitLine: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, formatter: '\u00a3{value}' }, name: 'ad spend', nameTextStyle: { color: '#66707c' } }],
+      legend: BAR_LEGEND,
       series: [
-        { name: 'Units sold', type: 'bar', data: units, label: UNIT_PILL, labelLayout: LAYOUT, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14, barGap: '10%' },
-        { name: 'Ad spend that day', type: 'bar', yAxisIndex: 1, data: spend, label: MONEY_PILL, labelLayout: LAYOUT, itemStyle: { color: LOSS, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14 },
-        { name: '7-day average ad spend', type: 'bar', yAxisIndex: 1, data: avg, itemStyle: { color: WHITEBAR, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14 }
+        { name: 'Units sold', type: 'bar', data: units, label: UNIT_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: GREEN, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 13, barGap: '20%', barCategoryGap: '40%' },
+        { name: 'Ad spend that day', type: 'bar', yAxisIndex: 1, data: spend, label: MONEY_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: LOSS, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 13 },
+        { name: '7-day average ad spend', type: 'bar', yAxisIndex: 1, data: avg, label: AVG_PILL, labelLayout: BAR_LAYOUT, itemStyle: { color: WHITEBAR, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 13 }
       ] }));
   }
   function drawWM() {
