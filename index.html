@@ -10901,6 +10901,7 @@ VIEW_CSS.push(
      clock summed over every weekday, the best and weakest weekday per date held, and the three hottest
      cells. Everything here is read off the slot rows and the grid; nothing is fetched or estimated. */
   function hh(x) { return (x < 10 ? '0' : '') + x + ':00'; }
+  function un(v) { return v + (Number(v) === 1 ? ' unit' : ' units'); }
   function hourRanges(list) {
     var out = [], i = 0;
     while (i < list.length) { var a = list[i], b = a; while (i + 1 < list.length && list[i + 1] === b + 1) { i++; b = list[i]; } out.push(a === b ? hh(a) : hh(a) + '\u2013' + hh(b + 1)); i++; }
@@ -10936,18 +10937,21 @@ VIEW_CSS.push(
     if (total > 0) {
       var hs = hourSum.map(function (v, x) { return { x: x, v: v }; }).sort(function (a, b) { return b.v - a.v || a.x - b.x; });
       var top = hs.filter(function (o) { return o.v > 0; }).slice(0, 3);
-      tiles.push(tile('Strongest hours', top.map(function (o) { return hh(o.x); }).join(', '), top.map(function (o) { return o.v + ' units at ' + hh(o.x); }).join(' \u00b7 ') + ', summed over every weekday'));
-      var zero = []; for (var z = 0; z < 24; z++) if (!hourSum[z]) zero.push(z);
-      if (zero.length) tiles.push(tile('Quietest hours', hourRanges(zero), 'not one unit sold in ' + (zero.length === 1 ? 'this hour' : 'these ' + zero.length + ' hours') + ' in this window', true));
-      else { var low = hs.slice().reverse().slice(0, 3); tiles.push(tile('Quietest hours', low.map(function (o) { return hh(o.x); }).join(', '), low.map(function (o) { return o.v + ' units at ' + hh(o.x); }).join(' \u00b7 '), true)); }
+      tiles.push(tile('Strongest hours', top.map(function (o) { return hh(o.x); }).join(', '), top.map(function (o) { return un(o.v) + ' at ' + hh(o.x); }).join(' \u00b7 ') + ', summed over every weekday'));
+      var zero = [], sold = []; for (var z = 0; z < 24; z++) { if (hourSum[z]) sold.push(z); else zero.push(z); }
+      /* a thin window leaves most of the clock empty: naming the few hours that DID sell is the
+         shorter and the truer sentence then */
+      if (zero.length > 12) tiles.push(tile('Quietest hours', 'every hour but ' + hourRanges(sold), 'not one unit sold in the other ' + zero.length + ' hours of the clock in this window', true));
+      else if (zero.length) tiles.push(tile('Quietest hours', hourRanges(zero), 'not one unit sold in ' + (zero.length === 1 ? 'this hour' : 'these ' + zero.length + ' hours') + ' in this window', true));
+      else { var low = hs.slice().reverse().slice(0, 3); tiles.push(tile('Quietest hours', low.map(function (o) { return hh(o.x); }).join(', '), low.map(function (o) { return un(o.v) + ' at ' + hh(o.x); }).join(' \u00b7 '), true)); }
       var ds = daySum.map(function (v, d) { var n = Number(dates[d]) || 0; return { d: d, v: v, n: n, rate: n ? v / n : null }; }).filter(function (o) { return o.rate != null; }).sort(function (a, b) { return b.rate - a.rate; });
       if (ds.length > 1) {
         var bd = ds[0], wd = ds[ds.length - 1];
-        tiles.push(tile('Best weekday', esc(DOW[bd.d]), n2(bd.rate) + ' units a day \u00b7 ' + bd.v + ' units over ' + bd.n + ' ' + esc(DOW[bd.d]) + (bd.n === 1 ? '' : 's')));
-        tiles.push(tile('Weakest weekday', esc(DOW[wd.d]), n2(wd.rate) + ' units a day \u00b7 ' + wd.v + ' units over ' + wd.n + ' ' + esc(DOW[wd.d]) + (wd.n === 1 ? '' : 's'), true));
+        tiles.push(tile('Best weekday', esc(DOW[bd.d]), n2(bd.rate) + ' units a day \u00b7 ' + un(bd.v) + ' over ' + bd.n + ' ' + esc(DOW[bd.d]) + (bd.n === 1 ? '' : 's')));
+        tiles.push(tile('Weakest weekday', esc(DOW[wd.d]), n2(wd.rate) + ' units a day \u00b7 ' + un(wd.v) + ' over ' + wd.n + ' ' + esc(DOW[wd.d]) + (wd.n === 1 ? '' : 's'), true));
       }
       var hot = cells.sort(function (a, b) { return b.v - a.v || a.d - b.d || a.x - b.x; }).slice(0, 3);
-      if (hot.length) tiles.push(tile('Hottest cells', hot.map(function (c) { return esc(DOW[c.d]) + ' ' + hh(c.x); }).join(', '), hot.map(function (c) { var n = Number(dates[c.d]) || 0; return c.v + ' units ' + esc(DOW[c.d]) + ' ' + hh(c.x) + (n ? ' over ' + n + ' dates' : ''); }).join(' \u00b7 ')));
+      if (hot.length) tiles.push(tile('Hottest cells', hot.map(function (c) { return esc(DOW[c.d]) + ' ' + hh(c.x); }).join(', '), hot.map(function (c) { var n = Number(dates[c.d]) || 0; return un(c.v) + ' ' + esc(DOW[c.d]) + ' ' + hh(c.x) + (n ? ' over ' + n + (n === 1 ? ' date' : ' dates') : ''); }).join(' \u00b7 ')));
     }
     if (!tiles.length) return '';
     return '<div class="at-sub" style="margin:12px 0 6px;font-weight:800;color:var(--text)">Best and worst times \u00b7 ' + esc(patLabel(P, 'hour_weekday')) + '</div><div class="at-kpis">' + tiles.join('') + '</div>';
