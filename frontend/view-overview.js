@@ -150,9 +150,15 @@
     var t = ukToday();
     if (O.mode === 'today') { return { from: t, to: t, label: 'Today' }; }
     if (O.mode === 'yday') { var y = dShift(t, -1); return { from: y, to: y, label: 'Yesterday' }; }
-    if (O.mode === 'd30') { return { from: dShift(t, -29), to: t, label: 'Last 30 days' }; }
     if (O.mode === 'custom' && O.from && O.to) { return { from: O.from, to: O.to, label: O.from + ' → ' + O.to }; }
-    return { from: dShift(t, -6), to: t, label: 'Last 7 days' };
+    /* 20 Nov (owner): "after Yesterday I want 3, 4, 5, 6 and 14 days". Any dN chip is the last N
+       UK days ending today — the same window law the 7- and 30-day chips always had, so every
+       section (dispatch clock, Collective, Profitability, Advertising, the prior-window deltas)
+       takes the new ones through the same path. The books feed carries 62 days, enough for the
+       30-day window and its prior window. */
+    var dn = /^d(\d+)$/.exec(String(O.mode || ''));
+    var n = dn ? Math.max(1, Math.min(31, Number(dn[1]) || 7)) : 7;
+    return { from: dShift(t, -(n - 1)), to: t, label: 'Last ' + n + ' days' };
   }
   function oRows(from, to) {
     /* the day books for the range — scoped to the chosen account when the page is filtered, so the
@@ -1130,7 +1136,7 @@
             '<button class="minibtn" id="o2Refresh">Refresh</button></span></div>' +
         '<div class="dates enter d1"><div class="seg" id="o2Seg">' +
           /* chips render FROM O.mode — the state survives navigation, so static markup lies */
-          [['today', 'Today'], ['yday', 'Yesterday'], ['d7', '7 days'], ['d30', '30 days']].map(function (p) {
+          [['today', 'Today'], ['yday', 'Yesterday'], ['d3', '3 days'], ['d4', '4 days'], ['d5', '5 days'], ['d6', '6 days'], ['d7', '7 days'], ['d14', '14 days'], ['d30', '30 days']].map(function (p) {
             return '<button data-o2-mode="' + p[0] + '"' + (O.mode === p[0] ? ' class="on"' : '') + '>' + p[1] + '</button>';
           }).join('') + '</div>' +
           '<div class="custom"><label>FROM</label><input type="date" id="o2From"><label>TO</label><input type="date" id="o2To">' +
