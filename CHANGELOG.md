@@ -166,3 +166,6 @@ builds 20260901-00xx–01xx.
 
 ## 2026-11-20 — Send to listers: three separate numbers per lister
 - `listingLoad` also returns `revisions` (listing_revision tasks assigned to a lister) and `issues` (hunt_revision tasks a lister raised with Need info, i.e. listings sent back for issues), same 60-day window. Each lister box shows new listings received (listed / open), listings sent back for issues (still with the hunter), and revisions sent to them (open), under the waiting count.
+
+## 2026-11-20 — Business overview: 3, 4, 5, 6 and 14-day chips
+- `oRange` resolves any `dN` chip as the last N UK days ending today (same law as 7 and 30), so the dispatch clock, Collective, Profitability, Advertising and the prior-window deltas all follow the new chips through the one path.
