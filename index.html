@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-2143';
+var BUILD = '20261120-2206';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -10806,26 +10806,6 @@ VIEW_CSS.push(
      conclusion is what a seller needs, and it has to stay true when the test says the opposite.
      9 Nov: the averages are now this window's own, so the sentence says that, and the smoothed
      all-history rate is only mentioned where the window is too thin to stand on its own. */
-  function weekdayNote(D, WD) {
-    var wk = D.profile && D.profile.weekday;
-    var thin = !!(WD && WD.thin);
-    var head = thin
-      ? 'Each weekday\'s average over this window. Some weekdays have fewer than three dates in it, so the smoothed figure from all of this listing\'s history is shown beside each average.'
-      : 'Each weekday\'s average over this window.';
-    if (!wk || !wk.rates) return head;
-    var p = wk.spread && wk.spread.p != null ? Number(wk.spread.p) : null;
-    var verdict = p == null ? 'There are not enough days yet to say whether the weekday pattern is real.'
-      : (p < 0.05 ? 'The weekday pattern here is real.' : 'There is no real weekday pattern here.');
-    return head + ' ' + verdict;
-  }
-
-  /* ── THE WINDOW BEHIND THE FOUR PATTERN BLOCKS ────────────────────────────────────────────────
-     The engine sends `patterns` = {window, slots, weekday, hour_weekday, dates}, every block summed
-     over the window the reader chose and the window named in `window.label`. The engine and this file
-     deploy separately, so an answer from an engine older than 9 Nov carries no `patterns` at all: the
-     page then draws the FIXED windows that answer does carry and labels each block with the window it
-     really is, rather than printing a chosen window it never computed. The selector is hidden in that
-     case, because moving it would change nothing. */
   var PAT_LEGACY = { slots: 'last 28 days', weekday: 'last 30 days', hour_weekday: 'last 28 days', dates: 'every day we hold' };
   function patOf(D) {
     if (!D) return null;
@@ -10841,43 +10821,6 @@ VIEW_CSS.push(
     if (!P) return 'not known';
     if (P.legacy) return PAT_LEGACY[block] || 'not known';
     return P.window && P.window.label ? P.window.label : 'not known';
-  }
-  var PAT_PRESETS = [['all', 'All time'], ['d28', 'Last 28 days'], ['this_month', 'This month'], ['last_month', 'Last month'], ['this_week', 'This week'], ['last_week', 'Last week']];
-  function patBar(P) {
-    var W = (P && P.window) || {};
-    if (P && P.legacy) {
-      return '<div class="at-panel"><h3>Patterns</h3><div class="at-sub">The four blocks below are each over the window named in its own heading. Choosing a window needs the newer engine, so the selector is not shown.</div></div>';
-    }
-    var k = String((AT.pattern && AT.pattern.kind) || 'all');
-    var notes = [];
-    if (!W.days) notes.push('There is no finished day in this window yet, so these blocks are empty rather than nought.');
-    else if (!W.complete) notes.push('This window is still running, so it is worked out up to yesterday.');
-    if (W.before_history) notes.push('Our own figures for this listing begin on ' + esc(dfmt(W.history_from)) + ', so a window that ends before then holds nothing.');
-    if (W.first_day && String(W.kind) === 'all') notes.push('All time starts on ' + esc(dfmt(W.first_day)) + ', the first day we hold for this listing.');
-    return '<div class="at-panel"><h3>Patterns · ' + esc(W.label || 'not known') + '</h3>' +
-      '<div class="at-sub">Pick the window and all four blocks below follow it: the time slots, the weekday profile, the hour by weekday grid and the dates. Each heading says the window it covers. Weeks run Monday to Sunday, and the week picker takes any date and uses that date\'s week.</div>' +
-      '<div class="at-wsel">' +
-      PAT_PRESETS.map(function (x) { return '<button data-pat="' + x[0] + '" class="' + (k === x[0] ? 'on' : '') + '">' + esc(x[1]) + '</button>'; }).join('') +
-      '<label>Month <input id="atPatM" type="month" placeholder="YYYY-MM" value="' + esc(W.month || '') + '" title="any month, from the first to the last of it"></label>' +
-      '<label>Week <input id="atPatW" type="date" value="' + esc(W.week_start || '') + '" title="any date; the week it falls in is used, Monday to Sunday"></label>' +
-      '<span class="msg" id="atPatMsg"></span></div>' +
-      (notes.length ? '<div class="at-note" style="margin-top:8px">' + notes.join(' ') + '</div>' : '') + '</div>';
-  }
-  /* changing the window RE-ASKS THE ENGINE, because every one of the four blocks is summed there. The
-     page it is already showing stays on screen while that happens: a window change is not a reason to
-     wipe a page a reader is in the middle of. */
-  function setPattern(pat) {
-    if (!AT.item) return;
-    AT.pattern = pat;
-    var btns = document.querySelectorAll('.at-wsel button');
-    for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('on', btns[i].getAttribute('data-pat') === String(pat.kind));
-    var msg = $('atPatMsg'); if (msg) msg.textContent = 'Working that window out…';
-    var t0 = Date.now();
-    api('adtoolListing', { item_id: AT.item, pattern: pat }).then(function (d) {
-      AT.data = d; AT.ms = Date.now() - t0; draw();
-    }).catch(function (e) {
-      var m2 = $('atPatMsg'); if (m2) m2.textContent = e.message || 'That window could not be worked out.';
-    });
   }
   /* a figure the answer does not hold is said in words, never drawn as a nought */
   /* a unit count: whole units, and eBay's attribution, so one order can be credited by more than one campaign */
@@ -10904,22 +10847,6 @@ VIEW_CSS.push(
           (s.sampled_days ? '<div class="at-src" title="days in this window with an hourly reading in this slot">' + s.sampled_days + (s.sampled_days === 1 ? ' day read' : ' days read') + '</div>' : '') + '</td></tr>';
       }).join('') + '</tbody></table></div>';
   }
-  function weekdayPanel(D, P) {
-    var WD = P && P.weekday, rows = (WD && WD.rows) || [];
-    var h = '<div class="at-panel"><h3>Weekday profile · ' + esc(patLabel(P, 'weekday')) + src('orders') + src('eBay ads report') + '</h3>' +
-      '<div class="at-sub">' + weekdayNote(D, WD) + '</div><div id="atWd" class="at-chart short"></div>';
-    if (!rows.length) return h + '<div class="at-empty">No finished day in this window yet.</div></div>';
-    return h + '<table class="at-tbl"><thead><tr><th>Day</th><th class="r">Dates</th><th class="r">Units/day</th><th class="r">Units from ads/day</th><th class="r">Spend/day</th>' + (atSpendOnly() ? '' : '<th class="r">Profit/day</th>') + '</tr></thead><tbody>' +
-      rows.map(function (x, i) {
-        /* the smoothed all-history rate rides beside the average ONLY where this window is too thin
-           to stand on its own: it is not this window's figure and must not read as if it were */
-        var pr = (WD && WD.thin && D.profile && D.profile.weekday && D.profile.weekday.rates) ? D.profile.weekday.rates[i] : null;
-        return '<tr><td>' + esc(x.day) + '</td><td class="r">' + (x.dates || 0) + '</td><td class="r">' + nk(x.units_day, plain) +
-          (pr ? ' <span class="at-src" title="the smoothed average over all of this listing\'s history">' + (Math.round(pr.rate * 100) / 100) + '</span>' : '') + '</td>' +
-          '<td class="r">' + nk(x.attr_units_day, plain) + '</td><td class="r">' + nk(x.spend_day, gbp) + '</td>' +
-          (atSpendOnly() ? '' : '<td class="r">' + adtProfitCell(x.profit_day, x.pending_cost_orders, x.pending_fee_orders) + '</td>') + '</tr>';
-      }).join('') + '</tbody></table></div>';
-  }
   function heatPanel(P) {
     var HW = P && P.hour_weekday;
     var h = '<div class="at-panel"><h3>Hour × weekday · ' + esc(patLabel(P, 'hour_weekday')) + src('orders') + '</h3>' +
@@ -10927,24 +10854,6 @@ VIEW_CSS.push(
     if (!HW || !HW.units) return h + '<div class="at-empty">Not known: the hourly figures for this window could not be read.</div></div>';
     return h + heat(HW.units, HW.dates, HW.orders) + '</div>';
   }
-  function datesPanel(P) {
-    var DT = P && P.dates, rows = (DT && DT.rows) || [], cal = !!(DT && DT.mode === 'calendar');
-    var h = '<div class="at-panel"><h3>' + (cal ? 'Every date in this window' : 'Best dates of the month') + ' · ' + esc(patLabel(P, 'dates')) + src('orders') + '</h3>' +
-      '<div class="at-sub">' + (cal
-        ? 'Every date of the month or week in order, with what that date did. A date we hold no day for is written as no day held, never as a nought.'
-        : 'Average units per calendar date over this window, with the number of dates behind each average.') + '</div>' +
-      '<div id="atDom" class="at-chart short"></div>';
-    if (!cal) return h + '</div>';
-    if (!rows.length) return h + '<div class="at-empty">No dates in this window.</div></div>';
-    return h + '<div style="overflow-x:auto;max-height:430px;overflow-y:auto"><table class="at-tbl"><thead><tr><th>Date</th><th>Day</th><th class="r">Units</th><th class="r">Orders</th>' + (atSpendOnly() ? '' : '<th class="r">Revenue</th>') + '<th class="r">Ad spend</th>' + (atSpendOnly() ? '' : '<th class="r">Profit</th>') + '</tr></thead><tbody>' +
-      rows.map(function (r) {
-        if (!r.held) return '<tr><td>' + esc(r.label || r.day) + '</td><td>' + esc(DOW[r.weekday] || '') + '</td><td colspan="' + (atSpendOnly() ? 3 : 5) + '" class="at-dt-none">' + (r.future ? 'not reached yet' : 'no day held') + '</td></tr>';
-        return '<tr><td>' + esc(r.label || r.day) + '</td><td>' + esc(DOW[r.weekday] || '') + '</td><td class="r">' + (r.units || 0) + '</td><td class="r">' + (r.orders || 0) + '</td>' +
-          (atSpendOnly() ? '' : '<td class="r">' + gbp(r.revenue) + '</td>') + '<td class="r">' + gbp(r.spend) + '</td>' +
-          (atSpendOnly() ? '' : '<td class="r">' + adtProfitCell(r.actual_profit, r.pending_cost_orders, r.pending_fee_orders) + '</td>') + '</tr>';
-      }).join('') + '</tbody></table></div></div>';
-  }
-
   function draw() {
     var D = AT.data, H = D.header, K = D.kpis || {};
     /* two clocks on one page: today's orders and spend every five minutes, finished days every hour */
@@ -11050,17 +10959,12 @@ VIEW_CSS.push(
       '<div id="atDaily" class="at-chart tall"></div></div>';
     /* week / month */
     h += '<div class="at-panel"><div class="at-tabs"><button class="' + (AT.tab === 'week' ? 'on' : '') + '" data-tab="week">Week to week</button><button class="' + (AT.tab === 'month' ? 'on' : '') + '" data-tab="month">Month to month</button></div><div id="atWM" class="at-chart short"></div></div>';
-    /* ── THE FOUR PATTERN BLOCKS, OVER THE WINDOW THE READER CHOSE (owner, 9 Nov) ────────────────
-       They used to be scattered down the page under three different fixed windows written into their
-       headings: the slots and the grid over 28 days, the weekday profile over 30, the dates over
-       everything held. They are one section now, under one selector, and each heading prints the
-       window the engine actually summed it over. The "Profit & loss" panel that used to sit beside
-       the dates block went long ago: the By period table at the top of the page is their one home. */
+    /* 20 Nov (owner): "delete these graphs, no longer needed" — the window selector, the weekday
+       profile and the dates block are gone. The time slots and the hour-by-weekday grid stay, over
+       all time (the engine's default window), each heading still naming the window it covers. */
     var P = patOf(D);
-    h += patBar(P);
-    h += '<div class="at-grid2">' + slotsPanel(P) + weekdayPanel(D, P) + '</div>';
+    h += slotsPanel(P);
     h += heatPanel(P);
-    h += datesPanel(P);
     /* notes, decision, actions */
     if (D.profile && D.profile.descriptors) { var ds = D.profile.descriptors; h += '<div class="at-panel"><h3>How this listing behaves' + src('profiles · ' + (ds.day || ''), 'listing patterns · ' + (ds.day || '')) + '</h3><div class="at-sub">Last 28 days unless stated.</div><div class="at-kpis">' + [['Weekday effect', esc(ds.weekday_best) + ' best · ' + esc(ds.weekday_worst) + ' worst', (ds.weekday_ratio != null ? 'best day is ' + ds.weekday_ratio + '× the worst · ' : '') + esc(ds.weekday_label || '')], ['Busiest time of day', SLOTS[ds.top_slot] || '—', Math.round((ds.top_slot_share || 0) * 100) + '% of its sales land there'], ['Day-to-day swing', ds.volatility_cv28 == null ? '—' : String(ds.volatility_cv28), 'no sale on ' + Math.round((ds.intermittency28 || 0) * 100) + '% of days. 0 is flat, above 1 is very uneven'], ['Ad dependence', ds.ad_dependence28 == null ? '—' : Math.round(ds.ad_dependence28 * 100) + '%', 'units from ads ÷ all units'], ['Extra units per £1 of spend', ds.spend_elasticity == null ? 'not enough spend levels' : String(ds.spend_elasticity), ds.elasticity_levels + ' spend level' + (ds.elasticity_levels === 1 ? '' : 's') + ' seen']].map(function (x) { return '<div class="at-kpi"><div class="k">' + x[0] + '</div><div class="v" style="font-size:15px">' + x[1] + '</div><div class="d">' + x[2] + '</div></div>'; }).join('') + '</div>' + (D.profile.regime && D.profile.regime.regime_change ? '<div class="at-note">Pattern changed: ' + esc(D.profile.regime.note) + '</div>' : '') + '</div>'; }
     /* Phase 4: week-to-week behaviour — the descriptors that moved week over week, with the reading
@@ -11104,15 +11008,6 @@ VIEW_CSS.push(
     for (var di = 0; di < dtabs.length; di++) dtabs[di].onclick = function () { AT.dmode = this.getAttribute('data-dmode') || 'day'; for (var dj = 0; dj < dtabs.length; dj++) dtabs[dj].classList.toggle('on', dtabs[dj] === this); drawDaily(); };
     var tabs = document.querySelectorAll('.at-tabs:not(.at-dtabs) button');
     for (var i = 0; i < tabs.length; i++) tabs[i].onclick = function () { AT.tab = this.getAttribute('data-tab'); for (var j = 0; j < tabs.length; j++) tabs[j].classList.toggle('on', tabs[j] === this); drawWM(); };
-    /* the window selector. The pickers fire on change, and a half-typed month or date is ignored
-       rather than sent: the engine would refuse it and the refusal would land as an error toast on
-       somebody who had not finished typing. */
-    var wsel = document.querySelectorAll('.at-wsel button');
-    for (var wi = 0; wi < wsel.length; wi++) wsel[wi].onclick = function () { setPattern({ kind: this.getAttribute('data-pat') }); };
-    var patM = $('atPatM');
-    if (patM) patM.onchange = function () { if (/^\d{4}-(0[1-9]|1[0-2])$/.test(this.value)) setPattern({ kind: 'month', month: this.value }); };
-    var pw = $('atPatW');
-    if (pw) pw.onchange = function () { if (/^\d{4}-\d{2}-\d{2}$/.test(this.value)) setPattern({ kind: 'week', week_start: this.value }); };
     $('atNoteBtn').onclick = function () {
       var n = $('atNote').value.trim(); if (!n) return;
       this.disabled = true;
@@ -11121,7 +11016,7 @@ VIEW_CSS.push(
       api('adtoolActionLog', { item_id: AT.item, type: 'note', note: n, pattern: AT.pattern }).then(function () { toast('Logged'); load(AT.item); }).catch(function (e) { toast(e.message || 'failed'); $('atNoteBtn').disabled = false; });
     };
     var ng = $('atNarrGo'); if (ng) ng.onclick = function (e) { e.preventDefault(); $('atNarr').textContent = 'Writing…'; api('adtoolNarrative', { scope: 'listing', scope_id: AT.item }).then(function (r) { $('atNarr').innerHTML = esc(r.text) + (r.validated ? '' : ' <b>(a figure is not in the numbers behind it, so it is held back)</b>'); }).catch(function (x) { $('atNarr').textContent = x.message || 'failed'; }); };
-    if (window.echarts) { drawHour(); drawDaily(); drawWM(); drawWd(); drawDom(); } else { var ids = ['atHour', 'atDaily', 'atWM', 'atWd', 'atDom']; ids.forEach(function (id) { var el = $(id); if (el) el.innerHTML = '<div class="at-empty">The chart library did not load, so this chart is missing.</div>'; }); }
+    if (window.echarts) { drawHour(); drawDaily(); drawWM(); } else { var ids = ['atHour', 'atDaily', 'atWM']; ids.forEach(function (id) { var el = $(id); if (el) el.innerHTML = '<div class="at-empty">The chart library did not load, so this chart is missing.</div>'; }); }
   }
 
   /* The heat-map cell shade. BYTE-IDENTICAL with the copy in view-adtool-analytics.js: each view file is
@@ -11380,32 +11275,6 @@ VIEW_CSS.push(
     inst.setOption({ graphic: { elements: g } }, { replaceMerge: ['graphic'] });
     DAILY_LIVE = DAILY_LIVE.filter(function (d) { return d.el !== el && document.body.contains(d.el); });
     DAILY_LIVE.push({ el: el, redraw: drawWM });
-  }
-  function drawWd() {
-    var P = patOf(AT.data), wd = (P && P.weekday && P.weekday.rows) || [];
-    if (!wd.length) return;
-    mount('atWd', chartBase({ xAxis: { type: 'category', data: wd.map(function (x) { return x.day; }), axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10 } }, legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 } },
-      series: [{ name: 'Units / day', type: 'bar', data: wd.map(function (x) { return x.units_day; }), itemStyle: { color: function (p) { return p.dataIndex === 6 ? GOLD2 : GOLD; }, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 28 }, { name: 'Units from ads / day', type: 'bar', data: wd.map(function (x) { return x.attr_units_day; }), itemStyle: { color: GOLD2, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 28 }, { name: 'Ad spend / day £', type: 'bar', data: wd.map(function (x) { return x.spend_day == null ? null : Math.round(Number(x.spend_day) * 100) / 100; }), itemStyle: { color: WHITE55, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 28 }] }));
-  }
-  /* THE DATES BLOCK DRAWS WHAT THE WINDOW IS. A month or a week draws its REAL dates in order, with a
-     gap where no day is held (never a nought bar, which would read as a day that sold nothing); all
-     time and the last 28 days draw the average per calendar date, with the number of dates behind
-     each bar in its hover. */
-  function drawDom() {
-    var P = patOf(AT.data), DT = P && P.dates, rows = (DT && DT.rows) || [];
-    if (!rows.length) return;
-    var cal = DT.mode === 'calendar';
-    var xs = rows.map(function (r) { return cal ? String(r.label || r.day || '') : String(r.dom); });
-    var data = rows.map(function (r) { return cal ? (r.held ? r.units : null) : r.units_day; });
-    var tip = function (ps) {
-      var a = (ps && ps.length) ? ps[0] : null; if (!a) return '';
-      var r = rows[a.dataIndex] || {};
-      if (cal) return esc(xs[a.dataIndex]) + '<br>' + (r.held ? ((r.units || 0) + ' units, ' + (r.orders || 0) + ' orders') : (r.future ? 'not reached yet' : 'no day held'));
-      return 'Date ' + r.dom + '<br>' + (r.units_day == null ? 'no dates behind it' : r.units_day + ' units a day, from ' + r.dates + (r.dates === 1 ? ' date' : ' dates'));
-    };
-    mount('atDom', chartBase({ tooltip: { trigger: 'axis', backgroundColor: 'rgba(4,6,10,.92)', borderColor: 'rgba(255,255,255,.14)', textStyle: { color: '#fff', fontSize: 12 }, formatter: tip },
-      xAxis: { type: 'category', data: xs, axisLine: { lineStyle: { color: ZERO } }, axisTick: { show: false }, axisLabel: { color: '#66707c', fontSize: 10, interval: cal ? (xs.length > 16 ? 1 : 0) : 4, rotate: cal ? 45 : 0 } },
-      series: [{ name: cal ? 'Units' : 'Units / day', type: 'bar', data: data, itemStyle: { color: function (p) { return (!cal && p.dataIndex >= 24) ? GOLD2 : GOLD; }, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 14 }] }));
   }
 })();
 

@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-11-20 - PRODUCT HISTORY: the window selector, the weekday profile and the dates block are gone
+
+Owner: "delete these graphs, no longer needed". The Patterns panel with its window picker (All time,
+Last 28 days, This/Last month, This/Last week, month and week pickers), the Weekday profile chart and
+table, and the Best dates of the month chart are removed from the Product history page. The time slots
+table and the hour-by-weekday grid stay, over all time, each heading still naming the window it covers.
+
 ## 2026-11-20 - ADS COMMAND CENTRE: the went-negative listings move here from Signals, with pictures on every row
 
 Owner: "show 'Went negative yesterday' not in the Signals page anymore but in the Ads command centre, in a
