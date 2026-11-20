@@ -92,6 +92,8 @@ VIEW_CSS.push(
     '.ac-dmov{display:inline-block;margin-left:5px;padding:0 5px;border-radius:5px;font-size:8px;letter-spacing:.05em;text-transform:uppercase;font-weight:800;color:var(--gold-a);border:1px solid rgba(242,176,53,.4);vertical-align:1px}' +
     '.ac-dpill{display:inline-block;padding:1px 7px;border-radius:9px;font-size:9.5px;font-weight:800;border:1px solid rgba(242,176,53,.5);color:var(--gold-a)}' +
     '.ac-dchart{max-width:1100px}.ac-dchart svg{width:100%;height:auto;display:block}' +
+    '.ac-dchart-ec{width:100%;min-height:200px}' +
+    '.ac-d .at-dtabs{margin:0 0 6px}.ac-d .at-dtabs button{padding:4px 9px;font-size:11px}' +
     '.ac-dleg{display:flex;gap:12px;flex-wrap:wrap;font-size:9.5px;color:var(--text-3);font-weight:700;margin:0 0 4px}.ac-dleg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:4px;vertical-align:-1px}' +
     '.ac-dwait{color:var(--text-3);font-size:11px;padding:4px 0}'
   );
@@ -136,35 +138,29 @@ VIEW_CSS.push(
   /* 2 · All-time daily — the Product history chart, drawn as inline SVG so the box needs no chart
      library: ad spend as faint bars on a right-hand £ scale, units from all channels as the gold line
      with its band, the 7-day average in white, units from ads as gold dots. */
-  function dDaily(D) {
+  /* 2 · All-time daily — THE PRODUCT HISTORY CHART ITSELF (owner, 20 Nov: "exactly how it is reflected
+     in the Product history page, for this and all products"). The drawing is the product page's own
+     function, shared through window.ADT_DAILY, with the same Day / Week / Month tabs; the box only
+     provides the element and remembers which tab each listing is on. */
+  function dDaily(D, id) {
     var days = (D.days || []).filter(function (d) { return d && d.day; });
+    var A = window.ADT_DAILY, mode = (AC_DET[id] && AC_DET[id].mode) || 'day';
     var h = '<div class="ac-dsec"><h4>All-time daily ' + dSrc('orders') + dSrc('eBay ads report') + '</h4>' +
-      '<div class="ac-dsub">Units sold each day (green), the ad spend of that day (red) and the 7-day average ad spend (white).</div>';
+      '<div class="ac-dsub">' + esc(A && A.sub ? A.sub : 'Units sold (green), ad spend (red) and the average ad spend (white).') + '</div>';
     if (!days.length) { return h + '<div class="ac-dwait">No day held for this listing yet.</div></div>'; }
-    /* 20 Nov (owner): three bars a day — units sold green on the left scale, that day's ad spend red
-       and the 7-day average ad spend white on the right £ scale */
-    var W = 1000, H = 150, L = 34, R = 40, T = 8, B = 20, n = days.length;
-    var pw = W - L - R, ph = H - T - B, slot = pw / n;
-    var units = days.map(function (d) { return Number(d.units) || 0; }), spend = days.map(function (d) { return Number(d.spend) || 0; });
-    var avg = spend.map(function (_, i) { var a = spend.slice(Math.max(0, i - 6), i + 1); return a.reduce(function (t, v) { return t + v; }, 0) / a.length; });
-    var maxU = Math.max(1, Math.max.apply(null, units)), maxS = Math.max(0.01, Math.max.apply(null, spend.concat(avg)));
-    var xs = function (i) { return L + slot * (i + 0.5); }, yu = function (v) { return T + ph - (v / maxU) * ph; }, ys = function (v) { return T + ph - (v / maxS) * ph; };
-    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
-    var ticks = maxU <= 6 ? maxU : 4;
-    for (var g = 0; g <= ticks; g++) { var gv = maxU * g / ticks, gy = yu(gv); s += '<line x1="' + L + '" y1="' + gy.toFixed(1) + '" x2="' + (W - R) + '" y2="' + gy.toFixed(1) + '" stroke="rgba(255,255,255,.06)"/><text x="' + (L - 6) + '" y="' + (gy + 3).toFixed(1) + '" text-anchor="end" font-size="9" fill="#66707c">' + (Math.round(gv * 10) / 10) + '</text>'; }
-    s += '<text x="' + (W - R + 6) + '" y="' + (T + 3) + '" font-size="9" fill="#66707c">\u00a3' + (Math.round(maxS * 100) / 100) + '</text><text x="' + (W - R + 6) + '" y="' + (T + ph + 3) + '" font-size="9" fill="#66707c">\u00a30</text>';
-    var bw = Math.max(2, Math.min(9, slot * 0.26)), gap = 1;
-    var bar = function (x, y, w, fill, tip) { return '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + Math.max(0, T + ph - y).toFixed(1) + '" rx="1.5" fill="' + fill + '"><title>' + esc(tip) + '</title></rect>'; };
-    days.forEach(function (d, i) {
-      var x0 = xs(i) - (bw * 3 + gap * 2) / 2;
-      if (units[i] > 0) { s += bar(x0, yu(units[i]), bw, '#2fb170', d.day + ' \u00b7 ' + units[i] + ' unit' + (units[i] === 1 ? '' : 's') + ' sold'); }
-      if (spend[i] > 0) { s += bar(x0 + bw + gap, ys(spend[i]), bw, '#e0563f', d.day + ' \u00b7 ad spend ' + dGbp(spend[i])); }
-      if (avg[i] > 0) { s += bar(x0 + (bw + gap) * 2, ys(avg[i]), bw, 'rgba(255,255,255,.72)', d.day + ' \u00b7 7-day average ad spend ' + dGbp(avg[i])); }
-    });
-    var every = Math.max(1, Math.ceil(n / 16));
-    days.forEach(function (d, i) { if (i % every === 0 || i === n - 1) { s += '<text x="' + xs(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9" fill="#66707c">' + esc(String(d.day).slice(5)) + '</text>'; } });
-    s += '</svg>';
-    return h + '<div class="ac-dleg"><span><i style="background:#2fb170"></i>Units sold</span><span><i style="background:#e0563f"></i>Ad spend that day</span><span><i style="background:rgba(255,255,255,.72)"></i>7-day average ad spend</span></div><div class="ac-dchart">' + s + '</div></div>';
+    if (!A) { return h + '<div class="ac-dwait">The chart could not be drawn: the Product history module is not loaded.</div></div>'; }
+    return h + A.tabs(mode, 'ac-dtabs') + '<div class="ac-dchart-ec" data-ac-daily="' + esc(id) + '"></div></div>';
+  }
+  /* wire the tabs and draw, once the box's HTML is in the page */
+  function acDailyMount(root, id) {
+    var A = window.ADT_DAILY, e = AC_DET[id];
+    if (!A || !e || !e.data) { return; }
+    var el = root.querySelector('[data-ac-daily="' + id + '"]'); if (!el) { return; }
+    var days = (e.data.days || []).filter(function (d) { return d && d.day; });
+    var tabs = root.querySelectorAll('.ac-dtabs button');
+    var draw = function () { A.ensure().then(function () { A.draw(el, days, e.mode || 'day'); })['catch'](function (err) { el.innerHTML = '<div class="ac-dwait">' + esc((err && err.message) || 'The chart library did not load.') + '</div>'; }); };
+    for (var i = 0; i < tabs.length; i++) tabs[i].onclick = function () { e.mode = this.getAttribute('data-dmode') || 'day'; for (var j = 0; j < tabs.length; j++) tabs[j].classList.toggle('on', tabs[j] === this); draw(); };
+    draw();
   }
   /* 3 · Where its ads sit — the campaign rows as the Product history prints them */
   function dWhere(D) {
@@ -208,7 +204,7 @@ VIEW_CSS.push(
     if (e.err) { return '<div class="ac-dwait">The Product history could not be read: ' + esc(e.err) + ' ' + open + '</div>'; }
     var D = e.data;
     return '<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin:0 0 6px"><span class="ac-dsub" style="margin:0">This row is red: \u00a33+ spent today with no order. Its Product history, in the page\u2019s own order:</span>' + open + '</div>' +
-      dPeriods(D) + dDaily(D) + dWhere(D);
+      dPeriods(D) + dDaily(D, id) + dWhere(D);
   }
   /* the red rows' Product histories are read one after another, never all at once, and kept for ten
      minutes so the two-minute board refresh does not re-ask for every one of them */
@@ -227,7 +223,7 @@ VIEW_CSS.push(
         AC_DET[id] = { data: null, err: (err && err.message) || 'no answer', at: Date.now() };
       }).then(function () {
         var el = box.querySelector('[data-ac-det="' + id + '"]');
-        if (el) { el.innerHTML = acDetailHtml(id); }
+        if (el) { el.innerHTML = acDetailHtml(id); acDailyMount(el, id); }
         next();
       });
     };
@@ -355,6 +351,8 @@ VIEW_CSS.push(
     });
     h += '</tbody></table></div>';
     box.innerHTML = h;
+    /* boxes already holding their answer draw their chart now; the rest draw when it lands */
+    Array.prototype.forEach.call(box.querySelectorAll('[data-ac-det]'), function (d) { acDailyMount(d, d.getAttribute('data-ac-det')); });
     acDetailsLoad(box);
     var ths = box.querySelectorAll('th[data-ac-k]');
     for (var i = 0; i < ths.length; i++) ths[i].onclick = function () {
