@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261120-1440';
+var BUILD = '20261120-1442';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2833,7 +2833,8 @@ VIEW_CSS.push(
     var h = '<div class="ac-dsec"><h4>Where its ads sit ' + dSrc('ad status, read per campaign') + (live ? dSrc(nLive === 1 ? 'in one campaign' : 'in ' + nLive + ' campaigns', true) : '') + '</h4>' +
       '<div class="ac-dsub">Which campaigns this listing is in, and what its own ad said when that campaign\u2019s ads were last read. Each status is a reading, not a live check, so the date of the reading is on every row.' +
       (D.where && D.where.dup && D.where.dup.why ? ' <b>' + esc(String(D.where.dup.why)) + '</b>' : '') +
-      (D.ebay_read ? ' Read from eBay ' + esc(String(D.ebay_read).replace('T', ' ').slice(11, 19) || String(D.ebay_read)) + '.' : '') +
+      /* the eBay read is an object: when it was asked, and the engine's own note on what it found */
+      (D.ebay_read && typeof D.ebay_read === 'object' && D.ebay_read.at ? ' <b>Read from eBay ' + esc(String(D.ebay_read.at).replace('T', ' ').slice(11, 19)) + '.</b>' + (D.ebay_read.note ? ' ' + esc(String(D.ebay_read.note)) : '') : '') +
       (Wr && D.where.note ? ' ' + esc(String(D.where.note)) + '.' : '') + '</div>';
     var nk = function (v, f) { return v == null ? '<span class="ac-dsm">no row</span>' : f(v); };
     if (live) {

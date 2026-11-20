@@ -168,7 +168,8 @@ VIEW_CSS.push(
     var h = '<div class="ac-dsec"><h4>Where its ads sit ' + dSrc('ad status, read per campaign') + (live ? dSrc(nLive === 1 ? 'in one campaign' : 'in ' + nLive + ' campaigns', true) : '') + '</h4>' +
       '<div class="ac-dsub">Which campaigns this listing is in, and what its own ad said when that campaign\u2019s ads were last read. Each status is a reading, not a live check, so the date of the reading is on every row.' +
       (D.where && D.where.dup && D.where.dup.why ? ' <b>' + esc(String(D.where.dup.why)) + '</b>' : '') +
-      (D.ebay_read ? ' Read from eBay ' + esc(String(D.ebay_read).replace('T', ' ').slice(11, 19) || String(D.ebay_read)) + '.' : '') +
+      /* the eBay read is an object: when it was asked, and the engine's own note on what it found */
+      (D.ebay_read && typeof D.ebay_read === 'object' && D.ebay_read.at ? ' <b>Read from eBay ' + esc(String(D.ebay_read.at).replace('T', ' ').slice(11, 19)) + '.</b>' + (D.ebay_read.note ? ' ' + esc(String(D.ebay_read.note)) : '') : '') +
       (Wr && D.where.note ? ' ' + esc(String(D.where.note)) + '.' : '') + '</div>';
     var nk = function (v, f) { return v == null ? '<span class="ac-dsm">no row</span>' : f(v); };
     if (live) {
