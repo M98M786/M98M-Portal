@@ -342,6 +342,13 @@ a.adt-pc-t:hover{color:var(--gold-a)}
     <div class="auth-note">Sign in with your <b>M98M company Google account</b>. New here? Signing in starts your registration — Management approves before access.</div>
   </div>
 </div>
+<script>
+/* 22 Nov (owner): "open in new tab reloads and signs in again — these are basic things". A new tab
+   must open ON its page. If this browser holds a portal session the sign-in card is hidden before
+   the shell paints at all; boot enters the app from the stored session and shows the card again
+   only if the engine refuses that session. */
+try{ if(/^[0-9a-f]{64}$/.test(localStorage.getItem('m98m:psess')||'')){ document.getElementById('loginScreen').classList.add('hidden'); } }catch(e){}
+</script>
 
 <!-- ============ REGISTER ============ -->
 <div id="registerScreen" class="screen hidden">
@@ -927,7 +934,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261121-2243';
+var BUILD = '20261121-2300';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -937,6 +944,12 @@ var BUILD = '20261121-2243';
       behaviour (reload as soon as the tab was hidden) fired exactly when a hunter hopped to
       AliExpress to copy a link; that path is gone. */
 var LAST_TYPED_AT = 0;
+/* 22 Nov (owner): "the page reloads every two minutes while a person is working — stop it". The last
+   moment this tab was USED — a click, a key, a scroll, a touch — captured on the document so the
+   scrolling main pane counts too. The auto-update and every page poll defer to it. */
+var LAST_ACTIVE_AT = Date.now();
+['pointerdown','keydown','wheel','touchstart','scroll'].forEach(function(ev){ document.addEventListener(ev, function(){ LAST_ACTIVE_AT = Date.now(); }, { passive:true, capture:true }); });
+function userBusy(ms){ return !document.hidden && (Date.now() - LAST_ACTIVE_AT) < (ms || 10*60*1000); }
 var DRAFT = (function(){
   var timer = null, pending = {}, MAX_AGE = 24*3600000;
   function key(view){ return 'm98m:draft:' + view; }
@@ -1037,8 +1050,22 @@ function versionWatch(){
     var a = document.activeElement;
     return !!(a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'checkbox' && a.value)));
   }
+  var FORCE = false;
+  function updatePill(){
+    if($('updPill')){ return; }
+    var d = document.createElement('div');
+    d.id = 'updPill';
+    d.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:9998;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--gold-line-hi);border-radius:999px;padding:8px 14px;font-size:12px;font-weight:800;box-shadow:0 12px 40px rgba(0,0,0,.45);display:flex;gap:10px;align-items:center';
+    d.innerHTML = '<span>A newer portal is ready. It applies by itself when you leave this tab or pause for 10 minutes.</span><button class="minibtn" style="border-color:var(--gold-a)">Apply now</button>';
+    d.querySelector('button').onclick = function(){ FORCE = true; safeReload(); };
+    document.body.appendChild(d);
+  }
   function safeReload(){
-    if(busyTyping()){
+    /* 22 Nov (owner): a tab somebody is WORKING in is never reloaded under them — not for typing
+       only, for any use in the last ten minutes. It updates when they leave the tab (hidden) or
+       pause for ten minutes, or at once from the pill. The recheck below keeps the 2-minute cadence. */
+    if(!FORCE && (busyTyping() || userBusy())){
+      updatePill();
       /* Drafts make even a lost reload safe, but the polite thing is to not interrupt at all:
          keep checking every 2 minutes and go only after a 10-minute quiet spell. The "seen"
          guard is deliberately NOT set here — only when a reload actually fires below — so if
@@ -1047,7 +1074,6 @@ function versionWatch(){
          already "seen" and giving up. (25 Sept: Sir Hasib's Product hunting page sat on the old
          build for exactly that reason — the guard was set before the defer, so the killed timer
          was the only path left and it was gone.) One live timer at a time, never a stack. */
-      if(!deferToastShown){ deferToastShown = true; try{ toast('Portal update ready — it will apply when you pause.'); }catch(e){} }
       if(!deferTimer){ deferTimer = setTimeout(function(){ deferTimer = null; safeReload(); }, 2*60*1000); }
       return;
     }
@@ -1079,7 +1105,12 @@ function versionWatch(){
       }).catch(function(){});
   }
   setInterval(check, 4*60*1000);
-  document.addEventListener('visibilitychange', function(){ if(!document.hidden) check(); });
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden){ check(); return; }
+    /* the person has left this tab: a waiting update applies now, out of sight, so the tab is
+       fresh when they come back — unless a draft is mid-typing, which the quiet-spell rule keeps */
+    if(pendingStamp && !busyTyping()){ safeReload(); }
+  });
   setTimeout(check, 15*1000);
 }
 versionWatch();
@@ -1262,8 +1293,10 @@ function dpAttach(el, sets, tz){
 }
 
 /* ---- Google Identity Services ---- */
+var GSI_READY = false;
 function initGsi(){
-  if(!window.google || !google.accounts || !STATE.config || !STATE.config.oauth_client_id){ return; }
+  if(GSI_READY || !window.google || !google.accounts || !STATE.config || !STATE.config.oauth_client_id){ return; }
+  GSI_READY = true;
   google.accounts.id.initialize({ client_id: STATE.config.oauth_client_id, callback: onCredential, auto_select:true, use_fedcm_for_prompt:true });
   google.accounts.id.renderButton($('gbtn'), { theme:'filled_black', size:'large', shape:'pill', text:'signin_with', width:280 });
 }
@@ -3337,7 +3370,7 @@ VIEW_CSS.push(
     };
   }
 
-  function acLoad() {
+  function acLoad(after) {
     var box = $('acBody');
     if (!box) { return; }
     var payload = AC.period ? { period: AC.period } : { days: AC.days };
@@ -3476,6 +3509,7 @@ VIEW_CSS.push(
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Snapshot ' +
         esc(String(d.updated_at || '—')) + ' UTC · ' + esc(String(d.note || '')) + '</p>';
       box.innerHTML = h;
+      if (typeof after === 'function') { try { after(); requestAnimationFrame(after); } catch (e) {} }
       Array.prototype.forEach.call(box.querySelectorAll('[data-ac-tile]'), function (t) {
         var go = function () { acFocus(t.getAttribute('data-ac-tile')); };
         t.onclick = go;
@@ -3549,7 +3583,19 @@ VIEW_CSS.push(
       });
       acLoad();
       if (AC.timer) { clearInterval(AC.timer); }
-      AC.timer = setInterval(function () { if ($('acBody') && STATE.idToken) { acLoad(); } else { clearInterval(AC.timer); AC.timer = null; } }, 120000);
+      /* 22 Nov (owner): "every two minutes the page reloads on a working person — stop it". The
+         refresh still comes every two minutes, but never while the page was used in the last
+         minute, never while an acknowledge form is open, never in a hidden tab — and it keeps the
+         scroll where it was. (It also ran only with a Google token; a portal session is enough.) */
+      AC.timer = setInterval(function () {
+        if (!$('acBody') || !(STATE.idToken || STATE.session)) { clearInterval(AC.timer); AC.timer = null; return; }
+        if (document.hidden) { return; }
+        if (typeof userBusy === 'function' && userBusy(60000)) { return; }
+        var a = document.activeElement; if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) { return; }
+        if (document.querySelector('.ac-nform:not(.hidden)')) { return; }
+        var mv = $('mainView'), top = mv ? mv.scrollTop : 0;
+        acLoad(function () { if (mv && Math.abs(mv.scrollTop - top) > 2) { mv.scrollTop = top; } });
+      }, 120000);
     }
   };
 })();
@@ -47335,9 +47381,14 @@ function adtPoll(containerId, everyMs, fn){
   var t = setInterval(function () {
     if (!document.getElementById(containerId)) { adtPollStop(containerId); return; }
     if (busy || document.hidden || !(STATE.idToken || STATE.session)) { return; }
+    /* 22 Nov (owner): a refresh under a working hand reads as "the page reloaded on me" — a tick
+       waits while the page was used in the last 45 seconds, and the main pane keeps its scroll */
+    if (typeof userBusy === 'function' && userBusy(45000)) { return; }
     busy = true;
+    var mv = document.getElementById('mainView'), top = mv ? mv.scrollTop : 0;
+    var keep = function () { if (mv && Math.abs(mv.scrollTop - top) > 2) { mv.scrollTop = top; } };
     var p; try { p = fn(); } catch (e) { p = Promise.reject(e); }
-    Promise.resolve(p).then(function () { fails = 0; busy = false; }).catch(function (e) {
+    Promise.resolve(p).then(function () { fails = 0; busy = false; keep(); requestAnimationFrame(keep); }).catch(function (e) {
       busy = false;
       if (String(e && e.message || '') === 'auth') { adtPollStop(containerId); toast('Your sign-in expired — reload to keep the page live.'); return; }
       if (++fails >= 10) { adtPollStop(containerId); }
@@ -47491,6 +47542,7 @@ function sessLoad(){
     return t;
   }catch(e){ return null; }
 }
+var BOOTED = false;
 function boot(){
   /* R6c: the config is public and stable — a cached copy arms engine routing the instant a
      cold tab opens, so the first screen can never race it. The fresh fetch still replaces it. */
@@ -47498,17 +47550,23 @@ function boot(){
     var cachedCfg = JSON.parse(localStorage.getItem('m98m:cfg') || 'null');
     if(cachedCfg && cachedCfg.engine_url && !STATE.config){ STATE.config = cachedCfg; }
   }catch(e){}
+  /* 22 Nov (owner): a new tab used to sit on the sign-in card until the config came back over the
+     network. With a stored session AND a cached config there is nothing to wait for: enter now;
+     the fresh config below only replaces the copy in memory. */
+  if(!BOOTED && STATE.config && STATE.config.oauth_client_id && psessLoad()){ BOOTED = true; bootSignIn(STATE.config); }
   /* Engine first for the public config: the worker is stable infrastructure and answers it
      without auth; the sheet front door is the fallback. (1 Sept: an AS burst-throttle here
      dead-ended boots at "Backend not reachable" while a valid portal session sat in storage.) */
   engineCall('getPublicConfig', {}, 6000).catch(function(){ return api('getPublicConfig'); }).then(function(cfg){
     STATE.config=cfg;
     try{ localStorage.setItem('m98m:cfg', JSON.stringify(cfg)); }catch(e){}
-    bootSignIn(cfg);
+    if(BOOTED){ return; }
+    BOOTED = true; bootSignIn(cfg);
   }).catch(function(){
+    if(BOOTED){ return; }
     /* Config fetch failed everywhere — with a cached copy the app must still restore the
        portal session; the dead-end text is only for a truly blank first visit. */
-    if(STATE.config && STATE.config.oauth_client_id){ bootSignIn(STATE.config); return; }
+    if(STATE.config && STATE.config.oauth_client_id){ BOOTED = true; bootSignIn(STATE.config); return; }
     $('loginStatus').className='auth-status err'; $('loginStatus').textContent='Backend not reachable yet.';
   });
 }
@@ -47547,11 +47605,11 @@ function bootSignIn(cfg){
           show('loginScreen'); $('loginStatus').className='auth-status err'; $('loginStatus').textContent = e.message;
         }
       });
-      /* quietly fetch a Google credential too — the sheet backend still likes one while its
-         session support rolls out; nothing here touches the visible screen */
-      try{ google.accounts.id.prompt(); }catch(e){}
+      /* 22 Nov (owner): no Google prompt over a live session — the session alone authenticates every
+         call, and the One Tap popping in each new tab was the "it signs in again" he kept seeing */
       return;
     }
+    show('loginScreen');
     var kept = sessLoad();
     if(kept){
       STATE.idToken = kept;
@@ -47578,7 +47636,19 @@ function bootSignIn(cfg){
       trySilentSignIn();
     }
 }
-window.onload=function(){ var tries=0; (function w(){ if(window.google&&google.accounts){ boot(); } else if(tries++<40){ setTimeout(w,150); } else { boot(); } })(); };
+/* 22 Nov (owner): a held session boots the moment the shell is parsed — it never waits for the page
+   load or for Google's script. Without a session the sign-in card needs Google, so that path still
+   waits for it (up to 6 s) as before. When Google's script lands after an instant boot, it only arms
+   the sign-in button for the session-expired bar. */
+(function(){
+  var started = false;
+  function startNow(){ if(started){ return; } started = true; boot(); }
+  if(psessLoad()){
+    startNow();
+    var g = 0; (function gw(){ if(window.google && google.accounts){ try{ initGsi(); }catch(e){} } else if(g++ < 60){ setTimeout(gw, 250); } })();
+  }
+  window.onload=function(){ var tries=0; (function w(){ if(started){ return; } if(window.google&&google.accounts){ startNow(); } else if(tries++<40){ setTimeout(w,150); } else { startNow(); } })(); };
+})();
 </script>
 <script src="assets/three.r128.min.js"></script>  <!-- self-hosted, pinned; NOT a CDN — the login 3D galaxy needs it, 2D canvas fallback if absent/blocked -->
 <script>
