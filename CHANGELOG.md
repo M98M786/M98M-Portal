@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 2026-11-21 - ADS COMMAND CENTRE: yesterday's negatives from the engine's ledger before the day tab exists
+
+Owner: "went negative only shows products up to 19 Nov, not yesterday the 20th - why, and fix it." The
+WENT NEGATIVE cards are raised by the Signals scan from each account's Sales Analysis day tab, and on
+the 21st no account had a "20th November" tab yet (the scan answered "not connected yet" for all six),
+so no card for the 20th could exist. The command centre now reads yesterday's negatives from the
+engine's own day ledger when the feed holds no card for that day - the same per-listing actual profit
+the Product history By period table shows - and lists them first, marked provisional, with the
+listing's figures and its Product history box; the Signals card, with Acknowledge, replaces them when
+the tab lands.
+
 ## 2026-11-21 - ADS COMMAND CENTRE: Husnain sees it as Management does
 
 Owner: "why is this page not shown to Husnain as it is to me in his portal - fix that, so he sees the

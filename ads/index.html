@@ -729,7 +729,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['priceRevisionBoard','priceItemDetail','priceDecide','adtoolPeakHold','adtoolPeakProfile','adtoolVideoBoard','adtoolPeakCampaigns','adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolHourWindow','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
+var ENGINE_ACTIONS = ['priceRevisionBoard','priceItemDetail','priceDecide','adtoolPeakHold','adtoolPeakProfile','adtoolVideoBoard','adtoolPeakCampaigns','adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolHourWindow','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard','adsNegativeDay', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261121-1132';
+var BUILD = '20261121-1152';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -12420,7 +12420,7 @@ window.M98M_ADS_ONLY = true;
      first, then the biggest spend today. A choice is remembered per browser under AC_SORT_KEY. */
   var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', landNote: '', sort: { key: '', dir: -1 },
     /* 20 Nov (owner): the went-negative signals, read from the Signals feed and drawn here instead */
-    neg: [], negAt: 0, negLoading: null, negDate: '' };
+    neg: [], negAt: 0, negLoading: null, negDate: '', negProv: [] };
   var AC_NEG_TYPE = 'WENT NEGATIVE YESTERDAY';
   /* the window in words, for every heading that names it: today, yesterday, the dates picked, or the last N days */
   function acWin(d) {
@@ -12541,16 +12541,30 @@ VIEW_CSS.push(
       AC.negDate = String((d && d.date) || '');
       AC.negAt = Date.now(); AC.negLoading = null;
       if ($('acItems')) { acPaintItems(); }
+      /* 21 Nov (owner): yesterday's negatives before the Sales Analysis tab exists — when the feed
+         holds no card dated yesterday (UK), the engine's own day ledger stands in, marked provisional */
+      var yd = acUkDay(-1);
+      if (!AC.neg.some(function (s) { return String(s.date) === yd; })) {
+        api('adsNegativeDay', { day: yd }).then(function (r) {
+          AC.negProv = ((r && r.rows) || []).map(function (x) {
+            return { type: AC_NEG_TYPE, date: yd, item_id: String(x.item_id), account: x.account, title: x.title, image: x.image, provisional: true,
+              'Actual Profit': x.actual_profit, value: x.actual_profit, ad_spend: x.spend, orders: x.orders, units: x.units, pending_cost_orders: x.pending_cost_orders, actions: [], acked_by_me: false, acknowledged_by_others: [] };
+          });
+          if ($('acItems')) { acPaintItems(); }
+        })['catch'](function () { AC.negProv = []; });
+      } else { AC.negProv = []; }
       return AC.neg;
     })['catch'](function () { AC.negLoading = null; AC.negAt = Date.now(); return AC.neg; });
     return AC.negLoading;
   }
+  function acUkDay(off) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date(Date.now() + (off || 0) * 86400000)); }
   function acNegKey(s) { return [s.account, s.type, s.date, s.item_id].map(function (v) { return String(v == null ? '' : v); }).join('|'); }
-  function acNegFind(key) { for (var i = 0; i < (AC.neg || []).length; i++) { if (acNegKey(AC.neg[i]) === key) { return AC.neg[i]; } } return null; }
+  function acNegAll() { return (AC.neg || []).concat(AC.negProv || []); }
+  function acNegFind(key) { var all = acNegAll(); for (var i = 0; i < all.length; i++) { if (acNegKey(all[i]) === key) { return all[i]; } } return null; }
   function acNegVal(s) { var v = s['Actual Profit']; if (v == null || v === '') { v = s.value; } return Number(v) || 0; }
   function acNorm(v) { return String(v == null ? '' : v).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
   function acNegRows() {
-    return (AC.neg || []).filter(function (s) {
+    return acNegAll().filter(function (s) {
       if (s.acked_by_me || (s.acknowledged_by_others && s.acknowledged_by_others.length) || (s.ack_history && s.ack_history.length)) { return false; }
       if (!String(s.item_id || '').trim()) { return false; }
       if (AC.acct) { var a = acNorm(s.account), w = acNorm(AC.acct); if (!(a === w || (a && w && (a.indexOf(w) >= 0 || w.indexOf(a) >= 0)))) { return false; } }
@@ -12565,21 +12579,31 @@ VIEW_CSS.push(
     if (s['Order Earning'] != null && s['Order Earning'] !== '') { bits.push('order earning ' + dGbp(s['Order Earning'])); }
     if (s['Raw Profit'] != null && s['Raw Profit'] !== '') { bits.push('raw profit ' + dGbp(s['Raw Profit'])); }
     if (s.ad_fees != null && s.ad_fees !== '') { bits.push('ad fees incl VAT ' + dGbp(s.ad_fees)); }
+    if (s.provisional) {
+      if (s.ad_spend != null) { bits.push('ad spend ' + dGbp(s.ad_spend)); }
+      bits.push((s.orders || 0) + ' order' + (s.orders === 1 ? '' : 's') + (s.pending_cost_orders ? ', ' + s.pending_cost_orders + ' not costed yet' : ''));
+    }
     return bits;
   }
   function acNegLine(s) {
     var who = String(s.owner_name || s.owner_email || '').trim();
     return 'WENT NEGATIVE ' + esc(String(s.date) === AC.negDate ? 'YESTERDAY' : dDay(s.date).toUpperCase()) + ' \u00b7 ACTUAL PROFIT ' + esc(dGbp(acNegVal(s))) +
       (acNegBits(s).length ? ' <span>\u00b7 ' + esc(acNegBits(s).join(' \u00b7 ')) + '</span>' : '') +
-      (who ? ' <span>\u00b7 listed by ' + esc(who) + '</span>' : '');
+      (who ? ' <span>\u00b7 listed by ' + esc(who) + '</span>' : '') +
+      (s.provisional ? ' <span>\u00b7 provisional, from the engine\u2019s ledger</span>' : '');
   }
   function acNegIntro(s) {
     var bits = acNegBits(s);
+    if (s.provisional) {
+      return 'This listing went negative ' + esc(acNegWhen(s)) + ', on the engine\u2019s own ledger: actual profit <b style="color:var(--warn)">' + esc(dGbp(acNegVal(s))) + '</b>' +
+        (bits.length ? ' (' + esc(bits.join(', ')) + ')' : '') + '. The day\u2019s Sales Analysis tab has not been built yet, so this is provisional: the Signals card, with its Acknowledge, is raised when the tab lands. Its Product history, in the page\u2019s own order:';
+    }
     return 'This listing went negative ' + esc(acNegWhen(s)) + ': actual profit <b style="color:var(--warn)">' + esc(dGbp(acNegVal(s))) + '</b>' +
       (bits.length ? ' (' + esc(bits.join(', ')) + ')' : '') + '. Nobody has acted on it yet. Its Product history, in the page\u2019s own order:';
   }
   /* the card's one-tap actions and the acknowledge-with-a-comment form, as the Signals page had them */
   function acNegActs(s) {
+    if (s.provisional) { return '<div class="ac-dsub" style="margin:0 0 8px">No action buttons yet: they come with the Signals card once the day\u2019s Sales Analysis tab is built (the Product history link above is live now).</div>'; }
     var k = esc(acNegKey(s));
     var acts = (s.actions || []).map(function (a) { return String(a || '').trim(); }).filter(Boolean);
     return '<div class="ac-nacts">' + acts.map(function (a) { return '<button class="minibtn" data-ac-nact="go" data-ac-nkey="' + k + '" data-ac-nlabel="' + esc(a) + '">' + esc(a) + '</button>'; }).join('') +
@@ -12898,7 +12922,7 @@ VIEW_CSS.push(
         var id = String(s.item_id), known = /^\d{9,13}$/.test(id), r = known ? byId[id] : null;
         if (String(s.date) !== lastDay) {
           lastDay = String(s.date);
-          h += '<tr class="ac-negd"><td colspan="' + cols.length + '">Went negative ' + esc(acNegWhen(s).replace(/^on /, '')) + '<span>' + perDay[lastDay] + ' listing' + (perDay[lastDay] === 1 ? '' : 's') + ', not acted on</span></td></tr>';
+          h += '<tr class="ac-negd"><td colspan="' + cols.length + '">Went negative ' + esc(acNegWhen(s).replace(/^on /, '')) + '<span>' + perDay[lastDay] + ' listing' + (perDay[lastDay] === 1 ? '' : 's') + (s.provisional ? ' \u00b7 provisional, from the engine\u2019s ledger until the day\u2019s Sales Analysis tab is built' : ', not acted on') + '</span></td></tr>';
         }
         var cell = { item_id: known ? id : '', account: (r && r.account) || s.account, title: (r && r.title) || s.title || id, image: (r && r.image) || s.image || null, waste: !!(r && r.waste) };
         h += '<tr class="ac-neg">' + cols.map(function (c, i) {
