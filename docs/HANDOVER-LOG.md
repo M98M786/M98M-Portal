@@ -478,3 +478,29 @@ in the next entry.
 
 **State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent; the armor case description is on hold
 pending Hasib's answer.
+---
+
+## 2026-11-21 22:32 UTC · WINDOWS · Armor ring-stand case description REVISED; error 240 was a wording trigger, found by bisecting
+
+**What was done.** Hasib carried the Mac's answer over (resend the live text, then add blocks back one at a time). The
+live description resent unchanged passed, so the NEXGEN account and the listing were never blocked. The camera-cover
+block alone was refused; sent as four separate edits, three passed (headline, chip and how-to step; the intro sentence;
+the charging-port line) and one was refused: the feature cell and spec row worded "Sliding window shields the lenses
+when closed; slide it open to take photos" and "open to shoot, closed to protect". Reworded as "A sliding window
+protects the lenses; slide it back to take photos" and "Sliding lens cover (slide back to take photos)" it passed. The
+full approved text, with the colours row, the nineteen-model list and both notes including "Not made for iPhone 18,
+Plus, Mini, 16e or 17e", then passed in one revise. Title unchanged, sold, watchers, price and quantity unchanged on
+every read-back; the live text now equals the proposal file.
+
+**Finding for both Claudes.** eBay's selling-practices rule SP_Item_Condition_Misrep (error 240, rule 1030269) is not
+about trademarks, model negations or the specifics: on this listing it tripped on open/closed-state wording for a
+cover ("closed", "shields", "open to shoot, closed to protect"). "closes over the lenses … slides open" in the intro
+passed, so the exact trigger is narrow; the safe pattern is "slide back to take photos". The Mac's elimination list
+(scratches, open, original, "not for model X" all passed elsewhere) held up.
+
+**Files.** Agent folder: backups of every step in backups/Sir Hasib/, bisect_log.json and the per-attempt responses in
+the item's proposals folder, seven rows in the revisions log for the night (one no-op test, four single-block sends,
+one final; every accepted send was a subset of the approved text). Desk republished.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent; nothing pending on this item. Title
+review for it falls due 14 Dec.
