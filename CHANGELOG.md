@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-11-21 - BUSINESS OVERVIEW: the Individual-days dispatch clock keeps the Today format
+
+Owner: "the details shown the same way as above for the individual days too - no change in the
+format". In the Individual days view the dispatch clock now draws one block per UK day of the window,
+newest first, each with the same three tiles and the same account table as Today's block, over that
+one day; the window's own totals are a single line above them.
+
 ## 2026-11-21 - BUSINESS OVERVIEW: the dispatch clock goes day by day in the Individual view
 
 Owner: "Individual days doesn't work, it still comes through with the collective combined data." The
