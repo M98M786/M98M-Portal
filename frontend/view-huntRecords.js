@@ -195,7 +195,16 @@
           '<td style="text-align:left;white-space:nowrap">' + hrPill(r) + '</td>' +
           '<td style="text-align:left;max-width:250px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' +
             hrAttr(r['Title']) + '">' + esc(hrStr(r['Title']) || hrStr(r.hunt_id)) + '</div>' +
-            '<span class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(hrStr(r.hunt_id)) + '</span></td>' +
+            '<span class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(hrStr(r.hunt_id)) + '</span>' +
+            /* 22 Nov (owner): "show Source Price / E-Bey Caluclator + £4 to item listers" — the two
+               prices every hunt carries, under the product, exactly as the hunt form holds them.
+               Both are in the §8.2 lister set already; this page just never drew them. */
+            ((hrStr(r['Source Price']) || hrStr(r['E-Bey Caluclator + \u00a34'])) ?
+              '<div style="font-size:11px;font-weight:700;color:var(--text-2);margin-top:3px;white-space:nowrap">' +
+                (hrStr(r['Source Price']) ? '<span style="color:var(--text-3)">Source Price</span> ' + esc(hrStr(r['Source Price'])) : '') +
+                (hrStr(r['Source Price']) && hrStr(r['E-Bey Caluclator + \u00a34']) ? ' \u00b7 ' : '') +
+                (hrStr(r['E-Bey Caluclator + \u00a34']) ? '<span style="color:var(--text-3)">E-Bey Caluclator + \u00a34</span> ' + esc(hrStr(r['E-Bey Caluclator + \u00a34'])) : '') +
+              '</div>' : '') + '</td>' +
           '<td style="text-align:left">' + (kind ? '<span class="hr-kind">' + esc(kind) + '</span>' : '<span style="color:var(--text-3)">—</span>') + '</td>' +
           '<td style="text-align:left">' + esc(hrStr(r.hunter_name) || hrStr(r.hunter_email) || '—') + '</td>' +
           (showAcct ? '<td style="text-align:left">' + esc(hrStr(r['Account Selected']) || '—') + '</td>' + hrTaskCells(r) : '') +
