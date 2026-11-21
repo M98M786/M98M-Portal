@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-11-21 - AD TOOL: the Team Lead reads the Product history with item profit
+
+Owner, asked whether the Product history boxes and page should open to Husnain with profit too:
+"open them too". The ad tool's reads (the Product history page, the boxes under the command centre's
+rows and the other adtool pages) now reach the Team Lead with their item-level profit. Account and
+fleet profit still leave for every role outside Management and Ops Head, and the price desk keeps its
+strip.
+
 ## 2026-11-21 - ADS COMMAND CENTRE: yesterday's negatives from the engine's ledger before the day tab exists
 
 Owner: "went negative only shows products up to 19 Nov, not yesterday the 20th - why, and fix it." The
