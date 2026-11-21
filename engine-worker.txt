@@ -5273,12 +5273,24 @@ const ADTOOL_ROLES = ['Management', 'Ops Head', 'Advertising Manager'];
    one page cannot be refused at the door and cannot reach any other advertising action. */
 /* 11 Nov, owner's follow-up ('total/full access to the Product history page'): the number register the page's
    'how is this worked out' chips open is a table of metric definitions, no earning in it, so it opens to the role too. */
-const ADTOOL_OPEN_ROLES = { adtoolSearch: ['Team Lead'], adtoolListing: ['Team Lead'], adtoolActionLog: ['Team Lead'], adtoolRegister: ['Team Lead'] };
+/* 22 Nov (owner): "update product history page in m98mfour@gmail.com so he can see the ads product
+   history". A Product Hunter is no advertising role, and the owner named ONE person, not the role —
+   so the page opens by the modules grant on his USERS row ('module:adtoolProduct' below), the same
+   grant the sidebar reads, and nobody else of his role moves. He is outside EARNINGS_SEE_ROLES, so
+   the answer leaves with every earning stripped (class 'ne'), exactly as the Team Lead's does. */
+const ADTOOL_OPEN_MODULE = 'module:adtoolProduct';
+const ADTOOL_OPEN_ROLES = { adtoolSearch: ['Team Lead', ADTOOL_OPEN_MODULE], adtoolListing: ['Team Lead', ADTOOL_OPEN_MODULE], adtoolActionLog: ['Team Lead', ADTOOL_OPEN_MODULE], adtoolRegister: ['Team Lead'] };
 /* the role half of adtGate as a pure predicate: the route handler runs it BEFORE the KV page cache is consulted, so a
    cached advertising payload can never answer a role the gate would refuse (the page-flag half stays inside the action) */
 function adtRoleAllowed(user, extraRoles) {
   const u = user || {}, r = String(u.role || '');
-  return ADTOOL_ROLES.indexOf(r) >= 0 || (!!extraRoles && extraRoles.indexOf(r) >= 0) || !!u.super;
+  if (ADTOOL_ROLES.indexOf(r) >= 0 || !!u.super) return true;
+  if (!extraRoles) return false;
+  if (extraRoles.indexOf(r) >= 0) return true;
+  /* a 'module:<key>' entry opens the page to anyone whose USERS modules column carries that key —
+     the per-person grant Management gives on the Access desk; '-<key>' there withdraws it */
+  const mods = String(u.modules || '').split(',').map((s) => s.trim());
+  return extraRoles.some((x) => String(x).indexOf('module:') === 0 && mods.indexOf(x.slice(7)) >= 0 && mods.indexOf('-' + x.slice(7)) < 0);
 }
 const ADTOOL_TZ = 'Europe/London';
 const ADTOOL_DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];

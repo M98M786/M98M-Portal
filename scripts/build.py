@@ -27,6 +27,13 @@ GS_ORDER = [
 MARKER = '/* === PHASE 3 VIEW MODULES SPLICED HERE === */'
 
 
+def _open(path, mode='r'):
+    """Every source and artifact is UTF-8 with LF endings, on any machine. Python's defaults on
+    Windows are the cp1252 code page (the build died on the first non-ASCII byte) and CRLF
+    on write (every line of index.html came out changed), which a build must never depend on."""
+    return open(path, mode, encoding='utf-8', newline='\n')
+
+
 def strip_strings_and_comments(src):
     """Blank out string literals and comments so a delimiter count reflects code, not prose.
     A brace inside "s.charAt(0) === '{'" is data, and counting it reports a phantom error."""
@@ -93,12 +100,12 @@ def build_backend():
         if not os.path.exists(path):
             missing.append(name)
             continue
-        with open(path) as fh:
+        with _open(path) as fh:
             parts.append('\n// ==================== %s ====================\n%s' % (name, fh.read()))
     out = '\n'.join(parts)
     os.makedirs(os.path.join(ROOT, 'build'), exist_ok=True)
     dest = os.path.join(ROOT, 'build', 'Code.gs')
-    with open(dest, 'w') as fh:
+    with _open(dest, 'w') as fh:
         fh.write(out)
 
     code = strip_strings_and_comments(out)
@@ -117,7 +124,7 @@ def build_frontend():
     # Source shell lives in src/ — the ROOT index.html is the BUILT page, because GitHub
     # Pages serves this repo's root as the live portal (main branch, path "/"). A push of the
     # source shell to root once served an empty frame to the whole team; never again.
-    with open(os.path.join(ROOT, 'src', 'shell.html')) as fh:
+    with _open(os.path.join(ROOT, 'src', 'shell.html')) as fh:
         shell = fh.read()
     if MARKER not in shell:
         sys.exit('ERROR: splice marker missing from index.html')
@@ -125,7 +132,7 @@ def build_frontend():
     files = sorted(f for f in os.listdir(fdir) if f.endswith('.js')) if os.path.isdir(fdir) else []
     blocks = []
     for name in files:
-        with open(os.path.join(fdir, name)) as fh:
+        with _open(os.path.join(fdir, name)) as fh:
             blocks.append('/* ---------- %s ---------- */\n%s' % (name, fh.read().strip()))
     page = shell.replace(MARKER, '\n\n'.join(blocks) if blocks else MARKER)
 
@@ -135,14 +142,14 @@ def build_frontend():
     stamp = time.strftime('%Y%m%d-%H%M', time.gmtime())
     page = page.replace('__BUILD_STAMP__', stamp)
 
-    with open(os.path.join(ROOT, 'index.html'), 'w') as fh:
+    with _open(os.path.join(ROOT, 'index.html'), 'w') as fh:
         fh.write(page)
-    with open(os.path.join(ROOT, 'version.txt'), 'w') as fh:
+    with _open(os.path.join(ROOT, 'version.txt'), 'w') as fh:
         fh.write(stamp + '\n')
     # engine source staged at root too: the dash-pane deploy fetches it from the live site
-    with open(os.path.join(ROOT, 'engine', 'worker.js')) as fh:
+    with _open(os.path.join(ROOT, 'engine', 'worker.js')) as fh:
         eng = fh.read()
-    with open(os.path.join(ROOT, 'engine-worker.txt'), 'w') as fh:
+    with _open(os.path.join(ROOT, 'engine-worker.txt'), 'w') as fh:
         fh.write(eng)
     print('build stamp: %s (root index.html, version.txt, engine-worker.txt written)' % stamp)
     views = sorted(set(re.findall(r'VIEWS\.([A-Za-z0-9_]+)\s*=', page)))
@@ -192,7 +199,7 @@ def build_ads():
     stamp would reload this page for ever.
     """
     import time
-    with open(os.path.join(ROOT, 'src', 'shell.html')) as fh:
+    with _open(os.path.join(ROOT, 'src', 'shell.html')) as fh:
         shell = fh.read()
     if MARKER not in shell:
         sys.exit('ERROR: splice marker missing from the shell')
@@ -212,7 +219,7 @@ def build_ads():
     blocks = ['window.M98M_ADS_ONLY = true;']
     declared = set()
     for name in files:
-        with open(os.path.join(fdir, name)) as fh:
+        with _open(os.path.join(fdir, name)) as fh:
             body = fh.read().strip()
         declared.update(v for v in re.findall(r'VIEWS\.([A-Za-z0-9_]+)\s*=', body) if v.startswith('adtool'))
         blocks.append('/* ---------- %s ---------- */\n%s' % (name, body))
@@ -227,9 +234,9 @@ def build_ads():
 
     out = os.path.join(ROOT, 'ads')
     os.makedirs(out, exist_ok=True)
-    with open(os.path.join(out, 'index.html'), 'w') as fh:
+    with _open(os.path.join(out, 'index.html'), 'w') as fh:
         fh.write(page)
-    with open(os.path.join(out, 'version.txt'), 'w') as fh:
+    with _open(os.path.join(out, 'version.txt'), 'w') as fh:
         fh.write(stamp + '\n')
     views = sorted(v for v in set(re.findall(r'VIEWS\.([A-Za-z0-9_]+)\s*=', page)) if v.startswith('adtool'))
     print('ads -> ads/index.html  %d bytes, modules: %d, advertising views: %d'
