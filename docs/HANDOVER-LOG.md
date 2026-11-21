@@ -431,3 +431,32 @@ and the earbuds' manual-campaign ads paused by someone other than the agent; the
 14 Dec; first reviews fall due from 10 Dec.
 
 **State.** MAC PRIMARY for standing duties, no SQR work. WINDOWS runs the SQR Listing Agent with the full package.
+---
+
+## 2026-11-21 22:17 UTC · WINDOWS · First SQR run from Windows: NEXGEN armor ring-stand case — campaign live, description revise refused by eBay (error 240)
+
+**What was done.** Hasib sent the "Top Listings - Sales Testing" search query report (1 Jun to 21 Nov, a SMART campaign
+shared by 26 listings, three of them other iPhone cases) for the shockproof armor ring-stand iPhone case on the NEXGEN
+shop. The title was revised by the Mac on 14 Nov and stays on its 30-day hold; the proposal was a description edit
+(the slide camera cover shown in the pictures was never mentioned; the charging-port wording was wrong for iPhone 12 to
+14; a full model list and colour row; notes that it is not a magnetic-charging case and not made for 18, Plus, Mini,
+16e or 17e) plus a manual keyword campaign. Hasib answered "go for it + campaign" on the desk.
+
+**Result.** The campaign is live: "SQR … iPhone armor ring stand case", Priority, manual, fixed bids, £3 a day, one ad
+group, 46 of 46 keywords and 148 of 148 negative phrase keywords accepted, one active ad; the Dynamic pay-per-sale copy
+removed; the listing's old SMART ad in "90 days top duplicae" was already paused by someone else and was left alone.
+Post-launch sweep: exactly one active ad, in the new campaign. **The ReviseFixedPriceItem call was refused: Ack
+Failure, error 240, "The item cannot be listed or modified. The title or description may contain improper words, or the
+listing or seller may be in violation of eBay policy."** The title in that call was unchanged, so the new text is the
+suspect: it introduced the words MagSafe and Lightning, which the old description never had. A retry without those two
+words was prepared but not sent (the app's safety check blocked it, and the agent's rule is to stop on an eBay error).
+Nothing on the listing changed; the pre-revise backup is in the agent's backups folder. Hasib decides: retry without
+the trademarks, or leave the description.
+
+**Windows lessons.** Every agent script must run with `python -X utf8` (the launcher crashed on a £ sign in a plan
+CSV written in the Windows code page; the CSV was re-encoded and the idempotent launcher resumed cleanly); the plan
+builder's Downloads path is the Mac's and is overridden to the agent's `sqr-csvs` folder; the desk generator gained
+a per-item override for status text.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent; one description revise awaiting
+Hasib's word.
