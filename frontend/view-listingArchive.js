@@ -21,16 +21,10 @@
     '.la-who{font-weight:700;white-space:nowrap}' +
     '.la-chip{font-size:11px;font-weight:800;padding:5px 13px;border-radius:99px;border:1px solid var(--gold-line);background:var(--panel-2);color:var(--text-2);cursor:pointer}' +
     '.la-chip.on{background:var(--blue);border-color:var(--blue);color:#fff}' +
-    /* 21 Nov (owner): the previous details, for every lister */
+    /* 21 Nov (owner): the previous details, for every lister — the Details toggle opens the same job card Assigned listings shows */
     '.la-more{font-size:11px;font-weight:800;padding:3px 9px;border-radius:8px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text-2);cursor:pointer;white-space:nowrap}' +
     '.la-more.on{border-color:var(--gold-a);color:var(--gold-a)}' +
-    '.la-det td{padding:0 11px 12px!important;border-bottom:1px solid var(--gold-line)}' +
-    '.la-box{display:grid;gap:10px 18px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));padding:12px 14px;border:1px solid var(--gold-line);border-radius:12px;background:var(--panel-2)}' +
-    '.la-box .k{font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800;margin-bottom:3px}' +
-    '.la-box .v{font-size:12px;font-weight:700;word-break:break-word}' +
-    '.la-lnk{display:inline-block;margin:2px 6px 2px 0;padding:3px 9px;border-radius:8px;border:1px solid var(--gold-line-hi);color:var(--blue-2);font-weight:800;font-size:11px;text-decoration:none}' +
-    '.la-lnk span{color:var(--text-3);font-weight:700;margin-left:4px}' +
-    '.la-img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--gold-line)}'
+    '.la-det td{padding:0 11px 12px!important;border-bottom:1px solid var(--gold-line)}'
   );
   var LA_OPEN = {};   // task_id → details panel open
 
@@ -120,39 +114,35 @@
      both already lister-safe: `sourcing` (live supplier names + links, no cost — the engine adds
      it) and `listing` (the hunt-form details the lister was given, §8.2-limited). Nothing here is
      an earning; the profit rule for listers is untouched. */
-  function laLink(url, label, tag) {
-    var u = typeof safeUrl === 'function' ? safeUrl(laStr(url)) : laStr(url);
-    if (!u) { return ''; }
-    return '<a class="la-lnk" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + (tag ? '<span>' + esc(tag) + '</span>' : '') + '</a>';
-  }
+
   function laDetails(r) {
-    var sc = r.sourcing || {}, L = r.listing || {};
-    var g = function (k) { var keys = Object.keys(L); for (var i = 0; i < keys.length; i++) { if (keys[i].replace(/\s+/g, ' ').trim().toLowerCase().indexOf(k.toLowerCase()) === 0) { return laStr(L[keys[i]]); } } return ''; };
+    var sc = r.sourcing || {};
     var id = laStr(r.item_id);
-    var cells = [];
-    var supLine = laStr(sc.supplier) || (sc.sup_names && sc.sup_names[0]) || '';
-    var links = (sc.links || []).map(function (l, i) { return laLink(l.url, 'Supplier ' + (i + 1) + (l.supplier ? ' · ' + l.supplier : ''), l.src); }).join('');
-    if (!links) {   // nothing saved since — fall back to the links the hunt form carried
-      links = [['Product Link 1', 'Supplier 1'], ['Product Link 2', 'Supplier 2'], ['Product Link 3', 'Supplier 3']].map(function (p) { return laLink(g(p[0]), p[1], 'hunt'); }).join('');
+    var card = '';
+    if (window.M98M_taskDetailsHtml && r.listing) {
+      card = window.M98M_taskDetailsHtml(JSON.stringify({ limited: r.listing, hunt_id: laStr(r.hunt_id) }));
     }
-    cells.push('<div><div class="k">Supplier being worked</div><div class="v">' + (supLine ? esc(supLine) : '<span style="color:var(--text-3)">not recorded</span>') +
-      (sc.sup_names && sc.sup_names.length > 1 ? '<div style="font-size:11px;color:var(--text-3);font-weight:700;margin-top:2px">also on file: ' + esc(sc.sup_names.slice(1).join(' · ')) + '</div>' : '') + '</div></div>');
-    cells.push('<div><div class="k">Sourcing links</div><div class="v">' + (links || '<span style="color:var(--text-3)">no link anywhere</span>') +
-      laLink(sc.temu || g('Temu Link'), 'Temu') + '</div></div>');
-    cells.push('<div><div class="k">eBay</div><div class="v">' + (id && !/^task:/.test(id) ? laLink('https://www.ebay.co.uk/itm/' + id, 'Open listing ' + id) : laLink(g('Ebay Link'), 'Ebay link from the hunt')) + '</div></div>');
-    var people = [];
-    if (sc.hunter) { people.push('Hunted by ' + esc(sc.hunter)); }
-    if (laStr(r.assigned_name) || laStr(r.assigned_to)) { people.push('Listed by ' + esc(laStr(r.assigned_name) || laStr(r.assigned_to))); }
-    if (people.length) { cells.push('<div><div class="k">People</div><div class="v">' + people.join('<br>') + '</div></div>'); }
-    var facts = [['Category', g('Category')], ['Seasonal', g('Seasonal')], ['Selected date', g('Selected Date')], ['CPC selling chance', g('CPC Selling Chance')], ['Source price (hunt)', g('Source Price')], ['Calculator price (hunt)', g('E-Bey')]].filter(function (f) { return f[1]; });
-    if (facts.length) { cells.push('<div><div class="k">From the hunt form</div><div class="v">' + facts.map(function (f) { return '<div><span style="color:var(--text-3)">' + esc(f[0]) + ':</span> ' + esc(f[1]) + '</div>'; }).join('') + '</div></div>'); }
-    var research = [['Terapeak', g('Main Keyword Terapeak')], ['Terapeak overview', g('Terapeak overview')], ['Avg sold price', g('Image Link of avg sold')], ['Zik', g('Image Link of Zik')]].map(function (f) { return laLink(f[1], f[0]); }).join('');
-    if (research) { cells.push('<div><div class="k">Research links</div><div class="v">' + research + '</div></div>'); }
-    var img = (typeof safeUrl === 'function' ? safeUrl(g('Image Link') || g('IMAGE')) : '');
-    if (img) { cells.push('<div><div class="k">Image</div><img class="la-img" src="' + esc(img) + '" alt=""></div>'); }
-    if (g('Title') && laStr(g('Title')) !== laStr(r.title)) { cells.push('<div style="grid-column:1/-1"><div class="k">Title given to the lister</div><div class="v">' + esc(g('Title')) + '</div></div>'); }
-    return '<div class="la-box">' + cells.join('') + '</div>';
+    /* the live supplier record, in the card's own grid and pill styles so it reads as one card */
+    var rows = [];
+    rows.push(['Supplier being worked', laStr(sc.supplier) || 'not recorded']);
+    if (sc.sup_names && sc.sup_names.length > 1) { rows.push(['Also on file', sc.sup_names.slice(1).join(' \u00b7 ')]); }
+    if (sc.hunter) { rows.push(['Hunted by', sc.hunter]); }
+    if (laStr(r.assigned_name)) { rows.push(['Listed by', laStr(r.assigned_name)]); }
+    var pills = [];
+    (sc.links || []).forEach(function (l, k) {
+      var u = typeof safeUrl === 'function' ? safeUrl(l.url) : l.url;
+      if (u) { pills.push('<a class="tk-dt-lnk" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">Supplier ' + (k + 1) + (l.supplier ? ' \u00b7 ' + esc(l.supplier) : '') + ' (' + esc(l.src) + ') \u2197</a>'); }
+    });
+    if (sc.temu) { pills.push('<a class="tk-dt-lnk" href="' + esc(sc.temu) + '" target="_blank" rel="noopener noreferrer">Temu \u2197</a>'); }
+    if (id && !/^task:/.test(id)) { pills.push('<a class="tk-dt-lnk" href="https://www.ebay.co.uk/itm/' + esc(id) + '" target="_blank" rel="noopener noreferrer">eBay listing ' + esc(id) + ' \u2197</a>'); }
+    var live = '<div class="tk-dt-grid" style="margin-top:12px">' + rows.map(function (kv) {
+      return '<div class="tk-dt-row"><span class="k">' + esc(kv[0]) + '</span><span class="v">' + esc(kv[1]) + '</span></div>';
+    }).join('') + '</div>' +
+      (pills.length ? '<div class="tk-dt-links">' + pills.join('') + '</div>' : '<div class="tk-sub" style="margin-top:10px">No sourcing link anywhere for this item.</div>');
+    return '<div class="tk-box tk-det" style="margin-top:4px"><div class="k">Details</div><div class="tk-txt">' + card + live + '</div></div>';
   }
+
+
 
   VIEWS.listingArchive = {
     label: 'Listings archive',

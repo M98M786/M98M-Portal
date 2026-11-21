@@ -29985,6 +29985,7 @@ const ROUTES = {
         if (pv2 && pv2.hunt_id && hunts[pv2.hunt_id]) {
           try { const v = JSON.parse(hunts[pv2.hunt_id].vals || '{}'); h = { l1: v['Product Link 1 Main supplier'] || '', l2: v['Product Link 2'] || '', l3: v['Product Link 3'] || '', temu: v['Temu Link'] || '' }; } catch (e) { h = null; }
         }
+        if (pv2 && pv2.hunt_id) r.hunt_id = String(pv2.hunt_id);   // the card prints it under the title
         if (!f && !sv && !g && !h) continue;
         const links = [
           pick2([['portal', sv && sv.s1], ['sheet', f && f.l1], ['go-live', g && g.ali_link], ['hunt', h && h.l1]], f && f.sup1),

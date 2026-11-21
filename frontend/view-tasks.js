@@ -826,6 +826,9 @@
     if (desc) { h += '<div class="tk-dt-desc"><div class="k">Description</div>' + tkText(desc) + '</div>'; }
     return h;
   }
+  /* 21 Nov (owner, pointing at this very card): the Listings archive opens THIS — the same grid,
+     link pills and description a task's Details button draws — rather than a card of its own. */
+  window.M98M_taskDetailsHtml = tkDetailsHtml;
 
   function tkRow(t, showWho, selectable) {
     var id = tkStr(t.task_id), status = tkStr(t.status), type = tkStr(t.type);
