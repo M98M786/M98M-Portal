@@ -27,6 +27,13 @@ const PROFIT_ROLES = ['Management', 'Ops Head'];                 // collective p
    profit-bearing read; loss letters still reach them by role. */
 const ITEM_PROFIT_ROLES = ['Management', 'Ops Head', 'Advertising Manager', 'CS'];
 const CAMPAIGN_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Manager', 'CS'];
+/* 21 Nov (owner): "why is the Ads command centre not shown to Husnain as it is to me — fix that, so he
+   sees it as we see it." The command centre's own board (adsBoard) and its WENT NEGATIVE signals go
+   to the Team Lead whole, earnings included, as the one named exception to Review 4. Every other
+   read keeps Review 4: the Product history boxes under the rows, the Product history page and the
+   price desk still strip earnings for the role. */
+const ADS_CENTRE_FULL_ROLES = ['Team Lead'];
+function adsCentreFull(user) { const u = user || {}; return canSeeEarnings(u) || ADS_CENTRE_FULL_ROLES.indexOf(String(u.role || '')) >= 0; }
 /* 10 Nov (owner): "update these pages as pinned pages in husnain's portal and make them properly
    working ... in price revision page, go with the privacy of calculation breakdown in profit in his
    portal." Husnain is a Team Lead, so Review 4 above still governs all four pinned pages: the page
@@ -25687,7 +25694,7 @@ const ROUTES = {
         items: itemsOut,
         split: split, split_total: splitTotal, split_incomplete: splitIncomplete,
         note: 'refreshed every 5 minutes; each cycle is as fresh as eBay built its last report (typically 5-10 minutes behind live). Organic vs promoted uses eBay-attributed sale revenue — promoted is what eBay credits to the ads, organic is the rest.' };
-      return canSeeEarnings(ctx.user) ? centre : stripEarnings(centre);
+      return adsCentreFull(ctx.user) ? centre : stripEarnings(centre);
     },
   },
 
@@ -31510,6 +31517,10 @@ const ROUTES = {
          only truth: PROFIT_ROLES is Management + Ops Head, ITEM_PROFIT_ROLES adds Advertising
          Manager + CS, and a signal card is per-item money — so the item list is the right gate. */
       const profit = ITEM_PROFIT_ROLES.indexOf(role) >= 0 || PROFIT_ROLES.indexOf(role) >= 0 || !!ctx.user.super;
+      /* 21 Nov (owner): the Team Lead reads the WENT NEGATIVE cards whole — they are the Ads command
+         centre's went-negative section, which he is to see as Management sees it. The other money
+         types stay stripped for the role. */
+      const negWhole = (t) => ADS_CENTRE_FULL_ROLES.indexOf(role) >= 0 && t === 'WENT NEGATIVE YESTERDAY';
       /* the session row carries no account scope — read it (users.accounts mirrors the sheet's
          accounts_access column); an empty scope means every account, exactly as on Apps Script */
       const urow = await ctx.env.DB.prepare('SELECT accounts FROM users WHERE email = ?1').bind(String(ctx.user.email || '').toLowerCase()).first().catch(() => null);
@@ -31517,7 +31528,7 @@ const ROUTES = {
       const PROFIT_FIELDS = ['Our Profit', 'ROI', 'Profit', 'Order Earning', 'order_earning', 'profit', 'roi', 'Raw Profit', 'Actual Profit', 'margin', 'Margin', 'earning', 'Earning', 'Our price net', 'net_after_cpc'];
       const PII_FIELDS = ['Full Address', 'Post to name', 'Post to address 1', 'Post to address 2', 'Post to city', 'Post to county', 'Post to postcode', 'Post to phone', 'Email', 'buyer', 'Buyer', 'Customer Address Detail'];
       const piiOk = role === 'CS' || role === 'Order Processor' || mgmt;
-      const strip = (rec) => { if (profit && piiOk) return rec; const o = {}; for (const k of Object.keys(rec)) { if (!profit && PROFIT_FIELDS.indexOf(k) >= 0) continue; if (!piiOk && PII_FIELDS.indexOf(k) >= 0) continue; o[k] = rec[k]; } return o; };
+      const strip = (rec) => { const pOk = profit || negWhole(String(rec.type || '')); if (pOk && piiOk) return rec; const o = {}; for (const k of Object.keys(rec)) { if (!pOk && PROFIT_FIELDS.indexOf(k) >= 0) continue; if (!piiOk && PII_FIELDS.indexOf(k) >= 0) continue; o[k] = rec[k]; } return o; };
       const accountsAllow = (account) => {
         if (mgmt) return true;
         if (!accountsRaw || accountsRaw === 'ALL' || accountsRaw === 'per-role') return true;
@@ -31546,7 +31557,7 @@ const ROUTES = {
         const type = String(r.type || ''), account = String(r.account || '');
         if (String(r.date || '') && String(r.date) < cutoff) { expired++; continue; }
         if (!accountsAllow(account)) continue;
-        if (!Number(r.count_only) && !profit) continue;
+        if (!Number(r.count_only) && !profit && !negWhole(type)) continue;
         let card = null; try { card = r.card_json ? JSON.parse(r.card_json) : null; } catch (e) { card = null; }
         const tokens = String(r.targeted_roles || '').split(',').map((t) => t.trim()).filter(Boolean);
         let visible = false;
