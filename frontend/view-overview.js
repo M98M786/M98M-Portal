@@ -523,13 +523,17 @@
       var live = d === t, list = (byDay[d] || []).slice().sort(function (p, q) { return oN(q.sold) - oN(p.sold); });
       var blk = '<div class="o2d-dayh">' + oDayLbl(d) + (live ? ' <span style="color:var(--gold-a)">\u00b7 today, live</span>' : '') + ' <span class="o2d-dayd">' + d + '</span></div>';
       if (!list.length) { return '<div class="o2d-day">' + blk + '<div class="empty" style="padding:4px 0 6px">' + (d > t ? 'Not reached yet.' : 'No day book held for ' + esc(d) + ' yet.') + '</div></div>'; }
+      /* a day book nobody has filled yet carries ads from eBay's report and nothing else: its profit
+         and actual are not nought, they are not written yet, and the row and the tile say so */
+      var filled = function (x) { return !!(oN(x.sold) || oN(x.oe) || oN(x.cost)); };
+      var nFilled = list.filter(filled).length;
       var s = oSum(list), act = 0, actN = 0;
-      list.forEach(function (x) { if (!live && x.actual != null && x.actual !== '') { act += oN(x.actual); actN++; } });
+      list.forEach(function (x) { if (!live && filled(x) && x.actual != null && x.actual !== '') { act += oN(x.actual); actN++; } });
       var actV = (!live && actN) ? act : null;
       var m = s.sold ? ((actV != null ? actV : s.profit - s.ads) / s.sold * 100) : null;
       var dayWord = live ? 'today' : oDayLbl(d);
       blk += '<div class="o2d">' +
-        tile('Sold ' + esc(dayWord), oGBPs(s.sold), 'the books\u2019 sold · ' + list.length + ' account' + (list.length === 1 ? '' : 's')) +
+        tile('Sold ' + esc(dayWord), oGBPs(s.sold), 'the books\u2019 sold · ' + (nFilled < list.length ? nFilled + ' of ' + list.length + ' account books filled' : list.length + ' account' + (list.length === 1 ? '' : 's'))) +
         tile('Order earning', oGBPs(s.oe), 'after eBay fees') +
         tile('Ali cost', oGBPs(s.cost), 'paid cost on the day tab') +
         tile('Ads', oGBPs(s.ads), live ? 'intraday, both families' : 'eBay\u2019s reports, both families') +
@@ -539,6 +543,9 @@
         '</div>';
       blk += '<div class="scroll"><table class="o2d-tbl"><thead><tr><th>Account</th><th>Sold</th><th>Order earning</th><th>Ali cost</th><th>Ads</th><th>Profit before ads</th><th>Actual</th><th>Margin</th></tr></thead><tbody>' +
         list.map(function (x) {
+          if (!filled(x)) {
+            return '<tr><td>' + esc(oS(x.account)) + '</td><td class="o2d-zero" colspan="3" style="text-align:left;padding-left:16px">' + (live ? 'no order yet today' : 'day book not filled in yet') + '</td><td>' + oGBPs(x.ads) + '</td><td class="o2d-zero" colspan="3" style="text-align:left;padding-left:16px">' + (live ? 'settles tonight' : 'not written yet — ads are already on eBay’s report') + '</td></tr>';
+          }
           var xa = (!live && x.actual != null && x.actual !== '') ? oN(x.actual) : null;
           var xm = oN(x.sold) ? ((xa != null ? xa : oN(x.profit) - oN(x.ads)) / oN(x.sold) * 100) : null;
           return '<tr><td>' + esc(oS(x.account)) + '</td><td>' + oGBPs(x.sold) + '</td><td>' + oGBPs(x.oe) + '</td><td>' + oGBPs(x.cost) + '</td><td>' + oGBPs(x.ads) + '</td>' +
