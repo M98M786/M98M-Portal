@@ -25520,7 +25520,10 @@ const ROUTES = {
       const rows = (await ctx.env.DB.prepare(
         'SELECT d.item_id, d.account, d.actual_profit, d.spend, d.cpc_spend, d.orders, d.units, d.revenue, d.pending_cost_orders, d.refunds, i.title, i.image ' +
         'FROM adtool_listing_day d LEFT JOIN items_api i ON i.item_id = d.item_id ' +
-        'WHERE d.day = ?1 AND d.actual_profit IS NOT NULL AND d.actual_profit < 0' + (acctF ? ' AND d.account = ?2' : '') + ' ORDER BY d.actual_profit ASC LIMIT 80'
+        /* the Sales Analysis day tab lists the products that SOLD that day, so the sheet's card can only
+           ever name a listing with an order; the same rule here, or every listing that merely spent on
+           ads without a sale would join the list and bury the ones the card would name */
+        'WHERE d.day = ?1 AND d.actual_profit IS NOT NULL AND d.actual_profit < 0 AND COALESCE(d.orders, 0) > 0' + (acctF ? ' AND d.account = ?2' : '') + ' ORDER BY d.actual_profit ASC LIMIT 120'
       ).bind(...(acctF ? [day, acctF] : [day])).all().catch(() => ({ results: [] }))).results || [];
       return { day, rows: rows.map((r) => ({
           item_id: String(r.item_id), account: String(r.account || ''), title: String(r.title || ''), image: r.image ? String(r.image) : null,

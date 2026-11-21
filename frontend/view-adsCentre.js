@@ -189,7 +189,7 @@ VIEW_CSS.push(
   function acNegIntro(s) {
     var bits = acNegBits(s);
     if (s.provisional) {
-      return 'This listing went negative ' + esc(acNegWhen(s)) + ' on the engine\u2019s own ledger: actual profit <b style="color:var(--warn)">' + esc(dGbp(acNegVal(s))) + '</b>' +
+      return 'This listing went negative ' + esc(acNegWhen(s)) + ', on the engine\u2019s own ledger: actual profit <b style="color:var(--warn)">' + esc(dGbp(acNegVal(s))) + '</b>' +
         (bits.length ? ' (' + esc(bits.join(', ')) + ')' : '') + '. The day\u2019s Sales Analysis tab has not been built yet, so this is provisional: the Signals card, with its Acknowledge, is raised when the tab lands. Its Product history, in the page\u2019s own order:';
     }
     return 'This listing went negative ' + esc(acNegWhen(s)) + ': actual profit <b style="color:var(--warn)">' + esc(dGbp(acNegVal(s))) + '</b>' +
