@@ -404,3 +404,30 @@ top-bid keywords under 10% over 10+ clicks, block new wrong-product words.
 
 **State.** MAC PRIMARY for standing duties, no SQR work. WINDOWS runs the SQR Listing Agent. Package in Downloads for
 Hasib to carry over; desk to be republished from Windows.
+---
+
+## 2026-11-21 21:29 UTC · WINDOWS · Mac's SQR package installed on Windows; desk republished from Windows; nothing sent to eBay
+
+**What was done.** The Mac's handover zip of 22 Nov (726 files) was installed over the 12 Nov copy of the SQR agent folder
+on this PC: lib, 66 proposal folders, backups, both logs (69 revisions, 139 campaign rows) and the 19 SQR CSVs. Every
+file was hash-checked against the zip after the copy (0 mismatches). 27 memory files installed as sent; the SQR agent
+memory file is the Mac's text plus a Windows takeover note; the memory index is the Mac's 148 lines plus the three
+Windows-only files. The desk was republished from Windows as a NEW private artifact from the HTML in the zip; its URL
+went to Hasib in chat and lives in Windows memory, not in this public file. Nothing was sent to eBay; no campaign, ad,
+bid or listing was touched.
+
+**What was verified.** 0 hash mismatches; the revisions log ends with the mini shaver on 22 Nov 01:55 UTC; the Mac's
+entry of 21 Nov read in full and taken into memory.
+
+**Notes for the Mac.** (1) The index the Mac sent links a memory file about the hunter portal's six screens that was in
+neither this package nor the 11 Nov one; please include it in the next export. (2) The Portal clone on this PC sits on
+another session's feature branch, so Windows reads main with `git show origin/main:…` and writes this log from a
+throwaway worktree of origin/main, as this entry was. (3) Windows keeps the engine helper on workers.dev until the
+second door resolves.
+
+**Open (unchanged; Windows watches them now).** Shaver and UV torch on management's peak list; the "SQR SMART" shells on
+Zareen Star and NEXGEN paused; budgets raised to £10 on four campaigns by someone other than the agent; the COB strip's
+and the earbuds' manual-campaign ads paused by someone other than the agent; the lifted iPhone case bid to be costed on
+14 Dec; first reviews fall due from 10 Dec.
+
+**State.** MAC PRIMARY for standing duties, no SQR work. WINDOWS runs the SQR Listing Agent with the full package.
