@@ -29953,6 +29953,52 @@ const ROUTES = {
       rows.sort((a, b) => b.sort - a.sort);
       if (rows.length > 1500) rows.length = 1500;
       rows.forEach((r) => { delete r.sort; });
+      /* 21 Nov (owner): "the listers' archive must carry the previous details — the item's supplier,
+         its links, the previous sourcing suppliers, all of it; today only management sees them."
+         Each row now carries a `sourcing` block read from the LIVE tables, in the same source order
+         the Product sourcing card uses per slot — portal save → Main Sheet → go-live record → hunt.
+         WHAT IS DELIBERATELY NOT HERE: any cost or earning. Supplier NAMES and LINKS are not money;
+         ali_cost / oe together reconstruct profit, which is why stripItem withholds them from a
+         lister, and that rule stands — this block carries none of those fields. Batched by IN-chunks,
+         never one query per row (the archive holds up to 1,500). */
+      const ids = Array.from(new Set(rows.map((r) => r.item_id).filter((x) => /^\d{9,15}$/.test(x))));
+      const chunk = async (sql, list, key) => {
+        const out = {};
+        for (let i = 0; i < list.length; i += 50) {
+          const part = list.slice(i, i + 50);
+          const rs2 = await ctx.env.DB.prepare(sql.replace('?LIST', part.map(() => '?').join(','))).bind(...part).all().catch(() => ({ results: [] }));
+          for (const r of (rs2.results || [])) out[String(r[key])] = r;
+        }
+        return out;
+      };
+      const facts = await chunk("SELECT item_id, COALESCE(current_sup,'') AS current_sup, COALESCE(sup1,'') AS sup1, COALESCE(sup2,'') AS sup2, COALESCE(sup3,'') AS sup3, COALESCE(sup1_link,'') AS l1, COALESCE(sup2_link,'') AS l2, COALESCE(sup3_link,'') AS l3 FROM items_facts WHERE item_id IN (?LIST)", ids, 'item_id');
+      const src = await chunk("SELECT item_id, COALESCE(s1,'') AS s1, COALESCE(s2,'') AS s2, COALESCE(s3,'') AS s3 FROM sourcing WHERE item_id IN (?LIST)", ids, 'item_id');
+      const gol = await chunk("SELECT item_id, COALESCE(ali_link,'') AS ali_link FROM golive WHERE item_id IN (?LIST)", ids, 'item_id');
+      const prov = await chunk("SELECT item_id, COALESCE(hunter_email,'') AS hunter_email, COALESCE(hunt_id,'') AS hunt_id FROM provenance WHERE item_id IN (?LIST)", ids, 'item_id');
+      const huntIds = Array.from(new Set(Object.values(prov).map((r) => String(r.hunt_id || '')).filter(Boolean)));
+      const hunts = await chunk('SELECT hunt_id, vals FROM hunt_rows WHERE hunt_id IN (?LIST)', huntIds, 'hunt_id');
+      const isUrl2 = (v) => /^https?:\/\//i.test(String(v || '').trim());
+      const pick2 = (cands, name) => { for (const [from, v] of cands) if (isUrl2(v)) return { url: String(v).trim(), src: from, supplier: String(name || '') }; return null; };
+      for (const r of rows) {
+        const f = facts[r.item_id], sv = src[r.item_id], g = gol[r.item_id], pv2 = prov[r.item_id];
+        let h = null;
+        if (pv2 && pv2.hunt_id && hunts[pv2.hunt_id]) {
+          try { const v = JSON.parse(hunts[pv2.hunt_id].vals || '{}'); h = { l1: v['Product Link 1 Main supplier'] || '', l2: v['Product Link 2'] || '', l3: v['Product Link 3'] || '', temu: v['Temu Link'] || '' }; } catch (e) { h = null; }
+        }
+        if (!f && !sv && !g && !h) continue;
+        const links = [
+          pick2([['portal', sv && sv.s1], ['sheet', f && f.l1], ['go-live', g && g.ali_link], ['hunt', h && h.l1]], f && f.sup1),
+          pick2([['portal', sv && sv.s2], ['sheet', f && f.l2], ['hunt', h && h.l2]], f && f.sup2),
+          pick2([['portal', sv && sv.s3], ['sheet', f && f.l3], ['hunt', h && h.l3]], f && f.sup3),
+        ].filter(Boolean);
+        r.sourcing = {
+          supplier: f ? String(f.current_sup || '') : '',
+          sup_names: f ? [f.sup1, f.sup2, f.sup3].map(String).filter(Boolean) : [],
+          links,
+          temu: h && isUrl2(h.temu) ? String(h.temu).trim() : '',
+          hunter: pv2 ? (names[String(pv2.hunter_email).toLowerCase()] || String(pv2.hunter_email || '')) : '',
+        };
+      }
       return { rows, total: rows.length };
     },
   },
