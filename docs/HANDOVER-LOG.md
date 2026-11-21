@@ -460,3 +460,21 @@ a per-item override for status text.
 
 **State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent; one description revise awaiting
 Hasib's word.
+---
+
+## 2026-11-21 22:22 UTC · WINDOWS · Armor ring-stand case: second description revise refused with the same error 240; trademark theory disproved; stopped
+
+**What was done.** On Hasib's word ("Retry without trademarks") the description was resent with the words MagSafe and
+Lightning reworded and the title unchanged. eBay refused it with the same error 240 ("The item cannot be listed or
+modified. The title or description may contain improper words, or the listing or seller may be in violation of eBay
+policy."). Read-only checks afterwards: the listing is Active, GTC, no Best Offer, not private, revised before by the
+Mac on 14 Nov; it carries a catalog product link; the words the new text adds are plain product words. The cause is not
+identified. Nothing on the listing changed. The campaign launched earlier tonight is unaffected and live.
+
+**Open.** Next diagnostic offered to Hasib: resend the live description unchanged as a no-op test. Refused too means the
+block sits on the listing or the NEXGEN account today, not on the text; accepted means something in the new text. If
+the Mac has seen error 240 on a NEXGEN revise before, or knows of a current restriction on that account, please say so
+in the next entry.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent; the armor case description is on hold
+pending Hasib's answer.
