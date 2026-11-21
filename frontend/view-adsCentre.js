@@ -14,7 +14,7 @@
      first, then the biggest spend today. A choice is remembered per browser under AC_SORT_KEY. */
   var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', landNote: '', sort: { key: '', dir: -1 },
     /* 20 Nov (owner): the went-negative signals, read from the Signals feed and drawn here instead */
-    neg: [], negAt: 0, negLoading: null, negDate: '', negProv: [] };
+    neg: [], negAt: 0, negLoading: null, negDate: '', negProv: [], negAcks: {}, negAckDay: '', bridged: {} };
   var AC_NEG_TYPE = 'WENT NEGATIVE YESTERDAY';
   /* the window in words, for every heading that names it: today, yesterday, the dates picked, or the last N days */
   function acWin(d) {
@@ -137,19 +137,35 @@ VIEW_CSS.push(
       if ($('acItems')) { acPaintItems(); }
       /* 21 Nov (owner): yesterday's negatives before the Sales Analysis tab exists — when the feed
          holds no card dated yesterday (UK), the engine's own day ledger stands in, marked provisional */
-      var yd = acUkDay(-1);
-      if (!AC.neg.some(function (s) { return String(s.date) === yd; })) {
-        api('adsNegativeDay', { day: yd }).then(function (r) {
-          AC.negProv = ((r && r.rows) || []).map(function (x) {
-            return { type: AC_NEG_TYPE, date: yd, item_id: String(x.item_id), account: x.account, title: x.title, image: x.image, provisional: true,
-              'Actual Profit': x.actual_profit, value: x.actual_profit, ad_spend: x.spend, orders: x.orders, units: x.units, pending_cost_orders: x.pending_cost_orders, actions: [], acked_by_me: false, acknowledged_by_others: [] };
-          });
-          if ($('acItems')) { acPaintItems(); }
-        })['catch'](function () { AC.negProv = []; });
-      } else { AC.negProv = []; }
+      var yd = acUkDay(-1), haveCards = AC.neg.some(function (s) { return String(s.date) === yd; });
+      /* the engine's ledger for yesterday is always read: its rows stand in while no card exists for
+         the day, and its acknowledgements apply either way (an acknowledged provisional row stays
+         acknowledged when the Signals card for it is raised, and the card is told so) */
+      api('adsNegativeDay', { day: yd }).then(function (r) {
+        AC.negAcks = (r && r.acks) || {}; AC.negAckDay = yd;
+        AC.negProv = haveCards ? [] : ((r && r.rows) || []).map(function (x) {
+          return { type: AC_NEG_TYPE, date: yd, item_id: String(x.item_id), account: x.account, title: x.title, image: x.image, provisional: true,
+            'Actual Profit': x.actual_profit, value: x.actual_profit, ad_spend: x.spend, orders: x.orders, units: x.units, pending_cost_orders: x.pending_cost_orders,
+            actions: ['open record', 'create revision task', 'flag to advertising'], acked_by_me: false, acknowledged_by_others: [] };
+        });
+        acNegBridge();
+        if ($('acItems')) { acPaintItems(); }
+      })['catch'](function () { AC.negProv = []; });
       return AC.neg;
     })['catch'](function () { AC.negLoading = null; AC.negAt = Date.now(); return AC.neg; });
     return AC.negLoading;
+  }
+  /* a Signals card raised for a day and listing that was acknowledged here while provisional: the
+     card is acknowledged on the Signals side too, once, with the comment given here */
+  function acNegBridge() {
+    (AC.neg || []).forEach(function (s) {
+      if (String(s.date) !== AC.negAckDay || s.acked_by_me) { return; }
+      var a = AC.negAcks[String(s.item_id)]; if (!a) { return; }
+      var key = acNegKey(s); if (AC.bridged[key]) { return; }
+      AC.bridged[key] = true;
+      api('acknowledgeSignal', { account: s.account, type: s.type, date: s.date, item_id: s.item_id, note: 'Acknowledged on the Ads command centre ' + String(a.at).replace('T', ' ').slice(0, 16) + (a.email ? ' by ' + a.email.split('@')[0] : '') + ': ' + a.note })
+        .then(function () { s.acked_by_me = true; })['catch'](function () { delete AC.bridged[key]; });
+    });
   }
   function acUkDay(off) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date(Date.now() + (off || 0) * 86400000)); }
   function acNegKey(s) { return [s.account, s.type, s.date, s.item_id].map(function (v) { return String(v == null ? '' : v); }).join('|'); }
@@ -160,6 +176,7 @@ VIEW_CSS.push(
   function acNegRows() {
     return acNegAll().filter(function (s) {
       if (s.acked_by_me || (s.acknowledged_by_others && s.acknowledged_by_others.length) || (s.ack_history && s.ack_history.length)) { return false; }
+      if (String(s.date) === AC.negAckDay && AC.negAcks[String(s.item_id)]) { return false; }
       if (!String(s.item_id || '').trim()) { return false; }
       if (AC.acct) { var a = acNorm(s.account), w = acNorm(AC.acct); if (!(a === w || (a && w && (a.indexOf(w) >= 0 || w.indexOf(a) >= 0)))) { return false; } }
       return true;
@@ -190,14 +207,13 @@ VIEW_CSS.push(
     var bits = acNegBits(s);
     if (s.provisional) {
       return 'This listing went negative ' + esc(acNegWhen(s)) + ', on the engine\u2019s own ledger: actual profit <b style="color:var(--warn)">' + esc(dGbp(acNegVal(s))) + '</b>' +
-        (bits.length ? ' (' + esc(bits.join(', ')) + ')' : '') + '. The day\u2019s Sales Analysis tab has not been built yet, so this is provisional: the Signals card, with its Acknowledge, is raised when the tab lands. Its Product history, in the page\u2019s own order:';
+        (bits.length ? ' (' + esc(bits.join(', ')) + ')' : '') + '. The day\u2019s Sales Analysis tab has not been built yet, so this is provisional; acknowledging it here is recorded by the engine and carried onto the Signals card when the tab lands. Nobody has acted on it yet. Its Product history, in the page\u2019s own order:';
     }
     return 'This listing went negative ' + esc(acNegWhen(s)) + ': actual profit <b style="color:var(--warn)">' + esc(dGbp(acNegVal(s))) + '</b>' +
       (bits.length ? ' (' + esc(bits.join(', ')) + ')' : '') + '. Nobody has acted on it yet. Its Product history, in the page\u2019s own order:';
   }
   /* the card's one-tap actions and the acknowledge-with-a-comment form, as the Signals page had them */
   function acNegActs(s) {
-    if (s.provisional) { return '<div class="ac-dsub" style="margin:0 0 8px">No action buttons yet: they come with the Signals card once the day\u2019s Sales Analysis tab is built (the Product history link above is live now).</div>'; }
     var k = esc(acNegKey(s));
     var acts = (s.actions || []).map(function (a) { return String(a || '').trim(); }).filter(Boolean);
     return '<div class="ac-nacts">' + acts.map(function (a) { return '<button class="minibtn" data-ac-nact="go" data-ac-nkey="' + k + '" data-ac-nlabel="' + esc(a) + '">' + esc(a) + '</button>'; }).join('') +
@@ -216,9 +232,13 @@ VIEW_CSS.push(
     if (!note) { toast('Write a comment first \u2014 what did you find or do about this listing?'); if (ta) { ta.focus(); } return; }
     if (s._busy) { return; }
     s._busy = true; btn.disabled = true; btn.textContent = 'Clearing\u2026';
-    api('acknowledgeSignal', { account: s.account, type: s.type, date: s.date, item_id: s.item_id, note: note }).then(function () {
+    var call = s.provisional
+      ? api('adsNegativeAck', { day: s.date, item_id: s.item_id, account: s.account, note: note }).then(function (r) { AC.negAcks[String(s.item_id)] = { at: (r && r.at) || new Date().toISOString(), note: note, email: (r && r.email) || '' }; })
+      : api('acknowledgeSignal', { account: s.account, type: s.type, date: s.date, item_id: s.item_id, note: note });
+    call.then(function () {
       var key = acNegKey(s);
       AC.neg = (AC.neg || []).filter(function (x) { return acNegKey(x) !== key; });
+      AC.negProv = (AC.negProv || []).filter(function (x) { return acNegKey(x) !== key; });
       toast('Acknowledged \u00b7 ' + String(s.title || s.item_id) + ' \u2014 off this list and logged.');
       acPaintItems();
     })['catch'](function (e) {

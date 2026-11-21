@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2026-11-21 - ADS COMMAND CENTRE: provisional went-negative rows take Acknowledge too
+
+Owner: "my page has the Acknowledge option, Husnain's doesn't - fix that." His row was one of the
+provisional ones read from the engine's ledger before the day's Sales Analysis tab exists, which had no
+buttons because no Signals card existed to acknowledge. Those rows now carry the same three actions and
+the same acknowledge-with-a-comment form. The engine records the acknowledgement itself (day, listing,
+who, when, comment), the row leaves the list, and when the Signals card for that day and listing is
+raised later the board acknowledges the card on the Signals side with the same comment, so nothing has
+to be acknowledged twice.
+
 ## 2026-11-21 - AD TOOL: the Team Lead reads the Product history with item profit
 
 Owner, asked whether the Product history boxes and page should open to Husnain with profit too:

@@ -25526,11 +25526,35 @@ const ROUTES = {
            ads without a sale would join the list and bury the ones the card would name */
         'WHERE d.day = ?1 AND d.actual_profit IS NOT NULL AND d.actual_profit < 0 AND COALESCE(d.orders, 0) > 0' + (acctF ? ' AND d.account = ?2' : '') + ' ORDER BY d.actual_profit ASC LIMIT 120'
       ).bind(...(acctF ? [day, acctF] : [day])).all().catch(() => ({ results: [] }))).results || [];
-      return { day, rows: rows.map((r) => ({
+      /* 21 Nov (owner: "my page has Acknowledge, Husnain's provisional row doesn't — fix that"): the
+         engine keeps its own acknowledgements for these provisional rows, keyed by day and listing,
+         and hands them back so the board can hide an acknowledged row and, once the Signals card is
+         raised for the same day and listing, carry the acknowledgement onto the card. */
+      await ctx.env.DB.prepare('CREATE TABLE IF NOT EXISTS adtool_neg_ack (day TEXT NOT NULL, item_id TEXT NOT NULL, account TEXT, email TEXT, note TEXT, at TEXT, PRIMARY KEY (day, item_id))').run().catch(() => {});
+      const ackRows = (await ctx.env.DB.prepare('SELECT item_id, account, email, note, at FROM adtool_neg_ack WHERE day = ?1').bind(day).all().catch(() => ({ results: [] }))).results || [];
+      const acks = {}; for (const a of ackRows) acks[String(a.item_id)] = { account: String(a.account || ''), email: String(a.email || ''), note: String(a.note || ''), at: String(a.at || '') };
+      return { day, acks, rows: rows.map((r) => ({
           item_id: String(r.item_id), account: String(r.account || ''), title: String(r.title || ''), image: r.image ? String(r.image) : null,
           actual_profit: round2(r.actual_profit), spend: round2((Number(r.spend) || 0) + (Number(r.cpc_spend) || 0)), orders: Number(r.orders) || 0, units: Number(r.units) || 0,
           revenue: round2(r.revenue), pending_cost_orders: Number(r.pending_cost_orders) || 0, refunds: round2(r.refunds) })),
         source: 'the engine\u2019s own day ledger \u2014 orders, costs and eBay\u2019s ads report, the figures the Product history By period table shows \u2014 provisional until the day\u2019s Sales Analysis tab is built and the Signals scan raises the cards' };
+    },
+  },
+
+  /* the acknowledgement of a provisional went-negative row: who, when, and the comment the Signals
+     page has always required; one per day and listing, the latest word winning */
+  adsNegativeAck: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (!adsCentreFull(ctx.user) && ['Advertising Manager', 'Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const okDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+      const day = okDay(p.day) ? String(p.day) : '', item = String(p.item_id || '').trim(), note = String(p.note || '').trim().slice(0, 500);
+      if (!day || !/^\d{9,13}$/.test(item)) throw new Error('SAY: the day and the item number are needed');
+      if (!note) throw new Error('SAY: a comment is required to acknowledge');
+      await ctx.env.DB.prepare('CREATE TABLE IF NOT EXISTS adtool_neg_ack (day TEXT NOT NULL, item_id TEXT NOT NULL, account TEXT, email TEXT, note TEXT, at TEXT, PRIMARY KEY (day, item_id))').run().catch(() => {});
+      const at = new Date().toISOString();
+      await ctx.env.DB.prepare('INSERT OR REPLACE INTO adtool_neg_ack (day, item_id, account, email, note, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
+        .bind(day, item, String(p.account || ''), String(ctx.user.email || ''), note, at).run();
+      return { ok: true, day, item_id: item, at, email: String(ctx.user.email || '') };
     },
   },
 
