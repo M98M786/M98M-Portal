@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-11-21 - ADS COMMAND CENTRE: Husnain sees it as Management does
+
+Owner: "why is this page not shown to Husnain as it is to me in his portal - fix that, so he sees the
+Ads command centre as we see it." The Team Lead role now receives the command centre's board whole
+(ad revenue, ROAS and the organic-versus-promoted split included) and the WENT NEGATIVE cards whole,
+so the went-negative section with its figures and actions draws for him. This is the one named
+exception to the rule that a Team Lead sees loss alerts and never earnings: the Product history boxes
+under the rows, the Product history page and the price desk still strip earnings for the role.
+
 ## 2026-11-21 - BUSINESS OVERVIEW: Live listings move to an Extras page at the end of the sidebar; Staff performance moves to My tasks
 
 Owner: "remove the listings from the Business overview, show them under an Extras title at the end
