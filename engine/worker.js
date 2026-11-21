@@ -26060,7 +26060,33 @@ const ROUTES = {
           });
           const tot = { came: 0, processed: 0, remaining: 0, dispatched: 0, half_done: 0, backlog: 0 };
           for (const a of accounts) { tot.came += a.came; tot.processed += a.processed; tot.remaining += a.remaining; tot.dispatched += a.dispatched; tot.half_done += a.half_done; }
-          return { day: rTo, from: rFrom, to: rTo, as_of: new Date().toISOString(), totals: tot, accounts,
+          /* 21 Nov (owner): the Business overview's Individual-days view — the same counts per UK
+             trading day, each day with its accounts. The day is the order's creation instant moved
+             to London time, the same basis the orders count in pageMetrics uses. Behind a catch: a
+             window that cannot be split still answers its totals. */
+          let days = null;
+          try {
+            const _lonH = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hour12: false }).formatToParts(new Date()).find((x) => x.type === 'hour').value);
+            const ukOffH = ((_lonH - new Date().getUTCHours()) + 24) % 24;
+            const dayExpr = "substr(datetime(o.created_at, '+" + ukOffH + " hours'),1,10)";
+            const dRows = (await ctx.env.DB.prepare(
+              'SELECT ' + dayExpr + ' AS d, o.account, COUNT(*) AS came, ' +
+              'SUM(CASE WHEN ' + PROCESSED + ' THEN 1 ELSE 0 END) AS processed, ' +
+              "SUM(CASE WHEN COALESCE(o.cost, 0) > 0 AND COALESCE(o.ali_order, '') = '' THEN 1 ELSE 0 END) AS half_done " +
+              "FROM orders o WHERE o.created_at >= ?1 AND o.created_at < ?2 AND o.status NOT IN ('CANCELLED', 'NOT_FOUND') " +
+              'GROUP BY d, o.account ORDER BY d DESC, came DESC'
+            ).bind(startIso, endIso).all()).results || [];
+            const byDay = {};
+            for (const r of dRows) {
+              const d = String(r.d || ''); if (!d) continue;
+              const g = (byDay[d] = byDay[d] || { day: d, came: 0, processed: 0, remaining: 0, half_done: 0, accounts: [] });
+              const came = Number(r.came) || 0, pr = Number(r.processed) || 0;
+              g.came += came; g.processed += pr; g.remaining += Math.max(0, came - pr); g.half_done += Number(r.half_done) || 0;
+              g.accounts.push({ account: String(r.account || ''), came, processed: pr, remaining: Math.max(0, came - pr) });
+            }
+            days = Object.keys(byDay).sort().reverse().map((k) => byDay[k]);
+          } catch (e) { days = null; }
+          return { day: rTo, from: rFrom, to: rTo, as_of: new Date().toISOString(), totals: tot, accounts, days,
             note: 'Orders that came in on the UK trading days ' + rFrom + ' \u2192 ' + rTo + '. Processed = the AliExpress cost AND the AliExpress order number are both on the order (owner, 12 Oct). "Started" counts orders carrying a cost but no order number yet. Cancelled and not-found orders are outside every count.' };
         });
       }
