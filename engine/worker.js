@@ -25529,27 +25529,58 @@ const ROUTES = {
       if (!adsCentreFull(ctx.user) && ['Advertising Manager', 'Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
       const okDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
       const day = okDay(p.day) ? String(p.day) : adtAddDays(ukDate(''), -1);
+      /* 22 Nov (owner): "confirm you show only the ones nobody has acted on, and if you have the
+         confirmation that no action was executed on it yesterday, show it the next day". So the
+         route answers a RUN of days, newest first (`days`, 1-7; one day keeps the old shape), and
+         every row says whether the engine has seen an action on that listing since its day began:
+         an acknowledgement here (adtool_neg_ack), an action logged on its Product history or a
+         desk (adtool_actions: pause, stop, bid, note, decision), or an ad change made THROUGH the
+         portal (adtool_campaign_ad_events whose source is not the sync). A row with `acted` is the
+         board's to hide; a row without it carries forward, day after day, until somebody acts.
+         The Signals page's own acknowledgements live in Apps Script and are not visible here; the
+         board suppresses the engine's rows for any day the Signals feed still holds cards for. */
+      const nDays = Math.max(1, Math.min(7, Number(p.days) || 1));
+      const days = []; for (let i = 0; i < nDays; i++) days.push(adtAddDays(day, -i));
       const acctF = String(p.account || '');
+      const qm = days.map((_, i) => '?' + (i + 1)).join(',');
       const rows = (await ctx.env.DB.prepare(
-        'SELECT d.item_id, d.account, d.actual_profit, d.spend, d.cpc_spend, d.orders, d.units, d.revenue, d.pending_cost_orders, d.refunds, i.title, i.image ' +
+        'SELECT d.day, d.item_id, d.account, d.actual_profit, d.spend, d.cpc_spend, d.orders, d.units, d.revenue, d.pending_cost_orders, d.refunds, i.title, i.image ' +
         'FROM adtool_listing_day d LEFT JOIN items_api i ON i.item_id = d.item_id ' +
         /* the Sales Analysis day tab lists the products that SOLD that day, so the sheet's card can only
            ever name a listing with an order; the same rule here, or every listing that merely spent on
            ads without a sale would join the list and bury the ones the card would name */
-        'WHERE d.day = ?1 AND d.actual_profit IS NOT NULL AND d.actual_profit < 0 AND COALESCE(d.orders, 0) > 0' + (acctF ? ' AND d.account = ?2' : '') + ' ORDER BY d.actual_profit ASC LIMIT 120'
-      ).bind(...(acctF ? [day, acctF] : [day])).all().catch(() => ({ results: [] }))).results || [];
+        'WHERE d.day IN (' + qm + ') AND d.actual_profit IS NOT NULL AND d.actual_profit < 0 AND COALESCE(d.orders, 0) > 0' + (acctF ? ' AND d.account = ?' + (days.length + 1) : '') + ' ORDER BY d.day DESC, d.actual_profit ASC LIMIT ' + (120 * nDays)
+      ).bind(...(acctF ? days.concat([acctF]) : days)).all().catch(() => ({ results: [] }))).results || [];
       /* 21 Nov (owner: "my page has Acknowledge, Husnain's provisional row doesn't — fix that"): the
          engine keeps its own acknowledgements for these provisional rows, keyed by day and listing,
          and hands them back so the board can hide an acknowledged row and, once the Signals card is
          raised for the same day and listing, carry the acknowledgement onto the card. */
       await ctx.env.DB.prepare('CREATE TABLE IF NOT EXISTS adtool_neg_ack (day TEXT NOT NULL, item_id TEXT NOT NULL, account TEXT, email TEXT, note TEXT, at TEXT, PRIMARY KEY (day, item_id))').run().catch(() => {});
-      const ackRows = (await ctx.env.DB.prepare('SELECT item_id, account, email, note, at FROM adtool_neg_ack WHERE day = ?1').bind(day).all().catch(() => ({ results: [] }))).results || [];
-      const acks = {}; for (const a of ackRows) acks[String(a.item_id)] = { account: String(a.account || ''), email: String(a.email || ''), note: String(a.note || ''), at: String(a.at || '') };
-      return { day, acks, rows: rows.map((r) => ({
-          item_id: String(r.item_id), account: String(r.account || ''), title: String(r.title || ''), image: r.image ? String(r.image) : null,
-          actual_profit: round2(r.actual_profit), spend: round2((Number(r.spend) || 0) + (Number(r.cpc_spend) || 0)), orders: Number(r.orders) || 0, units: Number(r.units) || 0,
-          revenue: round2(r.revenue), pending_cost_orders: Number(r.pending_cost_orders) || 0, refunds: round2(r.refunds) })),
-        source: 'the engine\u2019s own day ledger \u2014 orders, costs and eBay\u2019s ads report, the figures the Product history By period table shows \u2014 provisional until the day\u2019s Sales Analysis tab is built and the Signals scan raises the cards' };
+      const ackRows = (await ctx.env.DB.prepare('SELECT day, item_id, account, email, note, at FROM adtool_neg_ack WHERE day IN (' + qm + ')').bind(...days).all().catch(() => ({ results: [] }))).results || [];
+      const acksBy = {}; for (const d of days) acksBy[d] = {};
+      for (const a of ackRows) { if (acksBy[String(a.day)]) acksBy[String(a.day)][String(a.item_id)] = { account: String(a.account || ''), email: String(a.email || ''), note: String(a.note || ''), at: String(a.at || '') }; }
+      /* every action the engine has seen on these listings since the oldest day began, newest last */
+      const ids = Array.from(new Set(rows.map((r) => String(r.item_id)))).filter((x) => /^\d{9,13}$/.test(x));
+      const since = days[days.length - 1];
+      const actions = {};
+      const noteAct = (item, at, kind, by) => { const k = String(item); (actions[k] = actions[k] || []).push({ at: String(at || ''), kind, by: String(by || '') }); };
+      for (let i = 0; i < ids.length; i += 60) {
+        const part = ids.slice(i, i + 60), ph = part.map((_, j) => '?' + (j + 2)).join(',');
+        const acts = (await ctx.env.DB.prepare('SELECT item_id, type, by_email, at FROM adtool_actions WHERE at >= ?1 AND item_id IN (' + ph + ')').bind(since, ...part).all().catch(() => ({ results: [] }))).results || [];
+        for (const a of acts) noteAct(a.item_id, a.at, String(a.type || 'action'), a.by_email);
+        const evs = (await ctx.env.DB.prepare("SELECT item_id, to_status, seen_at, source FROM adtool_campaign_ad_events WHERE seen_at >= ?1 AND source <> 'sync' AND item_id IN (" + ph + ')').bind(since, ...part).all().catch(() => ({ results: [] }))).results || [];
+        for (const e of evs) noteAct(e.item_id, e.seen_at, 'ad ' + String(e.to_status || 'changed').toLowerCase() + ' (' + String(e.source || 'portal') + ')', '');
+      }
+      for (const k of Object.keys(actions)) actions[k].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+      const actedOn = (item, d) => { const list = actions[String(item)] || []; for (const a of list) { if (a.at.slice(0, 10) >= d) return a; } return null; };
+      const shape = (r) => ({
+        day: String(r.day), item_id: String(r.item_id), account: String(r.account || ''), title: String(r.title || ''), image: r.image ? String(r.image) : null,
+        actual_profit: round2(r.actual_profit), spend: round2((Number(r.spend) || 0) + (Number(r.cpc_spend) || 0)), orders: Number(r.orders) || 0, units: Number(r.units) || 0,
+        revenue: round2(r.revenue), pending_cost_orders: Number(r.pending_cost_orders) || 0, refunds: round2(r.refunds),
+        acted: actedOn(r.item_id, String(r.day)) });
+      const perDay = days.map((d) => ({ day: d, acks: acksBy[d], rows: rows.filter((r) => String(r.day) === d).map(shape) }));
+      return { day, acks: perDay[0].acks, rows: perDay[0].rows, days: perDay, carried_days: nDays,
+        source: 'the engine’s own day ledger — orders, costs and eBay’s ads report, the figures the Product history By period table shows — provisional until the day’s Sales Analysis tab is built and the Signals scan raises the cards' };
     },
   },
 

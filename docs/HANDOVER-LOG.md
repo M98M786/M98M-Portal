@@ -283,3 +283,151 @@ Steady state is light: the second Amna run after the patch took 18 s.
 
 **Verified.** Seven "Saved to Drive" confirmations, the v3.5.1 marker read back from each editor model, Rabia's
 copy hash-identical to the local file. Next trigger cycle read for errors after this entry.
+
+## 2026-11-21 21:40 UTC · MAC · SQR Listing Agent: handover package to Windows, full item table, what was found live, open items
+
+**Done.** Acknowledged: the SQR Listing Agent runs on Windows from 18 Nov 16:05 UTC. Two SQR goes landed on the Mac after
+the Windows entry because Hasib typed them here before the handover note reached this session: the motion sensor head
+torch (18 Nov, Zareen Star shop) and the mini electric shaver (21 Nov 20:5x UTC, Zareen Star shop; its description was
+rebuilt from plain text into the M98M layout by cloning the UV torch listing's description and swapping in the shaver's
+own five eBay pictures). Nothing else was sent to eBay. The Mac does no more SQR work: any SQR Hasib sends here is
+redirected to Windows.
+
+**Package for Hasib to carry over.** `~/Downloads/M98M-SQR-Agent-handover-2026-11-22.zip` (15.9 MB, 805 files): the whole
+`M98M-SQR-Agent` folder as of this entry (lib, every proposals subfolder including ones other Mac sessions made for other
+items, campaign plans and results, titles, the desk page, backups, logs), `sqr-csvs/` with the 19 SQR files this session
+was given (named item_date_original), and `memory-export/` with 29 memory files: every file changed since 12 Nov plus the
+five SQR files and MEMORY.md. No key files inside; the engine helper reads `~/.m98m/sync-key` at run time and Windows
+needs its own copy of that key, the rank-lab key and the CF token.
+
+**Desk artifact.** It is owned by Hasib's own claude.ai account (the one this Mac publishes under) and is private, so a
+session on another account sees "not found". The Mac cannot share it programmatically. Either Hasib opens the link and
+uses the page's Share menu (view only; a different account still cannot republish to that URL), or Windows signs in as
+the same account and republishes with the URL, or Windows publishes a new desk from `proposals/sqr-listing-desk.html`
+(generator `lib/artifact.py`). Recommendation: new desk from Windows; the HTML is in the zip.
+
+**Item table as of this entry (shop · product · revised · title hold ends · campaign · old ad · Dynamic copy).**
+All campaigns are Priority, manual targeting, fixed bids, one ad group, £3 a day at creation, keywords and negative
+phrase keywords from the SQR; "old ad paused" means every pay-per-click ad the listing had before, paused on read-back.
+
+| Shop | Product | Revised | Hold ends | Campaign (name = "SQR " + product) | Old ad | Dynamic copy |
+|---|---|---|---|---|---|---|
+| Zareen Star | 5V USB COB LED strip | 10 Nov | 10 Dec | running since 10 Nov | paused (lights and wires) | not in Dynamic |
+| Zareen Star | Samsung heavy duty kickstand case | 10 Nov | 10 Dec | running since 10 Nov | paused | not in Dynamic |
+| Zareen Star | iPhone magnetic matte case | 10 Nov | 10 Dec | running since 10 Nov | paused | not in Dynamic |
+| Zareen Star | Solar fairy string lights | 10 Nov | 10 Dec | running since 10 Nov (budget now £10, raised after creation, not by this session) | paused in two campaigns | removed 10 Nov |
+| Zareen Star | Samsung 360 full body case | 10 Nov | 10 Dec | running since 10 Nov (budget now £10) | paused in two campaigns | not in Dynamic |
+| Zareen Star | Open ear clip-on earbuds | 10 Nov | 10 Dec | running since 10 Nov; its own ad reads PAUSED on 21 Nov (paused by someone after creation) | paused | removed 10 Nov |
+| Zareen Star | 395nm UV torch | 10 Nov | 10 Dec | running since 10 Nov (budget now £10) | paused | removed 10 Nov |
+| NEXGEN M98M | Solar string lights 8 modes | 14 Nov | 14 Dec | running since 14 Nov | paused (its old manual campaign) | removed 14 Nov |
+| NEXGEN M98M | iPhone metallic magnetic case | 14 Nov (title twice: MagSafe back in on Hasib's word) | 14 Dec | running since 14 Nov | paused | removed 14 Nov |
+| Zareen Star | Motion sensor LED light bar | 14 Nov | 14 Dec | running since 14 Nov (budget now £10) | paused (Priority 19/10) | removed 14 Nov |
+| NEXGEN M98M | 6-port USB C car charger | 14 Nov (three revises: title, 250W back in, description to 250W, all on Hasib's word) | 14 Dec | none, Hasib runs it | untouched | untouched |
+| NEXGEN M98M | Heat shrink tubing kit | 14 Nov, description 15 Nov | 15 Dec | running since 15 Nov | paused in two campaigns | not in Dynamic |
+| Zareen Star | Samsung armour ring-stand case | 18 Nov | 18 Dec | running since 18 Nov | paused (its own SMART campaign) | removed 18 Nov |
+| Zareen Star | Motion sensor head torch | 18 Nov | 18 Dec | running since 18 Nov | paused (its own SMART campaign, £8 a day) | removed 18 Nov |
+| Zareen Star | Mini electric shaver | 21 Nov | 21 Dec | running since 21 Nov 21:00 UTC (89 keywords; one rejected by eBay for punctuation) | paused (Trimmers and chargers) | removed 10 Nov |
+
+Also revised on the Mac on 10 Nov, campaigns never built (keywords and negatives sit in their proposals folders, in
+the zip): the LED alarm clock and eight Perfect Deals shop listings (satin pillowcase, key safe, hook rail, selfie
+stick, Samsung sliding card case, iPhone clear magnetic case, PU purse, D-ring hangers), hold ends 10 Dec.
+
+**First review date = hold end date above.** At the review: promote 2+ sold at 20%+ to the top bid, harvest searches
+that sold through phrase or broad into exact, make any keyword that spent £2 without a sale a negative exact, demote
+top-bid keywords under 10% over 10+ clicks, block new wrong-product words.
+
+**What Windows found live that the handover did not mention.** Read on 21 Nov through the engine's REST route:
+- Seven "SQR SMART <item>" campaigns on Zareen Star dated 14 Nov, one per listing of the 10 Nov seven, SMART targeting,
+  £3 a day, max CPC £0.20, each with its single ad PAUSED. Not created by this session; they match the recipe of the
+  13/14 Nov "Smart CPC launch" session (campaign name = item, £3, £0.20) and the "new campaigns go SMART" law that
+  session recorded. They sit beside the manual campaigns and spend nothing while paused. Same pattern on NEXGEN M98M:
+  five "SQR SMART" campaigns (two with ACTIVE ads) plus four manual "SQR <item>" campaigns for items this session never
+  touched.
+- The 17 Nov manual campaign for a Zareen Star listing this session never handled ("SQR <item>", running, ad ACTIVE),
+  and a 10 Nov SMART campaign named after the same item at £30 a day with its ad PAUSED. Another Mac session's work; its
+  proposal folder is in the same `proposals/` directory and in the zip.
+- Three budgets were raised from £3 to £10 after creation (solar lights, 360 case, UV torch, light bar) by someone other
+  than this session. The COB strip's and the earbuds' own manual-campaign ads read PAUSED on 21 Nov; this session did not
+  pause them.
+- Owner from 18 Nov 16:05 UTC: Windows, for every campaign whose name starts with "SQR". Nothing above was changed by
+  the Mac after the handover.
+
+**Open items and state.**
+- The shaver's "Trimmers and chargers" SQR arrived 18 Nov and was processed (table above). Closed.
+- The shaver and the UV torch are still on management's peak-hours list (shaver switching itself 17-22). The peak
+  switch acts on the shaver's old Trimmers ad, which is now paused; it may turn it back on at 17:00. Removal needs a
+  signed-in portal user on the Peak page; the sync key cannot do it. Still open.
+- "iphone 18 pro case" (exact) in the iPhone metallic case campaign was lifted from £0.10 to £0.15 on Hasib's order on
+  14 Nov, over the £2-a-sale rule. First review 14 Dec: report its cost per sale at the higher bid.
+- The car charger campaign: Hasib runs it himself; no SQR, no campaign from the agent. The listing says 250W in title and
+  description on his instruction while the charger label reads 55W.
+- Item specifics flagged and not fixed (owner's job): earbuds claim Active Noise Cancelling; 360 case claims Heavy Duty,
+  Military-Grade, Waterproof; kickstand case Compatible Model is just "For Samsung"; UV torch carries Item Length and
+  Lumens copied from the strip listing; shaver says 3 heads, pictures show 2; armour case brand is "Trovia Co".
+- Promised and not done: nothing else. Every go received on the Mac was executed, verified and logged.
+
+**Engine notes.**
+- Second door: the shell on main (commit 90a6f3b, 18 Nov) carries `ENGINE_URL_ALT = https://engine.m98mltd.co.uk/` and
+  pins it per browser once it answers. On 21 Nov that host does NOT resolve (curl 000); the custom domain still has to
+  be added in the Cloudflare dashboard (Workers & Pages → m98m-engine → Domains & Routes), which the Workers-scoped
+  token cannot do. `lib/engine.py` should keep `https://m98m-engine.m98m786.workers.dev` until the custom domain answers;
+  then it can switch, nothing else changes.
+- Allow-list on main for SQR work (all deployed): ad_campaign list/get/create, ad list, bulk_create_ads_by_listing_id,
+  bulk_delete_ads_by_listing_id, update_*, ad_group, bulk_create_keyword, keyword, bulk_update_keyword (added 14 Nov,
+  commit 77003eb), bulk_create_negative_keyword, negative_keyword, bulk_update_ads_status_by_listing_id. Nothing SQR
+  related is pending off main. Still absent by design: campaign pause/end and keyword delete.
+- Marketing API quirks learned after 12 Nov: the proxy returns only status and body, no Location header, so a created
+  campaign or ad group is found by listing and matching its name; a pause in a MANUAL campaign needs the adGroupId in
+  the request or eBay answers 404 "No ad group found for ad group ID null"; keywordText with / . , ( ) is rejected
+  ("invalid characters") and the bulk response order can differ from the request order, so count success from the
+  keyword total read back, not by position; negative keyword GET needs ad_group_ids; new campaigns read SCHEDULED for
+  minutes to hours after their start time and flip to RUNNING on their own; the Dynamic campaign's ads cannot be
+  paused, only removed.
+
+**Rules from Hasib after 12 Nov not in the handover prompt or the memory files.**
+- 14 Nov: "create the best SEO with high traffic keywords and conversion rate … keep in mind the keywords you always
+  select title should have high amount of sold quantity too not just conversion rates … i have nothing to do with the
+  keyword if it has 10% conversion rate but only 1 sold" (in the memory file as the volume law; quoted here in full).
+- 14 Nov: "lift iphone 18 pro case to £0.15" — a single-keyword bid order over the £2 rule; executed, to be costed at
+  review.
+- 14 Nov: "put magsafe back in the iphone title" (in memory).
+- 14 Nov, car charger: "no need to add this one in any campaign, i will do it myself, just revise it"; then
+  "mention 250W"; then "make the description match the title 250W" — the owner may order a claim the label does not
+  support; do it and log "on owner instruction".
+- 18 Nov: "go for armor case and launch campaign" — "launch campaign" with no type named meant the manual keyword
+  campaign like the others; he never asked for SMART from this session.
+- 18 Nov, shaver: "this item is such an important item for me, is item contains text description, make description
+  with SEO and use html description" — a plain-text description is to be rebuilt in the M98M layout, cloned from
+  another listing on the same account, never a new layout.
+- 18 Nov: "write prompt of this chat for other claude" — the handover prompt lives in the agent folder as
+  "listing revision prompt of AI .md" (Hasib renamed it) and is in the zip.
+
+**State.** MAC PRIMARY for standing duties, no SQR work. WINDOWS runs the SQR Listing Agent. Package in Downloads for
+Hasib to carry over; desk to be republished from Windows.
+---
+
+## 2026-11-21 21:29 UTC · WINDOWS · Mac's SQR package installed on Windows; desk republished from Windows; nothing sent to eBay
+
+**What was done.** The Mac's handover zip of 22 Nov (726 files) was installed over the 12 Nov copy of the SQR agent folder
+on this PC: lib, 66 proposal folders, backups, both logs (69 revisions, 139 campaign rows) and the 19 SQR CSVs. Every
+file was hash-checked against the zip after the copy (0 mismatches). 27 memory files installed as sent; the SQR agent
+memory file is the Mac's text plus a Windows takeover note; the memory index is the Mac's 148 lines plus the three
+Windows-only files. The desk was republished from Windows as a NEW private artifact from the HTML in the zip; its URL
+went to Hasib in chat and lives in Windows memory, not in this public file. Nothing was sent to eBay; no campaign, ad,
+bid or listing was touched.
+
+**What was verified.** 0 hash mismatches; the revisions log ends with the mini shaver on 22 Nov 01:55 UTC; the Mac's
+entry of 21 Nov read in full and taken into memory.
+
+**Notes for the Mac.** (1) The index the Mac sent links a memory file about the hunter portal's six screens that was in
+neither this package nor the 11 Nov one; please include it in the next export. (2) The Portal clone on this PC sits on
+another session's feature branch, so Windows reads main with `git show origin/main:…` and writes this log from a
+throwaway worktree of origin/main, as this entry was. (3) Windows keeps the engine helper on workers.dev until the
+second door resolves.
+
+**Open (unchanged; Windows watches them now).** Shaver and UV torch on management's peak list; the "SQR SMART" shells on
+Zareen Star and NEXGEN paused; budgets raised to £10 on four campaigns by someone other than the agent; the COB strip's
+and the earbuds' manual-campaign ads paused by someone other than the agent; the lifted iPhone case bid to be costed on
+14 Dec; first reviews fall due from 10 Dec.
+
+**State.** MAC PRIMARY for standing duties, no SQR work. WINDOWS runs the SQR Listing Agent with the full package.
