@@ -1413,20 +1413,28 @@
   };
 
   /* 21 Nov (owner): "remove the listings from the Business overview, show them under an Extras title
-     at the end of the portal". The two sections that left the overview — Live listings and this
-     week's Staff performance — stand here unchanged, on a page of their own in the sidebar's last
-     group. Same painters, same feeds; the listings' own account chips and search work as before. */
+     at the end of the portal; the staff performance moves to my tasks page". The Live listings table
+     stands here unchanged, on a page of its own in the sidebar's last group — same painter, same
+     feed, its own account chips and search. Staff performance is drawn on My tasks through
+     renderStaffPerformance below. */
+  window.renderStaffPerformance = function () {
+    var sb = $('o2Staff'); if (!sb) { return; }
+    sb.innerHTML = '<div class="empty">Loading…</div>';
+    oFeed('teamPerformance', { period: 'week' }, 0).then(oPaintStaff).catch(function () {
+      var b = $('o2Staff');
+      if (b) { b.innerHTML = '<div class="o-card"><div class="empty">The staff ledger did not answer just now — <a href="#team" style="font-weight:800">Team performance</a> has the full desk.</div></div>'; }
+    });
+  };
   VIEWS.overviewExtras = {
-    label: 'Live listings & staff',
+    label: 'Live listings',
     order: 99,
     roles: ['Management', 'Ops Head'],
     icon: '<path d="M4 6h16M4 12h16M4 18h10"/>',
     render: function () {
       return '<div class="ov2">' +
-        '<div class="hgroup enter d1"><h1>Extras</h1><span class="sub">the two sections that left the Business overview · live listings and this week\'s staff performance</span>' +
+        '<div class="hgroup enter d1"><h1>Extras</h1><span class="sub">the live listings table that left the Business overview</span>' +
           '<button class="minibtn" id="o2XRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL\'S PRIMARY PURPOSE</span><span class="hint">profit · price · AliExpress cost · per-item ads — role-scoped server-side</span></div><div id="o2LL"><div class="empty">Loading…</div></div></div>' +
-        '<div class="sec enter d2"><div class="sec-h"><h2>Staff performance</h2><span class="hint">this week · from the portal\'s own activity ledger · management excluded</span></div><div id="o2Staff"><div class="empty">Loading…</div></div></div>' +
         '</div>';
     },
     init: function () {
@@ -1440,13 +1448,8 @@
       var load = function () {
         O.fetchGen = (O.fetchGen || 0) + 1;
         O.listings = null; oPaintListings();
-        var sb = $('o2Staff'); if (sb) { sb.innerHTML = '<div class="empty">Loading…</div>'; }
         oFeed('activeListings', {}, 0).then(function (d) { O.listings = (d && d.rows) || []; oPaintListings(); })
           .catch(function (e) { var b = $('o2LL'); if (b) { b.innerHTML = '<div class="o-card"><div class="empty">Could not load the live listings. <span style="color:var(--text-3);font-size:12px">' + esc((e && e.message) || 'no answer') + '</span></div></div>'; } });
-        oFeed('teamPerformance', { period: 'week' }, 500).then(oPaintStaff).catch(function () {
-          var b = $('o2Staff');
-          if (b) { b.innerHTML = '<div class="o-card"><div class="empty">The staff ledger did not answer just now — <a href="#team" style="font-weight:800">Team performance</a> has the full desk.</div></div>'; }
-        });
       };
       var rf = $('o2XRefresh'); if (rf) { rf.onclick = load; }
       load();

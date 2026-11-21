@@ -1,11 +1,13 @@
 # CHANGELOG
 
-## 2026-11-21 - BUSINESS OVERVIEW: Live listings and Staff performance move to an Extras page at the end of the sidebar
+## 2026-11-21 - BUSINESS OVERVIEW: Live listings move to an Extras page at the end of the sidebar; Staff performance moves to My tasks
 
 Owner: "remove the listings from the Business overview, show them under an Extras title at the end
-of the portal". The Live listings table and the week's Staff performance leave the Business overview
-and stand unchanged on a page of their own, "Live listings & staff", in a new Extras group at the
-bottom of the sidebar, with its own Refresh. The overview no longer fetches either feed.
+of the portal; the staff performance, move that to my tasks page". The Live listings table leaves the
+Business overview and stands unchanged on a page of its own, "Live listings", in a new Extras group at
+the bottom of the sidebar, with its own Refresh. The week's Staff performance block now sits at the
+foot of My tasks, for Management only, drawn by the same painter. The overview no longer fetches
+either feed.
 
 ## 2026-11-21 - BUSINESS OVERVIEW: each individual day's money, by account, in the dispatch block's format
 
