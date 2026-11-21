@@ -25504,6 +25504,32 @@ const ROUTES = {
   /* THE ADVERTISING COMMAND CENTRE (Hasib items 10/18/22): combined → account → item, in eBay's
      own vocabulary, from the intraday snapshot + the 14-day daily history. The updated stamp is
      the honest cadence — the data is as fresh as eBay built its last report, nothing pretended. */
+  /* 21 Nov (owner: "went negative only shows up to the 19th, not yesterday the 20th — why, fix it").
+     The WENT NEGATIVE cards are raised by the Signals scan from each account's Sales Analysis day
+     tab, and that tab is built only once the day can be costed, usually well into the next day; until
+     it exists the scan answers "not connected yet" and no card can be raised. This read answers the
+     command centre from the engine's OWN day ledger instead — the per-listing actual profit the
+     Product history's By period table shows — so yesterday's negatives are on the board from the
+     morning, marked provisional; the cards, with their Acknowledge, follow when the tab lands. */
+  adsNegativeDay: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (!adsCentreFull(ctx.user) && ['Advertising Manager', 'Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const okDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+      const day = okDay(p.day) ? String(p.day) : adtAddDays(ukDate(''), -1);
+      const acctF = String(p.account || '');
+      const rows = (await ctx.env.DB.prepare(
+        'SELECT d.item_id, d.account, d.actual_profit, d.spend, d.cpc_spend, d.orders, d.units, d.revenue, d.pending_cost_orders, d.refunds, i.title, i.image ' +
+        'FROM adtool_listing_day d LEFT JOIN items_api i ON i.item_id = d.item_id ' +
+        'WHERE d.day = ?1 AND d.actual_profit IS NOT NULL AND d.actual_profit < 0' + (acctF ? ' AND d.account = ?2' : '') + ' ORDER BY d.actual_profit ASC LIMIT 80'
+      ).bind(...(acctF ? [day, acctF] : [day])).all().catch(() => ({ results: [] }))).results || [];
+      return { day, rows: rows.map((r) => ({
+          item_id: String(r.item_id), account: String(r.account || ''), title: String(r.title || ''), image: r.image ? String(r.image) : null,
+          actual_profit: round2(r.actual_profit), spend: round2((Number(r.spend) || 0) + (Number(r.cpc_spend) || 0)), orders: Number(r.orders) || 0, units: Number(r.units) || 0,
+          revenue: round2(r.revenue), pending_cost_orders: Number(r.pending_cost_orders) || 0, refunds: round2(r.refunds) })),
+        source: 'the engine\u2019s own day ledger \u2014 orders, costs and eBay\u2019s ads report, the figures the Product history By period table shows \u2014 provisional until the day\u2019s Sales Analysis tab is built and the Signals scan raises the cards' };
+    },
+  },
+
   adsBoard: {
     auth: 'any', fn: async (p, ctx) => {
       /* Account-level ad-spend totals are a money read: the gate mirrors the screen's own
