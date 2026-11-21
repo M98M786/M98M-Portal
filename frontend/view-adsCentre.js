@@ -672,7 +672,7 @@ VIEW_CSS.push(
     };
   }
 
-  function acLoad() {
+  function acLoad(after) {
     var box = $('acBody');
     if (!box) { return; }
     var payload = AC.period ? { period: AC.period } : { days: AC.days };
@@ -811,6 +811,7 @@ VIEW_CSS.push(
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Snapshot ' +
         esc(String(d.updated_at || '—')) + ' UTC · ' + esc(String(d.note || '')) + '</p>';
       box.innerHTML = h;
+      if (typeof after === 'function') { try { after(); requestAnimationFrame(after); } catch (e) {} }
       Array.prototype.forEach.call(box.querySelectorAll('[data-ac-tile]'), function (t) {
         var go = function () { acFocus(t.getAttribute('data-ac-tile')); };
         t.onclick = go;
@@ -884,7 +885,19 @@ VIEW_CSS.push(
       });
       acLoad();
       if (AC.timer) { clearInterval(AC.timer); }
-      AC.timer = setInterval(function () { if ($('acBody') && STATE.idToken) { acLoad(); } else { clearInterval(AC.timer); AC.timer = null; } }, 120000);
+      /* 22 Nov (owner): "every two minutes the page reloads on a working person — stop it". The
+         refresh still comes every two minutes, but never while the page was used in the last
+         minute, never while an acknowledge form is open, never in a hidden tab — and it keeps the
+         scroll where it was. (It also ran only with a Google token; a portal session is enough.) */
+      AC.timer = setInterval(function () {
+        if (!$('acBody') || !(STATE.idToken || STATE.session)) { clearInterval(AC.timer); AC.timer = null; return; }
+        if (document.hidden) { return; }
+        if (typeof userBusy === 'function' && userBusy(60000)) { return; }
+        var a = document.activeElement; if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) { return; }
+        if (document.querySelector('.ac-nform:not(.hidden)')) { return; }
+        var mv = $('mainView'), top = mv ? mv.scrollTop : 0;
+        acLoad(function () { if (mv && Math.abs(mv.scrollTop - top) > 2) { mv.scrollTop = top; } });
+      }, 120000);
     }
   };
 })();
