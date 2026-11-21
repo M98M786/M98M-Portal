@@ -23,6 +23,8 @@
     '.o2d-bar{height:7px;border-radius:99px;background:var(--panel);border:1px solid var(--gold-line);overflow:hidden;min-width:90px}' +
     '.o2d-bar i{display:block;height:100%;background:var(--ok);border-radius:99px}' +
     '.o2d-sub{font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px}' +
+    '.o2d-day{padding:14px 0 6px;border-top:1px solid var(--gold-line)}.o2d-day:first-of-type{border-top:0;padding-top:4px}' +
+    '.o2d-dayh{font-size:14px;font-weight:800;margin:0 0 10px}.o2d-dayh .o2d-dayd{font-size:11px;color:var(--text-3);font-weight:600;margin-left:6px}' +
     '.o2d-rem{color:var(--warn)}td.o2d-zero{color:var(--text-3)}' +
 
     '.ov2 .sec{margin-bottom:26px}' +
@@ -1182,26 +1184,41 @@
       '</div>';
     var accts = (d.accounts || []).filter(function (a) { return a.came || a.backlog; });
     if (!today && O.view === 'individual') {
-      /* 21 Nov (owner: "individual days still comes through combined"): in the Individual view the
-         clock lists every UK day of the window, newest first, with each day's accounts beside it;
-         the three tiles above stay the window's collective total. */
+      /* 21 Nov (owner): "the details shown the same way as the Today block for the individual days
+         too — no change in the format". One block per UK day of the window, newest first: the same
+         three tiles and the same account table as Today, each over that one day. The window's
+         own totals are the one line above them. */
       var dl = d.days;
+      h = '<div class="o2d-sub" style="margin:0 0 10px">All ' + esc(win) + ' together: <b>' + (t.came || 0) + '</b> came · <b>' + (t.processed || 0) + '</b> processed (' + pct + '%) · <b>' + (t.remaining || 0) + '</b> remaining · ' + esc(r.from + ' \u2192 ' + r.to) + ' · UK trading days · all accounts</div>';
       if (!dl) {
-        h += '<div class="empty" style="padding:12px 0 0">The day-by-day split of these orders arrives with the engine update that is rolling out — it tries again in a minute.</div>';
+        h += '<div class="empty" style="padding:12px 0 0">The day-by-day split of these orders arrives with the engine update that is rolling out \u2014 it tries again in a minute.</div>';
       } else {
         var byDay = {}; dl.forEach(function (x) { byDay[String(x.day)] = x; });
         var tUk = ukToday();
-        h += '<div class="scroll"><table class="o2d-tbl"><thead><tr><th>Day</th><th>Came</th><th>Processed</th><th>Remaining</th><th style="text-align:left;padding-left:16px">Progress</th><th style="text-align:left;padding-left:16px">By account · came / processed</th></tr></thead><tbody>' +
-          oDayList(r.from, r.to).map(function (day) {
-            var x = byDay[day];
-            if (!x) { return '<tr><td>' + oDayLbl(day) + '</td><td class="o2d-zero" colspan="5" style="text-align:left;padding-left:16px">no orders came in</td></tr>'; }
-            var p = x.came ? Math.round(x.processed / x.came * 100) : 100;
-            var acc = (x.accounts || []).map(function (a) { return esc(a.account) + ' <b>' + a.came + '</b>/' + a.processed + (a.remaining ? ' <span class="o2d-rem">(' + a.remaining + ' left)</span>' : ''); }).join(' · ');
-            return '<tr><td>' + oDayLbl(day) + (day === tUk ? ' <span style="color:var(--gold-a);font-size:10px;font-weight:800">· today, live</span>' : '') + '</td><td' + (x.came ? '' : ' class="o2d-zero"') + '>' + x.came + '</td><td>' + x.processed + '</td>' +
-              '<td class="' + (x.remaining ? 'o2d-rem' : 'o2d-zero') + '">' + x.remaining + '</td>' +
-              '<td style="text-align:left;padding-left:16px"><div class="o2d-bar" title="' + p + '% processed"><i style="width:' + p + '%"></i></div></td>' +
-              '<td style="text-align:left;padding-left:16px;white-space:normal;font-size:11.5px;color:var(--text-2);line-height:1.5">' + acc + '</td></tr>';
-          }).join('') + '</tbody></table></div>';
+        h += oDayList(r.from, r.to).map(function (day) {
+          var x = byDay[day] || { came: 0, processed: 0, remaining: 0, accounts: [] };
+          var p = x.came ? Math.round((x.processed / x.came) * 100) : 0;
+          var isT = day === tUk, dayWord = isT ? 'today' : oDayLbl(day);
+          var blk = '<div class="o2d-dayh">' + oDayLbl(day) + (isT ? ' <span style="color:var(--gold-a)">\u00b7 today, live</span>' : '') + ' <span class="o2d-dayd">' + day + '</span></div>' +
+            '<div class="o2d">' +
+            '<div class="o2d-t"><span class="k">Orders came ' + esc(dayWord) + '</span><b>' + x.came + '</b><span class="s">UK trading day · all accounts</span></div>' +
+            '<div class="o2d-t ok"><span class="k">Processed &amp; bought</span><b>' + x.processed + '</b><span class="s">' + p + '% of ' + esc(dayWord) + ' · AliExpress cost + order number' + (x.half_done ? ' · ' + x.half_done + ' started (cost, no order no.)' : '') + '</span></div>' +
+            '<div class="o2d-t' + (x.remaining ? ' warn' : ' ok') + '"><span class="k">Remaining to buy</span><b>' + x.remaining + '</b><span class="s">not yet bought on AliExpress</span></div>' +
+            '</div>';
+          var acc = (x.accounts || []).filter(function (a2) { return a2.came; });
+          if (acc.length) {
+            blk += '<div class="scroll"><table class="o2d-tbl"><thead><tr><th>Account</th><th>Came</th><th>Processed</th><th>Remaining</th><th style="text-align:left;padding-left:16px">Progress</th></tr></thead><tbody>' +
+              acc.map(function (a2) {
+                var p2 = a2.came ? Math.round((a2.processed / a2.came) * 100) : 100;
+                return '<tr><td>' + esc(a2.account || '(none)') + '</td><td>' + a2.came + '</td><td>' + a2.processed + '</td>' +
+                  '<td class="' + (a2.remaining ? 'o2d-rem' : 'o2d-zero') + '">' + a2.remaining + '</td>' +
+                  '<td style="text-align:left;padding-left:16px"><div class="o2d-bar" title="' + p2 + '% processed"><i style="width:' + p2 + '%"></i></div></td></tr>';
+              }).join('') + '</tbody></table></div>';
+          } else {
+            blk += '<div class="empty" style="padding:10px 0 0">No orders came in on ' + esc(day) + '.</div>';
+          }
+          return '<div class="o2d-day">' + blk + '</div>';
+        }).join('');
       }
     } else if (accts.length) {
       h += '<div class="scroll"><table class="o2d-tbl"><thead><tr><th>Account</th><th>Came</th><th>Processed</th><th>Remaining</th>' +
