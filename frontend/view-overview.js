@@ -134,6 +134,8 @@
        is the page as it was (one figure per window); individual lays the same window out day by day. */
     view: 'collective' };
   var O_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], O_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  function oGBPs(v) { var n = oN(v); return (n < 0 ? '\u2212\u00a3' : '\u00a3') + Math.abs(n).toFixed(2); }
+  function oGBP0s(v) { var n = oN(v), a = Math.abs(n); return (n < 0 ? '\u2212\u00a3' : '\u00a3') + (a >= 1000 ? (a / 1000).toFixed(1) + 'k' : a.toFixed(2)); }
   function oDayLbl(iso) { var d = new Date(iso + 'T12:00:00Z'); return O_DOW[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + O_MON[d.getUTCMonth()]; }
   /* the days of a window, newest first, so today or yesterday heads the list */
   function oDayList(from, to) { var out = []; for (var d = from; d <= to; d = dShift(d, 1)) { out.push(d); if (out.length > 92) { break; } } return out.reverse(); }
@@ -518,14 +520,14 @@
       if (act != null) { totAct += act; settled++; }
       var m = b.sold ? ((act != null ? act : b.profit - b.ads) / b.sold * 100) : null;
       return '<tr' + (live ? ' class="live"' : '') + '><td>' + oDayLbl(d) + (live ? '<span class="o-dt-live">today · live</span>' : '') + '<span class="o-dt-d">' + d + (b.accts > 1 ? ' · ' + b.accts + ' accounts' : '') + '</span></td>' +
-        '<td>' + oGBP(b.sold) + '</td><td>' + oGBP(b.oe) + '</td><td>' + oGBP(b.cost) + '</td><td>' + oGBP(b.ads) + '</td><td class="' + cls(b.profit) + '">' + oGBP(b.profit) + '</td>' +
-        '<td class="' + (act == null ? '' : cls(act)) + '">' + (act == null ? '<span class="o-dt-none">' + (live ? 'settles tonight' : 'not in the books yet') + '</span>' : oGBP(act)) + '</td>' +
+        '<td>' + oGBPs(b.sold) + '</td><td>' + oGBPs(b.oe) + '</td><td>' + oGBPs(b.cost) + '</td><td>' + oGBPs(b.ads) + '</td><td class="' + cls(b.profit) + '">' + oGBPs(b.profit) + '</td>' +
+        '<td class="' + (act == null ? '' : cls(act)) + '">' + (act == null ? '<span class="o-dt-none">' + (live ? 'settles tonight' : 'not in the books yet') + '</span>' : oGBPs(act)) + '</td>' +
         '<td>' + (m == null ? '—' : m.toFixed(1) + '%') + '</td></tr>';
     }).join('');
     var n = days.length;
     var totRow = '<tr class="tot"><td>All ' + n + ' day' + (n === 1 ? '' : 's') + ' — collective<span class="o-dt-d">' + r.from + ' → ' + r.to + '</span></td>' +
-      '<td>' + oGBP(tot.sold) + '</td><td>' + oGBP(tot.oe) + '</td><td>' + oGBP(tot.cost) + '</td><td>' + oGBP(tot.ads) + '</td><td class="' + cls(tot.profit) + '">' + oGBP(tot.profit) + '</td>' +
-      '<td class="' + cls(totAct) + '">' + oGBP(totAct) + (settled < n ? '<span class="o-dt-d">' + settled + ' of ' + n + ' days settled</span>' : '') + '</td>' +
+      '<td>' + oGBPs(tot.sold) + '</td><td>' + oGBPs(tot.oe) + '</td><td>' + oGBPs(tot.cost) + '</td><td>' + oGBPs(tot.ads) + '</td><td class="' + cls(tot.profit) + '">' + oGBPs(tot.profit) + '</td>' +
+      '<td class="' + cls(totAct) + '">' + oGBPs(totAct) + (settled < n ? '<span class="o-dt-d">' + settled + ' of ' + n + ' days settled</span>' : '') + '</td>' +
       '<td>' + (tot.sold ? ((settled ? totAct : tot.profit - tot.ads) / tot.sold * 100).toFixed(1) + '%' : '—') + '</td></tr>';
     box.innerHTML = '<div class="o-card o-dt-wrap" style="grid-column:1/-1"><table class="o-dt"><thead><tr><th>Day</th><th>Sold</th><th>Order earning</th><th>Ali cost</th><th>Ads</th><th>Profit before ads</th><th>Actual · after ads &amp; returns</th><th>Margin</th></tr></thead><tbody>' + tr + totRow + '</tbody></table>' +
       '<div class="kpi-s" style="margin-top:8px">From the daily books (the Sales Analysis day tabs, rolled nightly), ' + (O.acct ? esc(O.acct) + ' only' : 'all accounts summed per day') + '. Profit before ads = 0.8 × (order earning − Ali cost); Actual is the sheet’s own column after ads and returns. Today rides the live overlay. The Collective view reads the money register instead, so its figures can differ by the days the books have not caught up on.</div></div>';
@@ -922,10 +924,10 @@
         var tds = accNames.map(function (a) {
           var x = cell[d + '|' + a]; if (!x) { return '<td><span class="o-dt-none">—</span></td>'; }
           var p = pOf(x, d); rs += oN(x.sold); rp += p;
-          return '<td>' + oGBP0(x.sold) + ' <span class="' + (p < 0 ? 'neg' : 'pos') + '">' + oGBP0(p) + '</span></td>';
+          return '<td>' + oGBP0s(x.sold) + ' <span class="' + (p < 0 ? 'neg' : 'pos') + '">' + oGBP0s(p) + '</span></td>';
         }).join('');
         return '<tr' + (live ? ' class="live"' : '') + '><td>' + oDayLbl(d) + (live ? '<span class="o-dt-live">today · live</span>' : '') + '</td>' + tds +
-          (accNames.length > 1 ? '<td><b>' + oGBP0(rs) + '</b> <span class="' + (rp < 0 ? 'neg' : 'pos') + '">' + oGBP0(rp) + '</span></td>' : '') + '</tr>';
+          (accNames.length > 1 ? '<td><b>' + oGBP0s(rs) + '</b> <span class="' + (rp < 0 ? 'neg' : 'pos') + '">' + oGBP0s(rp) + '</span></td>' : '') + '</tr>';
       }).join('');
       box.innerHTML = chips + '<div class="o-card"><div class="chart-wrap">' + oChart(rows, r.from, r.to) + '</div></div>' +
         '<div class="o-card o-dt-wrap" style="margin-top:12px"><span class="card-t">Account to account, day by day · revenue · actual profit (after ads &amp; returns)</span><table class="o-dt"><thead>' + th + '</thead><tbody>' + trs + '</tbody></table></div>' + tiles;
