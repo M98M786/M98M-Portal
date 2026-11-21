@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-11-21 - BUSINESS OVERVIEW: the dispatch clock goes day by day in the Individual view
+
+Owner: "Individual days doesn't work, it still comes through with the collective combined data." The
+first section of the page, the dispatch clock, was still one total for the window. In the Individual
+days view it now lists every UK day of the window, newest first - came, processed, remaining, the
+progress bar, and each day's accounts beside it - with the three tiles above keeping the window's
+total. The engine's window pulse answers the per-day split alongside its totals.
+
 ## 2026-11-21 - BUSINESS OVERVIEW: Apply for the account, and Collective / Individual days
 
 Owner: "Refresh doesn't work - change it to Apply so that when clicked the information is exclusively
