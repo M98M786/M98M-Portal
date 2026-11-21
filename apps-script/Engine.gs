@@ -328,6 +328,7 @@ const ENGINE_RUNNABLE = {
   adminRenameUser: function (args) { return typeof adminRenameUser === 'function' ? String(adminRenameUser(args)) : 'absent'; },
   staffReassign7Nov: function () { return typeof staffReassign7Nov === 'function' ? String(staffReassign7Nov()) : 'absent'; },
   huntingPortalForM98mfour: function () { return typeof huntingPortalForM98mfour === 'function' ? String(huntingPortalForM98mfour()) : 'absent'; },
+  productHistoryForM98mfour: function () { return typeof productHistoryForM98mfour === 'function' ? String(productHistoryForM98mfour()) : 'absent'; },
   purgeAutoRevisionsYaseenRabia: function () { return typeof purgeAutoRevisionsYaseenRabia === 'function' ? String(purgeAutoRevisionsYaseenRabia()) : 'absent'; },
   perfSnapshotPush: function () { return typeof perfSnapshotPush_ === 'function' ? (perfSnapshotPush_(), 'ok') : 'absent'; },
   reviewsDump: function () { return typeof reviewsDump === 'function' ? String(reviewsDump()) : 'absent'; },

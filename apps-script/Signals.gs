@@ -1660,6 +1660,15 @@ function runLossEscalationSweep() {
       logActivity_('system', 'HUNTER_PORTAL_M98MFOUR', 'm98mfour@gmail.com', '', 'run from the 5-minute sweep', huntingPortalForM98mfour());
     }
   } catch (e) { logActivity_('trigger', 'ERROR:hunterPortalM98mfour', '', '', '', String(e && e.stack || e).slice(0, 300)); }
+  /* 22 Nov (owner): Product history for Muhammad Ahmad — one modules grant, once, from this clock;
+     flag set BEFORE the call so a crash cannot loop it; the one-shot logs ahead of its mirror push. */
+  try {
+    const p22n = PropertiesService.getScriptProperties();
+    if (p22n.getProperty('PRODUCT_HISTORY_M98MFOUR') !== 'done' && typeof productHistoryForM98mfour === 'function') {
+      p22n.setProperty('PRODUCT_HISTORY_M98MFOUR', 'done');
+      logActivity_('system', 'PRODUCT_HISTORY_M98MFOUR', 'm98mfour@gmail.com', '', 'run from the 5-minute sweep', productHistoryForM98mfour());
+    }
+  } catch (e) { logActivity_('trigger', 'ERROR:productHistoryM98mfour', '', '', '', String(e && e.stack || e).slice(0, 300)); }
   /* 17 Nov (owner): purge system-sent revisions on the hand-worked accounts, once, from this
      clock — the flag is set BEFORE the call so a crash cannot loop it. The result line is logged
      by the one-shot itself ahead of any slow mirror work (the 11 Nov lesson). */
