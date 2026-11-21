@@ -504,3 +504,27 @@ one final; every accepted send was a subset of the approved text). Desk republis
 
 **State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent; nothing pending on this item. Title
 review for it falls due 14 Dec.
+
+## 2026-11-21 22:41 UTC · MAC · Product history: answered first, eBay asked behind it; one call per campaign for one listing; schema marker moved (owner, 22 Nov)
+
+**Why.** The owner: the ads portal's Product history page shows "Failed to fetch" very often and takes a long time after
+Open. Evidence: the route awaited the on-open eBay read (16 Nov) BEFORE the memo, and that read pulled every ad of every
+campaign the listing sits in (two pages of 500 each): 49.7 s on 21 Nov 22:02, while the composition alone is under 1 s.
+The shell gives this action 15 s and one 20 s retry, so every slow open ended in an error after 35 s; 860 client
+disconnects in 24 h with a median of 15 s. "Failed to fetch" is the same slow request dropped by the network, with the
+second door (engine.m98mltd.co.uk) not resolving at all: m98mltd.co.uk's nameservers are Namecheap's, so a Workers
+custom domain cannot exist there until the zone is on Cloudflare.
+
+**What changed.** (1) adtoolListing answers from the memo first and starts the eBay read behind the answer
+(adtListingEbayKick → waitUntil); the answer carries ebay_read.pending and the page asks again at 2.5/4/6/10/15 s,
+redrawing only the Where its ads sit panel. (2) The per-listing read is one GET per campaign with listing_ids=
+(adsFetchAdsForListing; eBay verified 22 Nov: member → the ad row, non-member → empty list total 0, deleted campaign →
+404 error 35045), through adsItemsCampaign's new only_listing mode: this listing's rows only, the campaign stamp left
+alone, the baseline judged on the campaign's own first sync; our own rows' campaigns are asked about too, so a row the
+listing has left is deleted at once. Record per listing in portal_config (adtool_listing_ebay_read_<id>); Where rows
+carry the listing read's date only for the campaigns it covered (adtRowReadStamp). (3) Schema marker 2026-11-22.1 /
+215-2ffce716: the count had moved on 21 Nov with adtool_neg_ack (created at its own sites, so nothing was missing) and
+the suite had been red on main since, along with three Product history pins the 20 Nov graph removal left stale; all
+re-pinned to the page as it is. Suite 1497/1497.
+
+**Nothing sent to eBay.** Reads only; the per-account switches, bounds (30 s per listing) and the 40k/day cap are unchanged.

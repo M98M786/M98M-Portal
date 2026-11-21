@@ -65,7 +65,7 @@ function run(argv) {
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const btoa = (str) => { let out = ''; for (let i = 0; i < str.length; i += 3) { const a = str.charCodeAt(i), b = str.charCodeAt(i + 1), c = str.charCodeAt(i + 2); const n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c); out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + (isNaN(b) ? '=' : B64[(n >> 6) & 63]) + (isNaN(c) ? '=' : B64[n & 63]); } return out; };
   const atob = (str) => { const s2 = String(str).replace(/=+$/, ''); let out = '', bits = 0, acc = 0; for (const ch of s2) { const v = B64.indexOf(ch); if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 255); } } return out; };
-  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, liveMembershipRow, adDupVerdict, ADTOOL_DUP_RULE, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, adSaleDayGap, adSaleNearPrice, adSaleLedgerRead, adSalePaidPerUnit, adSalePromoSaleFromXml, adSaleEventNamed, adSaleMembership, adSaleSkipReason, adSaleCountMembership, adSaleReasonText, adSaleMorningAfter, adSalePriceSteps, adSalePriceClocks, adSaleCohorts2, adTradeRequestXml, adTradeAckOf, ADTOOL_SALE_PENNY, ADTOOL_SALE_SKIP_REASONS, ADTOOL_SALE_SKIP_WORDS, ADTOOL_SALE_SKIP_SHORT, ADTOOL_TRADE_XML_FIELDS, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_SAMPLER_QUIET_DEFAULT_MIN, ADTOOL_SAMPLER_CONFIG_KEYS, adtSamplerCadence, adtSamplerDue, ADTOOL_PEAK_ENVELOPE_EDGE_MIN, adPeakEnvelopeHours, adPeakInEnvelope, adPeakStopLoss, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_LANDING_DAYS_SHOWN, adLandingDaysClean, adLandingWords, adLandingMark, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS, ADTOOL_PATTERN_KINDS, ADTOOL_PATTERN_MONTHS, ADTOOL_PATTERN_DATES_CAP, adListingDayWords, adListingMonthWords, adListingMonthEnd, adListingPattern, adListingPatternKey, adListingPatternWindow, adListingSlots, adListingWeekday, adListingHourWeekday, adListingDates, ADTOOL_PERIODS_NOTE, adPeakPeriodChunks, ADTOOL_CAMPAIGN_WATCH_MIN, ADTOOL_CAMPAIGN_WATCH_EVERY_MIN, ADTOOL_CAMPAIGN_WATCH_CALLS, ADTOOL_CAMPAIGN_WATCH_DAILY, ADTOOL_CAMPAIGN_WATCH_ACCOUNTS, ADTOOL_CAMPAIGN_WATCH_MS, ADTOOL_CAMPAIGN_WATCH_REREAD_S, ADTOOL_CAMPAIGN_WATCH_ITEM_S, ADTOOL_CAMPAIGN_WATCH_STATES, ADTOOL_CAMPAIGN_WATCH_PAGE_STATES, adWatchKey, adWatchByKey, adWatchRereadKey, adWatchItemKey, adWatchDayKey, adWatchUntil, adWatchAlive, adWatchAccounts, adWatchDailyLeft, adWatchBound, adWatchClock, adWatchEveryText, adWatchFleetMin, adWatchHeader, adWatchRereadNote, adWatchTickNote, adWatchCachePayloads, adWatchCampaignIds };')(round2, btoa, atob);
+  const F = new Function('round2', 'btoa', 'atob', pure + '\n return { adWatchUnionIds, adtListingEbayState, adtListingEbayRecordAfter, adtListingEbayShape, adtRowReadStamp, adtFrontier, adtPlanVerdict2, adtRunVerdict, adtHourBands, adtHourBandMerge, adtWeekdaySentence, adtLever, adtWeekdayIndex, adtRealMargin, adtWeekdayLong, gbpPlain, ADTOOL_FRONTIER_MARKS, ADTOOL_CARRY_FIX_DAY, ADTOOL_HOUR_BASIS, ADTOOL_DOW, adtUkParts, adtSlot, adtWeekdayOf, adtDom, adtIsoWeek, adtAddDays, adtMargin, adtOrderBrain, adtTaxonomy, adtDeltas, adtReconcile, adtCapHour, adtVerdicts, adtAdState, liveMembershipRow, adDupVerdict, ADTOOL_DUP_RULE, adtAdEvents, parseAdsReportCampaignTsv, adtRng, adtShrink, adtDecay, adtWeekdayProfile, adtShareProfile, adtPermWeekday, adtPermSpread, adtJsd, adtRegime, adtTheilSen, adtPelt, adtStage, adtDescriptors, adtSeasonalNaive, adtTsb, adtPoissonGlm, adtHoltWinters, adtMase, adtCoverage, adtForecastWith, adtBacktest, adtBands, adtChooseModel, adtListingAlerts, adtAccountSpendAlerts, adtDiminishingReturns, adtRoasLevers, adtPdf, adtAlertUrgency, adtWeekBehaviour, adtScenarios, adtStageExplain, adtDecide, adtScoreDecision, adtSampledYesterday, adtScoreTally, adtSheetLawVerdict, adtCarryForward, adtValidateNarrative, adtNumbersIn, adtFleetNarrativeTemplate, adtProductNarrativeTemplate, adtApplyCaps, adtApplyPlan, adtSheetLawOrders, adtSheetLawProfit, adtStripCollectiveProfit, adtCpcDerived, adtCpcTotals, adtCpcHeld, adtTrend, round4, adtKvCanon, adtKvKey, adtWarmUntil, ADTOOL_KV_DEFAULT_PERIOD, ADTOOL_IMPRESSIONS_FROM, adtSaleTimeline, adtSaleStatus, adtSaleSuccessor, adtSaleDiscountObserved, adtParseDiscountPct, adtSaleCohorts, adtSaleEligibility, adSaleDiscountFraction, adSalePctText, adSaleRules, adSaleProfitAfter, adSaleVerdict, adSaleBatchDay, adSaleCalendar, adSaleNextEligible, adSaleBatches, adSaleBatchKey, adSaleBatchKeyParse, adSaleDayGap, adSaleNearPrice, adSaleLedgerRead, adSalePaidPerUnit, adSalePromoSaleFromXml, adSaleEventNamed, adSaleMembership, adSaleSkipReason, adSaleCountMembership, adSaleReasonText, adSaleMorningAfter, adSalePriceSteps, adSalePriceClocks, adSaleCohorts2, adTradeRequestXml, adTradeAckOf, ADTOOL_SALE_PENNY, ADTOOL_SALE_SKIP_REASONS, ADTOOL_SALE_SKIP_WORDS, ADTOOL_SALE_SKIP_SHORT, ADTOOL_TRADE_XML_FIELDS, ADTOOL_SALE_DEFAULTS, ADTOOL_SALE_CONFIG_KEYS, ADTOOL_SALE_VERDICTS, ADTOOL_SALE_WEEKDAYS, ADTOOL_SALE_RESTRICTION_DAYS, ADTOOL_SALE_MAX_DAYS, ADTOOL_SALE_COHORT_CAP, ADTOOL_SALE_BATCHES_AHEAD, ADTOOL_FEE_RATE, adtPeriod, adtPeriodOr, adtDaySrc, adtTodayRows, adtTodayTuple, adtTodayRowHonest, adtHourCurve, adtRoleAllowed, adtPacificOffsetMin, adtSamplingFromMin, adtInSamplingWindow, adtSamplingFromText, adtSamplingWindowText, ADTOOL_ROLES, ADTOOL_PERIOD_KEYS, ADTOOL_CUSTOM_MAX_DAYS, ADTOOL_PROFIT_LAW, ADTOOL_APPLY_ENDPOINTS, ADTOOL_ALERT_RULES, ADTOOL_MARGIN_CAP, ADTOOL_MIN_SP, adtDeptOf, adtDeptRules, adtDeptSentences, adtRegInternal, adtRegRows, ADTOOL_DEPT_DEFAULTS, ADTOOL_DEPT_CONFIG_KEYS, ADTOOL_DEPT_ORDER, ADTOOL_DEPT_NAMES, ADTOOL_REGISTER_INTERNAL, adtMoneyNum, adtCampStatusKey, adtCampStatusMatch, adtRateRoas, adtRateCpc, adtCampaignBudgetShare, adtCampaignOverlap, adtCampaignRollup, adtUkMidnightUtcMs, adtUtcStamp, adtUkDayUtcBounds, adtUkDayWindows, adtUkClockOf, adtChangeShape, adtAdChangeKind, adtCampaignChangeKind, adtApplyTargetState, adtChangeAttribution, adtChangeArchive, adtPeakRules, adtPeakRule, adtInHourBands, adtOffPeakSpend, ADTOOL_AD_STATES, ADTOOL_CHANGE_STOPPED_KINDS, ADTOOL_CHANGE_ACTIVATED_KINDS, ADTOOL_PEAK_DEFAULTS, ADTOOL_PEAK_CONFIG_KEYS, ADTOOL_SLOT_NAMES, ADTOOL_SLOT_PHRASE, ADTOOL_SLOT_CLOCK, adStatusRank, adIdNewer, adPickLiveAd, adGroupAdsByListing, adMergeAds, adsFetchTruncated, adRepairTargets, adsRotationOrder, adsRotationPick, adsAgeWords, adsOldestStamp, adDynamicRate, adLiveSplitClass, adLiveSplitClassify, ADTOOL_LIVE_SPLIT_CLASSES, ADTOOL_LIVE_SPLIT_NAMES, adPotentialRules, adPotentialCpc, adPotentialBucket, ADTOOL_POTENTIAL_BUCKETS, ADTOOL_POTENTIAL_DEFAULTS, ADTOOL_POTENTIAL_CONFIG_KEYS, adPeakHoursParse, adPeakHoursText, adInPeakRanges, adPeakNextChange, adPeakApplyCaps, adPeakSwitchDecide, adPeakCampaignPick, adPeakCampaignsNow, adPeakCampaignFill, ADTOOL_PEAK_SWITCH_CAP, ADTOOL_PEAK_HOURS_HELP, adtPeakBelieved, adtReportSentLive, adPeakStampMs, adPeakBoundaryMs, adPeakMissedSends, adPeakReadingDisagree, ADTOOL_PEAK_GRACE_MIN, ADTOOL_PEAK_SETTLE_MIN, adPeakUkDayOf, adPeakUkClock, adPeakCohortEntry, adPeakCohortEntries, adPeakInCohort, adPeakCohortOn, adPeakCohortIds, adPeakCohortSql, adPeakCohortJoin, adPeakCohortBeforeJoin, adPeakHoursToday, adPeakSalesSplit, adPeakAvoided, adPeakReconcile, ADTOOL_PEAK_COHORT_CAP, ADTOOL_FRESH_DEFAULTS, ADTOOL_FRESH_CONFIG_KEYS, adtFreshRules, adtFreshAgeMin, adtFreshVerdict, adtFreshStamp, adtSamplerRuns, ADTOOL_SAMPLER_EVERY_MIN, ADTOOL_SAMPLER_RUN_SPLIT_S, ADTOOL_SAMPLER_RUNS_SHOWN, ADTOOL_SAMPLER_ALERT_GRACE_MIN, ADTOOL_SAMPLER_QUIET_DEFAULT_MIN, ADTOOL_SAMPLER_CONFIG_KEYS, adtSamplerCadence, adtSamplerDue, ADTOOL_PEAK_ENVELOPE_EDGE_MIN, adPeakEnvelopeHours, adPeakInEnvelope, adPeakStopLoss, ADTOOL_REGIME_JSD, ADTOOL_REGIME_CONSEC, ADTOOL_REGIME_MIN_ORDERS, ADTOOL_PEAK_PLAN_DEFAULTS, ADTOOL_PEAK_PLAN_CONFIG_KEYS, ADTOOL_PEAK_PLAN_BOUNDARY_HOURS, ADTOOL_PEAK_HOLDS, ADTOOL_PEAK_SCHEDULE_STATES, adPeakPad, adPeakPlanRules, adPeakProfile, adPeakDeadHours, adPeakSchedule, adPeakWantFor, adPeakTracking, adPeakPlanTick, adPeakNextSwitch, adPeakOffWhenProductive, adChangeBy, ADTOOL_CHANGE_AUTOMATIC_MIN, adPeakListingProfile, adVideoIdsFromXml, adVideoThumbDate, adVideoExpiryDate, adVideoMediaDate, adVideoBeforeAfter, adVideoCohortEntry, adVideoCohortEntries, adVideoCohortCounts, adVideoVsNoVideo, ADTOOL_COHORTS, ADTOOL_COHORT_WORDS, ADTOOL_VIDEO_WINDOW_CAP, ADTOOL_VIDEO_WINDOWS, ADTOOL_VIDEO_DATA_START, ADTOOL_VIDEO_API_TRUTH, ADTOOL_VIDEO_DATE_SOURCES, ADTOOL_VIDEO_DATE_AGREE_S, ADTOOL_VIDEO_DATE_BOTH, ADTOOL_VIDEO_DATE_THUMB, ADTOOL_VIDEO_DATE_EXPIRY, ADTOOL_VIDEO_DATE_REFUSED, ADTOOL_VIDEO_SWEEP_PER_ACCOUNT, ADTOOL_VIDEO_SWEEP_FETCH_CAP, ADTOOL_VIDEO_SWEEP_DATES, ADTOOL_VIDEO_RECHECK_DAYS, ADTOOL_VIDEO_SWEEP_MS, ADTOOL_VIDEO_SWEEP_PARALLEL, ADTOOL_VIDEO_SWEEP_DATE_PARALLEL, adtFetchSlices, adtKvPrefix, adtRollupPlan, adtRollupStepNote, adtRollupStepBlend, adtRollupStepCosts, adtRollupCostMs, adtRollupHourCursor, adtRollupOwed, adtHourPrint, adtRollupFreshRules, adtRollupAgeWords, ADTOOL_ROLLUP_BUDGET_MS, ADTOOL_ROLLUP_RESERVE_MS, ADTOOL_ROLLUP_ROWS_PER_S, ADTOOL_ROLLUP_COST_MARGIN, ADTOOL_ROLLUP_COST_DECAY, ADTOOL_ROLLUP_DEAD_MIN, ADTOOL_ROLLUP_STEP_MS, ADTOOL_ROLLUP_ORDER, ADTOOL_ROLLUP_DAY_ROWS, ADTOOL_ROLLUP_WHOLE_DAY_MS, trfParseUtc, trfReserveCalls, trfSampleIntervalMin, trfCadenceMin, trfCycleTicks, trfTickIndex, trfAccountTick, trfBackoffNextMin, trfBackoffUntil, trfBackoffLeftMin, trfSampleDecision, trfClockCredit, trfQuotaFromRateLimits, trfQuotaNote, trfQuotaResourcesSeen, trfSpreadCredit, trfPtDate, trfPtDayStartMs, trfPtShift, TRAFFIC_DOC_LIMIT_PER_DAY, TRAFFIC_LISTING_CALLS_PER_DAY, TRAFFIC_QUOTA_RESERVE_PCT, TRAFFIC_QUOTA_RESERVE_KEY, TRAFFIC_BACKOFF_KEY, TRAFFIC_BACKOFF_MIN_KEY, TRAFFIC_BACKOFF_FIRST_MIN, TRAFFIC_BACKOFF_MAX_MIN, TRAFFIC_TICK_MIN, TRAFFIC_QUOTA_PATH, TRAFFIC_QUOTA_API, TRAFFIC_QUOTA_RESOURCE, adtWindowSums, ADTOOL_LANDING_DAYS_SHOWN, adLandingDaysClean, adLandingWords, adLandingMark, ADTOOL_PEAK_PERIOD_KEYS, ADTOOL_PEAK_PERIOD_FIELDS, ADTOOL_PEAK_PERIOD_MONEY, adPeakPeriodZero, adPeakPeriodAdd, adPeakPeriodFinish, adPeakPeriodSums, adPeakPeriodFromAgg, adPeakPeriodSelect, adPeakItemsSql, adPeakPeriodRow, adPeakPeriodOrNull, adPeakPeriodToday, adPeakPeriodSpliceToday, adPeakPeriodsEmpty, adtRollupForced, adtRollupSkipsAfter, adtRollupMine, adtRollupClaimVerdict, adtRollupTailNext, adtRollupBehind, adtRollupOwedDays, adtRollupOwedNext, ADTOOL_ROLLUP_HOURLY_STEPS, ADTOOL_ROLLUP_CATCHUP_STEPS, ADTOOL_ROLLUP_CATCHUP_BUDGET_MS, ADTOOL_ROLLUP_PASS_CALLS, ADTOOL_OWED_FIELDS, ADTOOL_OWED_CAP, ADTOOL_OWED_SCAN_DAYS, ADTOOL_PROFILES_DAY_SQL, ADTOOL_FORECAST_DAY_SQL, ADTOOL_ROLLUP_LOCK_JOB, ADTOOL_ROLLUP_LEASE_MARGIN_MS, ADTOOL_PATTERN_KINDS, ADTOOL_PATTERN_MONTHS, ADTOOL_PATTERN_DATES_CAP, adListingDayWords, adListingMonthWords, adListingMonthEnd, adListingPattern, adListingPatternKey, adListingPatternWindow, adListingSlots, adListingWeekday, adListingHourWeekday, adListingDates, ADTOOL_PERIODS_NOTE, adPeakPeriodChunks, ADTOOL_CAMPAIGN_WATCH_MIN, ADTOOL_CAMPAIGN_WATCH_EVERY_MIN, ADTOOL_CAMPAIGN_WATCH_CALLS, ADTOOL_CAMPAIGN_WATCH_DAILY, ADTOOL_CAMPAIGN_WATCH_ACCOUNTS, ADTOOL_CAMPAIGN_WATCH_MS, ADTOOL_CAMPAIGN_WATCH_REREAD_S, ADTOOL_CAMPAIGN_WATCH_ITEM_S, ADTOOL_CAMPAIGN_WATCH_STATES, ADTOOL_CAMPAIGN_WATCH_PAGE_STATES, adWatchKey, adWatchByKey, adWatchRereadKey, adWatchItemKey, adWatchDayKey, adWatchUntil, adWatchAlive, adWatchAccounts, adWatchDailyLeft, adWatchBound, adWatchClock, adWatchEveryText, adWatchFleetMin, adWatchHeader, adWatchRereadNote, adWatchTickNote, adWatchCachePayloads, adWatchCampaignIds };')(round2, btoa, atob);
   const results = [];
   const t = (name, ok, detail) => results.push({ name, ok: !!ok, detail: detail === undefined ? '' : JSON.stringify(detail) });
   const near = (x, y, eps) => Math.abs(x - y) <= (eps || 0.005);
@@ -2135,7 +2135,7 @@ function run(argv) {
 
   /* (l) fix 6: an ad status is only as true as the last time eBay was asked, and only RUNNING
      campaigns are ever asked again. Every page that shows one is handed the stamp and the words. */
-  t('honesty: the shared per-listing read sends the stamp of its own reading, whether it is still being re-read, and how many ad records eBay held', (() => { const w = src.slice(src.indexOf('async function adtWhereRows'), src.indexOf('/* ---- actions ---- */')); return /ca\.synced_at, ca\.ad_records, c\.ads_synced_at/.test(w) && /ads_synced_at: adsOldestStamp\(r\.ads_synced_at, r\.synced_at\)/.test(w) && /campaign_running:/.test(w) && /ad_records: r\.ad_records == null \? 1 : Number\(r\.ad_records\)/.test(w); })(), null);
+  t('honesty: the shared per-listing read sends the stamp of its own reading, whether it is still being re-read, and how many ad records eBay held', (() => { const w = src.slice(src.indexOf('async function adtWhereRows'), src.indexOf('/* ---- actions ---- */')); return /ca\.synced_at, ca\.ad_records, c\.ads_synced_at/.test(w) && /ads_synced_at: adtRowReadStamp\(adsOldestStamp\(r\.ads_synced_at, r\.synced_at\), lrec, r\.campaign_id\)/.test(w) && /campaign_running:/.test(w) && /ad_records: r\.ad_records == null \? 1 : Number\(r\.ad_records\)/.test(w); })(), null);
   /* ONE OWNER FOR THE WORDING (settled 24 Oct). The engine used to send a pre-worded age AND the
      pages derived their own from the stamp. Two sources for one sentence drift, and the engine's is
      the one that goes wrong: it is built when the payload is built, so a page left open on a desk
@@ -6641,7 +6641,8 @@ function run(argv) {
        older than that still draws the empty chart it drew before */
     const drawn = /FROM adtool_listing_hour WHERE item_id = \?1 AND day >= \?2 AND day = \(SELECT MAX\(day\) FROM adtool_listing_day WHERE item_id = \?1 AND day <= \?3\) ORDER BY day, hour/.test(plSrc);
     /* and the 28-day profile is its own statement, narrowed to the six columns the sums use */
-    const prof = /SELECT day, hour, orders, units, revenue, hourly_status FROM adtool_listing_hour WHERE item_id = \?1 AND day >= \?2 ORDER BY day, hour/.test(plSrc);
+    /* 20 Nov ("totally rebuild these graphs"): the two spend columns the red bars draw joined the six */
+    const prof = /SELECT day, hour, orders, units, revenue, spend_s, spend_r, hourly_status FROM adtool_listing_hour WHERE item_id = \?1 AND day >= \?2 ORDER BY day, hour/.test(plSrc);
     const floor = /const hourFrom = adtAddDays\(today, -28\);/.test(plSrc);
     /* THE FIGURES COME OFF THE PROFILE AND NEVER OFF THE ROWS THAT TRAVEL, which is why bounding the
        payload cannot move the heat map, the time slots or the hourly note */
@@ -6661,7 +6662,8 @@ function run(argv) {
     const eight = (plSrc.slice(plSrc.indexOf('const core = ['), plSrc.indexOf("const G = await clock('reads_ms'")).match(/env\.DB\.prepare\(/g) || []).length === 8 &&
       /const cr = G\[0\], tRowRaw = G\[1\], saleRows = G\[2\], where = G\[3\], profile = G\[4\], notes = G\[5\], freshPair = G\[6\](?:, peakRead = G\[7\])?(?:, patHours = G\[8\])?;/.test(plSrc);
     /* the campaign map went from four trips to one, and the pattern bundle from five to one */
-    const wr = (src.slice(src.indexOf('const WR = await adtBatchRead(env, ['), src.indexOf('const rows = WR[0] || [];')).match(/env\.DB\.prepare\(/g) || []).length === 4;
+    /* 22 Nov: five — the fifth is Product history's own listing-read record (portal_config), in the same one trip */
+    const wr = (src.slice(src.indexOf('const WR = await adtBatchRead(env, ['), src.indexOf('const rows = WR[0] || [];')).match(/env\.DB\.prepare\(/g) || []).length === 5;
     const pb = (src.slice(src.indexOf('const PB = await adtBatchRead(env, ['), src.indexOf('const st = (PB[0] || [])[0];')).match(/env\.DB\.prepare\(/g) || []).length === 5;
     /* THE SCHEMA GUARDS RUN FIRST AND IN THEIR OLD ORDER: two lots of DDL at once is not a saving */
     const ddl = plSrc.indexOf('ensureAdtoolPhase1Schema(env)') < plSrc.indexOf('ensureAdtoolPhase2Schema(env)') &&
@@ -7881,8 +7883,8 @@ function run(argv) {
   t('where its ads sit: the 30-day and all-time money per campaign come out of the SAME grouped read, with the counts beside them so an empty window is not a nought', (() => {
     const wr = src.slice(src.indexOf('async function adtWhereRows(env, iid) {'), src.indexOf('/* ---- actions ---- */'));
     const sql = /SUM\(CASE WHEN day >= \?4 THEN spend ELSE 0 END\) AS sp_30, SUM\(CASE WHEN day >= \?4 THEN revenue ELSE 0 END\) AS rv_30, SUM\(CASE WHEN day >= \?4 THEN units ELSE 0 END\) AS un_30, SUM\(CASE WHEN day >= \?4 THEN 1 ELSE 0 END\) AS n_30, SUM\(spend\) AS sp_all, SUM\(revenue\) AS rv_all, SUM\(units\) AS un_all, COUNT\(\*\) AS n_all, MIN\(day\) AS first_day, MAX\(day\) AS last_day FROM adtool_ads_daily WHERE item_id = \?1 GROUP BY campaign_id'\)\.bind\(iid, yday, d7, d30\)/.test(wr);
-    /* ONE statement still, in the same batch of four: not a trip was added for either window */
-    const trips = (wr.slice(wr.indexOf('const WR = await adtBatchRead(env, ['), wr.indexOf('const rows = WR[0] || [];')).match(/env\.DB\.prepare\(/g) || []).length === 4 &&
+    /* ONE statement still, in the same batch (four, five from 22 Nov when the listing read's record joined it): not a trip was added for either window */
+    const trips = (wr.slice(wr.indexOf('const WR = await adtBatchRead(env, ['), wr.indexOf('const rows = WR[0] || [];')).match(/env\.DB\.prepare\(/g) || []).length === 5 &&
       (wr.match(/FROM adtool_ads_daily/g) || []).length === 1;
     /* a window with no row in it is null; a window with rows and no spend is a real nought; and no
        ROAS is ever printed off a nought spend */
@@ -8027,40 +8029,23 @@ function run(argv) {
     (src.match(/has not landed yet/g) || []).length >= 1 && /function adLandingWords\(days, count\) \{/.test(src), null);
 
   /* ---- and the page: one selector, and every one of the four headings carrying its window ---- */
-  t('product history page: ONE selector above the four blocks, all time first, with a month picker and a week picker, and changing it re-asks the engine with the window', (() => {
-    const presets = /var PAT_PRESETS = \[\['all', 'All time'\], \['d28', 'Last 28 days'\], \['this_month', 'This month'\], \['last_month', 'Last month'\], \['this_week', 'This week'\], \['last_week', 'Last week'\]\];/.test(bpProd);
-    const pickers = /<input id="atPatM" type="month"/.test(bpProd) && /<input id="atPatW" type="date"/.test(bpProd) &&
-      /setPattern\(\{ kind: 'month', month: this\.value \}\)/.test(bpProd) && /setPattern\(\{ kind: 'week', week_start: this\.value \}\)/.test(bpProd);
-    /* the window travels on every open and on every change, and all time is the default the owner asked for */
-    const asks = /api\('adtoolListing', \{ item_id: id, pattern: AT\.pattern \}\)/.test(bpProd) &&
-      /api\('adtoolListing', \{ item_id: AT\.item, pattern: pat \}\)/.test(bpProd) &&
-      /pattern: \{ kind: 'all' \}/.test(bpProd);
-    /* a half-typed month or date is never sent: the engine would refuse it and the refusal would
-       land on somebody who had not finished typing */
-    const guard = /if \(\/\^\\d\{4\}-\(0\[1-9\]\|1\[0-2\]\)\$\/\.test\(this\.value\)\)/.test(bpProd) && /if \(\/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(this\.value\)\)/.test(bpProd);
-    /* and the page a reader is in the middle of is NOT wiped while the new window is worked out */
-    const keep = /var msg = \$\('atPatMsg'\); if \(msg\) msg\.textContent = 'Working that window out…';/.test(bpProd) &&
-      bpProd.indexOf("function setPattern(pat) {") > 0;
-    /* the note carries the window too, because the engine holds this page's answer per window now */
+  t('product history page: the window selector went on 20 Nov (owner: "delete these graphs, no longer needed") — no picker or preset remains, the page asks all time on every open, and the note still carries the window the engine holds its answer under', (() => {
+    const gone = bpProd.indexOf('PAT_PRESETS') < 0 && bpProd.indexOf('atPatM') < 0 && bpProd.indexOf('atPatW') < 0 && bpProd.indexOf('function setPattern(') < 0 && bpProd.indexOf('atPatMsg') < 0;
+    const asks = /api\('adtoolListing', \{ item_id: id, pattern: AT\.pattern \}\)/.test(bpProd) && /pattern: \{ kind: 'all' \}/.test(bpProd);
     const note = /api\('adtoolActionLog', \{ item_id: AT\.item, type: 'note', note: n, pattern: AT\.pattern \}\)/.test(bpProd);
-    return presets && pickers && asks && guard && keep && note;
+    return gone && asks && note;
   })(), null);
-  t('product history page: all four headings print the window the engine summed them over, and not one of them carries a typed window any more', (() => {
-    const heads = ['Time slots · ', 'Weekday profile · ', 'Hour × weekday · ', 'Best dates of the month'].every(x => bpProd.indexOf(x) > 0);
-    const label = (bpProd.match(/esc\(patLabel\(P, '(slots|weekday|hour_weekday|dates)'\)\)/g) || []).length === 4 &&
-      /function patLabel\(P, block\) \{/.test(bpProd);
-    /* the typed windows are gone from the headings of all four */
+  t('product history page: the two pattern blocks that remain (owner, 20 Nov) print the window the engine summed them over, the weekday profile and the dates block are gone, and not one heading carries a typed window', (() => {
+    const heads = ['Time slots · ', 'Hour × weekday · ', 'Best and worst times '].every(x => bpProd.indexOf(x) > 0) &&
+      bpProd.indexOf('Weekday profile') < 0 && bpProd.indexOf('Best dates of the month') < 0;
+    const label = (bpProd.match(/esc\(patLabel\(P, '(slots|hour_weekday)'\)\)/g) || []).length === 3 && /function patLabel\(P, block\) \{/.test(bpProd) &&
+      !/patLabel\(P, '(weekday|dates)'\)/.test(bpProd);
     const typed = bpProd.indexOf('Time slots, last 28 days') < 0 && bpProd.indexOf('Weekday profile, last 30 days') < 0 &&
       bpProd.indexOf('Hour × weekday, last 28 days') < 0 && bpProd.indexOf('Average units per calendar date, over every day we hold') < 0;
-    /* a month or a week draws THE REAL DATES, and a date with no day held is said in words */
-    const real = /var cal = DT\.mode === 'calendar';/.test(bpProd) && /'Every date in this window'/.test(bpProd) &&
-      /\(r\.future \? 'not reached yet' : 'no day held'\)/.test(bpProd) &&
-      /return cal \? \(r\.held \? r\.units : null\) : r\.units_day;/.test(bpProd);
-    /* an engine older than this one sends no patterns: the page then labels each block with the
-       fixed window that answer really is, rather than printing a window nobody computed */
+    /* an engine older than this one sends no patterns: the page then labels each block with the fixed window that answer really is */
     const fallback = /var PAT_LEGACY = \{ slots: 'last 28 days', weekday: 'last 30 days', hour_weekday: 'last 28 days', dates: 'every day we hold' \};/.test(bpProd) &&
-      /if \(D\.patterns && D\.patterns\.window\) return D\.patterns;/.test(bpProd) && /if \(P && P\.legacy\) \{/.test(bpProd);
-    return heads && label && typed && real && fallback;
+      /if \(D\.patterns && D\.patterns\.window\) return D\.patterns;/.test(bpProd) && /if \(P\.legacy\) return PAT_LEGACY\[block\] \|\| 'not known';/.test(bpProd);
+    return heads && label && typed && fallback;
   })(), null);
 
   /* 9 Nov (owner, mid-build): "clearly need in which campaign it has sold how many units" */
@@ -8406,7 +8391,9 @@ function run(argv) {
       /* the family it is born in is one the settle pass already runs, so no new isolate flag was added */
       const family = /'CREATE INDEX IF NOT EXISTS idx_adtpksch_day ON adtool_peak_schedule\(day, item_id\)',\n    "CREATE TABLE IF NOT EXISTS adtool_peak_stops/.test(src) &&
         /\['phase 16', ensureAdtoolPhase16Schema\]/.test(src);
-      return v === '2026-11-10.2' && h === '213-d9cc864c' && family;
+      /* 22 Nov: the marker moved again (adtool_neg_ack, 21 Nov, created ungated at its own sites); what this pins is that the
+         version is at or past the one the stops table was born under and the hash beside it is the suite's own fingerprint */
+      return v >= '2026-11-10.2' && h === fp.hash && family;
     })(), [(src.match(/const ADTOOL_SCHEMA_VERSION = '([^']+)';/) || [])[1], (src.match(/const ADTOOL_SCHEMA_DDL_HASH = '([^']+)';/) || [])[1]]);
   t('spend rule: the switch job reads today’s stops and hands each one to the pure override, so a day-stop cannot be switched back on at the next tick (real source)',
     (() => {
@@ -8649,12 +8636,12 @@ function run(argv) {
   t('watch wiring: the two-minute re-read and the hourly pass are two callers of ONE reader, and the listing on demand is a third caller of its per-campaign half (real source)',
     (() => {
       const acctFn = (src.match(/async function adsItemsAccount\(env, acct, budget, opts\) \{/g) || []).length;
-      const campFn = (src.match(/async function adsItemsCampaign\(env, acct, camp, tok, budget, truthOn\) \{/g) || []).length;
+      const campFn = (src.match(/async function adsItemsCampaign\(env, acct, camp, tok, budget, truthOn, opts\) \{/g) || []).length;   // 22 Nov: opts carries only_listing
       const hourly = /await perAccount\(env, 'adsItems', async \(acct\) => \{/.test(src) && /await adsItemsAccount\(env, acct, budget, \{ job: 'adsItems' \}\);/.test(src);
       const fast = /const got = await adsItemsAccount\(env, acct, budget, \{ job: 'adsItemsWatched', cpc_only: true,/.test(src);
       /* the account loop reads its campaigns in a small pool now (14 Nov), so the per-campaign reader is called from the pool's map */
       const loop = /batch\.map\(camp => adsItemsCampaign\(env, acct, camp, tok, budget, truthOn\)\)/.test(src);
-      const listing = /await adsItemsCampaign\(env, a, camp, tok, budget, truthOn\);/.test(src);
+      const listing = /const one = await adsItemsCampaign\(env, a, camp, tok, budget, truthOn, \{ only_listing: lid \}\);/.test(src);
       /* and the merge exists TWICE in the whole worker and no more: the one reader, and the
          money-beats-status repair. A second copy is the one thing that could put two different
          answers about one ad on two pages. */
@@ -9010,7 +8997,7 @@ function run(argv) {
       /D\.where\.dup\.why/.test(view);
     return judged && state && list && page && chip;
   })(), null);
-  t('product history: eBay is asked about the listing on every open, through the Where page\'s own bounded reader, and the stamp rides OUTSIDE the memo', (() => {
+  t('product history: eBay is asked about the listing on every open — behind the answer since 22 Nov — through the Where page\'s own bounded reader, and the stamp rides OUTSIDE the memo', (() => {
     const fn = src.slice(src.indexOf('async function adtListingEbayRead('), src.indexOf('async function adtListingCacheClear('));
     /* the same reader the Where page's button uses, and nothing new is sent to eBay */
     const same = /r = await adWatchReread\(env, acct, String\(iid\), user\);/.test(fn) && !/fetch\(/.test(fn) &&
@@ -9020,10 +9007,11 @@ function run(argv) {
     /* the memo goes only when something MOVED, and an ad whose own state moved counts */
     const drop = /const changed = \(Number\(ch\.added\) \|\| 0\) \+ \(Number\(ch\.removed\) \|\| 0\) \+ \(Number\(ch\.bid_moved\) \|\| 0\) \+ \(Number\(ch\.status_moved\) \|\| 0\);/.test(fn) &&
       /if \(changed\) \{ try \{ await adtListingCacheClear\(env, iid, patKey\); \}/.test(fn);
-    /* the route asks BEFORE the memo is consulted, and the stamp is added after it so a stored
-       answer can never be handed back under a fresh one */
+    /* 22 Nov: the route answers from the memo FIRST and starts the read behind it (adtListingEbayKick);
+       the read is never awaited by the page's request, and the stamp is still added after the memo so a
+       stored answer can never be handed back under a fresh one */
     const route = src.slice(src.indexOf('  adtoolListing: {'), src.indexOf('  adtoolActionLog: {'));
-    const order = route.indexOf('adtListingEbayRead(ctx.env') < route.indexOf('adtKvMemo(ctx.env') &&
+    const order = route.indexOf('adtKvMemo(ctx.env') < route.indexOf('adtListingEbayKick(ctx, iid, patKey)') && !/await adtListingEbayRead\(/.test(route) &&
       /return adtListingWithEbayRead\(out, ebayRead\);/.test(route) &&
       /return Object\.assign\(\{\}, out, \{ ebay_read: ebayRead \|\| null \}\);/.test(src);
     /* and the page prints the engine's two sentences, neither of them typed here */
@@ -9097,6 +9085,73 @@ function run(argv) {
     const stamp = /ebay_read_at: readAt, ebay_read_every_s: ADTOOL_CAMPAIGN_WATCH_ITEM_S,/.test(r) &&
       /adWatchItemKey\(iid\)/.test(r);
     return keyed && rows && verdict && stamp;
+  })(), null);
+
+  /* ── 22 Nov (owner: Product history "takes a lot of time… Failed to fetch very often") ──────────── */
+  t('product history (22 Nov): the page is answered first and eBay is asked behind it — the kick writes a started record, hands the read to waitUntil and answers pending; the read itself still runs through adWatchReread', (() => {
+    const kick = src.slice(src.indexOf('async function adtListingEbayKick('), src.indexOf('async function adtListingEbayRead('));
+    return /const rec = await adtListingEbayRecord\(env, iid\);/.test(kick) && /adtListingEbayState\(rec, now, ADTOOL_CAMPAIGN_WATCH_ITEM_S\)/.test(kick) &&
+      kick.indexOf('adtListingEbayRecordWrite(env, iid, started)') < kick.indexOf('adtListingEbayRead(env, iid, ctx.user, patKey)') &&
+      /ctx\.waitUntil\(run\); return adtListingEbayShape\(started, \{ kind: 'pending', since_s: 0 \}\);/.test(kick) &&
+      /adtListingEbayRecordAfter\(rec, now, r, Date\.now\(\)\)/.test(kick) && !/fetch\(/.test(kick) && /\.catch\(e => adtListingEbayRecordWrite/.test(kick);
+  })(), null);
+  t('product history (22 Nov): the read record\'s three states — running is pending, answered within the bound is fresh, anything else is due, and a lost read is due again after the stall guard', (() => {
+    const now = 1800000000000;
+    const due = F.adtListingEbayState({}, now, 30).kind === 'due';
+    const pend = F.adtListingEbayState({ started: now - 5000, finished: null }, now, 30).kind === 'pending';
+    const lost = F.adtListingEbayState({ started: now - 50000, finished: null }, now, 30).kind === 'due';
+    const fresh = F.adtListingEbayState({ started: now - 9000, finished: now - 6000, asked: true, at: new Date(now - 6000).toISOString() }, now, 30).kind === 'fresh';
+    const old = F.adtListingEbayState({ started: now - 90000, finished: now - 86000, asked: true, at: new Date(now - 86000).toISOString() }, now, 30).kind === 'due';
+    const refused = F.adtListingEbayState({ started: now - 9000, finished: now - 8000, asked: false, at: new Date(now - 6000).toISOString() }, now, 30).kind === 'due';
+    return due && pend && lost && fresh && old && refused;
+  })(), null);
+  t('product history (22 Nov): the finished record keeps the last answer when a read was refused, and the shape the page prints says pending, read, or stored with the reason', (() => {
+    const now = 1800000000000, at = new Date(now - 60000).toISOString();
+    const prev = { at: at, read_ids: ['1', '2'], asked: true, account: 'A' };
+    const refused = F.adtListingEbayRecordAfter(prev, now - 1000, { asked: false, reason: 'wait 20 s', wait_s: 20 }, now);
+    const keep = refused.asked === false && refused.at === at && refused.read_ids.length === 2 && refused.reason === 'wait 20 s' && refused.finished === now && refused.started === now - 1000;
+    const ok = F.adtListingEbayRecordAfter(prev, now - 1000, { asked: true, at: new Date(now).toISOString(), read_ids: ['3'], changed: 1, campaigns_found: 1, campaigns_read: 1, calls: 2, note: 'n', account: 'A' }, now);
+    const fresh = ok.asked === true && ok.read_ids[0] === '3' && ok.changed === 1 && ok.note === 'n' && ok.reason === '';
+    const p = F.adtListingEbayShape({ started: now, finished: null, at: at }, { kind: 'pending', since_s: 0 });
+    const d = F.adtListingEbayShape(ok, { kind: 'fresh' });
+    const sdue = F.adtListingEbayShape(refused, { kind: 'due' });
+    return keep && fresh && p.pending === true && p.asked === false && p.at === at && d.asked === true && d.pending === false && d.at === ok.at && d.read_ids[0] === '3' &&
+      sdue.asked === false && sdue.pending === false && /wait 20 s/.test(sdue.reason) && sdue.at === at;
+  })(), null);
+  t('product history (22 Nov): a row\'s reading date moves up to the listing read only for a campaign that read actually covered, and never backwards', (() => {
+    const rec = { asked: true, at: '2026-11-22T18:51:18.000Z', read_ids: ['10'] };
+    return F.adtRowReadStamp('2026-11-22 03:00:00', rec, '10') === '2026-11-22 18:51:18' &&
+      F.adtRowReadStamp('2026-11-22 03:00:00', rec, '11') === '2026-11-22 03:00:00' &&
+      F.adtRowReadStamp('2026-11-22 19:00:00', rec, '10') === '2026-11-22 19:00:00' &&
+      F.adtRowReadStamp('', rec, '10') === '2026-11-22 18:51:18' &&
+      F.adtRowReadStamp('2026-11-22 03:00:00', { asked: false, at: '2026-11-22T18:51:18.000Z', read_ids: ['10'] }, '10') === '2026-11-22 03:00:00' &&
+      F.adWatchUnionIds(['1', 2, '1'], ['3', '2', '']).join(',') === '1,2,3';
+  })(), null);
+  t('product history (22 Nov): one listing is read in ONE call per campaign — the listing_ids filter, a GET with no body, nothing truncated, our own rows asked about too, and the campaign stamp left alone', (() => {
+    const fa = src.slice(src.indexOf('async function adsFetchAdsForListing('), src.indexOf('async function adsItems(env) {'));
+    const one = /\/ad\?listing_ids=' \+ encodeURIComponent\(id\) \+ '&limit=25'/.test(fa) && !/method:/.test(fa) && /truncated: false/.test(fa) && !/truncated: true/.test(fa) &&
+      /filter\(a => String\(\(a && a\.listingId\) \|\| ''\) === id\)/.test(fa);
+    const ic = src.slice(src.indexOf('async function adsItemsCampaign('), src.indexOf('async function adWatchReread('));
+    const sw = /const got = only \? await adsFetchAdsForListing\(tok, acct, cid, only, budget\) : await adsFetchAdList\(tok, acct, cid, budget\);/.test(ic) &&
+      /AND campaign_id = \?2 AND listing_id = \?3'\)\.bind\(acct, cid, only\)/.test(ic) &&
+      /const first = only \? !\(camp && camp\.ads_synced_at\) : Object\.keys\(prev\)\.length === 0;/.test(ic) &&
+      /if \(!only\) await env\.DB\.prepare\("UPDATE campaigns SET ads_synced_at = datetime\('now'\)/.test(ic);
+    const rr = src.slice(src.indexOf('async function adWatchReread('), src.indexOf('/* THE DUPLICATION SQL'));
+    const branch = /\{ only_listing: lid \}/.test(rr) && /read_ids: readIds,/.test(rr) && /ads_synced_at FROM campaigns WHERE account = \?1/.test(rr) &&
+      /SELECT DISTINCT campaign_id FROM campaign_ads WHERE account = \?1 AND listing_id = \?2/.test(rr) && /budget\.until = now \+ ADTOOL_CAMPAIGN_WATCH_ITEM_MS;/.test(rr) &&
+      /const ADTOOL_CAMPAIGN_WATCH_ITEM_MS = 20000;/.test(src) && /if \(one && one\.read\) \{ readIds\.push\(String\(camp\.campaign_id\)\); read\+\+; \}/.test(rr);
+    /* the Where rows carry the listing read's date only for the campaigns it covered */
+    const wr = src.slice(src.indexOf('async function adtWhereRows(env, iid) {'), src.indexOf('\n}\n', src.indexOf('async function adtWhereRows(env, iid) {')));
+    const rows = /adtListingEbayReadKey\(iid\)\),\n  \]\);/.test(wr) && /const lrec = adtListingEbayRecordParse\(\(\(WR\[4\] \|\| \[\]\)\[0\] \|\| \{\}\)\.value\);/.test(wr) &&
+      /ads_synced_at: adtRowReadStamp\(adsOldestStamp\(r\.ads_synced_at, r\.synced_at\), lrec, r\.campaign_id\),/.test(wr);
+    return one && sw && branch && rows;
+  })(), null);
+  t('product history (22 Nov): the page draws at once, follows the pending read up at lengthening intervals, and redraws only the Where its ads sit panel when the answer lands', (() => {
+    const view = rdFile('frontend/view-adtool-product.js');
+    return /function wherePanel\(D\) \{/.test(view) && /h \+= wherePanel\(D\);/.test(view) && /id="atWherePanel"/.test(view) &&
+      /draw\(\);\n\s*ebayFollowUp\(id, 0\);/.test(view) && /var EBAY_FOLLOW_MS = \[2500, 4000, 6000, 10000, 15000\];/.test(view) &&
+      /el\.outerHTML = wherePanel\(res\);/.test(view) && /if \(E\.pending\) return ' <b>Asking eBay now/.test(view) && /if \(AT\.item !== id\) return;/.test(view) &&
+      (view.match(/function wherePanel\(D\)/g) || []).length === 1;
   })(), null);
 
   const passed = results.filter(r => r.ok).length;
