@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-11-21 - BUSINESS OVERVIEW: each individual day's money, by account, in the dispatch block's format
+
+Owner: "the data for each individual day shown as the dispatch block is - its sold and so on for that
+day, by each account". In the Individual days view the Collective block now draws one block per UK day
+of the window, newest first: the day's tiles (sold, order earning, Ali cost, ads, profit before ads,
+the sheet's Actual, margin) and an account table with the same columns for that day. The window's
+total is one line above the blocks.
+
 ## 2026-11-21 - BUSINESS OVERVIEW: the Individual-days dispatch clock keeps the Today format
 
 Owner: "the details shown the same way as above for the individual days too - no change in the
