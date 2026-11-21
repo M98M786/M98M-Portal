@@ -512,9 +512,15 @@
         '<div class="card enter d2"><div class="hd" id="tkHd">Assigned to me ' +
           '<span class="hint">No task completes itself — every submission waits for approval</span></div>' +
           '<div class="bd" id="tkBody"><div class="spinner"></div></div>' +
-        '</div>';
+        '</div>' +
+        /* 21 Nov (owner): "staff performance — move that to my tasks page". The Business overview's
+           weekly staff block, for Management only, drawn by the overview module's own painter. */
+        (tkIsMgmt() && typeof window.renderStaffPerformance === 'function'
+          ? '<div class="ov2" style="margin-top:26px"><div class="sec enter d3"><div class="sec-h"><h2>Staff performance</h2><span class="hint">this week · from the portal\'s own activity ledger · management excluded</span></div><div id="o2Staff"><div class="empty">Loading…</div></div></div></div>'
+          : '');
     },
     init: function () {
+      if (tkIsMgmt() && typeof window.renderStaffPerformance === 'function' && $('o2Staff')) { window.renderStaffPerformance(); }
       if (tkCanCreate()) { tkWireComposer(); }
       tkPollStart();
       var sb = $('tkScopeBar');
