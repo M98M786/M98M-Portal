@@ -1183,9 +1183,12 @@ function pvTokens(s) {
    every DDL statement in the file, which is wider than these families on purpose: a CREATE put
    anywhere is a reason to look. That is deliberate: a marker that could go stale by accident is a
    column that never lands. */
-const ADTOOL_SCHEMA_VERSION = '2026-11-10.2';
+const ADTOOL_SCHEMA_VERSION = '2026-11-22.1';
 /* the fingerprint of every DDL statement in engine/worker.js, held to this value by the suite */
-const ADTOOL_SCHEMA_DDL_HASH = '213-d9cc864c';
+/* 22 Nov: the count moved to 215 on 21 Nov with adtool_neg_ack (Ads command centre), a table created at its own two
+   sites on every use rather than under a guard, so nothing was missing from the database; the marker simply had not
+   been moved with it, and the suite has said so since. Moved here, with no guarded statement added. */
+const ADTOOL_SCHEMA_DDL_HASH = '215-2ffce716';
 const ADTOOL_SCHEMA_KEY = 'adtool_schema_version';
 let ADTOOL_SCHEMA_MARK = null;      /* the one marker read per isolate */
 let ADTOOL_SCHEMA_SETTLE = null;    /* the one apply pass per isolate, and the proof DDL ran here */
@@ -3203,6 +3206,7 @@ const ADTOOL_CAMPAIGN_WATCH_MS = 90000;        // wall clock for one tick, well 
 const ADTOOL_CAMPAIGN_WATCH_IN_FLIGHT = 4;    // campaigns read at once by the watched re-read; the hourly pass reads one at a time
 const ADTOOL_CAMPAIGN_WATCH_REREAD_S = 60;     // "Re-read now", at most once this often per account
 const ADTOOL_CAMPAIGN_WATCH_ITEM_S = 30;       // one listing on demand, at most once this often
+const ADTOOL_CAMPAIGN_WATCH_ITEM_MS = 20000;   // wall clock for one listing's read: inside the thirty seconds a read handed to waitUntil has
 const ADTOOL_CAMPAIGN_WATCH_KEY = 'adtool_campaign_watch_';
 const ADTOOL_CAMPAIGN_WATCH_BY_KEY = 'adtool_campaign_watch_by_';
 const ADTOOL_CAMPAIGN_WATCH_CALLS_KEY = 'adtool_campaign_watch_calls_';
@@ -3394,6 +3398,85 @@ function adWatchCampaignIds(body) {
   }
   return out;
 }
+/* the union of two id lists, as strings, first seen first, so the listing's campaigns are asked about once each */
+function adWatchUnionIds(a, b) {
+  const out = [], seen = {};
+  for (const list of [a, b]) for (const v of (Array.isArray(list) ? list : [])) {
+    const id = String(v == null ? '' : v).trim();
+    if (!id || seen[id]) continue;
+    seen[id] = 1; out.push(id);
+  }
+  return out;
+}
+/* ── PRODUCT HISTORY'S OWN EBAY READ, AS A RECORD (22 Nov) ──────────────────────────────────────────────
+   The page is answered first and eBay is asked behind it. This record, one per listing in portal_config, is
+   how the next request (the page's own follow-up a few seconds later) learns whether that read is still
+   running, has landed, or never ran, without the page waiting on eBay even once. `at` is when eBay last
+   ANSWERED about this listing and `read_ids` the campaigns it answered for; both survive a later read that
+   was refused (bound, cap), so the panel can still say when the truth it shows was last confirmed. */
+const ADTOOL_LISTING_EBAY_READ_KEY = 'adtool_listing_ebay_read_';
+const ADTOOL_LISTING_EBAY_STALL_MS = 45000;   // a read that has not written its finish by then is presumed lost; the next open asks again
+function adtListingEbayReadKey(id) { return ADTOOL_LISTING_EBAY_READ_KEY + String(id == null ? '' : id).replace(/\D/g, ''); }
+function adtListingEbayRecordParse(v) {
+  if (v && typeof v === 'object') return v;
+  try { const j = JSON.parse(String(v || '')); return j && typeof j === 'object' ? j : {}; } catch (e) { return {}; }
+}
+/* pending: a read started and has not finished, within the stall guard. fresh: eBay answered within the
+   per-listing bound (asking again would only be refused by that bound). due: everything else. */
+function adtListingEbayState(rec, nowMs, boundS) {
+  const r = rec || {}, now = Number(nowMs) || Date.now();
+  const started = Number(r.started) || 0, finished = Number(r.finished) || 0;
+  if (started && !finished && now - started < ADTOOL_LISTING_EBAY_STALL_MS) return { kind: 'pending', since_s: Math.round((now - started) / 1000) };
+  const at = r.at ? Date.parse(String(r.at)) : NaN;
+  const s = Number(boundS) > 0 ? Number(boundS) : ADTOOL_CAMPAIGN_WATCH_ITEM_S;
+  if (r.asked && isFinite(at) && now - at < s * 1000) return { kind: 'fresh', age_s: Math.round((now - at) / 1000) };
+  return { kind: 'due' };
+}
+/* the record after a read came back: a refused read keeps the last answer's stamp and campaigns */
+function adtListingEbayRecordAfter(rec, started, r, nowMs) {
+  const prev = rec || {}, got = r || {};
+  const asked = !!got.asked;
+  return {
+    started: Number(started) || 0, finished: Number(nowMs) || Date.now(), asked: asked,
+    at: asked ? String(got.at || '') : String(prev.at || ''),
+    read_ids: asked ? (Array.isArray(got.read_ids) ? got.read_ids.map(String) : []) : (Array.isArray(prev.read_ids) ? prev.read_ids.map(String) : []),
+    account: String(got.account || prev.account || ''),
+    reason: asked ? '' : String(got.reason || ''),
+    changed: asked ? (Number(got.changed) || 0) : null,
+    campaigns_found: asked ? (got.campaigns_found == null ? null : Number(got.campaigns_found)) : null,
+    campaigns_read: asked ? (Number(got.campaigns_read) || 0) : null,
+    calls: asked ? (Number(got.calls) || 0) : null,
+    note: asked ? String(got.note || '') : '',
+    wait_s: got.wait_s == null ? null : Number(got.wait_s), capped: !!got.capped,
+  };
+}
+/* what the page is handed: pending (a read is running), read (eBay answered, with its stamp), or stored
+   (eBay was not asked, with the engine's reason). The last stamp rides along in every one of the three. */
+function adtListingEbayShape(rec, state) {
+  const r = rec || {};
+  const last = r.at ? String(r.at) : '';
+  if (state && state.kind === 'pending') {
+    return { asked: false, pending: true, at: last, account: r.account || '', changed: 0, since_s: Number(state.since_s) || 0,
+      reason: 'eBay is being asked about this listing now; this panel refreshes itself when the answer lands' };
+  }
+  if (r.asked && last) {
+    return { asked: true, pending: false, at: last, account: r.account || '', changed: Number(r.changed) || 0, reason: '',
+      campaigns_found: r.campaigns_found == null ? null : r.campaigns_found, campaigns_read: r.campaigns_read == null ? null : r.campaigns_read,
+      calls: r.calls == null ? null : r.calls, note: r.note || '', read_ids: Array.isArray(r.read_ids) ? r.read_ids : [] };
+  }
+  return { asked: false, pending: false, at: last, account: r.account || '', changed: 0,
+    reason: String(r.reason || 'eBay has not been asked about this listing yet'), wait_s: r.wait_s == null ? null : r.wait_s, capped: !!r.capped };
+}
+/* a row's reading date on the Where panel: the listing read moves it up ONLY for a campaign that read actually
+   covered, and never backwards. The stamp comes back in the table's own 'YYYY-MM-DD HH:MM:SS' spelling. */
+function adtRowReadStamp(stamp, rec, cid) {
+  const s = String(stamp == null ? '' : stamp).trim();
+  const r = rec || {};
+  if (!r.asked || !r.at || !Array.isArray(r.read_ids) || r.read_ids.map(String).indexOf(String(cid)) < 0) return s;
+  const at = String(r.at).replace('T', ' ').slice(0, 19);
+  if (!s) return at;
+  return at > s.replace('T', ' ').slice(0, 19) ? at : s;
+}
 /* ADTOOL-WATCH-PURE-END */
 
 /* The tick ceiling is the BUDGET'S OWN when it carries one. The hourly rotation leaves it unset and
@@ -3424,6 +3507,27 @@ async function adsFetchAdList(tok, acct, cid, budget) {
     if (total != null && ads.length >= total) break;
   }
   return { ads, ok: true, total, truncated: adsFetchTruncated(ads.length, total) };
+}
+/* 22 Nov (owner: Product history "takes a lot of time… Failed to fetch very often"): ONE LISTING'S OWN AD,
+   READ IN ONE CALL. The page's on-open read used to pull every ad of every campaign the listing sits in, two
+   pages of 500 apiece, which is how one open came to hold its request for 49 s on 21 Nov. eBay answers the
+   campaign-scoped ad list filtered to one listing in a single GET: a member comes back as its ad record, a
+   non-member as an empty list with total 0 (verified 22 Nov against a running CPC campaign, a Dynamic one
+   and a deleted one, which answers 404 with error 35045 and is left to adsCampaignAdsGone). An empty answer
+   is therefore definite and never a short page, so nothing read here is ever truncated. The answer is
+   filtered to the listing asked for as well, so a filter eBay ignored could not write another listing's ad. */
+async function adsFetchAdsForListing(tok, acct, cid, lid, budget) {
+  if (budget) budget.fetches++;
+  const id = String(lid || '').replace(/\D/g, '');
+  const r = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(cid) +
+    '/ad?listing_ids=' + encodeURIComponent(id) + '&limit=25', { headers: { authorization: 'Bearer ' + tok } });
+  if (!r.ok) {
+    if (r.status >= 500) throw new Error(acct + ' ads ' + cid + ' ' + r.status);
+    return { ads: [], ok: false, total: null, truncated: false, listing_only: id };   // 4xx: rule-based campaign, or one eBay no longer has
+  }
+  const pj = await r.json();
+  const ads = ((pj && pj.ads) || []).filter(a => String((a && a.listingId) || '') === id);
+  return { ads, ok: true, total: ads.length, truncated: false, listing_only: id };
 }
 
 async function adsItems(env) {
@@ -3523,14 +3627,21 @@ async function adsItemsAccount(env, acct, budget, opts) {
    on-demand re-read of a single listing, which finds the listing's campaigns from eBay and then
    comes through here for each of them, so a listing the owner has just changed is exact within
    seconds by the very same path the jobs use. */
-async function adsItemsCampaign(env, acct, camp, tok, budget, truthOn) {
+async function adsItemsCampaign(env, acct, camp, tok, budget, truthOn, opts) {
   const cid = String((camp && camp.campaign_id) || '');
   const nm = (camp && camp.name) || cid;
   const funding = String((camp && camp.funding_model) || '');
   const out = { campaign_id: cid, read: false, added: 0, removed: 0, bid_moved: 0, status_moved: 0, truncated: false };
   if (!cid) return out;
+  /* 22 Nov: ONE LISTING ONLY, for Product history's on-open read (adWatchReread's listing branch). Everything
+     below runs unchanged on one-row maps; what differs is the fetch (one call, this listing), the previous
+     rows (this listing's), the baseline test (the campaign's own first-ever sync — one listing having no row
+     yet is not that) and the campaign stamp, which is NOT moved because the campaign's ads were not all read.
+     A listing eBay answers an empty list for has left this campaign, and its row goes the way any removed
+     row goes: the answer is definite, so `removed` is trusted here as it is on a full untruncated page. */
+  const only = String((opts && opts.only_listing) || '').replace(/\D/g, '');
 
-  const got = await adsFetchAdList(tok, acct, cid, budget);
+  const got = only ? await adsFetchAdsForListing(tok, acct, cid, only, budget) : await adsFetchAdList(tok, acct, cid, budget);
   if (!got.ok) return out;                               // 4xx: rule-based campaign, no ad list
   out.read = true;
   budget.campaigns++;
@@ -3542,10 +3653,12 @@ async function adsItemsCampaign(env, acct, camp, tok, budget, truthOn) {
   const now = merged.now;
   budget.dup_listings += merged.duplicate_listings;
 
-  const prevRs = await env.DB.prepare('SELECT listing_id, bid_pct, ad_status FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).all();
+  const prevRs = only
+    ? await env.DB.prepare('SELECT listing_id, bid_pct, ad_status FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3').bind(acct, cid, only).all()
+    : await env.DB.prepare('SELECT listing_id, bid_pct, ad_status FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2').bind(acct, cid).all();
   const prev = {}, prevSt = {};
   for (const row of (prevRs.results || [])) { prev[row.listing_id] = String(row.bid_pct || ''); prevSt[row.listing_id] = row.ad_status == null ? '' : String(row.ad_status); }
-  const first = Object.keys(prev).length === 0;
+  const first = only ? !(camp && camp.ads_synced_at) : Object.keys(prev).length === 0;
 
   const added = Object.keys(now).filter(l => !(l in prev));
   /* fix 5: a short answer cannot say what left. Nothing is removed from a truncated answer. */
@@ -3621,7 +3734,7 @@ async function adsItemsCampaign(env, acct, camp, tok, budget, truthOn) {
     stmts.push(env.DB.prepare('DELETE FROM campaign_ads WHERE account = ?1 AND campaign_id = ?2 AND listing_id = ?3').bind(acct, cid, lid));
   }
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
-  await env.DB.prepare("UPDATE campaigns SET ads_synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2").bind(acct, cid).run();
+  if (!only) await env.DB.prepare("UPDATE campaigns SET ads_synced_at = datetime('now') WHERE account = ?1 AND campaign_id = ?2").bind(acct, cid).run();
   if (got.truncated) {
     await ctx_setSync(env, 'adsItemsTruncated', acct, 'campaign ' + cid + ': eBay reported ' + String(got.total) +
       ' ads and the two pages carried ' + got.ads.length + ', so what was seen was written and nothing was removed. ' +
@@ -3854,7 +3967,7 @@ async function adWatchReread(env, acct, listingId, user) {
   await ensureAdsReadingColumns(env);
   const budget = { fetches: 0, until: now + ADTOOL_CAMPAIGN_WATCH_MS, cap: Math.min(ADTOOL_CAMPAIGN_WATCH_CALLS, left),
     campaigns: 0, repaired: 0, unchanged: 0, missing: 0, dup_listings: 0, truncated: 0, added: 0, removed: 0, bid_moved: 0, status_moved: 0, starved: [] };
-  let found = null, read = 0;
+  let found = null, read = 0, readIds = [];
   if (!lid) {
     const got = await adsItemsAccount(env, a, budget, { job: 'adsItemsWatched', cpc_only: true, in_flight: ADTOOL_CAMPAIGN_WATCH_IN_FLIGHT,
       per_tick: ADTOOL_CAMPAIGN_WATCH_CALLS, repair: false, dup_sweep: false });
@@ -3867,19 +3980,28 @@ async function adWatchReread(env, acct, listingId, user) {
     if (!ref || !ref.ok) throw new Error('SAY: eBay would not say which campaigns hold that listing (' + String((ref && ref.status) || 'no answer') + ')');
     const ids = adWatchCampaignIds(ref.body);
     found = ids.length;
-    if (ids.length) {
+    /* 22 Nov: ONE CALL PER CAMPAIGN, FOR THIS LISTING ALONE, and the campaigns our own rows put it in are asked
+       about too. This used to pull each named campaign's whole ad list (two pages of 500), so a listing in three
+       Dynamic campaigns held Product history's open for the better part of a minute. eBay answers the
+       campaign-scoped list for one listing in one call, and an empty answer is definite (verified 22 Nov), which
+       is what lets a row the listing has left be deleted here instead of waiting for the hourly pass. The clock
+       is the item clock: a read that is handed to waitUntil has thirty seconds after the page is answered. */
+    budget.until = now + ADTOOL_CAMPAIGN_WATCH_ITEM_MS;
+    const ours = (await env.DB.prepare('SELECT DISTINCT campaign_id FROM campaign_ads WHERE account = ?1 AND listing_id = ?2').bind(a, lid).all().catch(() => ({ results: [] }))).results || [];
+    const want = adWatchUnionIds(ids, ours.map(r => r.campaign_id));
+    if (want.length) {
       const held = (await env.DB.prepare(
-        "SELECT campaign_id, name, funding_model FROM campaigns WHERE account = ?1 AND (status LIKE '%RUNNING%' OR status = 'ENDING_SOON') AND campaign_id IN (" +
-        ids.slice(0, 50).map(() => '?').join(',') + ')'
-      ).bind(...[a].concat(ids.slice(0, 50))).all().catch(() => ({ results: [] }))).results || [];
+        "SELECT campaign_id, name, funding_model, ads_synced_at FROM campaigns WHERE account = ?1 AND (status LIKE '%RUNNING%' OR status = 'ENDING_SOON') AND campaign_id IN (" +
+        want.slice(0, 50).map(() => '?').join(',') + ')'
+      ).bind(...[a].concat(want.slice(0, 50))).all().catch(() => ({ results: [] }))).results || [];
       if (held.length) {
         const tok = await ebayAccessToken(env, a);
         await ensureTruthSchema(env);
         const truthOn = (await adtFlag(env, 'adtool_campaign_truth')) === 'on';
         for (const camp of held) {
           if (adsBudgetSpent(budget)) break;
-          await adsItemsCampaign(env, a, camp, tok, budget, truthOn);
-          read++;
+          const one = await adsItemsCampaign(env, a, camp, tok, budget, truthOn, { only_listing: lid });
+          if (one && one.read) { readIds.push(String(camp.campaign_id)); read++; }
         }
       }
     }
@@ -3888,7 +4010,7 @@ async function adWatchReread(env, acct, listingId, user) {
   await adWatchCacheClear(env, a);
   const changes = { added: budget.added, removed: budget.removed, bid_moved: budget.bid_moved, status_moved: budget.status_moved };
   return Object.assign(base, {
-    ran: true, wait_s: null, calls: budget.fetches, campaigns_read: read, campaigns_found: found, changes: changes,
+    ran: true, wait_s: null, calls: budget.fetches, campaigns_read: read, campaigns_found: found, changes: changes, read_ids: readIds,
     note: adWatchRereadNote({ campaigns_read: read, calls: budget.fetches, changes: changes, listing_id: lid || null, no_campaigns: !read }),
     allowance: { used: usedNow, cap: ADTOOL_CAMPAIGN_WATCH_DAILY, left: adWatchDailyLeft(usedNow, ADTOOL_CAMPAIGN_WATCH_DAILY) },
   });
@@ -8364,6 +8486,40 @@ async function adtoolListingCompute(env, iid, p) {
    THE MEMO IS DROPPED ONLY WHEN SOMETHING MOVED. A re-read that found nothing has not made the
    stored answer wrong, and dropping the entry on every five-minute poll would take the memo away
    from the one page it was written for. */
+async function adtListingEbayRecord(env, iid) {
+  try {
+    const row = await env.DB.prepare('SELECT value FROM portal_config WHERE key = ?1').bind(adtListingEbayReadKey(iid)).first();
+    return adtListingEbayRecordParse(row && row.value);
+  } catch (e) { return {}; }
+}
+async function adtListingEbayRecordWrite(env, iid, rec) {
+  try {
+    await env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')")
+      .bind(adtListingEbayReadKey(iid), JSON.stringify(rec || {})).run();
+  } catch (e) { /* the page prints the stored sentence it already has */ }
+}
+/* 22 Nov (owner: "after entering a product ID and clicking Open it takes a lot of time… Failed to fetch very
+   often"): THE PAGE IS ANSWERED FIRST, EBAY IS ASKED BEHIND IT. Until now the route awaited the eBay read
+   before it so much as looked at the memo, so every open paid for the whole read (49 s on 21 Nov) and ran
+   into the shell's fifteen-second limit, which is the "Failed to fetch" the owner kept seeing. The read is
+   started here and handed to waitUntil, the answer carries `pending`, and the page asks again a few seconds
+   later; the record above is how that second ask learns the read has landed. The per-listing bound and the
+   daily cap are unchanged and still live in adWatchReread, which this runs through exactly as before. */
+async function adtListingEbayKick(ctx, iid, patKey) {
+  const env = ctx.env, now = Date.now();
+  const rec = await adtListingEbayRecord(env, iid);
+  const state = adtListingEbayState(rec, now, ADTOOL_CAMPAIGN_WATCH_ITEM_S);
+  if (state.kind !== 'due') return adtListingEbayShape(rec, state);
+  const started = Object.assign({}, rec, { started: now, finished: null });
+  await adtListingEbayRecordWrite(env, iid, started);
+  const run = adtListingEbayRead(env, iid, ctx.user, patKey)
+    .then(r => adtListingEbayRecordWrite(env, iid, adtListingEbayRecordAfter(rec, now, r, Date.now())))
+    .catch(e => adtListingEbayRecordWrite(env, iid, adtListingEbayRecordAfter(rec, now, { asked: false, reason: 'the read did not finish: ' + String((e && e.message) || e).slice(0, 160) }, Date.now())));
+  if (ctx && typeof ctx.waitUntil === 'function') { ctx.waitUntil(run); return adtListingEbayShape(started, { kind: 'pending', since_s: 0 }); }
+  await run;   // a caller with no waitUntil (a cron's own composition) pays for the read itself and is handed the finished record
+  const done = await adtListingEbayRecord(env, iid);
+  return adtListingEbayShape(done, adtListingEbayState(done, Date.now(), ADTOOL_CAMPAIGN_WATCH_ITEM_S));
+}
 async function adtListingEbayRead(env, iid, user, patKey) {
   let acct = '';
   try {
@@ -8381,7 +8537,7 @@ async function adtListingEbayRead(env, iid, user, patKey) {
   const ch = r.changes || {};
   const changed = (Number(ch.added) || 0) + (Number(ch.removed) || 0) + (Number(ch.bid_moved) || 0) + (Number(ch.status_moved) || 0);
   if (changed) { try { await adtListingCacheClear(env, iid, patKey); } catch (e) { /* a page up to its own two minutes behind, which is the stated ceiling anyway */ } }
-  return { asked: true, at: new Date().toISOString(), account: acct, changed: changed, reason: '',
+  return { asked: true, at: new Date().toISOString(), account: acct, changed: changed, reason: '', read_ids: Array.isArray(r.read_ids) ? r.read_ids : [],
     campaigns_found: r.campaigns_found, campaigns_read: r.campaigns_read, calls: r.calls, note: r.note, allowance: r.allowance || null };
 }
 /* the stamp rides OUTSIDE the memo, and that is deliberate: the memo holds the COMPOSITION, and
@@ -8459,13 +8615,16 @@ const ADTOOL_ACTIONS = {
          that builds the window, so a window the engine would refuse cannot be stored under a key. */
       if (p && (p.period || p.from)) return adtoolListingCompute(ctx.env, iid, p);
       const patKey = adListingPatternKey(p && p.pattern);
-      /* 16 Nov: EBAY IS ASKED BEFORE THE ANSWER IS COMPOSED. This runs ahead of the memo on purpose
-         — it is what drops the memo when a campaign or an ad has moved, so the Where its ads sit
-         table below is eBay's answer as of now rather than whatever the hourly pass last stored. */
-      const ebayRead = await adtListingEbayRead(ctx.env, iid, ctx.user, patKey);
+      /* 16 Nov asked eBay BEFORE the answer was composed, so that the memo was dropped when a campaign or
+         an ad had moved and the Where its ads sit table was eBay's answer as of now.
+         22 Nov (owner: the page "takes a lot of time… Failed to fetch very often"): THE ANSWER FIRST, EBAY
+         BEHIND IT. The read still drops the memo when something moved; it simply no longer holds the page
+         while it runs (adtListingEbayKick hands it to waitUntil and the page asks again a few seconds later).
+         The memo goes first so that a read finishing early cannot drop a key this composition then re-stores. */
       const out = await adtKvMemo(ctx.env, 'adtoolListing', adtProfitClass(ctx.user), patKey ? { item_id: iid, pattern: patKey } : { item_id: iid }, ADTOOL_KV_TTL_MS.adtoolListing,
         () => adtoolListingCompute(ctx.env, iid, p),
         (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+      const ebayRead = await adtListingEbayKick(ctx, iid, patKey);
       return adtListingWithEbayRead(out, ebayRead);
     },
   },
@@ -8833,6 +8992,7 @@ async function adtWhereRows(env, iid) {
     env.DB.prepare('SELECT campaign_id, SUM(CASE WHEN day = ?2 THEN spend ELSE 0 END) AS sp_y, SUM(CASE WHEN day = ?2 THEN units ELSE 0 END) AS un_y, SUM(CASE WHEN day = ?2 THEN revenue ELSE 0 END) AS rv_y, SUM(CASE WHEN day >= ?3 THEN spend ELSE 0 END) AS sp_7, SUM(CASE WHEN day >= ?3 THEN revenue ELSE 0 END) AS rv_7, SUM(CASE WHEN day >= ?3 THEN units ELSE 0 END) AS un_7, SUM(CASE WHEN day >= ?4 THEN spend ELSE 0 END) AS sp_30, SUM(CASE WHEN day >= ?4 THEN revenue ELSE 0 END) AS rv_30, SUM(CASE WHEN day >= ?4 THEN units ELSE 0 END) AS un_30, SUM(CASE WHEN day >= ?4 THEN 1 ELSE 0 END) AS n_30, SUM(spend) AS sp_all, SUM(revenue) AS rv_all, SUM(units) AS un_all, COUNT(*) AS n_all, MIN(day) AS first_day, MAX(day) AS last_day FROM adtool_ads_daily WHERE item_id = ?1 GROUP BY campaign_id').bind(iid, yday, d7, d30),
     env.DB.prepare('SELECT campaign_id, MAX(seen_at) AS at FROM adtool_campaign_ad_events WHERE item_id = ?1 GROUP BY campaign_id').bind(iid),
     env.DB.prepare('SELECT e.campaign_id, e.from_status, e.to_status, e.seen_at, e.source, COALESCE(c.name, a.name, e.campaign_id) AS name FROM adtool_campaign_ad_events e LEFT JOIN campaigns c ON c.account = e.account AND c.campaign_id = e.campaign_id LEFT JOIN adtool_campaign_archive a ON a.account = e.account AND a.campaign_id = e.campaign_id WHERE e.item_id = ?1 ORDER BY e.seen_at DESC LIMIT 20').bind(iid),
+    env.DB.prepare('SELECT value FROM portal_config WHERE key = ?1').bind(adtListingEbayReadKey(iid)),
   ]);
   const rows = WR[0] || [];
   const spend = {};
@@ -8840,6 +9000,8 @@ async function adtWhereRows(env, iid) {
   const lastEv = {};
   for (const r of (WR[2] || [])) lastEv[r.campaign_id] = r.at;
   const history = WR[3] || [];
+  /* 22 Nov: Product history's own per-listing read, so a row that read confirmed carries that reading's date */
+  const lrec = adtListingEbayRecordParse(((WR[4] || [])[0] || {}).value);
   const out = rows.map(r => {
     const resolved = !!r.name;
     /* AN ARCHIVE ROW IS ONE THAT EXISTS, not one that happens to carry a name. Judged on the name,
@@ -8883,7 +9045,7 @@ async function adtWhereRows(env, iid) {
       /* the OLDER of "eBay was last asked about this campaign's ads" and "this ad was last seen in
          an answer". Only a stamp is sent, never words: the page owns the wording so that an open
          page keeps counting (see adsOldestStamp and the note above adsAdProbe). */
-      ads_synced_at: adsOldestStamp(r.ads_synced_at, r.synced_at),
+      ads_synced_at: adtRowReadStamp(adsOldestStamp(r.ads_synced_at, r.synced_at), lrec, r.campaign_id),
       /* the proof the owner can see: more than one ad record for this listing in this campaign is
          exactly the duplicate that made a serving ad read ARCHIVED */
       ad_records: r.ad_records == null ? 1 : Number(r.ad_records) };

@@ -431,3 +431,100 @@ and the earbuds' manual-campaign ads paused by someone other than the agent; the
 14 Dec; first reviews fall due from 10 Dec.
 
 **State.** MAC PRIMARY for standing duties, no SQR work. WINDOWS runs the SQR Listing Agent with the full package.
+---
+
+## 2026-11-21 22:17 UTC · WINDOWS · First SQR run from Windows: NEXGEN armor ring-stand case — campaign live, description revise refused by eBay (error 240)
+
+**What was done.** Hasib sent the "Top Listings - Sales Testing" search query report (1 Jun to 21 Nov, a SMART campaign
+shared by 26 listings, three of them other iPhone cases) for the shockproof armor ring-stand iPhone case on the NEXGEN
+shop. The title was revised by the Mac on 14 Nov and stays on its 30-day hold; the proposal was a description edit
+(the slide camera cover shown in the pictures was never mentioned; the charging-port wording was wrong for iPhone 12 to
+14; a full model list and colour row; notes that it is not a magnetic-charging case and not made for 18, Plus, Mini,
+16e or 17e) plus a manual keyword campaign. Hasib answered "go for it + campaign" on the desk.
+
+**Result.** The campaign is live: "SQR … iPhone armor ring stand case", Priority, manual, fixed bids, £3 a day, one ad
+group, 46 of 46 keywords and 148 of 148 negative phrase keywords accepted, one active ad; the Dynamic pay-per-sale copy
+removed; the listing's old SMART ad in "90 days top duplicae" was already paused by someone else and was left alone.
+Post-launch sweep: exactly one active ad, in the new campaign. **The ReviseFixedPriceItem call was refused: Ack
+Failure, error 240, "The item cannot be listed or modified. The title or description may contain improper words, or the
+listing or seller may be in violation of eBay policy."** The title in that call was unchanged, so the new text is the
+suspect: it introduced the words MagSafe and Lightning, which the old description never had. A retry without those two
+words was prepared but not sent (the app's safety check blocked it, and the agent's rule is to stop on an eBay error).
+Nothing on the listing changed; the pre-revise backup is in the agent's backups folder. Hasib decides: retry without
+the trademarks, or leave the description.
+
+**Windows lessons.** Every agent script must run with `python -X utf8` (the launcher crashed on a £ sign in a plan
+CSV written in the Windows code page; the CSV was re-encoded and the idempotent launcher resumed cleanly); the plan
+builder's Downloads path is the Mac's and is overridden to the agent's `sqr-csvs` folder; the desk generator gained
+a per-item override for status text.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent; one description revise awaiting
+Hasib's word.
+---
+
+## 2026-11-21 22:22 UTC · WINDOWS · Armor ring-stand case: second description revise refused with the same error 240; trademark theory disproved; stopped
+
+**What was done.** On Hasib's word ("Retry without trademarks") the description was resent with the words MagSafe and
+Lightning reworded and the title unchanged. eBay refused it with the same error 240 ("The item cannot be listed or
+modified. The title or description may contain improper words, or the listing or seller may be in violation of eBay
+policy."). Read-only checks afterwards: the listing is Active, GTC, no Best Offer, not private, revised before by the
+Mac on 14 Nov; it carries a catalog product link; the words the new text adds are plain product words. The cause is not
+identified. Nothing on the listing changed. The campaign launched earlier tonight is unaffected and live.
+
+**Open.** Next diagnostic offered to Hasib: resend the live description unchanged as a no-op test. Refused too means the
+block sits on the listing or the NEXGEN account today, not on the text; accepted means something in the new text. If
+the Mac has seen error 240 on a NEXGEN revise before, or knows of a current restriction on that account, please say so
+in the next entry.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent; the armor case description is on hold
+pending Hasib's answer.
+---
+
+## 2026-11-21 22:32 UTC · WINDOWS · Armor ring-stand case description REVISED; error 240 was a wording trigger, found by bisecting
+
+**What was done.** Hasib carried the Mac's answer over (resend the live text, then add blocks back one at a time). The
+live description resent unchanged passed, so the NEXGEN account and the listing were never blocked. The camera-cover
+block alone was refused; sent as four separate edits, three passed (headline, chip and how-to step; the intro sentence;
+the charging-port line) and one was refused: the feature cell and spec row worded "Sliding window shields the lenses
+when closed; slide it open to take photos" and "open to shoot, closed to protect". Reworded as "A sliding window
+protects the lenses; slide it back to take photos" and "Sliding lens cover (slide back to take photos)" it passed. The
+full approved text, with the colours row, the nineteen-model list and both notes including "Not made for iPhone 18,
+Plus, Mini, 16e or 17e", then passed in one revise. Title unchanged, sold, watchers, price and quantity unchanged on
+every read-back; the live text now equals the proposal file.
+
+**Finding for both Claudes.** eBay's selling-practices rule SP_Item_Condition_Misrep (error 240, rule 1030269) is not
+about trademarks, model negations or the specifics: on this listing it tripped on open/closed-state wording for a
+cover ("closed", "shields", "open to shoot, closed to protect"). "closes over the lenses … slides open" in the intro
+passed, so the exact trigger is narrow; the safe pattern is "slide back to take photos". The Mac's elimination list
+(scratches, open, original, "not for model X" all passed elsewhere) held up.
+
+**Files.** Agent folder: backups of every step in backups/Sir Hasib/, bisect_log.json and the per-attempt responses in
+the item's proposals folder, seven rows in the revisions log for the night (one no-op test, four single-block sends,
+one final; every accepted send was a subset of the approved text). Desk republished.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent; nothing pending on this item. Title
+review for it falls due 14 Dec.
+
+## 2026-11-21 22:41 UTC · MAC · Product history: answered first, eBay asked behind it; one call per campaign for one listing; schema marker moved (owner, 22 Nov)
+
+**Why.** The owner: the ads portal's Product history page shows "Failed to fetch" very often and takes a long time after
+Open. Evidence: the route awaited the on-open eBay read (16 Nov) BEFORE the memo, and that read pulled every ad of every
+campaign the listing sits in (two pages of 500 each): 49.7 s on 21 Nov 22:02, while the composition alone is under 1 s.
+The shell gives this action 15 s and one 20 s retry, so every slow open ended in an error after 35 s; 860 client
+disconnects in 24 h with a median of 15 s. "Failed to fetch" is the same slow request dropped by the network, with the
+second door (engine.m98mltd.co.uk) not resolving at all: m98mltd.co.uk's nameservers are Namecheap's, so a Workers
+custom domain cannot exist there until the zone is on Cloudflare.
+
+**What changed.** (1) adtoolListing answers from the memo first and starts the eBay read behind the answer
+(adtListingEbayKick → waitUntil); the answer carries ebay_read.pending and the page asks again at 2.5/4/6/10/15 s,
+redrawing only the Where its ads sit panel. (2) The per-listing read is one GET per campaign with listing_ids=
+(adsFetchAdsForListing; eBay verified 22 Nov: member → the ad row, non-member → empty list total 0, deleted campaign →
+404 error 35045), through adsItemsCampaign's new only_listing mode: this listing's rows only, the campaign stamp left
+alone, the baseline judged on the campaign's own first sync; our own rows' campaigns are asked about too, so a row the
+listing has left is deleted at once. Record per listing in portal_config (adtool_listing_ebay_read_<id>); Where rows
+carry the listing read's date only for the campaigns it covered (adtRowReadStamp). (3) Schema marker 2026-11-22.1 /
+215-2ffce716: the count had moved on 21 Nov with adtool_neg_ack (created at its own sites, so nothing was missing) and
+the suite had been red on main since, along with three Product history pins the 20 Nov graph removal left stale; all
+re-pinned to the page as it is. Suite 1497/1497.
+
+**Nothing sent to eBay.** Reads only; the per-account switches, bounds (30 s per listing) and the 40k/day cap are unchanged.
