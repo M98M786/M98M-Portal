@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261121-0120';
+var BUILD = '20261121-0156';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -16382,7 +16382,10 @@ function enterApp(user){
     { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','rev20','revApproval','videoRev','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','approvedArchive','huntRevised','huntRevisions','huntRecords','ideaBox'] },
     { name:'Customer Service', keys:['tasksCS','csSignals','csDesk','csReplyDesk','csDefenseDesk','csRecoveryDesk','cs','returns','refunds','inbox','feedback'] },
-    { name:'Library',     keys:['tools','rules'] }
+    { name:'Library',     keys:['tools','rules'] },
+    /* 21 Nov (owner): "show them under an Extras title at the end of the portal" — the sections that
+       left the Business overview, last in the sidebar */
+    { name:'Extras',      keys:['overviewExtras'] }
   ];
   /* The advertising portal at /ads/ is THIS shell with only the adtool views spliced in. It sets
      M98M_ADS_ONLY before boot and everything that differs is cosmetic: those views stop being

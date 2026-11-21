@@ -1751,7 +1751,10 @@ function enterApp(user){
     { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','rev20','revApproval','videoRev','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','approvedArchive','huntRevised','huntRevisions','huntRecords','ideaBox'] },
     { name:'Customer Service', keys:['tasksCS','csSignals','csDesk','csReplyDesk','csDefenseDesk','csRecoveryDesk','cs','returns','refunds','inbox','feedback'] },
-    { name:'Library',     keys:['tools','rules'] }
+    { name:'Library',     keys:['tools','rules'] },
+    /* 21 Nov (owner): "show them under an Extras title at the end of the portal" — the sections that
+       left the Business overview, last in the sidebar */
+    { name:'Extras',      keys:['overviewExtras'] }
   ];
   /* The advertising portal at /ads/ is THIS shell with only the adtool views spliced in. It sets
      M98M_ADS_ONLY before boot and everything that differs is cosmetic: those views stop being
