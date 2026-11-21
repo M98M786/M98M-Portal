@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261121-2101';
+var BUILD = '20261121-2211';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2679,7 +2679,19 @@ VIEWS.home = {
      first, then the biggest spend today. A choice is remembered per browser under AC_SORT_KEY. */
   var AC = { timer: null, days: 14, period: '', acct: '', from: '', to: '', items: [], lastDays: 14, win: '14d', landNote: '', sort: { key: '', dir: -1 },
     /* 20 Nov (owner): the went-negative signals, read from the Signals feed and drawn here instead */
-    neg: [], negAt: 0, negLoading: null, negDate: '', negProv: [], negAcks: {}, negAckDay: '', bridged: {} };
+    neg: [], negAt: 0, negLoading: null, negDate: '', negProv: [], negAcks: {}, negAckDay: '', negActed: {}, negDays: [], bridged: {},
+    /* 22 Nov (owner): a tile, clicked, narrows the board to exactly the listings it counts */
+    focus: '' };
+  /* the tiles that narrow the board: which rows each one means, and the sentence over them */
+  var AC_FOCUS = {
+    spend:  { pick: function (r) { return (acNum(r.spend_today) || 0) > 0; },  sortKey: 'spend_today',  what: 'spent on ads today' },
+    clicks: { pick: function (r) { return (acNum(r.clicks_today) || 0) > 0; }, sortKey: 'clicks_today', what: 'were clicked today' },
+    sold:   { pick: function (r) { return (acNum(r.sold_today) || 0) > 0; },   sortKey: 'sold_today',   what: 'sold through their ads today' },
+    waste:  { pick: function (r) { return !!r.waste; },                        sortKey: 'spend_today',  what: 'have spent \u00a33 or more today without a single order' },
+    window: { pick: function (r) { return (acNum(r.spend_14d) || 0) > 0; },    sortKey: 'spend_14d',    what: function () { return 'spent on ads over ' + (AC.win === 'today' ? 'today' : AC.win === 'yesterday' ? 'yesterday' : 'the last ' + AC.lastDays + ' days'); } },
+    neg:    { pick: function () { return false; },                             sortKey: '',             what: 'went negative and nobody has acted on them' }
+  };
+  function acFocusRows(rows) { var f = AC_FOCUS[AC.focus]; return f ? rows.filter(f.pick) : rows; }
   var AC_NEG_TYPE = 'WENT NEGATIVE YESTERDAY';
   /* the window in words, for every heading that names it: today, yesterday, the dates picked, or the last N days */
   function acWin(d) {
@@ -2701,6 +2713,13 @@ VIEW_CSS.push(
     '.ac-tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
     '.ac-tile .v{font-size:24px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}' +
     '.ac-tile.bad .v{color:var(--bad)}.ac-tile.gold .v{color:var(--gold-a)}' +
+    '.ac-tile[data-ac-tile]{cursor:pointer;transition:border-color .12s,transform .12s;position:relative}' +
+    '.ac-tile[data-ac-tile]:hover{border-color:var(--gold-line-hi);transform:translateY(-1px)}' +
+    '.ac-tile.on{border-color:var(--gold-a);box-shadow:0 0 0 1px var(--gold-a) inset}' +
+    '.ac-tile .s{font-size:10.5px;color:var(--text-3);font-weight:700;margin-top:4px}' +
+    '.ac-tile .go{font-size:10px;color:var(--text-3);font-weight:800;letter-spacing:.06em;margin-top:7px}.ac-tile.on .go{color:var(--gold-a)}' +
+    '.ac-focus{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--gold-a);border-radius:10px;padding:8px 12px;margin:0 0 10px;background:var(--panel-2);font-size:12px;font-weight:700}' +
+    '.ac-focus b{color:var(--gold-a)}.ac-focus .minibtn{margin-left:auto}' +
     '.ac-accs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}' +
     '.ac-acc{border:1px solid var(--gold-line);border-radius:11px;padding:10px 14px;background:var(--panel);font-size:12px;font-weight:700}' +
     '.ac-acc b{display:block;font-size:15px;font-variant-numeric:tabular-nums}' +
@@ -2802,17 +2821,32 @@ VIEW_CSS.push(
       if ($('acItems')) { acPaintItems(); }
       /* 21 Nov (owner): yesterday's negatives before the Sales Analysis tab exists — when the feed
          holds no card dated yesterday (UK), the engine's own day ledger stands in, marked provisional */
-      var yd = acUkDay(-1), haveCards = AC.neg.some(function (s) { return String(s.date) === yd; });
-      /* the engine's ledger for yesterday is always read: its rows stand in while no card exists for
-         the day, and its acknowledgements apply either way (an acknowledged provisional row stays
-         acknowledged when the Signals card for it is raised, and the card is told so) */
-      api('adsNegativeDay', { day: yd }).then(function (r) {
-        AC.negAcks = (r && r.acks) || {}; AC.negAckDay = yd;
-        AC.negProv = haveCards ? [] : ((r && r.rows) || []).map(function (x) {
-          return { type: AC_NEG_TYPE, date: yd, item_id: String(x.item_id), account: x.account, title: x.title, image: x.image, provisional: true,
-            'Actual Profit': x.actual_profit, value: x.actual_profit, ad_spend: x.spend, orders: x.orders, units: x.units, pending_cost_orders: x.pending_cost_orders,
-            actions: ['open record', 'create revision task', 'flag to advertising'], acked_by_me: false, acknowledged_by_others: [] };
+      var yd = acUkDay(-1);
+      var cardDays = {}; AC.neg.forEach(function (s) { cardDays[String(s.date)] = true; });
+      /* 22 Nov (owner): "if you have the confirmation that no action was executed on it yesterday,
+         show it the next day". The engine's ledger is read for a RUN of days, newest first: for every
+         day the Signals feed holds no card for, its rows stand in; a row the engine has seen an
+         action on (an acknowledgement here, an action logged on the listing, an ad change made
+         through the portal) is dropped and remembered, so the same day-and-listing is hidden on the
+         Signals card too; everything else carries forward until somebody acts. The engine's
+         acknowledgements apply either way (an acknowledged provisional row stays acknowledged when
+         the Signals card for it is raised, and the card is told so). */
+      api('adsNegativeDay', { day: yd, days: 4 }).then(function (r) {
+        var days = (r && r.days && r.days.length) ? r.days : [{ day: yd, acks: (r && r.acks) || {}, rows: (r && r.rows) || [] }];
+        AC.negAcks = {}; AC.negActed = {}; AC.negAckDay = yd; AC.negDays = days.map(function (d) { return String(d.day); });
+        var prov = [];
+        days.forEach(function (d) {
+          var day = String(d.day);
+          AC.negAcks[day] = d.acks || {};
+          (d.rows || []).forEach(function (x) {
+            if (x.acted) { (AC.negActed[day] = AC.negActed[day] || {})[String(x.item_id)] = x.acted; return; }
+            if (cardDays[day]) { return; }
+            prov.push({ type: AC_NEG_TYPE, date: day, item_id: String(x.item_id), account: x.account, title: x.title, image: x.image, provisional: true,
+              'Actual Profit': x.actual_profit, value: x.actual_profit, ad_spend: x.spend, orders: x.orders, units: x.units, pending_cost_orders: x.pending_cost_orders,
+              actions: ['open record', 'create revision task', 'flag to advertising'], acked_by_me: false, acknowledged_by_others: [] });
+          });
         });
+        AC.negProv = prov;
         acNegBridge();
         if ($('acItems')) { acPaintItems(); }
       })['catch'](function () { AC.negProv = []; });
@@ -2824,14 +2858,17 @@ VIEW_CSS.push(
      card is acknowledged on the Signals side too, once, with the comment given here */
   function acNegBridge() {
     (AC.neg || []).forEach(function (s) {
-      if (String(s.date) !== AC.negAckDay || s.acked_by_me) { return; }
-      var a = AC.negAcks[String(s.item_id)]; if (!a) { return; }
+      if (s.acked_by_me) { return; }
+      var a = acNegAckOf(s); if (!a) { return; }
       var key = acNegKey(s); if (AC.bridged[key]) { return; }
       AC.bridged[key] = true;
       api('acknowledgeSignal', { account: s.account, type: s.type, date: s.date, item_id: s.item_id, note: 'Acknowledged on the Ads command centre ' + String(a.at).replace('T', ' ').slice(0, 16) + (a.email ? ' by ' + a.email.split('@')[0] : '') + ': ' + a.note })
         .then(function () { s.acked_by_me = true; })['catch'](function () { delete AC.bridged[key]; });
     });
   }
+  /* the engine's own acknowledgement for a day and listing, if any */
+  function acNegAckOf(s) { var d = AC.negAcks[String(s.date)]; return d ? d[String(s.item_id)] : null; }
+  function acNegActedOf(s) { var d = AC.negActed[String(s.date)]; return d ? d[String(s.item_id)] : null; }
   function acUkDay(off) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date(Date.now() + (off || 0) * 86400000)); }
   function acNegKey(s) { return [s.account, s.type, s.date, s.item_id].map(function (v) { return String(v == null ? '' : v); }).join('|'); }
   function acNegAll() { return (AC.neg || []).concat(AC.negProv || []); }
@@ -2841,7 +2878,7 @@ VIEW_CSS.push(
   function acNegRows() {
     return acNegAll().filter(function (s) {
       if (s.acked_by_me || (s.acknowledged_by_others && s.acknowledged_by_others.length) || (s.ack_history && s.ack_history.length)) { return false; }
-      if (String(s.date) === AC.negAckDay && AC.negAcks[String(s.item_id)]) { return false; }
+      if (acNegAckOf(s) || acNegActedOf(s)) { return false; }   // acknowledged here, or acted on in the tool
       if (!String(s.item_id || '').trim()) { return false; }
       if (AC.acct) { var a = acNorm(s.account), w = acNorm(AC.acct); if (!(a === w || (a && w && (a.indexOf(w) >= 0 || w.indexOf(a) >= 0)))) { return false; } }
       return true;
@@ -2898,7 +2935,7 @@ VIEW_CSS.push(
     if (s._busy) { return; }
     s._busy = true; btn.disabled = true; btn.textContent = 'Clearing\u2026';
     var call = s.provisional
-      ? api('adsNegativeAck', { day: s.date, item_id: s.item_id, account: s.account, note: note }).then(function (r) { AC.negAcks[String(s.item_id)] = { at: (r && r.at) || new Date().toISOString(), note: note, email: (r && r.email) || '' }; })
+      ? api('adsNegativeAck', { day: s.date, item_id: s.item_id, account: s.account, note: note }).then(function (r) { (AC.negAcks[String(s.date)] = AC.negAcks[String(s.date)] || {})[String(s.item_id)] = { at: (r && r.at) || new Date().toISOString(), note: note, email: (r && r.email) || '' }; })
       : api('acknowledgeSignal', { account: s.account, type: s.type, date: s.date, item_id: s.item_id, note: note });
     call.then(function () {
       var key = acNegKey(s);
@@ -3138,6 +3175,10 @@ VIEW_CSS.push(
   function acSortRows(rows) {
     var out = rows.slice();
     var col = AC.sort.key ? acCol(AC.sort.key) : null;
+    if (!col && AC.focus && AC_FOCUS[AC.focus] && AC_FOCUS[AC.focus].sortKey) {
+      var fk = acCol(AC_FOCUS[AC.focus].sortKey);
+      if (fk) { return out.sort(function (a, b) { var wa = a.waste ? 1 : 0, wb = b.waste ? 1 : 0; if (wa !== wb) { return wb - wa; } return (fk.val(b) || 0) - (fk.val(a) || 0); }); }
+    }
     if (!col) {
       /* Nothing chosen: the board's own order, reproduced key for key — waste rows first, then the
          biggest spend today, then the biggest spend over the window. That third key is not decoration:
@@ -3166,10 +3207,53 @@ VIEW_CSS.push(
       return (va - vb) * dir;
     });
   }
+  /* the went-negative tile's figure: yesterday's un-acted listings, and how many older ones still wait */
+  function acNegTile(neg) {
+    var n = $('acNegN'), s = $('acNegS');
+    if (!n) { return; }
+    var yd = acUkDay(-1), y = 0, older = 0;
+    neg.forEach(function (x) { if (String(x.date) === yd) { y++; } else { older++; } });
+    n.textContent = String(y);
+    var t = n.closest ? n.closest('.ac-tile') : null;
+    if (t) { t.classList.toggle('bad', y + older > 0); }
+    if (s) { s.textContent = older ? '+ ' + older + ' older still waiting' : (AC.negDays.length > 1 ? 'nothing older waiting' : ''); }
+  }
+  function acFocus(key) {
+    AC.focus = AC.focus === key ? '' : (AC_FOCUS[key] ? key : '');
+    document.querySelectorAll('[data-ac-tile]').forEach(function (t) {
+      var on = t.getAttribute('data-ac-tile') === AC.focus, g = t.querySelector('.go');
+      t.classList.toggle('on', on);
+      if (g) { g.textContent = on ? 'SHOWING BELOW \u00b7 CLICK TO SHOW ALL' : 'SHOW THESE \u2193'; }
+    });
+    acPaintItems();
+    var tgt = $('acFocus') || $('acItems');
+    if (AC.focus && tgt && tgt.scrollIntoView) { tgt.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  }
+  function acFocusWire(box) {
+    var b = box.querySelector('[data-ac-unfocus]');
+    if (b) { b.onclick = function () { acFocus(''); }; }
+  }
   function acPaintItems() {
     var box = $('acItems');
     if (!box) { return; }
-    var rows = AC.items || [], neg = acNegRows();
+    var all = AC.items || [], negAll = acNegRows();
+    acNegTile(negAll);
+    /* a tile in focus: only the listings it counts (the waste tile = the red rows, exactly as many as
+       the tile says), or only the went-negative block; the sentence above says which and lets go */
+    var rows = AC.focus === 'neg' ? [] : acFocusRows(all), neg = (AC.focus && AC.focus !== 'neg') ? [] : negAll;
+    var focusBar = '';
+    if (AC.focus) {
+      var F = AC_FOCUS[AC.focus], n = AC.focus === 'neg' ? neg.length : rows.length;
+      var what = typeof F.what === 'function' ? F.what() : F.what;
+      focusBar = '<div class="ac-focus" id="acFocus"><b>' + n + '</b> listing' + (n === 1 ? '' : 's') + ' ' + esc(what) + (AC.acct ? ' \u00b7 ' + esc(AC.acct) : '') +
+        '<button class="minibtn" data-ac-unfocus="1">Show everything</button></div>';
+      if (!n) {
+        box.innerHTML = focusBar + '<div style="color:var(--text-2);font-weight:700;padding:12px 0">' +
+          (AC.focus === 'neg' ? 'Nothing went negative that is still waiting for action.' : 'No listing matches this tile right now.') + '</div>';
+        acFocusWire(box);
+        return;
+      }
+    }
     if (!rows.length && !neg.length) {
       /* "Nothing is recorded" and "eBay has not sent it" are different answers and a reader acts on
          them differently: the first reads as a quiet day. Where the engine says the report for the
@@ -3188,7 +3272,7 @@ VIEW_CSS.push(
       return '<th class="acc-s" data-ac-k="' + esc(c.key) + '" title="' + esc('Sort by ' + c.sorts) + '">' +
         esc(acLabel(c)) + (on ? '<span class="acc-ar">' + (AC.sort.dir < 0 ? '\u25bc' : '\u25b2') + '</span>' : '') + '</th>';
     }).join('') + '</tr></thead>';
-    var h = '';
+    var h = focusBar;
     /* 20 Nov (owner): the WENT NEGATIVE listings nobody has acted on, before today's red rows, in
        their own colour, each with the same Product history box underneath; the board's own figures
        fill the other columns where the listing is on today's board */
@@ -3237,6 +3321,7 @@ VIEW_CSS.push(
           : 'No ad activity recorded yet today \u2014 eBay produces the first same-day report at about 08:05 UK, so nothing can be read before then.') + '</div>';
     }
     box.innerHTML = h;
+    acFocusWire(box);
     /* boxes already holding their answer draw their chart now; the rest draw when it lands */
     Array.prototype.forEach.call(box.querySelectorAll('[data-ac-det]'), function (d) { acDailyMount(d, d.getAttribute('data-ac-det')); });
     acDetailsLoad(box);
@@ -3262,12 +3347,21 @@ VIEW_CSS.push(
     api('adsBoard', payload).then(function (d) {
       d = d || {};
       var c = d.combined || {};
+      /* 22 Nov (owner): "when I click the 9, send me exactly to where the 9 items are" — every tile
+         is a button that narrows the board below to the listings it counts, and a sixth tile counts
+         what went negative yesterday with nobody acting on it yet (filled when that feed lands). */
+      var tile = function (key, cls, k, v, sub) {
+        return '<div class="ac-tile' + (cls ? ' ' + cls : '') + (AC.focus === key ? ' on' : '') + '" data-ac-tile="' + key + '" role="button" tabindex="0" title="Show only these listings">' +
+          '<div class="k">' + k + '</div><div class="v">' + v + '</div>' + (sub ? '<div class="s">' + sub + '</div>' : '') +
+          '<div class="go">' + (AC.focus === key ? 'SHOWING BELOW \u00b7 CLICK TO SHOW ALL' : 'SHOW THESE \u2193') + '</div></div>';
+      };
       var h = '<div class="ac-tiles">' +
-        '<div class="ac-tile gold"><div class="k">Spend today · all accounts</div><div class="v">' + acGBP(c.spend_today) + '</div></div>' +
-        '<div class="ac-tile"><div class="k">Clicks today</div><div class="v">' + (c.clicks_today || 0) + '</div></div>' +
-        '<div class="ac-tile"><div class="k">Sold via ads today</div><div class="v">' + (c.sold_today || 0) + '</div></div>' +
-        '<div class="ac-tile' + (c.waste_n ? ' bad' : '') + '"><div class="k">Wasting £3+ · no order</div><div class="v">' + (c.waste_n || 0) + '</div></div>' +
-        '<div class="ac-tile"><div class="k">Spend · ' + esc(acWin(d)) + '</div><div class="v">' + acGBP(c.spend_14d) + '</div></div>' +
+        tile('spend', 'gold', 'Spend today · all accounts', acGBP(c.spend_today), '') +
+        tile('clicks', '', 'Clicks today', (c.clicks_today || 0), '') +
+        tile('sold', '', 'Sold via ads today', (c.sold_today || 0), '') +
+        tile('waste', c.waste_n ? 'bad' : '', 'Wasting £3+ · no order', (c.waste_n || 0), '') +
+        tile('neg', '', 'Went negative yesterday · not acted on', '<span id="acNegN">\u2026</span>', '<span id="acNegS"></span>') +
+        tile('window', '', 'Spend · ' + esc(acWin(d)), acGBP(c.spend_14d), '') +
       '</div>';
       if (d.window_source) { h += '<div class="ac-split-note" style="margin:-4px 0 10px">Window figures from ' + esc(String(d.window_source)) + '.</div>'; }
       /* A DAY IN THIS WINDOW EBAY'S REPORT HAS NOT LANDED FOR (owner, 11 Nov: the whole portal read
@@ -3382,6 +3476,11 @@ VIEW_CSS.push(
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Snapshot ' +
         esc(String(d.updated_at || '—')) + ' UTC · ' + esc(String(d.note || '')) + '</p>';
       box.innerHTML = h;
+      Array.prototype.forEach.call(box.querySelectorAll('[data-ac-tile]'), function (t) {
+        var go = function () { acFocus(t.getAttribute('data-ac-tile')); };
+        t.onclick = go;
+        t.onkeydown = function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } };
+      });
       acPaintItems();
     }).catch(function (e) {
       box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Could not load the board.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';
