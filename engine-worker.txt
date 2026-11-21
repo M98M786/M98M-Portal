@@ -30,8 +30,9 @@ const CAMPAIGN_ROLES = ['Management', 'Ops Head', 'Team Lead', 'Advertising Mana
 /* 21 Nov (owner): "why is the Ads command centre not shown to Husnain as it is to me — fix that, so he
    sees it as we see it." The command centre's own board (adsBoard) and its WENT NEGATIVE signals go
    to the Team Lead whole, earnings included, as the one named exception to Review 4. Every other
-   read keeps Review 4: the Product history boxes under the rows, the Product history page and the
-   price desk still strip earnings for the role. */
+   read keeps Review 4 — except the ad tool's own pages (the Product history and the boxes under the
+   rows), opened to the role with their item-level profit on 21 Nov at the owner's word; the price
+   desk still strips earnings for the role. */
 const ADS_CENTRE_FULL_ROLES = ['Team Lead'];
 function adsCentreFull(user) { const u = user || {}; return canSeeEarnings(u) || ADS_CENTRE_FULL_ROLES.indexOf(String(u.role || '')) >= 0; }
 /* 10 Nov (owner): "update these pages as pinned pages in husnain's portal and make them properly
@@ -33809,7 +33810,11 @@ for (const k of Object.keys(ROUTES)) {
     const u = (ctx && ctx.user) || {};
     const out = adtStripCollectiveProfit(await raw(p, ctx), { keepCollective: PROFIT_ROLES.indexOf(String(u.role || '')) >= 0 || !!u.super });
     /* 10 Nov: and for a reader who may see no earning at all — the Team Lead on the pinned Product
-       history — the per-item profit those rows deliberately keep goes too. */
-    return canSeeEarnings(u) ? out : stripEarnings(out);
+       history — the per-item profit those rows deliberately keep goes too.
+       21 Nov (owner, asked outright): "open them too" — the Team Lead reads the ad tool's pages, the
+       Product history and the boxes under the command centre's rows, with their item-level profit.
+       The collective (account and fleet) profit above still leaves for every role outside
+       PROFIT_ROLES, and the price desk keeps its own strip. */
+    return (canSeeEarnings(u) || adsCentreFull(u)) ? out : stripEarnings(out);
   };
 }
