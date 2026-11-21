@@ -927,7 +927,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261121-1940';
+var BUILD = '20261121-2103';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -16381,7 +16381,13 @@ function enterApp(user){
        profit in his portal"); Ads command centre was already in his sidebar but the engine refused
        the read, which is the "not properly working" he is pointing at; Active listings already worked. */
     { emails: ['m98mtwo@gmail.com'],
-      keys: ['priceDesk', 'adsCentre', 'adtoolProduct', 'activeListings'] }
+      keys: ['priceDesk', 'adsCentre', 'adtoolProduct', 'activeListings'] },
+    /* 22 Nov (owner): Muhammad Ahmad (Product Hunter) — "so he can see the ads product history".
+       Product history is hidden from every sidebar, so a pin is the only way it shows; it opens
+       only once his USERS modules carry adtoolProduct (the engine reads the same grant), and the
+       engine answers him spend-only like the Team Lead. */
+    { emails: ['m98mfour@gmail.com'],
+      keys: ['adtoolProduct'] }
   ];
   /* a label that reads right in a mixed list: "Overview" alone says nothing next to Business overview */
   var PIN_LABEL = { adtoolOverview: 'Advertising overview', dashboard: 'Sales analysis', adtoolStopped: 'Activated & stopped' };

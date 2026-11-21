@@ -649,6 +649,44 @@ function huntingPortalForM98mfour() {
   return res;
 }
 
+/* 22 Nov (owner): "update product history page in m98mfour@gmail.com so he can see the ads product
+   history." The page is role-gated to advertising roles and hidden from every sidebar; for one named
+   person the way in is the modules grant on his USERS row, which the portal's sidebar, the engine's
+   gate and the Access desk all read. This APPENDS adtoolProduct to whatever he carries — it never
+   rewrites the hunter list (the 10 Nov lesson) — and is idempotent. Flag PRODUCT_HISTORY_M98MFOUR. */
+var PRODUCT_HISTORY_MODULE = 'adtoolProduct';
+function productHistoryForM98mfour() {
+  var TARGET = 'm98mfour@gmail.com';
+  var sh = sadmUsersSheet_();
+  var f;
+  try { f = sadmFind_(sh, TARGET); } catch (e) { return 'ABORT: ' + String(e && e.message || e); }
+  var val = function (k) { return String(f.rec[k] == null ? '' : f.rec[k]).trim(); };
+  var c = f.head.indexOf('modules');
+  if (c < 0) { return 'ABORT: USERS has no modules column'; }
+  var before = val('modules');
+  var list = before.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  if (list.indexOf(PRODUCT_HISTORY_MODULE) >= 0 && list.indexOf('-' + PRODUCT_HISTORY_MODULE) < 0) {
+    return 'no change — ' + TARGET + ' already carries ' + PRODUCT_HISTORY_MODULE + ' (role ' + val('role') + ')';
+  }
+  list = list.filter(function (k) { return k !== '-' + PRODUCT_HISTORY_MODULE; });
+  if (list.indexOf(PRODUCT_HISTORY_MODULE) < 0) list.push(PRODUCT_HISTORY_MODULE);
+  var after = list.join(',');
+  var cell = sh.getRange(f.row, c + 1);
+  cell.setNumberFormat('@');
+  cell.setValue(after);
+  SpreadsheetApp.flush();
+  sadmForgetUsers_();
+  try { logActivity_('system', 'PRODUCT_HISTORY_GRANT', TARGET, before || '(blank)', after, 'owner 22 Nov — ads product history for Muhammad Ahmad'); } catch (e) {}
+  var out = [TARGET + ' (' + val('role') + '): modules "' + (before || '(blank)') + '" -> "' + after + '"'];
+  Logger.log(out.join(' · '));                       // say it BEFORE the slow mirror push (11 Nov lesson)
+  var mirror = 'mirror not pushed';
+  try { if (typeof pushEngineSync === 'function') mirror = String(pushEngineSync()); } catch (e) { mirror = 'mirror push failed: ' + (e && e.message || e); }
+  out.push('mirror: ' + mirror);
+  var res = out.join(' · ');
+  Logger.log(res);
+  return res;
+}
+
 function renameM98mfourToTahirAmin() {
   const r = staffRename({ email: 'm98mfour@gmail.com', name: 'Tahir Amin' });
   Logger.log(r);
