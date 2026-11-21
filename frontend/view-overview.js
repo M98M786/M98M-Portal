@@ -128,7 +128,32 @@
   function ukToday() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date()); }
   function dShift(iso, days) { var d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); }
 
-  var O = { days: null, ov: null, listings: null, cs: null, extras: null, truthY: null, mode: 'd7', from: '', to: '', llQ: '', llAcc: '', pMode: 'all', pAcc: '', acct: '' };
+  var O = { days: null, ov: null, listings: null, cs: null, extras: null, truthY: null, mode: 'd7', from: '', to: '', llQ: '', llAcc: '', pMode: 'all', pAcc: '', acct: '',
+    /* 21 Nov (owner): "I want both individual days' performance when clicking a days chip and the
+       collective combined data too — an option to select either". `view` is that switch: collective
+       is the page as it was (one figure per window); individual lays the same window out day by day. */
+    view: 'collective' };
+  var O_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], O_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  function oGBPs(v) { var n = oN(v); return (n < 0 ? '\u2212\u00a3' : '\u00a3') + Math.abs(n).toFixed(2); }
+  function oGBP0s(v) { var n = oN(v), a = Math.abs(n); return (n < 0 ? '\u2212\u00a3' : '\u00a3') + (a >= 1000 ? (a / 1000).toFixed(1) + 'k' : a.toFixed(2)); }
+  function oDayLbl(iso) { var d = new Date(iso + 'T12:00:00Z'); return O_DOW[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + O_MON[d.getUTCMonth()]; }
+  /* the days of a window, newest first, so today or yesterday heads the list */
+  function oDayList(from, to) { var out = []; for (var d = from; d <= to; d = dShift(d, 1)) { out.push(d); if (out.length > 92) { break; } } return out.reverse(); }
+  VIEW_CSS.push(
+    '.ov2 .o-dt{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}' +
+    '.ov2 .o-dt th{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);text-align:right;padding:7px 10px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
+    '.ov2 .o-dt th:first-child,.ov2 .o-dt td:first-child{text-align:left}' +
+    '.ov2 .o-dt td{padding:7px 10px;border-bottom:1px solid var(--gold-line);text-align:right;white-space:nowrap}' +
+    '.ov2 .o-dt tr.tot td{font-weight:800;border-top:2px solid var(--gold-line-hi);background:var(--panel-2)}' +
+    '.ov2 .o-dt tr.live td{background:rgba(242,176,53,.06)}' +
+    '.ov2 .o-dt .o-dt-d{display:block;font-size:10px;color:var(--text-3);font-weight:600}' +
+    '.ov2 .o-dt .o-dt-live{display:inline-block;margin-left:6px;padding:0 6px;border-radius:6px;font-size:9px;letter-spacing:.05em;text-transform:uppercase;font-weight:800;color:var(--gold-a);border:1px solid rgba(242,176,53,.45);vertical-align:1px}' +
+    '.ov2 .o-dt .o-dt-none{color:var(--text-3);font-weight:600}' +
+    '.ov2 .o-dt .pos{color:var(--ok,#2fb170)}.ov2 .o-dt .neg{color:var(--bad)}' +
+    '.ov2 .o-dt-wrap{overflow-x:auto}' +
+    '.ov2 .o-pending{box-shadow:0 0 0 2px rgba(242,176,53,.55);animation:oPend 1.2s ease-in-out infinite}' +
+    '@keyframes oPend{0%,100%{box-shadow:0 0 0 2px rgba(242,176,53,.55)}50%{box-shadow:0 0 0 2px rgba(242,176,53,.15)}}'
+  );
   /* Page-level account filter (owner, 6 Sept: "update the whole page with a selection option,
      account to account by name, and an all-accounts option which is the default"). O.acct === ''
      means ALL ACCOUNTS — every section then behaves EXACTLY as before (zero change, zero risk to
@@ -143,7 +168,7 @@
     var sub = $('o2Sub');
     if (sub) { sub.textContent = 'Management · ' + (O.acct || 'all accounts') + ' · every number has a live feed behind it'; }
     var ch = $('o2CollH');
-    if (ch) { ch.textContent = O.acct ? esc(O.acct) + ' — this account' : 'Collective — all accounts'; }
+    if (ch) { ch.textContent = (O.view === 'individual' ? 'Day by day — ' : 'Collective — ') + (O.acct ? O.acct + (O.view === 'individual' ? '' : ' — this account') : 'all accounts'); }
   }
 
   function oRange() {
@@ -470,13 +495,47 @@
   function oPaintDated() {
     var r = oRange();
     var lbl = $('o2RangeLbl');
-    if (lbl) { lbl.innerHTML = 'Showing <b>' + esc(r.label) + '</b> · ' + esc(r.from) + ' → ' + esc(r.to) + ' · UK business days · drives the dispatch clock, Collective, Profitability and Advertising'; }
+    if (lbl) { lbl.innerHTML = 'Showing <b>' + esc(r.label) + '</b> · ' + esc(r.from) + ' → ' + esc(r.to) + ' · <b>' + (O.view === 'individual' ? 'individual days' : 'collective') + '</b> · UK business days · drives the dispatch clock, Collective, Profitability and Advertising'; }
     oPaintKpis(r); oPaintProfit(r);
   }
 
+  /* INDIVIDUAL DAYS (owner, 21 Nov): the window laid out one row per UK day, newest first, from
+     the daily books — sold, order earning, AliExpress cost, ads, profit before ads, the sheet's own
+     Actual (after ads and returns) and the margin — with the whole window summed underneath, which
+     is the collective figure. Today is the live overlay and has no Actual until the books roll. */
+  function oPaintDays(box, r) {
+    if (O.days === null) { box.innerHTML = '<div class="empty">Loading the daily books…</div>'; return; }
+    var t = ukToday(), rows = oRows(r.from, r.to), by = {};
+    rows.forEach(function (x) {
+      var b = (by[x.date] = by[x.date] || { sold: 0, oe: 0, cost: 0, ads: 0, profit: 0, actual: 0, actualN: 0, ret: 0, accts: 0 });
+      b.sold += oN(x.sold); b.oe += oN(x.oe); b.cost += oN(x.cost); b.ads += oN(x.ads); b.profit += oN(x.profit); b.ret += oN(x.returns); b.accts++;
+      if (x.actual != null && x.actual !== '' && x.date !== t) { b.actual += oN(x.actual); b.actualN++; }
+    });
+    var days = oDayList(r.from, r.to), tot = oSum(rows), totAct = 0, settled = 0;
+    var cls = function (v) { return v < 0 ? 'neg' : 'pos'; };
+    var tr = days.map(function (d) {
+      var b = by[d], live = d === t;
+      if (!b) { return '<tr><td>' + oDayLbl(d) + '<span class="o-dt-d">' + d + '</span></td><td colspan="7" class="o-dt-none">' + (d > t ? 'not reached yet' : 'no day book held') + '</td></tr>'; }
+      var act = (!live && b.actualN) ? b.actual : null;
+      if (act != null) { totAct += act; settled++; }
+      var m = b.sold ? ((act != null ? act : b.profit - b.ads) / b.sold * 100) : null;
+      return '<tr' + (live ? ' class="live"' : '') + '><td>' + oDayLbl(d) + (live ? '<span class="o-dt-live">today · live</span>' : '') + '<span class="o-dt-d">' + d + (b.accts > 1 ? ' · ' + b.accts + ' accounts' : '') + '</span></td>' +
+        '<td>' + oGBPs(b.sold) + '</td><td>' + oGBPs(b.oe) + '</td><td>' + oGBPs(b.cost) + '</td><td>' + oGBPs(b.ads) + '</td><td class="' + cls(b.profit) + '">' + oGBPs(b.profit) + '</td>' +
+        '<td class="' + (act == null ? '' : cls(act)) + '">' + (act == null ? '<span class="o-dt-none">' + (live ? 'settles tonight' : 'not in the books yet') + '</span>' : oGBPs(act)) + '</td>' +
+        '<td>' + (m == null ? '—' : m.toFixed(1) + '%') + '</td></tr>';
+    }).join('');
+    var n = days.length;
+    var totRow = '<tr class="tot"><td>All ' + n + ' day' + (n === 1 ? '' : 's') + ' — collective<span class="o-dt-d">' + r.from + ' → ' + r.to + '</span></td>' +
+      '<td>' + oGBPs(tot.sold) + '</td><td>' + oGBPs(tot.oe) + '</td><td>' + oGBPs(tot.cost) + '</td><td>' + oGBPs(tot.ads) + '</td><td class="' + cls(tot.profit) + '">' + oGBPs(tot.profit) + '</td>' +
+      '<td class="' + cls(totAct) + '">' + oGBPs(totAct) + (settled < n ? '<span class="o-dt-d">' + settled + ' of ' + n + ' days settled</span>' : '') + '</td>' +
+      '<td>' + (tot.sold ? ((settled ? totAct : tot.profit - tot.ads) / tot.sold * 100).toFixed(1) + '%' : '—') + '</td></tr>';
+    box.innerHTML = '<div class="o-card o-dt-wrap" style="grid-column:1/-1"><table class="o-dt"><thead><tr><th>Day</th><th>Sold</th><th>Order earning</th><th>Ali cost</th><th>Ads</th><th>Profit before ads</th><th>Actual · after ads &amp; returns</th><th>Margin</th></tr></thead><tbody>' + tr + totRow + '</tbody></table>' +
+      '<div class="kpi-s" style="margin-top:8px">From the daily books (the Sales Analysis day tabs, rolled nightly), ' + (O.acct ? esc(O.acct) + ' only' : 'all accounts summed per day') + '. Profit before ads = 0.8 × (order earning − Ali cost); Actual is the sheet’s own column after ads and returns. Today rides the live overlay. The Collective view reads the money register instead, so its figures can differ by the days the books have not caught up on.</div></div>';
+  }
   function oPaintKpis(r) {
     var box = $('o2Kpis');
     if (!box) { return; }
+    if (O.view === 'individual') { oPaintDays(box, r); return; }
     /* TRUTH v2 WO-03 (money LIVE): the money tiles read the register for the CHOSEN RANGE —
        Σ Raw Profit, Σ VAT to HMRC, Σ True Order Earning, sheet Sold with the eBay sub-line and
        rows coverage. Ads-family tiles keep the old path until the ads module flips (Phase 4). */
@@ -852,6 +911,28 @@
       '<div class="tile"><b>Ads</b><span>' + oGBP0(t.ads) + '</span></div>' +
       '<div class="tile"><b>Ali cost</b><span>' + oGBP0(t.cost) + '</span></div>' +
       '<div class="tile"><b>Margin est</b><span>' + (t.sold ? (t.profit / t.sold * 100).toFixed(1) + '%' : '—') + '</span></div></div>';
+    if (O.view === 'individual') {
+      /* 21 Nov (owner): individual days — every account's revenue and actual profit on every day of
+         the window, newest day first, with the day's total in the last column. Today has no settled
+         Actual, so its running profit before ads less its ads stands in, as the chart does. */
+      var t0 = ukToday(), accNames = (O.pMode === 'acct' && O.pAcc) ? [O.pAcc] : names, cell = {};
+      oRows(r.from, r.to).forEach(function (x) { cell[x.date + '|' + oS(x.account)] = x; });
+      var pOf = function (x, d) { return (x.actual != null && x.actual !== '' && d !== t0) ? oN(x.actual) : oN(x.profit) - oN(x.ads); };
+      var th = '<tr><th>Day</th>' + accNames.map(function (a) { return '<th>' + esc(a) + '<span class="o-dt-d">revenue · actual</span></th>'; }).join('') + (accNames.length > 1 ? '<th>All<span class="o-dt-d">revenue · actual</span></th>' : '') + '</tr>';
+      var trs = oDayList(r.from, r.to).map(function (d) {
+        var rs = 0, rp = 0, live = d === t0;
+        var tds = accNames.map(function (a) {
+          var x = cell[d + '|' + a]; if (!x) { return '<td><span class="o-dt-none">—</span></td>'; }
+          var p = pOf(x, d); rs += oN(x.sold); rp += p;
+          return '<td>' + oGBP0s(x.sold) + ' <span class="' + (p < 0 ? 'neg' : 'pos') + '">' + oGBP0s(p) + '</span></td>';
+        }).join('');
+        return '<tr' + (live ? ' class="live"' : '') + '><td>' + oDayLbl(d) + (live ? '<span class="o-dt-live">today · live</span>' : '') + '</td>' + tds +
+          (accNames.length > 1 ? '<td><b>' + oGBP0s(rs) + '</b> <span class="' + (rp < 0 ? 'neg' : 'pos') + '">' + oGBP0s(rp) + '</span></td>' : '') + '</tr>';
+      }).join('');
+      box.innerHTML = chips + '<div class="o-card"><div class="chart-wrap">' + oChart(rows, r.from, r.to) + '</div></div>' +
+        '<div class="o-card o-dt-wrap" style="margin-top:12px"><span class="card-t">Account to account, day by day · revenue · actual profit (after ads &amp; returns)</span><table class="o-dt"><thead>' + th + '</thead><tbody>' + trs + '</tbody></table></div>' + tiles;
+      return;
+    }
     box.innerHTML = chips + '<div class="split"><div class="o-card"><div class="chart-wrap">' + oChart(rows, r.from, r.to) + '</div></div>' +
       '<div class="o-card">' + rank + '</div></div>' + tiles;
   }
@@ -901,6 +982,17 @@
         .sort(function (a, b) { return b.spend - a.spend; });
       ads.forEach(function (a) { a.spend = Math.round(a.spend * 100) / 100; a.roas = a.spend > 0 ? Math.round(a.revenue / a.spend * 100) / 100 : null; });
     }
+    var perDay = false;
+    if (O.view === 'individual' && !isYday) {
+      /* 21 Nov (owner): individual days — one row per day of the window, newest first: the day's
+         real spend across the chosen scope, its revenue, its ROAS */
+      if (O.days === null) { box.innerHTML = '<div class="empty">Loading…</div>'; return; }
+      var byD = {};
+      oRows(r.from, r.to).forEach(function (d0) { var a = (byD[d0.date] = byD[d0.date] || { date: d0.date, account: oDayLbl(d0.date), spend: 0, revenue: 0 }); a.spend += oN(d0.ads); a.revenue += oN(d0.sold); });
+      ads = oDayList(r.from, r.to).map(function (d) { return byD[d] || { date: d, account: oDayLbl(d), spend: 0, revenue: 0 }; });
+      ads.forEach(function (a) { a.spend = Math.round(a.spend * 100) / 100; a.roas = a.spend > 0 ? Math.round(a.revenue / a.spend * 100) / 100 : null; if (a.date === ukToday()) { a.account += ' · today, live'; } });
+      perDay = true;
+    }
     var spend = 0, rev = 0;
     ads.forEach(function (a) { spend += oN(a.spend); rev += oN(a.revenue); });
     var roas = spend > 0 ? rev / spend : null;
@@ -928,7 +1020,7 @@
         '<div class="kpi-s" style="margin-top:8px">promoted = eBay-attributed ad revenue; organic is the rest' +
           (sp.basis ? ' \u00b7 ' + esc(String(sp.basis)) : '') + '</div></div>';
     }
-    box.innerHTML = '<div class="split"><div class="o-card"><span class="card-t">' + esc(winLabel) + ' per account · real spend</span>' +
+    box.innerHTML = '<div class="split"><div class="o-card"><span class="card-t">' + esc(winLabel) + (perDay ? ' day by day' : ' per account') + ' · real spend</span>' +
       '<div class="mini-rows">' + (rows || '<div class="empty">No spend recorded ' + (isYday ? 'yesterday' : 'in this window') + (isYday ? ' — two accounts still need the marketing re-consent.' : '.') + '</div>') + '</div>' +
       (!isYday && r.to >= ukToday() ? '<div class="kpi-s" style="margin-top:8px">today\u2019s spend is the intraday figure; its revenue settles with the nightly books</div>' : '') + '</div>' +
       '<div class="o-card"><div class="gauge-wrap">' + oGauge(roas) +
@@ -1132,13 +1224,20 @@
         '<div class="hgroup enter d1"><h1>Business <span class="goldtext">overview</span></h1>' +
           '<span class="sub" id="o2Sub">Management · all accounts · every number has a live feed behind it</span>' +
           '<span style="margin-left:auto;display:flex;gap:8px;align-items:center">' +
+            /* 21 Nov (owner): "change Refresh to Apply, so when clicked the page is exclusively the
+               account selected". Choosing an account no longer reloads by itself: Apply does, and
+               with the account unchanged it is the refresh it always was. */
             '<select class="alx-sel" id="o2Acct" style="min-width:150px"><option value="">All accounts</option></select>' +
-            '<button class="minibtn" id="o2Refresh">Refresh</button></span></div>' +
+            '<button class="btn-p" id="o2AcctApply" title="load every section for the account chosen (all accounts when none is)">Apply</button></span></div>' +
         '<div class="dates enter d1"><div class="seg" id="o2Seg">' +
           /* chips render FROM O.mode — the state survives navigation, so static markup lies */
           [['today', 'Today'], ['yday', 'Yesterday'], ['d3', '3 days'], ['d4', '4 days'], ['d5', '5 days'], ['d6', '6 days'], ['d7', '7 days'], ['d14', '14 days'], ['d30', '30 days']].map(function (p) {
             return '<button data-o2-mode="' + p[0] + '"' + (O.mode === p[0] ? ' class="on"' : '') + '>' + p[1] + '</button>';
           }).join('') + '</div>' +
+          '<div class="seg" id="o2View" style="margin-left:4px;padding-left:10px;border-left:1px solid var(--gold-line)" title="Collective: one figure for the whole window. Individual days: the same window laid out day by day.">' +
+            [['collective', 'Collective'], ['individual', 'Individual days']].map(function (p) {
+              return '<button data-o2-view="' + p[0] + '"' + (O.view === p[0] ? ' class="on"' : '') + '>' + p[1] + '</button>';
+            }).join('') + '</div>' +
           '<div class="custom"><label>FROM</label><input type="date" id="o2From"><label>TO</label><input type="date" id="o2To">' +
           '<button class="btn-p" id="o2Apply">Apply</button></div>' +
           '<div class="range-label" id="o2RangeLbl"></div></div>' +
@@ -1197,6 +1296,13 @@
             for (var i = 0; i < bs.length; i++) { bs[i].classList.toggle('on', bs[i] === seg); }
             oRangeChanged(); return;
           }
+          var vw = t && t.closest ? t.closest('[data-o2-view]') : null;
+          if (vw) {
+            O.view = vw.getAttribute('data-o2-view') === 'individual' ? 'individual' : 'collective';
+            var vb = document.querySelectorAll('#o2View button');
+            for (var q = 0; q < vb.length; q++) { vb[q].classList.toggle('on', vb[q] === vw); }
+            oScopeLabels(); oRangeChanged(); return;
+          }
           var pm = t && t.closest ? t.closest('[data-o2-pmode]') : null;
           if (pm) {
             O.pMode = pm.getAttribute('data-o2-pmode');
@@ -1228,18 +1334,22 @@
         if (f0 && O.from) f0.value = O.from;
         if (t0 && O.to) t0.value = O.to;
       }
-      var rf = $('o2Refresh');
-      if (rf) { rf.onclick = function () { O.days = null; O.ov = null; O.listings = null; O.cs = null; O.truthY = null; oFetchAll(); oPulse(); }; }
-      var acctSel = $('o2Acct');
+      var acctSel = $('o2Acct'), acctAp = $('o2AcctApply');
       if (acctSel) {
-        fillAccountSelect(acctSel, O.acct, function () {
-          O.acct = acctSel.value || '';
+        /* picking an account only arms the Apply button; nothing reloads until it is pressed */
+        fillAccountSelect(acctSel, O.acct, function () { if (acctAp) { acctAp.classList.toggle('o-pending', (acctSel.value || '') !== O.acct); } });
+      }
+      if (acctAp) {
+        acctAp.onclick = function () {
+          O.acct = acctSel ? (acctSel.value || '') : O.acct;
+          acctAp.classList.remove('o-pending');
           oScopeLabels();
           /* drop everything cached for the previous scope so no all-accounts number lingers
              (truthPage's own cache is keyed by {from,to,account}, so it never crosses accounts) */
-          O.days = null; O.ov = null; O.listings = null; O.cs = null; O.funds = null; O.truth = null; O.truthY = null; O.extras = null;
-          oFetchAll(); oPulse();
-        });
+          O.days = null; O.ov = null; O.listings = null; O.cs = null; O.funds = null; O.truth = null; O.truthY = null; O.extras = null; O.truthRangeKey = '';
+          oFetchAll(); oPulse(); oDispatchLoad();
+          toast(O.acct ? 'Loading every section for ' + O.acct + ' only' : 'Loading every section for all accounts');
+        };
       }
       oScopeLabels();
       oFetchAll();

@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2026-11-21 - BUSINESS OVERVIEW: Apply for the account, and Collective / Individual days
+
+Owner: "Refresh doesn't work - change it to Apply so that when clicked the information is exclusively
+for the account selected. I want both individual days' performance when clicking the days selection
+and the collective combined data too - an option to select either." The Refresh button is now Apply:
+choosing an account arms it and pressing it reloads every section for that account (all accounts when
+none is chosen); with the account unchanged it is the refresh it was. A Collective / Individual days
+switch sits beside the day chips. Collective is the page as it was. Individual days lays the chosen
+window out day by day, newest first: the Collective block becomes a table of sold, order earning,
+AliExpress cost, ads, profit before ads, the sheet's Actual and the margin per day with the window
+summed underneath; Profitability adds an account-to-account table per day; the Advertising card lists
+spend, revenue and ROAS per day. All of it from the daily books; today is the live overlay.
+
 ## 2026-11-20 - SIGNALS PAGE DELETED
 
 Owner: "Delete Signals, no longer needed". The Signals page leaves the sidebar and the pinned list, the
