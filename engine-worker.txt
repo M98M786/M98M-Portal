@@ -841,7 +841,10 @@ async function ebayRestFetch(env, account, method, path, body) {
     body: (m === 'POST' && body) ? JSON.stringify(body) : undefined,
   });
   const text = await r.text();
-  return { status: r.status, ok: r.ok, body: text, host: host, path: p, account: String(account || '') };
+  /* 22 Nov: createVideo answers 201 with an EMPTY body and the new video's address in the
+     Location header — without this field the id a create just made cannot be read back. */
+  return { status: r.status, ok: r.ok, body: text, host: host, path: p, account: String(account || ''),
+    location: String(r.headers.get('location') || '') };
 }
 
 /* eBay's own accepted-carrier list (A4: never a manual mapping) — one Trading call per account
@@ -34017,6 +34020,71 @@ const ROUTES = {
       let raw = '';
       for (let i = 0; i < buf.length; i++) raw += String.fromCharCode(buf[i]);
       return { status: r.status, content_type: ct, location: loc, body_b64: btoa(raw) };
+    },
+  },
+
+  /* 22 Nov (owner): "upload video to my items on eBay through the API" — the WRITE half of the
+     media story whose read half has run since 31 Oct (adVideoThumbFetch reads this same
+     /commerce/media path for the video sweep). Three ops on one sync-keyed route, the same
+     stance as its siblings: the token never leaves the worker.
+       create — declares {title, size} (classification ITEM) and returns eBay's new video id.
+                eBay answers 201 with an EMPTY body and the id in the Location header, which is
+                why ebayRestFetch now carries `location` back.
+       part   — one piece of the file, base64 inside the JSON envelope (the router reads JSON and
+                nothing else). Decoded here, sent to eBay as application/octet-stream; pieces go
+                IN ORDER from offset 0 with Content-Range, and a single piece that is the whole
+                file goes plain (Content-Range is for resumable uploads only). A piece is capped
+                at 8 MB decoded: the 150 MB file cap can never ride one request, and a piece this
+                size stays far from the isolate's memory line.
+       status — the same read the sweep makes. PENDING_UPLOAD → PROCESSING → LIVE is the good
+                road; BLOCKED and PROCESSING_FAILED are eBay's refusals, statusMessage says why.
+     ATTACH IS NOT HERE: a video goes onto a listing by ReviseFixedPriceItem with
+     VideoDetails.VideoID through ebayTradeCall — the call that already owns listing revisions.
+     EBAY_GB supports listing video; the scope is sell.inventory, carried by the global-app
+     consents. The create is audited (a new media object on the account is a write worth a row);
+     the parts are not — one row per 8 MB would be noise, and the create names the whole act. */
+  ebayVideoUpload: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const op = String(p.op || ''), account = String(p.account || '');
+      if (!account) throw new Error('SAY: account is needed');
+      if (op === 'create') {
+        const title = String(p.title || '').trim(), size = Math.floor(Number(p.size || 0));
+        if (!title) throw new Error('SAY: title is needed');
+        if (!(size > 0 && size <= 157286400)) throw new Error('SAY: size must be the file\'s exact byte count, up to 150 MB (157286400)');
+        const body = { title: title, size: size, classification: ['ITEM'] };
+        if (p.description) body.description = String(p.description).slice(0, 500);
+        const r = await ebayRestFetch(ctx.env, account, 'POST', '/commerce/media/v1_beta/video', body);
+        const vid = (String(r.location || '').match(/\/video\/([0-9a-zA-Z_-]+)/) || [])[1] || '';
+        await ctx.env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES ('sync-key', 'EBAY_VIDEO_CREATE', ?1, '', ?2, datetime('now'))")
+          .bind(account, (vid ? vid : 'no id (eBay said ' + r.status + ')') + ' · ' + title.slice(0, 80) + ' · ' + size + ' bytes').run();
+        return { status: r.status, video_id: vid, location: r.location || '', body: r.body };
+      }
+      if (op === 'part') {
+        const vid = String(p.video_id || '').replace(/[^0-9a-zA-Z_-]/g, '').slice(0, 64);
+        if (!vid) throw new Error('SAY: video_id is needed');
+        const offset = Math.floor(Number(p.offset)), total = Math.floor(Number(p.total || 0));
+        if (!(offset >= 0) || !(total > 0)) throw new Error('SAY: offset and total (bytes) are both needed');
+        let bytes;
+        try {
+          const raw = atob(String(p.data_b64 || ''));
+          bytes = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        } catch (e) { throw new Error('SAY: data_b64 is missing or not base64'); }
+        if (!bytes.length || bytes.length > 8388608) throw new Error('SAY: a piece is 1 byte to 8 MB of decoded video');
+        if (offset + bytes.length > total) throw new Error('SAY: this piece runs past the declared total');
+        const whole = offset === 0 && bytes.length === total;
+        const headers = { authorization: 'Bearer ' + (await ebayAccessToken(ctx.env, account)), 'content-type': 'application/octet-stream' };
+        if (!whole) headers['content-range'] = 'bytes ' + offset + '-' + (offset + bytes.length - 1) + '/' + total;
+        const r = await fetch('https://apim.ebay.com/commerce/media/v1_beta/video/' + vid + '/upload', { method: 'POST', headers: headers, body: bytes });
+        return { status: r.status, sent: bytes.length, from: offset, to: offset + bytes.length - 1, total: total, whole: whole, body: (await r.text()).slice(0, 400) };
+      }
+      if (op === 'status') {
+        const vid = String(p.video_id || '').replace(/[^0-9a-zA-Z_-]/g, '').slice(0, 64);
+        if (!vid) throw new Error('SAY: video_id is needed');
+        const r = await ebayRestFetch(ctx.env, account, 'GET', '/commerce/media/v1_beta/video/' + vid);
+        return { status: r.status, body: r.body };
+      }
+      throw new Error('SAY: op must be create, part or status');
     },
   },
   ebaySubmitConsent: {
