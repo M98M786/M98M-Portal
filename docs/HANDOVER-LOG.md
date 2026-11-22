@@ -528,3 +528,74 @@ the suite had been red on main since, along with three Product history pins the 
 re-pinned to the page as it is. Suite 1497/1497.
 
 **Nothing sent to eBay.** Reads only; the per-account switches, bounds (30 s per listing) and the 40k/day cap are unchanged.
+
+## 2026-11-22 · MAC · Engine: ebayVideoUpload — a listing video uploaded through the API (owner, 22 Nov)
+
+**Why.** The owner: "I will upload the video in the chat and you upload it on eBay — make a route." Until now the
+engine could only READ a video record (the 31 Oct sweep); nothing could put one up. eBay's road: Media API
+createVideo → the bytes → processing → the id attached to the listing. UK marketplace supports it; the cap is
+150 MB and in practice a listing video is under a minute; the sell.inventory scope the upload needs is already in
+the consents, and the media read has worked on every account since 31 Oct through the same token path.
+
+**What changed.** Commit 4e81e20 on main. One new sync-keyed route `ebayVideoUpload` (token never leaves the
+worker), three ops, all taking `account`:
+- `op:'create'` `{title, size, description?}` — size is the file's EXACT byte count; answers `{video_id}` read
+  from eBay's Location header (201 with an empty body — ebayRestFetch now returns `location` for this). Audited
+  as EBAY_VIDEO_CREATE.
+- `op:'part'` `{video_id, offset, total, data_b64}` — the file as base64 pieces of up to 8 MB decoded, sent in
+  order from offset 0; one piece that is the whole file goes without Content-Range, several go with
+  `bytes start-end/total`. eBay's rule: the bytes received must equal the declared size exactly.
+- `op:'status'` `{video_id}` — PENDING_UPLOAD → PROCESSING → LIVE is the good road; BLOCKED / PROCESSING_FAILED
+  are eBay's refusals and statusMessage says why. Attach only after LIVE.
+- Attach is NOT in the route: ReviseFixedPriceItem through the existing `ebayTradeCall` with
+  `<Item><ItemID>…</ItemID><VideoDetails><VideoID>…</VideoID></VideoDetails></Item>`; GetItem with
+  OutputSelector Item.VideoDetails proves it. One video per listing.
+
+**For WINDOWS.** Call it the same way as every sync route: POST JSON `{action:'ebayVideoUpload', key:<the sync
+key from the usual place>, payload:{…}}` to the engine, browser User-Agent on the request (a bare curl UA is
+blocked at the door). Chunk the file at 6 MB, base64 each piece, send parts strictly in order and stop on the
+first non-2xx; then poll status every ~20 s until LIVE (processing usually lands inside a few minutes) and
+revise the listing. The account named in payload must be the account that owns the item.
+
+**Verified.** Parse check passed; deployed and probed (unauthenticated probe answers auth, not unknown action).
+First real video still to run — the owner will drop one in chat on the Mac side.
+
+**Still open.** Nothing in the portal shows upload progress; this is a session-driven tool only, like the SQR
+campaign work.
+
+## 2026-11-22 · MAC · Price automation: the peak-time penny pulse, SHADOW (owner, 22 Nov)
+
+**Why.** The owner (voice, 22 Nov): a price automation page in the ads portal, pinned in the main portal too. In
+peak time the listings in the Dynamic/General campaigns take a 10p cut — a quarter of them an evening, a four-day
+wheel, each listing once per cycle, only a listing that can AFFORD it; the price goes back up in the morning; and
+because eBay drops a listing out of its Dynamic campaign on a price change, every price move is followed ~20
+minutes later by a re-add into the campaign it came from ("2 triggers"). Then, mid-build: **"keep it in shadow
+mode, firstly make it"** — so this build rehearses and sends NOTHING.
+
+**What changed.** New page `adtoolPulse` "Price automation" (frontend/view-adtool-pulse.js, .ppl- prefix): in the
+/ads/ Advertising sidebar after Peak time listings, pinned in management's PIN_GROUPS, hidden in the main sidebar
+like the other tool pages. Engine: PULSE section (pure block ADTOOL-PULSE-PURE), job `adtoolPricePulse` on its own
+slot `1-59/5 * * * *` (also runnable by key), actions `adtoolPulse` / `adtoolPulseSet` / `adtoolPulseRun`, table
+`adtool_pulse_plan` (one row per listing per pulse-day: cohort, price → new_price, afford verdict + reason, step
+planned→cut→readded→restored→done, or skipped/lapsed, every stamp UTC). Config `adtool_pulse_*`: amount 0.10,
+start_hour 17 UK, restore_hour 7 UK, readd_min 20, min_unit_profit £1; flags adtool_page_pulse + adtool_job_pulse.
+Schema family 29 ('pulse'), marker bumped 2026-11-22.2 / 217-6ee53e06. Register: PULSE_WHEEL / PULSE_AFFORD /
+PULSE_SHADOW.
+
+**The laws inside it.** Cohort = hash of the item number mod 4 (stable: a listing keeps its evening), day index =
+days since 2026-11-19 mod 4 — NEVER move that epoch. Membership = the one shared rule's cost-per-sale branch
+(running campaign, active listing, ad not archived). Afford = 30-day profit/unit (adtool_listing_day actual_profit
+per unit) minus the cut still ≥ the floor; no units or no cost = refused with the reason on the row (not knowing
+is not affording). SHADOW BY CONSTRUCTION: the job writes no apply-log row and fetches nothing — held by test; a
+config row asking for live is refused out loud. Live would be: ReviseFixedPriceItem (StartPrice) via ebayTradeCall
++ bulk_create_ads_by_listing_id back into the same campaign.
+
+**Said on the page (owner decisions pending).** A 4-day pulse keeps every pulsed listing permanently OUT of the
+markdown-sale system (14-days-same-price rule) — the two systems want the same listings; which wins is the
+owner's call. Defaults (17:00 cut, 07:00 restore, £1 floor) are management-editable knobs on the page.
+
+**Verified.** adtool-check ALL PASSED (1508/1508, syntax, SQL columns). Build 20261122-0122: adtoolPulse in both
+portals, ads views 23/23. Engine deployed + probed after push (see commit).
+
+**Still open.** Live mode (per-account switch, caps, undo, read-back after re-add) is deliberately NOT built.
+First real evening of shadow rows lands at 17:00 UK; read the page's history panel the day after.

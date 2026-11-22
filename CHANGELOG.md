@@ -1,6 +1,17 @@
 # CHANGELOG
 
-## 2026-11-21 - ADS COMMAND CENTRE: provisional went-negative rows take Acknowledge too
+## 2026-11-22 - ENGINE: upload a listing video through the API (ebayVideoUpload)
+
+Owner: "I will upload the video in the chat and you upload it on eBay — make a route." New sync-keyed
+route `ebayVideoUpload` with three ops: **create** (declares the title and the file's exact byte count,
+returns eBay's new video id — eBay answers 201 with an empty body and the id in the Location header,
+so ebayRestFetch now carries that header back; audited as EBAY_VIDEO_CREATE), **part** (the file
+travels as base64 pieces of up to 8 MB inside the JSON envelope; a single piece that is the whole file
+goes plain, several go in order from offset 0 with Content-Range), and **status** (the same media read
+the video sweep has made since 31 Oct — PENDING_UPLOAD → PROCESSING → LIVE, or eBay's refusal with its
+reason). Attaching the finished video to a listing is ReviseFixedPriceItem with VideoDetails.VideoID
+through the existing ebayTradeCall; eBay's cap is 150 MB, UK marketplace supported, and the
+sell.inventory scope the upload needs is already in the consents.
 
 Owner: "my page has the Acknowledge option, Husnain's doesn't - fix that." His row was one of the
 provisional ones read from the engine's ledger before the day's Sales Analysis tab exists, which had no
