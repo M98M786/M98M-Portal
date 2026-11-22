@@ -233,6 +233,15 @@ function cronMap() {
        way, because the job compares the state it wants with the state it believes and puts the ad
        right on the next tick rather than replaying a missed boundary. */
     '1-59/15 * * * *': [adtoolPeakSwitch],
+    /* The price pulse keeps a clock, not a workload: most ticks it reads one bounded SELECT and
+       stamps nothing. It still gets an invocation of its own because it is the job built to one day
+       write to eBay — prices and campaign membership both — and the law of this map is that such a
+       job is never the one a packed slot starves. Minutes :01 :06 :11 …, which shares four CLOCK
+       minutes an hour with the peak switch's quarter-hour slot but never an invocation or a budget;
+       the offsets ending :03/:08 are left alone on purpose, because :43 is the roll-up catch-up's
+       minute and that one is held free of every other slot by test. Today the job is shadow by
+       construction and sends nothing (see the PULSE section). */
+    '1-59/5 * * * *': [adtoolPricePulse],
     /* adtoolPeakPlan rides FIRST in this slot, and it is here only for the three cuts between the parts
        of the day (06:00, noon and 17:00 UK), where it works out today again for the listings the drift
        check flagged that day. On every other tick it reads the UK clock and returns without starting a
@@ -1186,12 +1195,12 @@ function pvTokens(s) {
    every DDL statement in the file, which is wider than these families on purpose: a CREATE put
    anywhere is a reason to look. That is deliberate: a marker that could go stale by accident is a
    column that never lands. */
-const ADTOOL_SCHEMA_VERSION = '2026-11-22.1';
+const ADTOOL_SCHEMA_VERSION = '2026-11-22.2';
 /* the fingerprint of every DDL statement in engine/worker.js, held to this value by the suite */
 /* 22 Nov: the count moved to 215 on 21 Nov with adtool_neg_ack (Ads command centre), a table created at its own two
    sites on every use rather than under a guard, so nothing was missing from the database; the marker simply had not
    been moved with it, and the suite has said so since. Moved here, with no guarded statement added. */
-const ADTOOL_SCHEMA_DDL_HASH = '215-2ffce716';
+const ADTOOL_SCHEMA_DDL_HASH = '217-6ee53e06';
 const ADTOOL_SCHEMA_KEY = 'adtool_schema_version';
 let ADTOOL_SCHEMA_MARK = null;      /* the one marker read per isolate */
 let ADTOOL_SCHEMA_SETTLE = null;    /* the one apply pass per isolate, and the proof DDL ran here */
@@ -1257,6 +1266,7 @@ function adtSchemaFamilies() {
     ['intraday', ensureAdtoolSchema],
     ['traffic', ensureTrafficSchema],
     ['price', ensurePriceSchema],
+    ['pulse', ensureAdtoolPulseSchema],
   ];
 }
 async function adtSchemaSettleRun(env) {
@@ -8210,6 +8220,9 @@ const ADTOOL_KV_TTL_MS = { adtoolToday: 60000, adtoolCommand: 60000, adtoolRunTo
      and a list people keep by hand, and the two writes behind that list drop this entry themselves
      rather than leaving the page two minutes stale. */
   adtoolChangeDay: 60000, adtoolPeak: 120000,
+  /* Price automation reads a plan its own job stamps every five minutes; two minutes keeps the
+     page inside the five-minute law with the same headroom every other advertising page gets */
+  adtoolPulse: 120000,
   /* 28 Oct: Entire Live Listings reads the campaign map, which the sync refreshes every few minutes,
      and the finished day figures behind it, which move once an hour. Potential CPC reads orders and
      finished days. Two minutes keeps a page flag switched off honoured inside the ceiling the gate
@@ -21001,6 +21014,7 @@ const ADTOOL_ACTIONS_P16 = {
     },
   },
 };
+
 /* ---- VIDEOS: the schema, the sweep, the cohort and the board (owner's brief, 31 Oct, §4) ----
    Nothing in this section writes to eBay. The sweep's GetItem, the media read and the item-page read
    are all reads, and the three of them are the only fetches it makes. */
@@ -31742,6 +31756,9 @@ const ROUTES = {
         adsItemsWatched,
         /* a once-over of the peak list, run by hand and on no cron slot: it names the campaign a
            listing is already wholly switched in, and never chooses for one in two (2 Nov) */
+        /* the price pulse (22 Nov): shadow by construction, so running it by key deals and stamps
+           the plan and sends nothing */
+        adtoolPricePulse,
         adtoolPeakCampaignFill, adtoolPeakHoursSet, adtoolPeakPlan };
       const fn = jobs[String(p.job || '')];
       if (!fn) throw new Error('SAY: unknown job — one of ' + Object.keys(jobs).join(', '));
@@ -34140,7 +34157,311 @@ Object.assign(ROUTES, ADTOOL_ACTIONS_P10); /* ADTOOL sale events: who qualifies,
 Object.assign(ROUTES, ADTOOL_ACTIONS_P11); /* ADTOOL big update phase 3: CPC Active / Post listings, Advertising Overview */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P14); /* ADTOOL owner batch 18 Oct: Campaigns, the listings inside one, and where each listing advertises */
 Object.assign(ROUTES, ADTOOL_ACTIONS_P15); /* ADTOOL owner batch 22 Oct: Stopped yesterday, Activated today, Peak times only */
+/* ══ PRICE AUTOMATION — THE PEAK-TIME PENNY PULSE (owner, 22 Nov 2026) ═══════════════════════════
+   The owner's law, in his own order: the listings sitting in the Dynamic/General campaigns take a
+   10p price cut in peak time, a quarter of them an evening, so each listing takes its turn once in
+   four days and never more often. Only a listing that can AFFORD the cut takes it. Next morning the
+   price goes back to what it was. And because eBay answers a price change by dropping the listing
+   out of its Dynamic campaign, every price move is followed, twenty minutes later, by putting the
+   listing back into the campaign it came from — the owner's two triggers.
+
+   SHADOW BY CONSTRUCTION (owner, same day: "keep it in shadow mode, firstly make it"). This build
+   writes every step into adtool_pulse_plan and sends NOTHING to eBay: no price revision, no ad
+   create, no ad delete, no token is ever fetched here. The one mode this code can run is 'shadow' —
+   a portal_config row asking for anything else is read, said out loud in the job note and the page,
+   and NOT obeyed. Turning it on for real is a later build and a deliberate one, never a config edit
+   nobody reviewed. What live WOULD send is written on every row so the rehearsal is honest:
+   the cut and the restore are Trading ReviseFixedPriceItem (Item.StartPrice) through the existing
+   ebayTradeCall plumbing, and the re-add is POST
+   /sell/marketing/v1/ad_campaign/{campaign_id}/bulk_create_ads_by_listing_id back into the same
+   campaign the listing was read from (the delete twin of which the 6 Nov de-duplication already
+   exercised live).
+
+   TWO WARNINGS THAT BELONG TO THE DESIGN, said here and printed on the page:
+   - eBay's sale-event rule counts 14 days at the SAME price (adSalePriceSteps: a real change
+     restarts the clock). A four-day price pulse therefore keeps every pulsed listing permanently
+     OUT of the markdown-sale system. The two systems want the same listings and cannot both have
+     them; which one wins is the owner's call, not this file's.
+   - the cohort is read from the portal's campaign map at the start hour, and that map lags eBay by
+     a few minutes; a listing that joined a Dynamic campaign that afternoon is in the evening's
+     read, one that left is not. */
+
+/* ADTOOL-PULSE-PURE-BEGIN */
+const ADTOOL_PULSE_DEFAULTS = { amount: 0.10, start_hour: 17, restore_hour: 7, readd_min: 20, min_unit_profit: 1 };
+const ADTOOL_PULSE_CONFIG_KEYS = ['adtool_pulse_amount', 'adtool_pulse_start_hour', 'adtool_pulse_restore_hour', 'adtool_pulse_readd_min', 'adtool_pulse_min_unit_profit', 'adtool_pulse_mode'];
+/* Day nought of the four-day wheel. Any fixed date works, but it must NEVER move once rows exist,
+   or every listing in the fleet changes its turn on the same evening. */
+const ADTOOL_PULSE_EPOCH = '2026-11-19';
+const ADTOOL_PULSE_STEPS = ['planned', 'skipped', 'cut', 'readded', 'restored', 'done', 'lapsed'];
+const ADTOOL_PULSE_PRICE_FLOOR = 0.99;
+function adtPulseDayIndex(day) {
+  const ms = new Date(String(day) + 'T12:00:00Z') - new Date(ADTOOL_PULSE_EPOCH + 'T12:00:00Z');
+  return ((Math.round(ms / 86400000) % 4) + 4) % 4;
+}
+function adtPulseCohortOf(itemId) {
+  /* a listing's place on the wheel comes from its own number and nothing else, so it keeps its turn
+     as the fleet grows and shrinks, and two reads of the same day always build the same cohort.
+     eBay item numbers share long common prefixes per account, so the whole number is folded in
+     rather than a slice of it. */
+  const s = String(itemId || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 100003;
+  return h % 4;
+}
+function adtPulseAfford(row, cfg) {
+  /* THE AFFORDABLE TEST (owner: "only the item which is affordable"). The item gives up the cut on
+     every unit it sells that evening, so the question is whether its own thirty days say it can:
+     profit per unit under the portal's own law, minus the cut, must still clear the floor a manager
+     sets. NOT KNOWING IS NOT AFFORDING: no units in thirty days, or a cost the records cannot
+     price, refuses the cut and says why, rather than gambling a listing nobody can account for. */
+  const amount = Number(cfg.amount), floor = Number(cfg.min_unit_profit), price = Number(row.price);
+  if (!(price > 0)) return { ok: false, reason: 'no listed price on record' };
+  if (price - amount < ADTOOL_PULSE_PRICE_FLOOR) return { ok: false, reason: 'price would fall under £' + ADTOOL_PULSE_PRICE_FLOOR.toFixed(2) };
+  if (!(Number(row.units_30d) > 0)) return { ok: false, reason: 'nothing sold in 30 days, so profit per unit is unknown' };
+  if (row.unit_profit_30d === null || row.unit_profit_30d === undefined) return { ok: false, reason: 'cost not on record, so profit per unit is unknown' };
+  if (Number(row.unit_profit_30d) - amount < floor) return { ok: false, reason: 'profit per unit £' + Number(row.unit_profit_30d).toFixed(2) + ' cannot give up £' + amount.toFixed(2) + ' and keep £' + floor.toFixed(2) };
+  return { ok: true, reason: '' };
+}
+function adtPulseDue(row, uk, cfg, nowMs) {
+  /* the one owed transition for this row at this tick, or '' — the whole clock of the tool in one
+     place, so the job stays a reader of this answer and the tests can hold every boundary. */
+  const step = String(row.step || ''), day = String(row.day || '');
+  if (step === 'planned') {
+    if (day < uk.date) return 'lapse';
+    /* the cut belongs to its own evening: a plan the worker slept through is not cut at midnight —
+       the listing keeps its price and its next turn comes round in four days */
+    if (day !== uk.date) return '';
+    return (uk.hour >= Number(cfg.start_hour) && uk.hour < 23) ? 'cut' : '';
+  }
+  if (step === 'cut' || step === 'readded') {
+    if (day === uk.date) {
+      if (step === 'cut' && row.cut_at && nowMs >= Date.parse(row.cut_at) + Number(cfg.readd_min) * 60000) return 'readd';
+      return '';
+    }
+    /* yesterday's listing goes back up at the morning hour; an older stray goes back up at once —
+       a reduced price nobody is watching is not a state to hold for want of a tick */
+    if (day < adtAddDays(uk.date, -1)) return 'restore';
+    return uk.hour >= Number(cfg.restore_hour) ? 'restore' : '';
+  }
+  if (step === 'restored') {
+    return (row.restored_at && nowMs >= Date.parse(row.restored_at) + Number(cfg.readd_min) * 60000) ? 'readd2' : '';
+  }
+  return '';
+}
+function adtPulseWheel(members, day) {
+  /* the four cohorts counted from a membership list, with the day each next runs, so the page can
+     draw the wheel the owner described: 25% tonight, the next quarter tomorrow, round in four days */
+  const idx = adtPulseDayIndex(day);
+  const wheel = [0, 1, 2, 3].map(c => ({ cohort: c, members: 0, days_away: ((c - idx) % 4 + 4) % 4, runs_on: adtAddDays(day, ((c - idx) % 4 + 4) % 4) }));
+  for (const m of (members || [])) wheel[adtPulseCohortOf(m.item_id)].members++;
+  return wheel;
+}
+/* ADTOOL-PULSE-PURE-END */
+
+let ADTOOL_PULSE_SCHEMA_OK = false;
+async function ensureAdtoolPulseSchema(env) {
+  if (ADTOOL_PULSE_SCHEMA_OK) return;
+  if (await adtSchemaMarked(env)) { ADTOOL_PULSE_SCHEMA_OK = true; return; }
+  const stmts = [
+    "CREATE TABLE IF NOT EXISTS adtool_pulse_plan (day TEXT NOT NULL, account TEXT NOT NULL, item_id TEXT NOT NULL, cohort INTEGER, campaign_id TEXT DEFAULT '', campaign_name TEXT DEFAULT '', title TEXT DEFAULT '', price REAL, new_price REAL, unit_profit_30d REAL, units_30d INTEGER, eligible INTEGER DEFAULT 0, reason TEXT DEFAULT '', step TEXT DEFAULT 'planned', mode TEXT DEFAULT 'shadow', cut_at TEXT DEFAULT '', readd_at TEXT DEFAULT '', restored_at TEXT DEFAULT '', done_at TEXT DEFAULT '', updated_at TEXT, PRIMARY KEY (day, account, item_id))",
+    'CREATE INDEX IF NOT EXISTS idx_adtpulse_step ON adtool_pulse_plan(step, day)',
+  ].map(s => env.DB.prepare(s));
+  /* the page flag and the job's own stop button, both seeded on — 'on' is safe here because the
+     mode below is shadow and this build cannot send regardless */
+  for (const key of ['adtool_page_pulse', 'adtool_job_pulse']) {
+    stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, 'on', datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key));
+  }
+  const seed = { adtool_pulse_mode: 'shadow', adtool_pulse_amount: '0.10', adtool_pulse_start_hour: '17', adtool_pulse_restore_hour: '7', adtool_pulse_readd_min: '20', adtool_pulse_min_unit_profit: '1' };
+  for (const k of Object.keys(seed)) {
+    stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO NOTHING").bind(k, seed[k]));
+  }
+  await adtSeedRun(env, [
+    ['PULSE_WHEEL', 'The four-day price wheel', 'Every listing with a live ad in a running Dynamic or General (cost-per-sale) campaign is dealt onto one of four days by the digits of its own item number, so a quarter of them take their turn each evening and each listing comes round once in four days, never more often. The wheel is dealt from the campaign map at the start hour, so a listing that joined that afternoon is in and one that left is not.', 'campaigns, campaign_ads, items_api, adtool_pulse_plan', 'Each evening at the start hour, and the page reads the live map whenever it is opened', 'Unit tests hold the deal steady (same listing, same cohort, always) and the turn spacing at exactly four days'],
+    ['PULSE_AFFORD', 'Which listing can afford the cut', 'A listing may take the evening cut only when its own thirty days say it can: profit per unit under the portal\'s profit law, minus the cut, must still clear the floor a manager sets. Nothing sold in thirty days, or a cost the records cannot price, refuses the cut with the reason written on the row — not knowing is never afforded.', 'adtool_listing_day, items_api, portal_config', 'Each evening when the plan is dealt', 'Unit tests either side of the floor to the penny, and on the two unknowns refusing'],
+    ['PULSE_SHADOW', 'The pulse rehearses and sends nothing', 'Every step of the owner\'s two triggers — the evening cut, the re-add twenty minutes later, the morning restore and its own re-add — is decided on the clock and written to the plan with its stamp, and nothing is sent to eBay: no price revision, no ad create, no ad delete. A config row asking for live is refused out loud. What live would send is named on every row so the rehearsal can be read like the real thing.', 'adtool_pulse_plan, portal_config', 'Every five minutes on the job\'s own slot', 'The plan table against the clock: each stamp inside its own window, and the apply log holding no pulse rows at all'],
+  ].map(r => env.DB.prepare("INSERT INTO adtool_number_register (metric_id, name, formula, source_tables, recompute, recheck, owner, phase, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'adtool', 16, datetime('now')) ON CONFLICT(metric_id) DO UPDATE SET name = ?2, formula = ?3, source_tables = ?4, recompute = ?5, recheck = ?6").bind(r[0], r[1], r[2], r[3], r[4], r[5])).concat(stmts), 'pulse schema');
+  ADTOOL_PULSE_SCHEMA_OK = true;
+}
+
+async function adtPulseConfig(env) {
+  const out = { mode: 'shadow', amount: ADTOOL_PULSE_DEFAULTS.amount, start_hour: ADTOOL_PULSE_DEFAULTS.start_hour, restore_hour: ADTOOL_PULSE_DEFAULTS.restore_hour, readd_min: ADTOOL_PULSE_DEFAULTS.readd_min, min_unit_profit: ADTOOL_PULSE_DEFAULTS.min_unit_profit };
+  for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_pulse_%'").all()).results || [])) {
+    const k = String(r.key).replace('adtool_pulse_', ''), v = String(r.value == null ? '' : r.value);
+    if (k === 'mode') { out.mode = v; continue; }
+    if (out[k] !== undefined) { const n = Number(v); if (isFinite(n)) out[k] = n; }
+  }
+  /* shadow by construction: a mode row asking for live is reported, never obeyed */
+  out.live_refused = out.mode !== 'shadow';
+  out.mode = 'shadow';
+  return out;
+}
+
+/* the one membership rule every advertising page shares (ADTOOL_LIVE_AD_SQL), narrowed to its
+   cost-per-sale branch — which is what the owner's "Dynamic and General" campaigns are */
+const ADTOOL_PULSE_DYNAMIC_SQL = "SELECT ca.listing_id AS item_id, ca.campaign_id, c.name AS campaign_name, c.account, ia.price, ia.title FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id JOIN items_api ia ON ia.item_id = ca.listing_id WHERE (c.status LIKE '%RUNNING%' OR c.status = 'ENDING_SOON') AND ia.status = 'ACTIVE' AND c.funding_model <> 'COST_PER_CLICK' AND COALESCE(ca.ad_status, '') <> 'ARCHIVED'";
+async function adtPulseMembers(env, acct) {
+  const rows = (await env.DB.prepare(ADTOOL_PULSE_DYNAMIC_SQL + (acct ? ' AND c.account = ?1' : '')).bind(...(acct ? [acct] : [])).all()).results || [];
+  /* one row per listing: a listing in two cost-per-sale campaigns (the duplication the 6 Nov sweep
+     exists to remove) is pulsed once, against the first campaign read, and says how many it sits in */
+  const by = {};
+  for (const r of rows) {
+    const id = String(r.item_id);
+    if (by[id]) { by[id].campaigns += 1; continue; }
+    by[id] = { item_id: id, account: String(r.account || ''), campaign_id: String(r.campaign_id || ''), campaign_name: String(r.campaign_name || ''), price: r.price == null ? null : Number(r.price), title: String(r.title || ''), campaigns: 1 };
+  }
+  return Object.keys(by).map(k => by[k]);
+}
+
+async function adtPulsePlanBuild(env, cfg, uk) {
+  /* tonight's quarter of the wheel, dealt ONCE per UK day: the first tick at or after the start
+     hour writes the plan, and every later tick finds it there and deals nothing */
+  const today = uk.date;
+  const have = await env.DB.prepare('SELECT COUNT(*) AS n FROM adtool_pulse_plan WHERE day = ?1').bind(today).first();
+  if (have && Number(have.n) > 0) return 0;
+  const idx = adtPulseDayIndex(today);
+  const members = (await adtPulseMembers(env, '')).filter(m => adtPulseCohortOf(m.item_id) === idx);
+  if (!members.length) return 0;
+  const ids = members.map(m => m.item_id), from = adtAddDays(today, -30), sums = {};
+  for (const ch of adtChunks(ids)) {
+    for (const r of ((await env.DB.prepare('SELECT item_id, SUM(units) AS u, SUM(actual_profit) AS p FROM adtool_listing_day WHERE day >= ?1 AND item_id IN ' + adtInList(ch, 1) + ' GROUP BY item_id').bind(from, ...ch).all()).results || [])) sums[String(r.item_id)] = r;
+  }
+  const nowIso = new Date().toISOString(), stmts = [];
+  for (const m of members) {
+    const s = sums[m.item_id] || {};
+    const units = Number(s.u) || 0;
+    const unitProfit = (units > 0 && s.p !== null && s.p !== undefined) ? Math.round(Number(s.p) / units * 100) / 100 : null;
+    const a = adtPulseAfford({ price: m.price, units_30d: units, unit_profit_30d: unitProfit }, cfg);
+    const newPrice = a.ok ? Math.round((Number(m.price) - Number(cfg.amount)) * 100) / 100 : null;
+    stmts.push(env.DB.prepare('INSERT OR IGNORE INTO adtool_pulse_plan (day, account, item_id, cohort, campaign_id, campaign_name, title, price, new_price, unit_profit_30d, units_30d, eligible, reason, step, mode, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)')
+      .bind(today, m.account, m.item_id, idx, m.campaign_id, m.campaign_name, m.title.slice(0, 90), m.price, newPrice, unitProfit, units, a.ok ? 1 : 0, a.reason, a.ok ? 'planned' : 'skipped', 'shadow', nowIso));
+  }
+  return adtBatch(env, stmts);
+}
+
+async function adtoolPricePulse(env) {
+  /* THE OWNER'S TWO TRIGGERS, on one five-minute clock. Trigger one is the evening cut for tonight's
+     quarter of the wheel; trigger two is the re-add twenty minutes after any price move; the morning
+     restore and its own re-add are the same pair run the other way. In this build every one of them
+     is a row stamped in adtool_pulse_plan and NOTHING leaves the worker. */
+  if ((await adtFlag(env, 'adtool_page_pulse')) !== 'on') return;
+  if ((await adtFlag(env, 'adtool_job_pulse')) !== 'on') return;
+  await ensureAdtoolPulseSchema(env);
+  const t = await adtJobStart(env, 'adtoolPricePulse');
+  let written = 0;
+  try {
+    const uk = adtUkParts(Date.now()), nowMs = Date.now(), nowIso = new Date(nowMs).toISOString();
+    const cfg = await adtPulseConfig(env);
+    let built = 0;
+    if (uk.hour >= cfg.start_hour && uk.hour < 23) { built = await adtPulsePlanBuild(env, cfg, uk); written += built; }
+    const rows = (await env.DB.prepare("SELECT day, account, item_id, step, cut_at, restored_at FROM adtool_pulse_plan WHERE step IN ('planned', 'cut', 'readded', 'restored') AND day >= ?1 ORDER BY day LIMIT 1200").bind(adtAddDays(uk.date, -6)).all()).results || [];
+    const stmts = [], n = { cut: 0, readd: 0, restore: 0, readd2: 0, lapse: 0 };
+    for (const r of rows) {
+      const due = adtPulseDue(r, uk, cfg, nowMs);
+      if (!due) continue;
+      n[due] = (n[due] || 0) + 1;
+      /* each UPDATE re-states the step it is leaving, so a tick racing itself cannot stamp twice */
+      if (due === 'cut') stmts.push(env.DB.prepare("UPDATE adtool_pulse_plan SET step = 'cut', cut_at = ?4, updated_at = ?4 WHERE day = ?1 AND account = ?2 AND item_id = ?3 AND step = 'planned'").bind(r.day, r.account, r.item_id, nowIso));
+      else if (due === 'readd') stmts.push(env.DB.prepare("UPDATE adtool_pulse_plan SET step = 'readded', readd_at = ?4, updated_at = ?4 WHERE day = ?1 AND account = ?2 AND item_id = ?3 AND step = 'cut'").bind(r.day, r.account, r.item_id, nowIso));
+      else if (due === 'restore') stmts.push(env.DB.prepare("UPDATE adtool_pulse_plan SET step = 'restored', restored_at = ?4, updated_at = ?4 WHERE day = ?1 AND account = ?2 AND item_id = ?3 AND step IN ('cut', 'readded')").bind(r.day, r.account, r.item_id, nowIso));
+      else if (due === 'readd2') stmts.push(env.DB.prepare("UPDATE adtool_pulse_plan SET step = 'done', done_at = ?4, updated_at = ?4 WHERE day = ?1 AND account = ?2 AND item_id = ?3 AND step = 'restored'").bind(r.day, r.account, r.item_id, nowIso));
+      else if (due === 'lapse') stmts.push(env.DB.prepare("UPDATE adtool_pulse_plan SET step = 'lapsed', reason = 'the evening passed before the cut was stamped — the listing kept its price', updated_at = ?4 WHERE day = ?1 AND account = ?2 AND item_id = ?3 AND step = 'planned'").bind(r.day, r.account, r.item_id, nowIso));
+    }
+    written += await adtBatch(env, stmts);
+    await adtJobEnd(env, 'adtoolPricePulse', t, written, 'ok',
+      'shadow · dealt ' + built + ' · cut ' + n.cut + ' · re-add ' + n.readd + ' · restore ' + n.restore + ' · done ' + n.readd2 + (n.lapse ? ' · lapsed ' + n.lapse : '') + (cfg.live_refused ? ' · A LIVE MODE ROW WAS REFUSED: this build only rehearses' : ''));
+  } catch (e) {
+    await adtJobEnd(env, 'adtoolPricePulse', t, written, 'error', String((e && e.message) || e).slice(0, 200));
+  }
+}
+
+async function adtoolPulseCompute(env, day, acct) {
+  const uk = adtUkParts(Date.now()), today = uk.date, d = day || today;
+  const cfg = await adtPulseConfig(env);
+  const members = await adtPulseMembers(env, acct);
+  const wheel = adtPulseWheel(members, today);
+  const ab = acct ? [acct] : [];
+  const rows = (await env.DB.prepare('SELECT day, account, item_id, cohort, campaign_id, campaign_name, title, price, new_price, unit_profit_30d, units_30d, eligible, reason, step, mode, cut_at, readd_at, restored_at, done_at FROM adtool_pulse_plan WHERE day = ?1' + (acct ? ' AND account = ?2' : '') + ' ORDER BY eligible DESC, account, item_id LIMIT 1200').bind(...[d].concat(ab)).all()).results || [];
+  const hist = (await env.DB.prepare("SELECT day, COUNT(*) AS listings, SUM(eligible) AS eligible, SUM(CASE WHEN step = 'done' THEN 1 ELSE 0 END) AS done, SUM(CASE WHEN step = 'lapsed' THEN 1 ELSE 0 END) AS lapsed FROM adtool_pulse_plan WHERE day >= ?1 GROUP BY day ORDER BY day DESC LIMIT 10").bind(adtAddDays(today, -9)).all()).results || [];
+  const steps = {}, reasons = {};
+  for (const r of rows) {
+    steps[String(r.step)] = (steps[String(r.step)] || 0) + 1;
+    if (!Number(r.eligible) && r.reason) reasons[String(r.reason)] = (reasons[String(r.reason)] || 0) + 1;
+  }
+  const accounts = {};
+  for (const m of members) accounts[m.account] = (accounts[m.account] || 0) + 1;
+  return {
+    day: d, today, day_index: adtPulseDayIndex(d), cfg, shadow: true,
+    members_total: members.length, wheel,
+    accounts: Object.keys(accounts).sort().map(a => ({ account: a, members: accounts[a] })),
+    rows, steps, reasons: Object.keys(reasons).map(k => ({ reason: k, listings: reasons[k] })).sort((a, b) => b.listings - a.listings),
+    hist,
+    warnings: [
+      'Shadow mode: every step is decided on the clock and written down here, and nothing is sent to eBay — no price changes, no campaign changes.',
+      'eBay counts 14 days at the same price before a listing can join a markdown sale. A four-day price pulse keeps every pulsed listing out of the sale-event system for as long as it runs — the two systems want the same listings, and which one wins is an owner decision.',
+      'A price change drops a listing out of its Dynamic campaign on eBay — that is why every price move here is followed, ' + cfg.readd_min + ' minutes later, by a re-add step back into the campaign it came from. Live mode would read the campaign back first and re-add only what is missing.',
+    ],
+    computed_at: new Date().toISOString(),
+  };
+}
+
+const ADTOOL_ACTIONS_PULSE = {
+  adtoolPulse: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, null);
+      await ensureAdtoolPulseSchema(ctx.env);
+      await adtGate(ctx, 'adtool_page_pulse');
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(String((p && p.day) || '')) ? String(p.day) : '';
+      const acct = String((p && p.account) || '').trim();
+      return adtKvMemo(ctx.env, 'adtoolPulse', adtProfitClass(ctx.user), { day, account: acct }, ADTOOL_KV_TTL_MS.adtoolPulse,
+        () => adtoolPulseCompute(ctx.env, day, acct),
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+    },
+  },
+  adtoolPulseSet: {
+    auth: 'any', fn: async (p, ctx) => {
+      await adtGate(ctx, null);
+      await ensureAdtoolPulseSchema(ctx.env);
+      await adtGate(ctx, 'adtool_page_pulse');
+      const role = String((ctx.user && ctx.user.role) || '');
+      if (role !== 'Management' && role !== 'Ops Head') throw new Error('SAY: only Management or an Ops Head may change these settings');
+      /* each knob is clamped to a band wide enough to steer and narrow enough that a slipped keystroke
+         cannot ask for a £10 cut or a 2 a.m. peak; the mode is deliberately NOT a knob here */
+      const ALLOWED = { amount: [0.01, 1], start_hour: [12, 22], restore_hour: [4, 12], readd_min: [5, 120], min_unit_profit: [0, 10] };
+      const k = String((p && p.key) || ''), v = Number(p && p.value);
+      if (!ALLOWED[k]) throw new Error('SAY: that is not a setting this page keeps — one of ' + Object.keys(ALLOWED).join(', '));
+      if (!isFinite(v) || v < ALLOWED[k][0] || v > ALLOWED[k][1]) throw new Error('SAY: ' + k + ' must be between ' + ALLOWED[k][0] + ' and ' + ALLOWED[k][1]);
+      await ctx.env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')").bind('adtool_pulse_' + k, String(v)).run();
+      await adtPulseCacheClear(ctx.env);
+      return { saved: k, value: v, sent_to_ebay: false };
+    },
+  },
+  adtoolPulseRun: {
+    auth: 'any', fn: async (p, ctx) => {
+      /* run the shadow job by hand, so the page need not wait five minutes to show a dealt plan */
+      await adtGate(ctx, null);
+      await ensureAdtoolPulseSchema(ctx.env);
+      await adtGate(ctx, 'adtool_page_pulse');
+      const role = String((ctx.user && ctx.user.role) || '');
+      if (role !== 'Management' && role !== 'Ops Head') throw new Error('SAY: only Management or an Ops Head may run the job by hand');
+      await runJob(ctx.env, adtoolPricePulse);
+      await adtPulseCacheClear(ctx.env);
+      const uk = adtUkParts(Date.now());
+      const counts = (await ctx.env.DB.prepare('SELECT step, COUNT(*) AS n FROM adtool_pulse_plan WHERE day = ?1 GROUP BY step').bind(uk.date).all()).results || [];
+      return { ran: 'adtoolPricePulse', day: uk.date, steps: counts, sent_to_ebay: false };
+    },
+  },
+};
+async function adtPulseCacheClear(env) {
+  /* the page reloads straight after a write; the keys name the payloads a fresh page opens with */
+  for (const cls of ['p', 'np']) {
+    for (const pay of [{ day: '', account: '' }]) {
+      try { await env.HOT.delete(adtKvKey('adtoolPulse', cls, pay)); } catch (e) { /* the two-minute window catches it */ }
+    }
+  }
+}
+
 Object.assign(ROUTES, ADTOOL_ACTIONS_P16); /* ADTOOL owner batch 28 Oct: Entire Live Listings, Potential CPC */
+Object.assign(ROUTES, ADTOOL_ACTIONS_PULSE); /* Price automation — the peak-time penny pulse (owner, 22 Nov), shadow by construction */
 /* Phase 1A (27 Sep 2026): no collective profit leaves the engine for the ads portal. Every adtool action's answer
    passes through adtStripCollectiveProfit on the way out — profit keys survive only inside item-keyed rows, and the
    old est. ad profit never survives. The actions themselves no longer compute account or fleet profit; this is the
