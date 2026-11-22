@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2026-11-22 - ENGINE: ebayVideoUpload carries the whole file in one piece (WINDOWS)
+
+The first real video (Perfect Super Deals, 11 MB) showed eBay does not take pieces: the create answered
+201 with a video id, then the first 6 MB piece sent with Content-Range came back 400 190007
+"Content-Length 6291456 cannot be less than video size 11516628" — the upload endpoint wants the whole
+file in one request. The piece cap rises from 8 MB to 16 MB decoded so a normal listing video rides one
+request with no Content-Range; 16 MB is the isolate's memory line with the base64 envelope and the
+decoded copies in memory at once. The create now refuses a size over 16 MB so no empty media record is
+left behind for a file the route cannot carry; a longer video needs a route that reads a raw body.
+
 ## 2026-11-22 - ENGINE: upload a listing video through the API (ebayVideoUpload)
 
 Owner: "I will upload the video in the chat and you upload it on eBay — make a route." New sync-keyed
