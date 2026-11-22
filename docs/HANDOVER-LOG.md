@@ -528,3 +528,37 @@ the suite had been red on main since, along with three Product history pins the 
 re-pinned to the page as it is. Suite 1497/1497.
 
 **Nothing sent to eBay.** Reads only; the per-account switches, bounds (30 s per listing) and the 40k/day cap are unchanged.
+
+## 2026-11-22 · MAC · Engine: ebayVideoUpload — a listing video uploaded through the API (owner, 22 Nov)
+
+**Why.** The owner: "I will upload the video in the chat and you upload it on eBay — make a route." Until now the
+engine could only READ a video record (the 31 Oct sweep); nothing could put one up. eBay's road: Media API
+createVideo → the bytes → processing → the id attached to the listing. UK marketplace supports it; the cap is
+150 MB and in practice a listing video is under a minute; the sell.inventory scope the upload needs is already in
+the consents, and the media read has worked on every account since 31 Oct through the same token path.
+
+**What changed.** Commit 4e81e20 on main. One new sync-keyed route `ebayVideoUpload` (token never leaves the
+worker), three ops, all taking `account`:
+- `op:'create'` `{title, size, description?}` — size is the file's EXACT byte count; answers `{video_id}` read
+  from eBay's Location header (201 with an empty body — ebayRestFetch now returns `location` for this). Audited
+  as EBAY_VIDEO_CREATE.
+- `op:'part'` `{video_id, offset, total, data_b64}` — the file as base64 pieces of up to 8 MB decoded, sent in
+  order from offset 0; one piece that is the whole file goes without Content-Range, several go with
+  `bytes start-end/total`. eBay's rule: the bytes received must equal the declared size exactly.
+- `op:'status'` `{video_id}` — PENDING_UPLOAD → PROCESSING → LIVE is the good road; BLOCKED / PROCESSING_FAILED
+  are eBay's refusals and statusMessage says why. Attach only after LIVE.
+- Attach is NOT in the route: ReviseFixedPriceItem through the existing `ebayTradeCall` with
+  `<Item><ItemID>…</ItemID><VideoDetails><VideoID>…</VideoID></VideoDetails></Item>`; GetItem with
+  OutputSelector Item.VideoDetails proves it. One video per listing.
+
+**For WINDOWS.** Call it the same way as every sync route: POST JSON `{action:'ebayVideoUpload', key:<the sync
+key from the usual place>, payload:{…}}` to the engine, browser User-Agent on the request (a bare curl UA is
+blocked at the door). Chunk the file at 6 MB, base64 each piece, send parts strictly in order and stop on the
+first non-2xx; then poll status every ~20 s until LIVE (processing usually lands inside a few minutes) and
+revise the listing. The account named in payload must be the account that owns the item.
+
+**Verified.** Parse check passed; deployed and probed (unauthenticated probe answers auth, not unknown action).
+First real video still to run — the owner will drop one in chat on the Mac side.
+
+**Still open.** Nothing in the portal shows upload progress; this is a session-driven tool only, like the SQR
+campaign work.
