@@ -3902,12 +3902,17 @@ async function adsItemsNet(env) {
    Past the daily cap it stops and writes down that it has, which is the same figure the page reads
    back to say "today's watch allowance used". */
 const ADTOOL_CAMPAIGN_WATCH_WARM_MS = 25000;     // the warm after a tick's reads: three lists per account, inside this
+/* and never past this much of the TICK itself. Measured 23 Nov: one account of 60 campaigns took 97 s to read, and the
+   reads are allowed 90 s (ADTOOL_CAMPAIGN_WATCH_MS), so a fixed warm on top could reach 115 s of a two-minute slot and
+   meet the next tick coming the other way. The warm gets whatever is left of this envelope and no more. */
+const ADTOOL_CAMPAIGN_WATCH_TICK_MS = 105000;
 const ADTOOL_CAMPAIGN_WATCH_WARM_UNTIL_MS = 150000;  // good until a little after the next two-minute tick
 async function adWatchWarmPages(env, accts, tickStart) {
   const out = [], t0 = Date.now();
+  const deadline = Math.min(t0 + ADTOOL_CAMPAIGN_WATCH_WARM_MS, (Number(tickStart) || t0) + ADTOOL_CAMPAIGN_WATCH_TICK_MS);
   for (const acct of (accts || [])) {
     for (const state of ['', 'multi', 'none']) {
-      if (Date.now() - t0 > ADTOOL_CAMPAIGN_WATCH_WARM_MS) return out;
+      if (Date.now() > deadline) return out;
       const pay = { account: String(acct), q: '', state: state };
       try {
         const data = await adtoolItemCampaignsCompute(env, pay);

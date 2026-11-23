@@ -9291,7 +9291,11 @@ function run(argv) {
     const f = src.slice(src.indexOf('async function adWatchWarmPages('), src.indexOf('async function adsItemsWatched('));
     const fn = /for \(const state of \['', 'multi', 'none'\]\)/.test(f) && /const pay = \{ account: String\(acct\), q: '', state: state \};/.test(f) &&
       /await adtoolItemCampaignsCompute\(env, pay\)/.test(f) && /adtKvPut\(env, adtKvKey\('adtoolItemCampaigns', 'p', pay\), ADTOOL_KV_TTL_MS\.adtoolItemCampaigns, [^\n]*true, Date\.now\(\) \+ ADTOOL_CAMPAIGN_WATCH_WARM_UNTIL_MS\)/.test(f) &&
-      /if \(Date\.now\(\) - t0 > ADTOOL_CAMPAIGN_WATCH_WARM_MS\) return out;/.test(f) && /const ADTOOL_CAMPAIGN_WATCH_WARM_MS = 25000;/.test(src) && /const ADTOOL_CAMPAIGN_WATCH_WARM_UNTIL_MS = 150000;/.test(src);
+      /* the warm stops at its own bound OR at what is left of the tick's envelope, whichever comes first, so it
+         cannot push a two-minute tick into the next one (measured 23 Nov: 60 campaigns took 97 s to read) */
+      /const deadline = Math\.min\(t0 \+ ADTOOL_CAMPAIGN_WATCH_WARM_MS, \(Number\(tickStart\) \|\| t0\) \+ ADTOOL_CAMPAIGN_WATCH_TICK_MS\);/.test(f) &&
+      /if \(Date\.now\(\) > deadline\) return out;/.test(f) && /const ADTOOL_CAMPAIGN_WATCH_WARM_MS = 25000;/.test(src) &&
+      /const ADTOOL_CAMPAIGN_WATCH_TICK_MS = 105000;/.test(src) && /const ADTOOL_CAMPAIGN_WATCH_WARM_UNTIL_MS = 150000;/.test(src);
     const w = src.slice(src.indexOf('async function adsItemsWatched('), src.indexOf('/* THE DUPLICATION SQL') > 0 ? src.indexOf('async function adsItemsWatched(') + 6000 : 0);
     const order = w.indexOf('await adWatchCacheClear(env, acct);') < w.indexOf('const warmed = await adWatchWarmPages(env, warmAccts, now);') &&
       w.indexOf('const warmed = await adWatchWarmPages(env, warmAccts, now);') < w.indexOf('const spentNow = await adWatchCountCalls(env, budget.fetches, used);') &&
