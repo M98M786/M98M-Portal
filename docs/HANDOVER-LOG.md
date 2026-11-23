@@ -913,3 +913,36 @@ picture shows it, a not-Apple line beside the MagSafe wording). Proposal only, n
 
 **State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent. This listing: proposal waiting. If he
 approves, the title is held to 23 Dec and re-scanned after 7, 14 and 30 days against the baseline saved today.
+
+## 2026-11-23 22:48 UTC · WINDOWS (the bilal PC, standby) · Toothbrush replacement heads (AZHAR ABRT): title and description revised on the owner's go
+
+**The ask.** Owner, in chat on the bilal PC: revise this listing and go. No search report was given, so this was a
+title and description revision only: no keyword plan, no campaign change. The PC is standby; the owner's go covered
+this one listing and nothing else was sent from here.
+
+**What was done (23 Nov, 22:38 and 22:39 UTC, two `ReviseFixedPriceItem` calls through `ebayTradeCall`, both Success).**
+- Title: "Braun" dropped and "Brush" added, 79 characters. Old: *Electric Toothbrush Heads Compatible With Oral B Braun
+  Replacement 4 12 16 Pack*. New: *Electric Toothbrush Heads Compatible With Oral B Replacement Brush 4 12 16 Pack*.
+  Reason: the Listing Safety Archive flags this listing for two trademark words and this leaves one, inside "Compatible
+  With"; and almost every top-20 market title carries "Brush Head", a word the old title had lost.
+- Description: eight in-place edits in the same Listing Tool template. The DuPont name removed in three places; "Size 1"
+  replaced with the real size from the gallery picture; the compatible handle ranges named in the intro and in a new
+  spec row; pack contents stated; two new notes (does not fit iO or sonic handles; a compatible part, not made by or
+  endorsed by Oral B or Braun).
+
+**Files.** In `M98M-SQR-Agent` on the bilal PC only (not in this repo): the proposal folder for the listing, two backups
+under `backups/AZHAR ABRT/` (before the title, before the description) and two rows in `logs/sqr-revisions.csv`.
+
+**What was verified.** GetItem after each call: the title and the description equal the proposal; price, quantity, the
+three pack variations and the sold count are unchanged. The October refusal on ABRT variation listings ("missing
+required variation specifics") did NOT appear in this category.
+
+**Still open (flagged to the owner, not touched).**
+- Zero sold since it went live on 3 Aug. Price is the likelier cause: same-title listings in the top five sell the small
+  pack well under ours, and ours is in no top 20 on five searches. A 5% markdown runs to 3 Dec.
+- Gallery picture 3 shows genuine Oral-B handles and Oral-B's own product names: the biggest takedown risk on the listing.
+- Picture 1 shows 20 heads and there is no 20 pack; Country of Origin says United Kingdom; Features list both Soft and
+  Medium bristles; the pack size sits under a variation called "Colour".
+- The "does not fit iO or sonic" note comes from general knowledge of this head type, not from supplier data.
+
+**State.** MAC PRIMARY. Title held to 24 Dec (30-day window): do not change it from either machine before then.
