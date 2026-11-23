@@ -1203,12 +1203,12 @@ function pvTokens(s) {
    every DDL statement in the file, which is wider than these families on purpose: a CREATE put
    anywhere is a reason to look. That is deliberate: a marker that could go stale by accident is a
    column that never lands. */
-const ADTOOL_SCHEMA_VERSION = '2026-11-23.1';
+const ADTOOL_SCHEMA_VERSION = '2026-11-23.2';
 /* the fingerprint of every DDL statement in engine/worker.js, held to this value by the suite */
 /* 22 Nov: the count moved to 215 on 21 Nov with adtool_neg_ack (Ads command centre), a table created at its own two
    sites on every use rather than under a guard, so nothing was missing from the database; the marker simply had not
    been moved with it, and the suite has said so since. Moved here, with no guarded statement added. */
-const ADTOOL_SCHEMA_DDL_HASH = '218-9d38cd43';
+const ADTOOL_SCHEMA_DDL_HASH = '219-e230ddd8';
 const ADTOOL_SCHEMA_KEY = 'adtool_schema_version';
 let ADTOOL_SCHEMA_MARK = null;      /* the one marker read per isolate */
 let ADTOOL_SCHEMA_SETTLE = null;    /* the one apply pass per isolate, and the proof DDL ran here */
@@ -3964,7 +3964,10 @@ async function adsItemsWatched(env) {
   await ctx_setSync(env, 'adsItemsWatched', '', adWatchTickNote({ accounts: done.length ? done : accounts,
     campaigns_read: budget.campaigns, calls: budget.fetches, used: spentNow,
     changes: { added: budget.added, removed: budget.removed, bid_moved: budget.bid_moved, status_moved: budget.status_moved },
-    capped: adWatchDailyLeft(spentNow, ADTOOL_CAMPAIGN_WATCH_DAILY) <= 0, starved: budget.starved }) + (warmed.length ? ' · warmed ' + warmed.join('+') : ''));
+    capped: adWatchDailyLeft(spentNow, ADTOOL_CAMPAIGN_WATCH_DAILY) <= 0, starved: budget.starved }) +
+    /* 23 Nov: the warm SAYS what it did, including nothing and why. The first note after it shipped carried no
+       warm at all and there was no way to tell a warm that found no account from one that failed silently. */
+    ' · warmed ' + (warmed.length ? warmed.join('+') : 'nothing (' + warmAccts.length + ' account(s) read)'));
 }
 
 /* every ad-list GET the watch makes, counted against the UTC day in one row. The hourly pass is NOT
@@ -24446,6 +24449,12 @@ async function ensureTruthSchema(env) {
        Where each listing advertises and the never-advertised counts read 2.5 million rows a run, 208 million a day
        between them (Cloudflare's per-query figures, 22-23 Nov). */
     "CREATE INDEX IF NOT EXISTS idx_campaign_ads_listing ON campaign_ads(listing_id)",
+    /* 23 Nov, measured the same way: idx_adtls_item_day — adtool_listing_slot's key begins with the ACCOUNT
+       (account, item_id, day, slot), so Peak time listings' own dayparts read, which names listings and a day
+       range and no account, walked all 251,880 rows every time. 421 runs in forty minutes read 109 million rows,
+       the largest single shape in the system, and the page it belongs to is the one the owner opened to say it
+       was too slow. The same (item_id, day) shape the day and hour grains already carry. */
+    "CREATE INDEX IF NOT EXISTS idx_adtls_item_day ON adtool_listing_slot(item_id, day)",
     /* ---- THE NIGHT-TIME BASELINE: THE FIVE TABLES THE CRONS WERE WALKING WHOLE (6 Nov) -------
        Yesterday's three indexes took the day from 3.9 billion rows to a pace of 1.2 billion, and
        what was left was FLAT: ~40 million rows an hour between midnight and 04:00 UTC with nobody
@@ -26793,7 +26802,11 @@ const ROUTES = {
       const pkDay = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10);
       const sum = await ctx.env.DB.prepare(
         "SELECT COUNT(*) AS pending, " +
-        "  SUM(CASE WHEN (SELECT COUNT(*) FROM campaign_ads ca WHERE ca.listing_id = d.item_id) = 0 THEN 1 ELSE 0 END) AS never_advertised " +
+        /* 23 Nov: NOT EXISTS, not a count compared to nought. The count had to visit every ad record a listing
+           has before it could say "none", which is why this one shape read 27 million rows in forty minutes while
+           its twin on items_api (already written as NOT EXISTS) dropped to nothing on the new campaign_ads index.
+           The answer is identical: both ask whether the listing appears in the campaign map at all. */
+        "  SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM campaign_ads ca WHERE ca.listing_id = d.item_id) THEN 1 ELSE 0 END) AS never_advertised " +
         "FROM listing_decisions d WHERE d.status = 'PENDING'"
       ).first().catch(() => null);
       const today = await ctx.env.DB.prepare(

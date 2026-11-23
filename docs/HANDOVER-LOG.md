@@ -777,3 +777,22 @@ take-back payload, optimistic removal, revisions + finished toggle); engine-rout
 live-item refused, wrong-type refused, non-mgmt refused, deleted-stamp and unapproved → no re-queue).
 
 **State.** Frontend + engine live. Apps Script: saved, **awaiting the owner's decision on the version limit**.
+
+## 2026-11-23 14:50 UTC · MAC · Peak time listings: the dayparts read was scanning the whole slot table; one index, and the twin count rewritten (owner's speed batch, 23 Nov)
+
+**Why.** After the speed batch above went live I re-read Cloudflare's per-query D1 figures. The campaign-map index had
+done its work: the items_api "never advertised" scan (122.5 million rows in three hours) left the top list entirely.
+A new shape took its place at the top: Peak time listings' own dayparts read, **109 million rows in forty minutes**
+(421 runs x 251,880 rows). adtool_listing_slot's key begins with the ACCOUNT (account, item_id, day, slot) and the
+read names listings and a day range and no account, so every run walked the whole table. The five-minute warm and
+the two-minute watch warm had multiplied how often that ran, so the warm I added to make pages fast was feeding the
+heaviest query in the system.
+
+**What changed.** (1) idx_adtls_item_day on adtool_listing_slot(item_id, day) — the same shape the day and hour
+grains already carry. (2) The never-advertised count on the zero-sale page rewritten from
+`(SELECT COUNT(*) ...) = 0` to `NOT EXISTS (...)` so it uses the new campaign_ads index as its items_api twin
+already does; identical answer, 27 million rows a run before. (3) The watch tick's note now says what the warm did
+including nothing and why: the first notes after it shipped carried no warm line at all and there was no way to tell
+a warm that found no account from one that failed. Marker 2026-11-23.2 / 219-e230ddd8. Suite 1514/1514.
+
+**Nothing sent to eBay.**
