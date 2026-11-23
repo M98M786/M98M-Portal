@@ -967,3 +967,28 @@ titles change between messages, go by the text he pastes.
 
 **State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent. This listing: title on hold to 23 Dec
 unless he asks for the iPhone 18 change sooner; baseline rank scans from before the revise are saved for comparison.
+
+## 2026-11-23 23:18 UTC · WINDOWS · Frosted MagSafe iPhone case (Growmore): iPhone 18 Pro and 18 Pro Max ADDED as variations on the owner's word, 18 now first in the title
+
+**The order.** After the 18 request was held on the fact that nothing for iPhone 18 could be bought there, the owner
+answered: add iPhone 18 Pro and 18 Pro Max, and revise the title.
+
+**Done at 23:15 UTC, in one call so it was all or nothing.** Sixteen new variations: both models in the listing's eight
+existing colours, same price as the rest, fifteen available each (the listing's standing level). Title now opens
+MagSafe, "Case For iPhone", then 18 17 16 15 14 13 12, Pro Max, Shockproof Phone Cover (75 characters; 12 kept because
+that family still sells there). Four model lines of the description were updated and its not-available note now says
+"the standard iPhone 18". eBay accepted it first time. Read-back: all 152 older variations identical in price,
+quantity and sold count; 168 now; total sold and watchers unchanged; specifics and pictures untouched.
+
+**Recipe worth keeping (Trading, through the engine's trade route).** To ADD variations to a live listing send
+ReviseFixedPriceItem with the new Variation nodes only (price, the quantity available, the two specifics) plus the
+whole VariationSpecificsSet: every existing value in its current order, the new values at the end. Variations not
+named in the call are left alone. Pictures keyed on the other specific (colour here) need no Pictures node. The
+script does a dry run by default and verifies every older variation after the live call.
+
+**Note for whoever touches this listing next.** The SQR agent's rule "never change variations" still stands for our own
+initiative; this was the owner's explicit instruction. Colours were taken from his Sir Hasib copy of the same case,
+which already sells the 18 models. Asked of him: the order desk should confirm the supplier link carries both models
+in all eight colours.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent. This listing: title on hold to 23 Dec.
