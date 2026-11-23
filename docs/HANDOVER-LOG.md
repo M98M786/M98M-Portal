@@ -796,3 +796,24 @@ including nothing and why: the first notes after it shipped carried no warm line
 a warm that found no account from one that failed. Marker 2026-11-23.2 / 219-e230ddd8. Suite 1514/1514.
 
 **Nothing sent to eBay.**
+---
+
+## 2026-11-23 16:59 UTC · WINDOWS · Heated gloves (Zareen Star): five-day review of its manual campaign applied; description revised; title kept on hold
+
+**What was done.** Hasib sent the manual campaign's search query report (17 to 23 Nov) and the old smart campaign's
+report for the USB heated gloves and said "revise it". The title was revised by the Mac on 18 Nov, so it stays on its
+30-day hold; this was a review. Findings: the campaign's two units in five days came from placements, its 27 keywords
+took 33 clicks for none; "heated gloves" at the lowest bid got no impressions at all; "mens heated gloves" spent over
+£3 without a sale; the broad keyword leaked to bike, battery and brand searches. On his go: "mens heated gloves" moved
+from the middle bid to the lowest (he accepted a demotion in place of the £2 block), "winter gloves" paused, eight
+negative phrase keywords added (the misspelling and plural the live list missed, bike terms, a rival brand, scarf,
+winter gloves), all read back. Description revised: the Pro versions are now explained as five-finger heating, which
+the last gallery pictures show, and a pasted "5+ heat levels / 5 or more heat settings" block that contradicted the
+listing's own "no settings" line was removed. Sold, watchers, price and quantity unchanged on read-back.
+
+**Still open, Hasib's side.** The heating-technology gallery picture still promises twelve hours of warmth with an
+included power bank, a three-second heat-up and full-hand coverage; the text says no power bank and back-of-hand
+heating. Flagged on 18 Nov by the Mac and again today. "heated gloves" stays at the lowest bid unless he lifts it.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent; ten twin sessions stand ready for
+parallel items. Next review of the gloves on 18 Dec with the title.
