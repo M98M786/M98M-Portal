@@ -574,8 +574,13 @@ VIEW_CSS.push(
     var all = AC.items || [], negAll = acNegRows();
     acNegTile(negAll);
     /* a tile in focus: only the listings it counts (the waste tile = the red rows, exactly as many as
-       the tile says), or only the went-negative block; the sentence above says which and lets go */
-    var rows = AC.focus === 'neg' ? [] : acFocusRows(all), neg = (AC.focus && AC.focus !== 'neg') ? [] : negAll;
+       the tile says), or only the went-negative block; the sentence above says which and lets go.
+       23 Nov (owner): "the plain board is for sorting every listing at once — no Product history
+       pushed in between the rows, and no went-negative block unless I click its tile". So with no
+       tile pressed the board is rows only; the Product history boxes come only behind the Wasting
+       tile, and the went-negative block only behind its own tile. */
+    var rows = AC.focus === 'neg' ? [] : acFocusRows(all), neg = AC.focus === 'neg' ? negAll : [];
+    var boxes = AC.focus === 'waste';
     var focusBar = '';
     if (AC.focus) {
       var F = AC_FOCUS[AC.focus], n = AC.focus === 'neg' ? neg.length : rows.length;
@@ -642,9 +647,10 @@ VIEW_CSS.push(
       acSortRows(rows).forEach(function (r) {
         h += '<tr' + (r.waste ? ' class="ac-waste"' : '') + '>' +
           cols.map(function (c) { return '<td>' + c.cell(r) + '</td>'; }).join('') + '</tr>';
-        /* 20 Nov (owner): a red row carries its Product history underneath, in one box */
+        /* 20 Nov (owner): a red row carries its Product history underneath, in one box — 23 Nov:
+           only on the Wasting tile's own view, never on the plain board */
         var did = String(r.item_id == null ? '' : r.item_id).trim();
-        if (r.waste && /^\d{9,13}$/.test(did)) {
+        if (boxes && r.waste && /^\d{9,13}$/.test(did)) {
           h += '<tr class="ac-sub"><td colspan="' + cols.length + '"><div class="ac-d" data-ac-det="' + esc(did) + '">' + acDetailHtml(did) + '</div></td></tr>';
         }
       });
