@@ -946,3 +946,24 @@ required variation specifics") did NOT appear in this category.
 - The "does not fit iO or sonic" note comes from general knowledge of this head type, not from supplier data.
 
 **State.** MAC PRIMARY. Title held to 24 Dec (30-day window): do not change it from either machine before then.
+
+## 2026-11-23 23:01 UTC · WINDOWS · Frosted MagSafe iPhone case (Growmore), the biggest listing: title and description REVISED on the owner's go; his iPhone 18 request held on a fact
+
+**Done at 22:58 UTC.** Owner: "Go for it and revise it", no campaign. Title is now the one he pasted, 72 characters:
+MagSafe, then "Case For iPhone", the six models, Pro Max, Shockproof Phone Cover. Max and Phone are new; Luxury, Frosted
+and the dash are gone. The description went with its 20 in-place edits. eBay accepted both first time. Read-back: live
+description identical to the reviewed file; sold, watchers, price, quantity, all variations, specifics and pictures
+unchanged. Backup taken first. No campaign was touched.
+
+**Held, and why.** He also asked for iPhone 18 in place of 12 at the start of the title. Not applied: this listing has no
+iPhone 18 variation, so the word would be untrue and an iPhone 18 buyer has nothing to select; it also still sells the
+iPhone 12 family. His copy of the same case on the Sir Hasib account already carries the three iPhone 18 variations, so
+the supplier makes them. When the 18 variations are added to this listing, 18 goes first; with 12 kept the title is 75
+characters. The description's model list and its "not available for iPhone 18" note must change in the same revise.
+
+**Lesson.** I showed an interim title labelled "Proposed" before the judge panel finished; the panel then picked another,
+and he answered "going with proposed" with the interim title pasted. Never label a provisional pick "Proposed". When
+titles change between messages, go by the text he pastes.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent. This listing: title on hold to 23 Dec
+unless he asks for the iPhone 18 change sooner; baseline rank scans from before the revise are saved for comparison.
