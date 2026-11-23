@@ -685,7 +685,11 @@ VIEW_CSS.push(
     if (AC.acct) { payload.account = AC.acct; }
     if (!AC.period && AC.from && AC.to) { payload.from = AC.from; payload.to = AC.to; }
     acNegLoad();
-    api('adsBoard', payload).then(function (d) {
+    /* 23 Nov (owner: "every page takes so long to open"): a board you have opened before is drawn
+       from the last answer AT ONCE and replaced the moment the fresh one lands, instead of leaving
+       you on a spinner every single time. The same rule the Active listings page has had since
+       September. Nothing here decides or writes, so a last answer on screen is never acted on. */
+    var paintBoard = function (d) {
       d = d || {};
       var c = d.combined || {};
       /* 22 Nov (owner): "when I click the 9, send me exactly to where the 9 items are" — every tile
@@ -824,8 +828,17 @@ VIEW_CSS.push(
         t.onkeydown = function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } };
       });
       acPaintItems();
+    };
+    var had = (typeof cacheRead === 'function') ? cacheRead('adsBoard', payload) : null;
+    if (had) { try { paintBoard(had); } catch (e) { had = null; } }
+    api('adsBoard', payload).then(function (d) {
+      if (typeof cacheWrite === 'function') { try { cacheWrite('adsBoard', payload, d); } catch (e) {} }
+      paintBoard(d);
     }).catch(function (e) {
-      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Could not load the board.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';
+      var msg = String((e && e.message) || '');
+      if (msg === 'navigated away') { return; }          // the screen that asked is gone
+      if (had) { toast('Showing the last board \u2014 could not refresh just now.'); return; }
+      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Could not load the board.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(msg) + '</span></div>';
     });
   }
 

@@ -216,7 +216,13 @@ function ibSchedule() {
  *  actions ask for are coalesced so a burst of clicks cannot become a burst of calls. */
 function ibPollNow() {
   if (IB.busy) { IB.again = true; return; }
-  if (document.hidden || !STATE.idToken) return;
+  /* 23 Nov: A PORTAL SESSION IS A SIGN-IN. Since 22 Nov a tab that boots from a stored session
+     never asks Google for a credential (that One Tap popping up in every new tab was the owner's
+     complaint), so STATE.idToken is null for everybody who has signed in once — and this gate,
+     which still named the Google token alone, quietly switched the bell off for the whole office.
+     The engine authenticates a session on its own; every other poll in the portal already says
+     `STATE.idToken || STATE.session`. */
+  if (document.hidden || !(STATE.idToken || STATE.session)) return;
   var wait = IB_POLL_MIN_GAP - (ibNowMs() - IB.lastAt);
   if (wait > 0) { ibClearTimer(); IB.timer = setTimeout(ibPollNow, wait); return; }
   IB.busy = true; IB.again = false;
