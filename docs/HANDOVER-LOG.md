@@ -852,3 +852,37 @@ and CPC figures, so it must never be drawn on a lister's screen.
 August, 678 distinct items. The eBay catalogue holds 2,013 listings across the 8 accounts, so ~1,336 older
 listings have no task row and appear nowhere in it. If "whole archive" means every listing the company has
 ever put up, that is a different page (built from items_api + the sourcing tables) and needs his word.
+
+## 2026-11-23 17:55 UTC · MAC · Listings archive part two: the page was giving up after 30 seconds and saying nothing
+
+**The report.** Owner sent Bilal's screen: Listings archive showing his own two September listings,
+"currently ये देखो यार … कोई पुराना डेटा नहीं पड़ा हुआ, इसको अपडेट करा दो".
+
+**The tell.** In the screenshot the **All listers / Mine chips are missing**. `laPaint` hides them only
+when `LA.mineOnly` is true, and that flag is set in exactly one place: the catch that falls back from
+the team feed to `myListingWork` (the person's own work). So the archive call was failing, silently,
+for every lister — my 21 Nov Details work was never even reached.
+
+**Why it failed.** `listingArchiveEngine` built the whole page in one answer: `SELECT *` over 882
+completed listing tasks (1.6 MB of `details` the list never draws) and then the live supplier record for
+all 678 items in IN-chunks of 50 — about **73 D1 queries per page open**. Cloudflare's analytics for the
+Worker: 779 invocations in three hours ended `clientDisconnected` with wall-time P99 **30.02 s** — the
+browser's own abort, to the millisecond. (Nothing shows in `errors`: the engine catches route failures
+and answers HTTP 200 `{ok:false}`, so analytics counts them as successes. Check `status` dimensions, not
+`errors`, when hunting this kind of thing.)
+
+**Fix (b6b89ac, build 20261123-1750, engine deployed 17:51Z, live == main, verified).** The list is three
+cheap queries (users, provenance, the completed listing tasks BY NAME — never `SELECT *` on tasks) and
+carries no record. `listingArchiveRow` reads ONE row's record when its Details is opened: the §8.2 pack
+plus that item's live supplier rows, six single-row reads, cached for the visit, dropped on Refresh. When
+the team feed does not answer, the count line now says "N of your own — the team archive did not answer,
+press Refresh" instead of showing own-work in silence.
+
+**Law worth keeping.** A silent fallback hid this for weeks. Any fallback that narrows what a person can
+see must say so on the screen; the 2 Nov "a fallback that announces itself reads as a breakage" lesson is
+about the fast/slow PATH, not about showing someone less data than they asked for.
+
+**Still open.** The archive is the record of portal-era work (882 jobs, 678 items). The eBay catalogue
+holds 2,013 listings, so ~1,336 older ones appear nowhere — a different page if the owner wants it.
+Apps Script still reads the §8.2 pack one level too high (`listingParseDetails_`); it is only the
+fallback and cannot be deployed while the project sits at its 200-version limit.
