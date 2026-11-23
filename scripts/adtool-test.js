@@ -9264,7 +9264,10 @@ function run(argv) {
   t('speed (23 Nov): the request flag reaches every memo — the router sets ctx.fresh off _fresh and passes the options, every route memo passes them, and the key canon ignores any underscore key', (() => {
     const router = src.slice(src.indexOf('const rcTtl = hasWriteIntent(body.payload)'), src.indexOf('let data;\n      try { data = await runRoute(); }'));
     const rt = /ctx2\.fresh = !!\(body\.payload && body\.payload\._fresh\);/.test(router) && router.indexOf('ctx2.fresh =') < router.indexOf('const runRoute') &&
-      /adtKvMemo\(env, action, adtProfitClass\(ctx2\.user\), body\.payload \|\| \{\}, rcTtl, \(\) => route\.fn\(body\.payload \|\| \{\}, ctx2\), ctx2\.waitUntil, adtMemoOpts\(ctx2\)\)/.test(router);
+      /* once the engine has decided to compute, the compute is fresh: the one action memoised at both levels cannot
+         be handed its inner memo's stale answer and store it under a fresh stamp */
+      /adtKvMemo\(env, action, adtProfitClass\(ctx2\.user\), body\.payload \|\| \{\}, rcTtl, \(\) => \{ ctx2\.fresh = true; return route\.fn\(body\.payload \|\| \{\}, ctx2\); \}, ctx2\.waitUntil, adtMemoOpts\(ctx2\)\)/.test(router) &&
+      router.indexOf('ctx2.fresh = !!(body.payload && body.payload._fresh)') < router.indexOf('ctx2.fresh = true;');
     const inner = (src.match(/adtMemoOpts\(ctx\)\)/g) || []).length;
     const every = (src.match(/adtKvMemo\(ctx\.env, 'adtool/g) || []).length + (src.match(/adtKvMemo\(env, 'adtoolRunToday'/g) || []).length === inner;
     const canon = JSON.stringify(F.adtKvCanon('adtoolPeak', { _fresh: 1, account: '' })) === '{}' && JSON.stringify(F.adtKvCanon('adtoolItemCampaigns', { state: 'multi', _fresh: 1 })) === JSON.stringify(F.adtKvCanon('adtoolItemCampaigns', { state: 'multi' }));
@@ -9292,11 +9295,19 @@ function run(argv) {
     const w = src.slice(src.indexOf('async function adsItemsWatched('), src.indexOf('/* THE DUPLICATION SQL') > 0 ? src.indexOf('async function adsItemsWatched(') + 6000 : 0);
     const order = w.indexOf('await adWatchCacheClear(env, acct);') < w.indexOf('const warmed = await adWatchWarmPages(env, warmAccts, now);') &&
       w.indexOf('const warmed = await adWatchWarmPages(env, warmAccts, now);') < w.indexOf('const spentNow = await adWatchCountCalls(env, budget.fetches, used);') &&
-      /warmAccts\.push\(acct\);/.test(w) && /\(warmed\.length \? ' · warmed ' \+ warmed\.join\('\+'\) : ''\)/.test(w);
+      /warmAccts\.push\(acct\);/.test(w) &&
+      /* 23 Nov: the note says what the warm did, nothing included, so a silent warm cannot look like no warm */
+      /' · warmed ' \+ \(warmed\.length \? warmed\.join\('\+'\) : 'nothing \(' \+ warmAccts\.length \+ ' account\(s\) read\)'\)/.test(w) &&
+      /out\.push\(acct \+ \(state \? ':' \+ state : ''\) \+ ' failed \('/.test(src);
     return fn && order;
   })(), null);
   t('speed (23 Nov): the campaign map carries an index on its listing column, the two Peak expanders are in the page cache, and the schema marker moved with the index', (() => {
-    const idx = /"CREATE INDEX IF NOT EXISTS idx_campaign_ads_listing ON campaign_ads\(listing_id\)",/.test(src);
+    const idx = /"CREATE INDEX IF NOT EXISTS idx_campaign_ads_listing ON campaign_ads\(listing_id\)",/.test(src) &&
+      /* 23 Nov, measured after the first: the dayparts read of the page the owner opened, 109M rows in forty minutes */
+      /"CREATE INDEX IF NOT EXISTS idx_adtls_item_day ON adtool_listing_slot\(item_id, day\)",/.test(src) &&
+      /* and the twin count written so it can use the campaign_ads index, as its items_api sibling already does */
+      /SUM\(CASE WHEN NOT EXISTS \(SELECT 1 FROM campaign_ads ca WHERE ca\.listing_id = d\.item_id\) THEN 1 ELSE 0 END\) AS never_advertised/.test(src) &&
+      !/SELECT COUNT\(\*\) FROM campaign_ads ca WHERE ca\.listing_id = d\.item_id\) = 0/.test(src);
     const cache = /adtoolPeakProfile: 120000, adtoolPeakCampaigns: 60000 \};/.test(src);
     const v = (src.match(/const ADTOOL_SCHEMA_VERSION = '([^']+)';/) || [])[1] || '';
     return idx && cache && v >= '2026-11-23.1';
