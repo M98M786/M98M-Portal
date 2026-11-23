@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## 2026-11-23 - LISTINGS ARCHIVE: two rows instead of 882, because the page gave up after 30 seconds
+
+Owner, with Bilal's screen in front of him: the archive showed his own two September listings and
+nothing else - "कोई पुराना डेटा नहीं पड़ा हुआ". The giveaway is in the screenshot: the **All listers /
+Mine chips were gone**, and `laPaint` hides them only when `LA.mineOnly` is true - the flag the page
+sets when the TEAM feed fails and it quietly falls back to `myListingWork`, the person's own work.
+
+`listingArchiveEngine` was building the whole page in one answer: `SELECT *` over 882 completed tasks
+(1.6 MB of `details` nobody draws), then the live supplier record for all 678 items in IN-chunks of 50
+- about **73 D1 queries per page open**. Cloudflare's own analytics show the price: 779 invocations in
+three hours ended `clientDisconnected`, wall-time P99 **30.02 s**, which is exactly the browser's
+30-second abort. So every lister who opened the archive waited half a minute and was then handed their
+own two rows with no error anywhere - and 21 Nov's Details work was never even reached.
+
+**The list is now three queries** - users, provenance, and the completed listing tasks by name (never
+`SELECT *`: `details` is up to 8 KB a row and the list draws none of it). It carries no record at all.
+**The record for ONE row is read when the person opens it** (`listingArchiveRow`: the §8.2 hunt-form
+pack plus that item's live supplier rows, six single-row reads), so opening a row costs what one row
+costs. The view keeps the opened records for the visit, and a Refresh forgets them.
+
+Also: when the team feed does not answer, the count line now says so - "N of your own - the team
+archive did not answer, press Refresh" - instead of letting a lister read an empty page as the truth.
+
+§8.2 unchanged: same 21-column whitelist, no cost or earning on this path, and a revision's own
+details prose (management's reasoning, which carries profit and CPC figures) is still never returned.
+
+Build 20261123-1750 · engine deployed.
 ## 2026-11-23 - LISTINGS ARCHIVE: the record itself was being stripped away, not withheld
 
 Owner, 23 Nov: "item listers are not getting whole listing archive, refresh it." The archive's Details
