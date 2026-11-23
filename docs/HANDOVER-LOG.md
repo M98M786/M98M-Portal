@@ -647,3 +647,32 @@ plumbing commit (`read-tree origin/main` → `hash-object -w` → `update-index 
 
 **State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent and the listing-video uploads; nothing
 pending on this item.
+
+## 2026-11-23 13:25 UTC · WINDOWS · Send to listers: nightly top-up of every lister to 12 at UK midnight (owner, 23 Nov)
+
+**What happened.** Owner's rule, given in chat on 23 Nov: every day at UK midnight, look at how many listings each
+of the four listers holds; whoever has fewer than 12 gets listings from the Send to lister box until they hold 12,
+never more than 12 in a day, the fewer they hold the more they get.
+
+**Change.** Worker: `listerTopUp` joins the hourly `0 * * * *` slot second (after adtoolPeakPlan); it returns on
+every tick but UK midnight, marks the UK day in `sync_state` (job listerTopUp, account @day) BEFORE calling, then
+calls Apps Script `engineRunJob listerTopUp` up to four times while the reply says `more`; the night's notes land
+in `sync_state` account @last. No new cron slot, crons.json untouched. Apps Script (Hunting.gs): the Send's body is
+now `huntSendCore_(payload, by)` and `actionHuntSendToLister_` is its gate + call, unchanged for the click path;
+`listerTopUp(args)` reads USERS (approved Item Lister + Listing Manager), counts open listing_new tasks per lister
+from three TASKS columns (Pending/Working/Updated), reads PENDING_SEND oldest first, deals one card per lister per
+round to those under 12, picks account (hunter's hint if allowed, else round-robin excluding the two hand-worked
+accounts and any paused one), campaign (hunter's pick if a known type, else '100 % Strong '), deadline (two days
+on, 23:59 PKT, Sunday to Monday), and sends through huntSendCore_ as `system:lister-top-up`. Registered in
+ENGINE_RUNNABLE. Rebased onto the Mac's 22-23 Nov commits (video upload, penny pulse, go-live desk) with no
+source conflict; only generated files and the two logs were re-merged.
+
+**Verified so far.** Build clean; Node syntax check of worker.js and Code.gs passed on scratch copies (the privacy
+guard on this machine refuses Node over the originals, so the unit suite was not run here — see Still open). RL
+scan: the `staff-identity` finding on engine/worker.js is pre-existing on main (a stashed baseline scans the
+same), not from this change.
+
+**Still open.** (1) Apps Script deploy: /exec serves the DEPLOYED version and the project sits at Google's
+200-version cap — an old version must be deleted before "New version" can be deployed; until that lands the
+worker's midnight call answers "unknown job". (2) `node scripts/adtool-test.js` to be run by the owner or the Mac.
+(3) First real run = tonight 00:00 UK; read sync_state @last and ACTIVITY_LOG LISTER_TOP_UP in the morning.
