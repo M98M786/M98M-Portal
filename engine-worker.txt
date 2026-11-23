@@ -34047,12 +34047,17 @@ const ROUTES = {
        create — declares {title, size} (classification ITEM) and returns eBay's new video id.
                 eBay answers 201 with an EMPTY body and the id in the Location header, which is
                 why ebayRestFetch now carries `location` back.
-       part   — one piece of the file, base64 inside the JSON envelope (the router reads JSON and
-                nothing else). Decoded here, sent to eBay as application/octet-stream; pieces go
-                IN ORDER from offset 0 with Content-Range, and a single piece that is the whole
-                file goes plain (Content-Range is for resumable uploads only). A piece is capped
-                at 8 MB decoded: the 150 MB file cap can never ride one request, and a piece this
-                size stays far from the isolate's memory line.
+       part   — the file, base64 inside the JSON envelope (the router reads JSON and nothing
+                else). Decoded here, sent to eBay as application/octet-stream. The first real run
+                (WINDOWS, 22 Nov, an 11 MB file in 6 MB pieces) showed eBay does NOT take pieces:
+                the first piece, sent with Content-Range, came back 400 190007 "Content-Length
+                6291456 cannot be less than video size 11516628" — the upload endpoint wants the
+                whole file in ONE request. So the whole file at offset 0 is the road (no
+                Content-Range); the Content-Range branch is kept for a caller at offset > 0 but is
+                not expected to pass. The cap is 16 MB decoded: the base64 envelope (4/3 of the
+                file) and the decoded copies all sit in the isolate's 128 MB at once, and a 16 MB
+                file peaks near 75 MB there. A longer video needs a route that reads a raw body.
+                The create refuses a size over the cap, so no empty media record is left behind.
        status — the same read the sweep makes. PENDING_UPLOAD → PROCESSING → LIVE is the good
                 road; BLOCKED and PROCESSING_FAILED are eBay's refusals, statusMessage says why.
      ATTACH IS NOT HERE: a video goes onto a listing by ReviseFixedPriceItem with
@@ -34068,6 +34073,7 @@ const ROUTES = {
         const title = String(p.title || '').trim(), size = Math.floor(Number(p.size || 0));
         if (!title) throw new Error('SAY: title is needed');
         if (!(size > 0 && size <= 157286400)) throw new Error('SAY: size must be the file\'s exact byte count, up to 150 MB (157286400)');
+        if (size > 16777216) throw new Error('SAY: this route carries a video of up to 16 MB (16777216 bytes) in one piece — eBay takes the whole file in one request; trim the video or wait for the raw-body route');
         const body = { title: title, size: size, classification: ['ITEM'] };
         if (p.description) body.description = String(p.description).slice(0, 500);
         const r = await ebayRestFetch(ctx.env, account, 'POST', '/commerce/media/v1_beta/video', body);
@@ -34087,7 +34093,7 @@ const ROUTES = {
           bytes = new Uint8Array(raw.length);
           for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
         } catch (e) { throw new Error('SAY: data_b64 is missing or not base64'); }
-        if (!bytes.length || bytes.length > 8388608) throw new Error('SAY: a piece is 1 byte to 8 MB of decoded video');
+        if (!bytes.length || bytes.length > 16777216) throw new Error('SAY: a piece is 1 byte to 16 MB of decoded video — and eBay only accepts the whole file as one piece');
         if (offset + bytes.length > total) throw new Error('SAY: this piece runs past the declared total');
         const whole = offset === 0 && bytes.length === total;
         const headers = { authorization: 'Bearer ' + (await ebayAccessToken(ctx.env, account)), 'content-type': 'application/octet-stream' };

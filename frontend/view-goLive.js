@@ -12,13 +12,37 @@
      The server (CONFIG go_live_publishers) decides who may publish; this list only shows the desk.
      Google signs the same person in as either @googlemail.com or @gmail.com, so both are listed. */
   var GL_PUBLISHERS = ['zaidkaleem987@gmail.com', 'mrhasibullah91@googlemail.com', 'mrhasibullah91@gmail.com', 'm98m786@gmail.com', 'mrhasibullah@googlemail.com', 'mrhasibullah@gmail.com'];   // 22 Oct: Sir Hasib's third management email
-  /* Item IDs published from THIS desk in this session. The desk reads myListingWork, which is
-     engine-served (D1 tasks mirror) and lags the sheet write enterItemId just made — so without
-     this the draft the publisher just made live comes straight back on the next refresh until the
-     mirror syncs. We only add a task here on a CONFIRMED success, never on a slow/timeout path, so
-     a listing that did not actually publish is never hidden. (owner, 6 Sept — "it says live but
-     comes back on refresh".) A full page reload clears this, by which time the mirror has caught up. */
-  var GL_DONE = {};
+  /* Drafts this desk has dealt with. The desk reads myListingWork, which is engine-served (D1
+     tasks mirror) and lags the sheet write enterItemId just made — so without this the draft the
+     publisher just made live comes straight back on the next refresh until the mirror syncs
+     (owner, 6 Sept — "it says live but comes back on refresh"). Until 23 Nov this remembered only a
+     CONFIRMED success and only for the tab's lifetime; the rule below replaces that. */
+  /* 23 Nov (owner): "even if I make it live, it keeps sitting like that". The sheet write LANDS
+     (this very draft: completed 17:42, in the mirror at 17:47) — but the desk is drawn from the
+     engine's mirror of the tasks sheet, which the sheet refreshes every five minutes, and the
+     sheet's reply to a go-live can take longer than the browser waits. So a draft the publisher
+     has made live, sent back or deleted leaves the desk THE MOMENT the button is pressed, and
+     stays off it — across reloads and new tabs — until the mirror itself no longer lists it (or
+     45 minutes pass). Only a refusal from the sheet brings it back, with the reason. */
+  var GL_DONE_KEY = 'm98m:glDone', GL_DONE_TTL = 45 * 60000;
+  var GL_DONE = (function () {
+    try {
+      var o = JSON.parse(localStorage.getItem(GL_DONE_KEY) || '{}') || {}, now = Date.now(), out = {};
+      Object.keys(o).forEach(function (k) { if (o[k] && now - Number(o[k].at || 0) < GL_DONE_TTL) { out[k] = o[k]; } });
+      return out;
+    } catch (e) { return {}; }
+  })();
+  function glDoneSave() { try { localStorage.setItem(GL_DONE_KEY, JSON.stringify(GL_DONE)); } catch (e) {} }
+  function glDoneSet(id, what) { GL_DONE[id] = { at: Date.now(), what: what }; glDoneSave(); }
+  function glDoneClear(id) { if (GL_DONE[id]) { delete GL_DONE[id]; glDoneSave(); } }
+  /** The draft leaves the desk now: off the list, off the tiles, off the badge — and remembered. */
+  function glGone(id, what) {
+    glDoneSet(id, what);
+    GL_SHOWN = GL_SHOWN.filter(function (x) { return glS(x.t.task_id) !== id; });
+    glRenderTiles(GL_SHOWN);
+    glRenderList();
+  }
+  var GL_SLOW_RE = /overloaded|timeout|timed out|did not answer|taking long|aborted|failed to fetch|network/i;
   /* 1 Oct (owner): "give option to Zaid to select the campaign … when he is adding the item id and
      title in the go-live desk, so he can change campaign type on the basis of listing quality."
      The same list the hunt form offers; the server checks the value. Blank = the hunt's own pick. */
@@ -310,6 +334,11 @@
   /** A full repaint: only ever from a fresh load, and every box comes back filled. */
   function glPaint(all) {
     var me = glS(STATE.user && STATE.user.email).toLowerCase();
+    /* the mirror has caught up with a made-live / sent-back / deleted draft: it is no longer in
+       the answer at all (Completed is not returned) or no longer flagged — forget it */
+    var still = {};
+    all.forEach(function (t) { var f = glFlag(t); if (f && f.flag === 'draft') { still[glS(t.task_id)] = 1; } });
+    Object.keys(GL_DONE).forEach(function (id) { if (!still[id]) { glDoneClear(id); } });
     var drafts = glDrafts(all);
     GL_SHOWN = drafts;
     glRenderTiles(drafts);
@@ -321,6 +350,7 @@
       pressed the screen holds one account, and checking it would re-add everything hidden.
       The re-render loses nothing typed (GL_DRAFT puts it back). */
   function glAppend(extra) {
+    extra = (extra || []).filter(function (t) { return !GL_DONE[glS(t && t.task_id)]; });
     var have = {};
     GL_SHOWN.forEach(function (x) { have[glS(x.t.task_id)] = 1; });
     var add = glDrafts(extra || []).filter(function (x) { return !have[glS(x.t.task_id)]; });
@@ -340,30 +370,32 @@
         var camp = box.querySelector('[data-gl-camp="' + id.replace(/"/g, '') + '"]');
         var v = inp ? glS(inp.value) : '';
         if (!/^\d{9,15}$/.test(v)) { toast('An eBay Item ID is 9 to 15 digits.'); if (inp) { inp.focus(); } return; }
-        var btn = this; btn.disabled = true;
-        btn.textContent = 'Live ✓';
-        toast('Live · the campaign, supplier and 7-day tasks are being created.');
-        api('enterItemId', { task_id: id, item_id: v, title: ttl ? glS(ttl.value) : '',
+        var payload = { task_id: id, item_id: v, title: ttl ? glS(ttl.value) : '',
           campaign_type: camp ? glS(camp.value) : '',
-          note: note ? glS(note.value) : 'Published from the go-live desk.' })
+          note: note ? glS(note.value) : 'Published from the go-live desk.' };
+        /* off the desk NOW — the card, its tile count and the badge; the typed values stay in
+           GL_DRAFT so a refusal puts the card back exactly as it was */
+        glGone(id, 'live ' + v);
+        toast('Live \u2713 \u00b7 Item ID ' + v + ' \u2014 off the desk. The campaign and 7-day tasks are being created.');
+        api('enterItemId', payload)
           .then(function (res) {
-            GL_DONE[id] = true;   // confirmed live — keep it off the desk even while the mirror lags
             delete GL_DRAFT[id];  // it is on eBay now; nothing left to remember
-            toast('Live ✓ — campaign, supplier and 7-day tasks created.');
+            toast(res && res.already_live ? String(res.note || 'Already live \u2014 the leftover draft flag is cleared.') : 'Live \u2713 confirmed \u2014 campaign and 7-day tasks created.');
             glLoad(true);
           }).catch(function (e) {
             var msg = String((e && e.message) || '');
             /* The sheet backend is slow, not broken: it almost always FINISHES entering the Item
-               ID on the server even when the browser gives up at 25s — so don't report failure and
-               don't let the publisher re-enter it. Say it's finishing and refresh; the draft leaves
-               this desk the moment it lands. (owner, 5 Sept — the recurring "go-live not working".) */
-            if (/overloaded|timeout|did not answer|taking long|aborted/i.test(msg)) {
-              btn.textContent = 'Finishing on the server…';
-              toast('Google is slow right now — the Item ID is finishing on the server. Refreshing to confirm…');
-              setTimeout(function () { glLoad(true); }, 7000);
+               ID on the server even when the browser gives up — so the draft STAYS off the desk;
+               the mirror confirms it on its next sweep (owner, 5 Sept and 23 Nov). */
+            if (GL_SLOW_RE.test(msg)) {
+              toast('Google is slow right now \u2014 the Item ID is finishing on the server. The draft stays off the desk; it is confirmed on the next sweep.');
+              setTimeout(function () { glLoad(true); }, 20000);
+              setTimeout(function () { glLoad(true); }, 150000);
             } else {
-              btn.disabled = false; btn.textContent = 'Make live — enter Item ID';
-              toast('NOT entered — ' + msg);
+              /* a real refusal (not yours, not in progress, bad campaign type): back on the desk, with the reason */
+              glDoneClear(id);
+              toast('NOT entered \u2014 ' + msg + ' \u2014 the draft is back on the desk.');
+              glLoad(true);
             }
           });
       };
@@ -374,12 +406,17 @@
         var note = box.querySelector('[data-gl-note="' + id.replace(/"/g, '') + '"]');
         var msg = note ? glS(note.value) : '';
         if (!msg) { toast('Write what the lister must fix in the note box first.'); if (note) { note.focus(); } return; }
-        var btn = this; btn.disabled = true;
+        glGone(id, 'sent back');
+        toast('Sending back to the lister\u2026');
         api('goLiveReturn', { task_id: id, note: msg }).then(function (r) {
           delete GL_DRAFT[id];
           toast('Sent back to ' + (glS(r && r.assigned_to).split('@')[0] || 'the lister') + '.');
           glLoad(true);
-        }).catch(function (e) { btn.disabled = false; toast(e.message); });
+        }).catch(function (e) {
+          var m = String((e && e.message) || '');
+          if (GL_SLOW_RE.test(m)) { toast('Google is slow right now \u2014 the send-back is finishing on the server; the draft stays off the desk.'); setTimeout(function () { glLoad(true); }, 20000); return; }
+          glDoneClear(id); toast('NOT sent back \u2014 ' + m + ' \u2014 the draft is back on the desk.'); glLoad(true);
+        });
       };
     });
     /* 22 Oct (owner): delete a draft so it never goes live — for a VeRO/IP risk spotted at go-live.
@@ -392,19 +429,16 @@
         var card = box.querySelector('[data-gl-card="' + id.replace(/"/g, '') + '"]');
         var ttl = card ? (card.querySelector('[data-gl-title]') || {}).value : '';
         if (!window.confirm('Delete this draft? It will be removed from the go-live desk and will NOT go live on eBay. This cannot be undone.' + (reason ? '\n\nReason: ' + reason : '\n\n(Tip: type a reason in the note box first — the lister is told.)'))) { return; }
-        var btn = this; btn.disabled = true; btn.textContent = 'Deleting…';
+        glGone(id, 'deleted');
+        toast('Deleting the draft\u2026');
         api('goLiveDelete', { task_id: id, note: reason }).then(function () {
-          GL_DONE[id] = true;   // keep it off the desk even while the mirror lags
           delete GL_DRAFT[id];
-          toast('Draft deleted — it will not go live.');
+          toast('Draft deleted \u2014 it will not go live.');
           glLoad(true);
         }).catch(function (e) {
           var msg = String((e && e.message) || '');
-          if (/overloaded|timeout|did not answer|taking long|aborted/i.test(msg)) {
-            btn.textContent = 'Finishing on the server…';
-            toast('Google is slow right now — the delete is finishing on the server. Refreshing to confirm…');
-            setTimeout(function () { glLoad(true); }, 7000);
-          } else { btn.disabled = false; btn.textContent = 'Delete draft'; toast('NOT deleted — ' + msg); }
+          if (GL_SLOW_RE.test(msg)) { toast('Google is slow right now \u2014 the delete is finishing on the server; the draft stays off the desk.'); setTimeout(function () { glLoad(true); }, 20000); return; }
+          glDoneClear(id); toast('NOT deleted \u2014 ' + msg + ' \u2014 the draft is back on the desk.'); glLoad(true);
         });
       };
     });
