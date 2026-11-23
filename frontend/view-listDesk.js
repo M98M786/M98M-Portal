@@ -388,7 +388,11 @@
           var m = ldS(e && e.message);
           if (LD_SLOW_RE.test(m)) { ldAfterAction(id, 'Google is slow right now — the take-back is finishing on the server; the task stays off the board.'); return; }
           btn.disabled = false;
-          toast('NOT taken back — ' + m);
+          /* 23 Nov: the backend half of Take back is saved but not yet DEPLOYED (Apps Script is at
+             its 200-version limit, so /exec still runs the older version). Say that plainly rather
+             than showing the router's "unknown action". Retires itself the day it deploys. */
+          if (/unknown action/i.test(m)) { toast('Take back is not live yet — the backend deploy is waiting on the Apps Script version limit. Delete task works in the meantime.'); }
+          else { toast('NOT taken back — ' + m); }
           ldBoardLoad(true);
         });
       };

@@ -935,7 +935,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261123-1353';
+var BUILD = '20261123-1446';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -26382,7 +26382,11 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           var m = ldS(e && e.message);
           if (LD_SLOW_RE.test(m)) { ldAfterAction(id, 'Google is slow right now — the take-back is finishing on the server; the task stays off the board.'); return; }
           btn.disabled = false;
-          toast('NOT taken back — ' + m);
+          /* 23 Nov: the backend half of Take back is saved but not yet DEPLOYED (Apps Script is at
+             its 200-version limit, so /exec still runs the older version). Say that plainly rather
+             than showing the router's "unknown action". Retires itself the day it deploys. */
+          if (/unknown action/i.test(m)) { toast('Take back is not live yet — the backend deploy is waiting on the Apps Script version limit. Delete task works in the meantime.'); }
+          else { toast('NOT taken back — ' + m); }
           ldBoardLoad(true);
         });
       };

@@ -727,3 +727,53 @@ campaign_ads(listing_id): the never-advertised scans read 208M rows/day. Schema 
 (6) Two stale pins from other sessions' commits re-pointed (planner first in the hourly slot). Suite 1514/1514.
 
 **Nothing sent to eBay.** Reads and stored answers only.
+
+## 2026-11-23 14:50 UTC · MAC · Listing desk rebuilt lister-first; **APPS SCRIPT IS AT ITS 200-VERSION LIMIT — two features are saved but NOT deployed**
+
+**Owner's ask (voice, 23 Nov).** A Listing desk page carrying all four listers: their names across the top, click a
+name and every task they are holding opens with its status, click a task and the listing itself opens — because
+listings sit in someone's tasks for some reason and later nobody can see *why* they are stuck ("सेंट टू लिस्टर्स में
+पड़ा हुआ है" and no more than that). From there, take the listing's task back, or delete it.
+
+**Shipped (frontend + engine, live).** `frontend/view-listDesk.js` is now lister-first: one box per lister (the Send
+form's own roster, plus anyone else actually holding open listing work, the go-live desk included) showing open count
+split not-started / being listed / submitted, revisions, overdue, and the oldest task's age. A name opens every task
+with them — new listings, revisions, and the finished 60 days behind a toggle. A task opens the listing itself: the
+§8.2-limited job card (the same `M98M_taskDetailsHtml` the Listings archive draws), the **comment trail — which is the
+"why is it stuck" the owner asked for**, the dates, and the hunt + hunter it came from. New engine read
+`listingTaskCard` (deployed by the guard on the push): it decides `can_act` server-side, so the desk can never offer
+an action the sheet would refuse; details is `{hunt_id, limited:{…}}`, so the pack lives under `.limited` — passing
+the outer object to `lstLimited` silently yields ONE field. Commits 98e567f (+ the honest-error follow-up), builds
+from this tree. The lister's own page (reject-back) is untouched.
+
+**The two buttons.** *Delete task* reuses `goLiveDelete` — already deployed since 22 Oct, so **it works today**.
+*Take back* is a new Apps Script action `actionHuntTakeBack_` (`huntTakeBack`): deletes the task row, tells the
+holder, and puts the hunt BACK in the `PENDING_SEND` tray so Send to listers offers it again — the opposite of
+goLiveDelete, which stamps the hunt so it is never re-sent. It refuses a listing carrying an Item ID at both ends,
+and it never nests locks (the hunt record is read under its own lock, `pendingSendAdd_` takes the script lock itself).
+
+**⛔ THE BLOCKER — read this before any Apps Script work.** The deploy dialog answered: *"This project has reached the
+Apps Script limit of 200 versions. You can associate this deployment with an existing version or delete unused
+versions from the project history page and try again."* So:
+- The new code IS saved to the editor (HEAD) — triggers that run HEAD already have it — but **`/exec` still runs
+  Version 201 (20 Nov)**, and the portal's `api()` calls go to `/exec`. Take back therefore answers "unknown action"
+  until someone deploys; the page now says that in plain words instead of showing the router's error.
+- **This is not only my feature.** The WINDOWS session's `listerTopUp` (4d85a9a, today) is in the same saved HEAD and
+  is equally undeployed — the UK-midnight top-up of every lister to 12 cannot run through `/exec` until the same
+  deploy happens. One deploy ships both.
+- **I did NOT delete any versions.** Pruning 200 versions of the owner's backend history is permanent, has no undo,
+  and is a project-hygiene decision for Hasib, not something to do inside an unrelated feature request. Project
+  History loads them newest-first (162–201 were on screen); the oldest are from early October.
+- The failed attempt left the live deployment untouched — verified: a GET on `/exec` answers
+  `{"ok":true,"service":"M98M Operations Intelligence System"}`, still Version 201.
+- **Recipe note for next time:** in the deploy chain the "Deploy" trigger is a `div[aria-haspopup="true"]` whose text
+  starts "Deploy" (a `textContent === 'Deploy'` button query finds nothing), and "Manage deployments" must be matched
+  as the LAST element whose own trimmed text is exactly that string. Project History's row menus DO open under the
+  event storm, but the screenshots of that page are stale compositor frames — trust the DOM, not the picture.
+
+**Checks.** node --check on all three files; build.py clean; a render harness over the view (board, drawer, detail,
+take-back payload, optimistic removal, revisions + finished toggle); engine-route unit cases
+(mgmt / Team Lead / own task / foreign lister → auth / live item / revision task); AS-action unit cases (happy,
+live-item refused, wrong-type refused, non-mgmt refused, deleted-stamp and unapproved → no re-queue).
+
+**State.** Frontend + engine live. Apps Script: saved, **awaiting the owner's decision on the version limit**.
