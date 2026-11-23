@@ -870,6 +870,7 @@ function engineApi(action, payload, engineOnly){
 }
 
 function api(action, payload){
+  if (ADT_QUIET_TICK && String(action || '').indexOf('adtool') === 0) { payload = Object.assign({}, payload || {}, { _fresh: 1 }); }
   if((STATE.idToken || STATE.session) && ENGINE_ACTIONS.indexOf(action)>=0){
     if(STATE.config && STATE.config.engine_url){ return engineApi(action, payload, true); }
     /* R6c (Hasib's "unknown action" on the CS desk): an ENGINE action must NEVER fall through
@@ -934,7 +935,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261123-1342';
+var BUILD = '20261123-1344';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -17425,6 +17426,12 @@ function adtFreshShow(slotId, fresh){ var s = document.getElementById(slotId); i
    failures in a row. adtPoll(containerId, everyMs, fn) — fn returns the read's promise. One poller
    per container: re-entering the page replaces the old one. */
 var ADT_POLLS = {};
+/* 23 Nov: A QUIET POLL SAYS SO. The engine hands a reader a stored answer at once and rebuilds it behind the reply,
+   which is right when somebody is waiting on "Loading…" and wrong for the five-minute poll of a page already on
+   screen, where nobody waits and a stored answer would only make the page lag its own poll. The poll's reads carry
+   _fresh (set here for the synchronous part of the tick, which is where a page fires its reads), and the engine's
+   key canon ignores it. */
+var ADT_QUIET_TICK = false;
 function adtPoll(containerId, everyMs, fn){
   adtPollStop(containerId);
   var fails = 0, busy = false;
@@ -17437,7 +17444,7 @@ function adtPoll(containerId, everyMs, fn){
     busy = true;
     var mv = document.getElementById('mainView'), top = mv ? mv.scrollTop : 0;
     var keep = function () { if (mv && Math.abs(mv.scrollTop - top) > 2) { mv.scrollTop = top; } };
-    var p; try { p = fn(); } catch (e) { p = Promise.reject(e); }
+    var p; ADT_QUIET_TICK = true; try { p = fn(); } catch (e) { p = Promise.reject(e); } finally { ADT_QUIET_TICK = false; }
     Promise.resolve(p).then(function () { fails = 0; busy = false; keep(); requestAnimationFrame(keep); }).catch(function (e) {
       busy = false;
       if (String(e && e.message || '') === 'auth') { adtPollStop(containerId); toast('Your sign-in expired — reload to keep the page live.'); return; }

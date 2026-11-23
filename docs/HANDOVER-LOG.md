@@ -706,3 +706,24 @@ in chat: twenty Mac revises never hit it; the likely trigger is the new "not mad
 17e" text contradicting the item specifics or variation models; test by resending the live description unchanged.
 
 **State.** MAC PRIMARY. The campaigns above read SCHEDULED at creation and flip to RUNNING on their own.
+
+## 2026-11-23 13:44 UTC · MAC · Advertising portal speed: stored answers served at once, rebuilt behind; five-minute warm; Where warmed by the reading; campaign-map index (owner, 23 Nov)
+
+**Why.** The owner, with Peak time listings and Where each listing advertises on "Loading…": "these pages are way too
+slow, make the whole advertising portal fast". Measured: the page download is 388 KB and arrives in a quarter of a
+second; the time is in the engine. The memo records (sync_state adtoolCache = hits/misses) showed most opens recompute:
+Peak 242/1051, Where 214/1349, Running today 738/4051, Plan 1589/2756, Departments 60/889, because memos live 30 s to
+2 min and pages poll every 5, and the composes are 10-20 s chains of medium queries (adtoolSlow high-water marks).
+
+**What changed.** (1) adtKvMemo: a stored answer past its time is returned at once and rebuilt behind the reply under
+a 120 s lock (adtKvRefresh); never for a quiet poll (the shell marks a poll's advertising reads _fresh; the key canon
+ignores underscore keys; the router sets ctx.fresh); never past 20 min; a prewarm forces and writes a warm entry
+(adtMemoOpts on the router and all 12 route memos). (2) adtoolPagesWarm on the 4-59/5 slot after trafficNow: Peak,
+Plan (d30, peak cohort), Command (peak), Where ×3, Running today, Report, Sale events — only pages read in the last
+6 h (adtoolCache last_ok), 200 s budget, note in sync_state adtoolPagesWarm; runnable by key. (3) adsItemsWatched
+warms the three Where lists for the account it just read (adWatchWarmPages, 25 s bound, good 150 s). (4)
+ROUTE_CACHE_MS: adtoolPeakProfile 120 s, adtoolPeakCampaigns 60 s. (5) Index idx_campaign_ads_listing on
+campaign_ads(listing_id): the never-advertised scans read 208M rows/day. Schema marker 2026-11-23.1 / 218-9d38cd43.
+(6) Two stale pins from other sessions' commits re-pointed (planner first in the hourly slot). Suite 1514/1514.
+
+**Nothing sent to eBay.** Reads and stored answers only.

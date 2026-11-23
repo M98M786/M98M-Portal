@@ -186,7 +186,7 @@ function cronMap() {
        the accounts are spread across the ticks of one cycle so a tick is one or two eBay calls rather
        than eight. That is why the sampler did not simply move to a slower slot: a quota that rises
        should speed it up without a cron change, and a quota that falls should slow it down. */
-    '4-59/5 * * * *': [trafficNow],
+    '4-59/5 * * * *': [trafficNow, adtoolPagesWarm],
     /* THE SAMPLER'S OWN TWO-MINUTE SLOT (owner, 10 Nov: "that system should get updated every 2
        minutes"). adsIntraday LEFT the five-minute slot above, where it rode fourth behind three API
        syncs. Two reasons, and the second is the one that matters: a turn every two minutes is a turn
@@ -451,7 +451,9 @@ export default {
         /* Running today is a read page (the note op lives on adtoolStopToday, which stays uncached) */
         adtoolRunToday: 60000,
         /* Phase 3 (big update): CPC Active / Post listings + Advertising Overview — 120 s, warmed hourly */
-        adtoolCpcListings: 120000, adtoolOverview: 120000 };
+        adtoolCpcListings: 120000, adtoolOverview: 120000,
+        /* 23 Nov: the two expanders a Peak row opens are reads (the Change campaign control carries `op`, which skips the cache) */
+        adtoolPeakProfile: 120000, adtoolPeakCampaigns: 60000 };
       /* Phase 1B: the advertising reads use a KV-backed memo instead (adtKvMemo) — the in-isolate map misses on
          every fresh isolate, and the 5-minute job pre-warms the today / Command centre payloads into KV. Same TTLs,
          same write-intent skip; a page that includes today is 60 s. */
@@ -465,10 +467,11 @@ export default {
       /* the advertising KV cache is keyed by profit class, not role, and a hit never runs the action (so never its
          adtGate): the role half of the gate runs HERE first, or a Lister's session would read the pre-warmed payloads */
       if (action.indexOf('adtool') === 0 && !adtRoleAllowed(ctx2.user, ADTOOL_OPEN_ROLES[action])) throw new AuthError('auth');
+      ctx2.fresh = !!(body.payload && body.payload._fresh);   // 23 Nov: a quiet poll waits for a fresh answer rather than taking a stored one
       const runRoute = () => !rcTtl
         ? route.fn(body.payload || {}, ctx2)
         : action.indexOf('adtool') === 0
-          ? adtKvMemo(env, action, adtProfitClass(ctx2.user), body.payload || {}, rcTtl, () => route.fn(body.payload || {}, ctx2), ctx2.waitUntil)
+          ? adtKvMemo(env, action, adtProfitClass(ctx2.user), body.payload || {}, rcTtl, () => route.fn(body.payload || {}, ctx2), ctx2.waitUntil, adtMemoOpts(ctx2))
           : memo('rt:' + action + ':' + String((ctx2.user && ctx2.user.role) || '') + ':' + JSON.stringify(body.payload || {}), rcTtl, () => route.fn(body.payload || {}, ctx2));
       let data;
       try { data = await runRoute(); }
@@ -1200,12 +1203,12 @@ function pvTokens(s) {
    every DDL statement in the file, which is wider than these families on purpose: a CREATE put
    anywhere is a reason to look. That is deliberate: a marker that could go stale by accident is a
    column that never lands. */
-const ADTOOL_SCHEMA_VERSION = '2026-11-22.2';
+const ADTOOL_SCHEMA_VERSION = '2026-11-23.1';
 /* the fingerprint of every DDL statement in engine/worker.js, held to this value by the suite */
 /* 22 Nov: the count moved to 215 on 21 Nov with adtool_neg_ack (Ads command centre), a table created at its own two
    sites on every use rather than under a guard, so nothing was missing from the database; the marker simply had not
    been moved with it, and the suite has said so since. Moved here, with no guarded statement added. */
-const ADTOOL_SCHEMA_DDL_HASH = '217-6ee53e06';
+const ADTOOL_SCHEMA_DDL_HASH = '218-9d38cd43';
 const ADTOOL_SCHEMA_KEY = 'adtool_schema_version';
 let ADTOOL_SCHEMA_MARK = null;      /* the one marker read per isolate */
 let ADTOOL_SCHEMA_SETTLE = null;    /* the one apply pass per isolate, and the proof DDL ran here */
@@ -3894,6 +3897,23 @@ async function adsItemsNet(env) {
    live changes is waiting on.
    Past the daily cap it stops and writes down that it has, which is the same figure the page reads
    back to say "today's watch allowance used". */
+const ADTOOL_CAMPAIGN_WATCH_WARM_MS = 25000;     // the warm after a tick's reads: three lists per account, inside this
+const ADTOOL_CAMPAIGN_WATCH_WARM_UNTIL_MS = 150000;  // good until a little after the next two-minute tick
+async function adWatchWarmPages(env, accts, tickStart) {
+  const out = [], t0 = Date.now();
+  for (const acct of (accts || [])) {
+    for (const state of ['', 'multi', 'none']) {
+      if (Date.now() - t0 > ADTOOL_CAMPAIGN_WATCH_WARM_MS) return out;
+      const pay = { account: String(acct), q: '', state: state };
+      try {
+        const data = await adtoolItemCampaignsCompute(env, pay);
+        await adtKvPut(env, adtKvKey('adtoolItemCampaigns', 'p', pay), ADTOOL_KV_TTL_MS.adtoolItemCampaigns, adtStripCollectiveProfit(JSON.parse(JSON.stringify(data)), { keepCollective: true }), true, Date.now() + ADTOOL_CAMPAIGN_WATCH_WARM_UNTIL_MS);
+        out.push(acct + (state ? ':' + state : ''));
+      } catch (e) { /* the page composes on demand, as before */ }
+    }
+  }
+  return out;
+}
 async function adsItemsWatched(env) {
   const now = Date.now();
   const cfg = (await env.DB.prepare(
@@ -3914,12 +3934,13 @@ async function adsItemsWatched(env) {
   await ensureAdsReadingColumns(env);
   const budget = { fetches: 0, until: now + ADTOOL_CAMPAIGN_WATCH_MS, cap: Math.min(ADTOOL_CAMPAIGN_WATCH_CALLS, left),
     campaigns: 0, repaired: 0, unchanged: 0, missing: 0, dup_listings: 0, truncated: 0, added: 0, removed: 0, bid_moved: 0, status_moved: 0, starved: [] };
-  const done = [];
+  const done = [], warmAccts = [];
   for (const acct of accounts) {
     try {
       const got = await adsItemsAccount(env, acct, budget, { job: 'adsItemsWatched', cpc_only: true, in_flight: ADTOOL_CAMPAIGN_WATCH_IN_FLIGHT,
         per_tick: ADTOOL_CAMPAIGN_WATCH_CALLS, repair: false, dup_sweep: false });
       done.push(acct + ' (' + got.read + ' of ' + got.running + ')');
+      warmAccts.push(acct);
       /* THE PAGE'S MEMO GOES THE MOMENT SOMETHING HAS MOVED, and only then. KV is the one budget in
          this worker counted in writes a day rather than a month, and a clear on every tick of every
          watched account would be hundreds of them an hour for an answer that had not changed. A tick
@@ -3934,11 +3955,16 @@ async function adsItemsWatched(env) {
       ).bind(acct, String(e && e.message || e).slice(0, 300)).run();
     }
   }
+  /* 23 Nov: THE READING WARMS THE PAGE. The account just re-read is the one somebody has open on Where each
+     listing advertises, and that page polls every minute; its three lists are composed here, once, and stored
+     good until a little after the next tick, so every poll in between is a KV read and not three composes. The
+     memo for the account was dropped above when something moved, so what is stored here is the new truth. */
+  const warmed = await adWatchWarmPages(env, warmAccts, now);
   const spentNow = await adWatchCountCalls(env, budget.fetches, used);
   await ctx_setSync(env, 'adsItemsWatched', '', adWatchTickNote({ accounts: done.length ? done : accounts,
     campaigns_read: budget.campaigns, calls: budget.fetches, used: spentNow,
     changes: { added: budget.added, removed: budget.removed, bid_moved: budget.bid_moved, status_moved: budget.status_moved },
-    capped: adWatchDailyLeft(spentNow, ADTOOL_CAMPAIGN_WATCH_DAILY) <= 0, starved: budget.starved }));
+    capped: adWatchDailyLeft(spentNow, ADTOOL_CAMPAIGN_WATCH_DAILY) <= 0, starved: budget.starved }) + (warmed.length ? ' · warmed ' + warmed.join('+') : ''));
 }
 
 /* every ad-list GET the watch makes, counted against the UTC day in one row. The hourly pass is NOT
@@ -8170,6 +8196,8 @@ function adtKvCanon(action, payload) {
   for (const k of Object.keys(p).sort()) {
     const v = p[k];
     if (v === undefined || v === null || v === '') continue;
+    /* 23 Nov: a key beginning with an underscore is a request flag (the shell's _fresh on a quiet poll), never part of the answer, never part of the key */
+    if (k.charAt(0) === '_') continue;
     if (k === 'period' && ADTOOL_KV_DEFAULT_PERIOD[action] && String(v) === ADTOOL_KV_DEFAULT_PERIOD[action]) continue;
     if (k === 'mode' && action === 'adtoolCpcListings' && String(v) === 'active') continue;
     /* 31 Oct section 2: `cohort` is NEVER dropped. The Peak-time Overview asks these same two
@@ -8209,17 +8237,49 @@ async function adtCacheTick(env, action, hit) {
   const upd = hit ? "cursor = (CAST(substr(cursor, 1, instr(cursor, '/') - 1) AS INTEGER) + 1) || substr(cursor, instr(cursor, '/'))" : "cursor = substr(cursor, 1, instr(cursor, '/')) || (CAST(substr(cursor, instr(cursor, '/') + 1) AS INTEGER) + 1)";
   await env.DB.prepare("INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('adtoolCache', ?1, ?2, datetime('now'), '') ON CONFLICT(job, account) DO UPDATE SET " + upd + ", last_ok = datetime('now')").bind(action, hit ? '1/0' : '0/1').run();
 }
-async function adtKvMemo(env, action, cls, payload, ttlMs, fn, waitUntil) {
+/* 23 Nov (owner: "these pages are way too slow… make the whole advertising portal fast"): A READER IS NEVER
+   MADE TO WAIT FOR A COMPOSE THE ENGINE ALREADY HOLDS. Measured before this change: Peak time listings hit its memo
+   242 times against 1,051 recomputes in its life, Where each listing advertises 214 against 1,349, Running today
+   738 against 4,051, because the memos live two minutes and the pages poll every five, so nearly every poll paid
+   the whole 10-20 s compose while somebody looked at "Loading…". Now a stored answer past its time is handed back at
+   once and rebuilt BEHIND the response (waitUntil), under a short lock so two readers do not rebuild it twice; the
+   next request reads the rebuilt one. A quiet poll (the shell marks it _fresh, nobody is waiting on it) still waits
+   for a fresh answer, so a page left open never shows figures older than its own poll. An entry older than
+   ADTOOL_KV_STALE_MAX_MS is not shown at all: the reader waits as before. A prewarm (opts.force) skips the stored
+   entry and writes a warm one. */
+const ADTOOL_KV_STALE_MAX_MS = 20 * 60000;    // the oldest stored answer a reader is shown while a fresh one is made behind it
+const ADTOOL_KV_REFRESH_LOCK_S = 120;         // one rebuild at a time per key; a rebuild that died frees itself by then
+function adtMemoOpts(ctx) { return { force: !!(ctx && ctx.prewarm), warm: !!(ctx && ctx.prewarm), fresh: !!(ctx && ctx.fresh) }; }
+async function adtKvRefresh(env, key, action, ttlMs, fn) {
+  const lock = key + ':r';
+  try { if (await env.HOT.get(lock)) return false; } catch (e) { /* no lock readable: rebuild */ }
+  try { await env.HOT.put(lock, String(Date.now()), { expirationTtl: ADTOOL_KV_REFRESH_LOCK_S }); } catch (e) { /* a lock that could not be written costs at most one extra rebuild */ }
+  try {
+    const data = await fn();
+    await adtKvPut(env, key, ttlMs, data);
+    await adtCacheTick(env, action, false);
+    return true;
+  } finally { try { await env.HOT.delete(lock); } catch (e) { /* it expires on its own */ } }
+}
+async function adtKvMemo(env, action, cls, payload, ttlMs, fn, waitUntil, opts) {
   const key = adtKvKey(action, cls, payload);
-  let hit = null; try { hit = await env.HOT.get(key, 'json'); } catch (e) { hit = null; }
+  const o = opts || {};
+  let hit = null; if (!o.force) { try { hit = await env.HOT.get(key, 'json'); } catch (e) { hit = null; } }
   const later = pr => { const p = Promise.resolve(pr).catch(() => {}); if (waitUntil) waitUntil(p); return p; };
   /* a pre-warmed entry is good until the job that wrote it runs again: the 5-minute prewarm's entries for 330 s
      (today grain + orders every 5 min), the hourly warm's until the horizon it stored (the next :20 rollup) */
   const ttl = hit && hit.warm ? Math.max(ttlMs, 330000) : ttlMs;
-  const good = hit && hit.at && hit.data !== undefined && (hit.until ? Date.now() < Number(hit.until) : Date.now() - hit.at < ttl);
+  const age = hit && hit.at ? Date.now() - Number(hit.at) : Infinity;
+  const good = hit && hit.at && hit.data !== undefined && (hit.until ? Date.now() < Number(hit.until) : age < ttl);
   if (good) { later(adtCacheTick(env, action, true)); return hit.data; }
+  const stale = !!(hit && hit.at && hit.data !== undefined && age < ADTOOL_KV_STALE_MAX_MS);
+  if (stale && waitUntil && !o.fresh) {
+    later(adtKvRefresh(env, key, action, ttlMs, fn));
+    later(adtCacheTick(env, action, true));
+    return hit.data;
+  }
   const data = await fn();
-  later(adtKvPut(env, key, ttlMs, data)); later(adtCacheTick(env, action, false));
+  later(adtKvPut(env, key, ttlMs, data, o.warm)); later(adtCacheTick(env, action, false));
   return data;
 }
 async function adtoolTodayPrewarm(env, rebuild) {
@@ -8684,7 +8744,7 @@ const ADTOOL_ACTIONS = {
          The memo goes first so that a read finishing early cannot drop a key this composition then re-stores. */
       const out = await adtKvMemo(ctx.env, 'adtoolListing', adtProfitClass(ctx.user), patKey ? { item_id: iid, pattern: patKey } : { item_id: iid }, ADTOOL_KV_TTL_MS.adtoolListing,
         () => adtoolListingCompute(ctx.env, iid, p),
-        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
       const ebayRead = await adtListingEbayKick(ctx, iid, patKey);
       return adtListingWithEbayRead(out, ebayRead);
     },
@@ -12474,7 +12534,7 @@ const ADTOOL_ACTIONS_P9 = {
       /* the run / stop lists are the same code the Running today page runs, first 8 rows each */
       let runToday = { enabled: false, run_today_top: [], stop_today_top: [], counts: null };
       if ((await adtFlag(env, 'adtool_page_runtoday')) === 'on') {
-        const rt = await adtKvMemo(env, 'adtoolRunToday', 'p', { account: acct }, ADTOOL_KV_TTL_MS.adtoolRunToday, () => adtoolRunTodayCompute(env, acct), (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        const rt = await adtKvMemo(env, 'adtoolRunToday', 'p', { account: acct }, ADTOOL_KV_TTL_MS.adtoolRunToday, () => adtoolRunTodayCompute(env, acct), (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
         /* the cohort narrows the SAME rows this list was already handed, and never runs the
            computation a second time: one row is one listing, so a listing filter is exact here.
            The counts are recounted off the narrowed rows, because a count of the fleet printed
@@ -14596,6 +14656,57 @@ async function adtoolOverviewCompute(env, p) {
   };
 }
 
+/* ---- 23 Nov: the FIVE-MINUTE warm of the pages that move inside the hour, for the pages somebody is reading ---- */
+/* Each entry is what the page sends on its first open (adtKvCanon folds the spellings). The hourly warm above keeps
+   the pages whose answer cannot move between two rollups; these are the ones that can — the peak list and its
+   Overview blocks, Where each listing advertises (three lists), Running today, the morning report and the sale
+   events — and a page nobody has read for ADTOOL_PAGES_WARM_DEMAND_MS is left alone, because warming a page nobody
+   opens is a compose every five minutes for no reader. Management-class entries ('p'); a spend-only reader's class
+   is served stored-then-rebuilt by the memo itself. */
+const ADTOOL_PAGES_WARM = [
+  ['adtoolPeak', {}], ['adtoolPlan', { period: 'd30', cohort: 'peak' }], ['adtoolCommand', { cohort: 'peak' }],
+  ['adtoolItemCampaigns', {}], ['adtoolItemCampaigns', { state: 'multi' }], ['adtoolItemCampaigns', { state: 'none' }],
+  ['adtoolRunToday', {}], ['adtoolReport', {}], ['adtoolSales', {}]];
+const ADTOOL_PAGES_WARM_DEMAND_MS = 6 * 3600000;   // warmed while somebody has read the page inside this window
+const ADTOOL_PAGES_WARM_BUDGET_MS = 200000;        // inside its own five minutes, with room for the next tick
+const ADTOOL_INNER_MEMO = new Set(['adtoolPeak', 'adtoolItemCampaigns', 'adtoolDepts', 'adtoolCampaignBoard', 'adtoolCampaignListings', 'adtoolChangeDay', 'adtoolVideoBoard', 'adtoolListing']);
+function adtPagesWarmDue(list, readAt, nowMs, demandMs) {
+  /* the entries whose action somebody read inside the demand window, in list order */
+  const out = [];
+  for (const j of (list || [])) {
+    const at = readAt && readAt[j[0]];
+    if (at && (Number(nowMs) - Number(at)) < Number(demandMs)) out.push(j);
+  }
+  return out;
+}
+async function adtoolPagesWarm(env) {
+  const t0 = Date.now();
+  const readAt = {};
+  try {
+    const rs = await env.DB.prepare("SELECT account, last_ok FROM sync_state WHERE job = 'adtoolCache'").all();
+    for (const r of (rs.results || [])) { const ms = Date.parse(String(r.last_ok || '').replace(' ', 'T') + 'Z'); if (isFinite(ms)) readAt[String(r.account)] = ms; }
+  } catch (e) { /* no record of reads: nothing is warmed this tick */ }
+  const due = adtPagesWarmDue(ADTOOL_PAGES_WARM, readAt, t0, ADTOOL_PAGES_WARM_DEMAND_MS);
+  const ctx = { env, user: { role: 'Management', email: 'warm@engine' }, waitUntil: null, prewarm: true };
+  const out = [], skipped = [], failed = [];
+  for (const j of due) {
+    const action = j[0], payload = j[1];
+    const label = action + (Object.keys(payload).length ? ':' + Object.keys(payload).map(k => payload[k]).join('/') : '');
+    if (Date.now() - t0 > ADTOOL_PAGES_WARM_BUDGET_MS) { skipped.push(label); continue; }
+    const route = ROUTES[action]; if (!route) continue;
+    try {
+      const data = await (route.raw || route.fn)(payload, ctx);
+      /* a route with a memo of its own has just written its warm entry (adtMemoOpts: force + warm); the others are stored here */
+      if (!ADTOOL_INNER_MEMO.has(action)) await adtKvPut(env, adtKvKey(action, 'p', payload), ADTOOL_KV_TTL_MS[action] || 120000, adtStripCollectiveProfit(JSON.parse(JSON.stringify(data)), { keepCollective: true }), true);
+      out.push(label);
+    } catch (e) { failed.push(label + ' (' + String((e && e.message) || e).replace(/^SAY: /, '').slice(0, 60) + ')'); }
+  }
+  try {
+    await ctx_setSync(env, 'adtoolPagesWarm', '', 'warmed ' + (out.join('+') || 'nothing') + (skipped.length ? ' · skipped ' + skipped.join('+') + ' (time budget)' : '') +
+      (failed.length ? ' · failed ' + failed.join('+') : '') + ' · ' + due.length + ' of ' + ADTOOL_PAGES_WARM.length + ' in demand · ' + (Date.now() - t0) + ' ms');
+  } catch (e) { /* the note is for a person; the entries are already written */ }
+  return out;
+}
 /* ---- hourly pre-warm of the heavy first-open pages (plan §4) ---- */
 /* the :50 second chance — a rollup that overran its cap skips the tail warm, so this rides the marketing slot
    and warms only when nothing warmed in the last 40 minutes */
@@ -14683,7 +14794,7 @@ const ADTOOL_ACTIONS_P11 = {
       const acct = String((p && p.account) || '').trim();
       return adtKvMemo(ctx.env, 'adtoolDepts', adtProfitClass(ctx.user), { account: acct }, ADTOOL_KV_TTL_MS.adtoolDepts,
         () => adtoolDeptsCompute(ctx.env, { account: acct }),
-        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
     },
   },
 };
@@ -15660,7 +15771,7 @@ const ADTOOL_ACTIONS_P14 = {
       const pay = { period: String((p && p.period) || ''), from: String((p && p.from) || ''), to: String((p && p.to) || ''), account: String((p && p.account) || '').trim(), status: String((p && p.status) || '').trim() };
       return adtKvMemo(ctx.env, 'adtoolCampaignBoard', adtProfitClass(ctx.user), pay, ADTOOL_KV_TTL_MS.adtoolCampaignBoard,
         () => adtoolCampaignBoardCompute(ctx.env, pay),
-        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
     },
   },
   adtoolCampaignListings: {
@@ -15671,7 +15782,7 @@ const ADTOOL_ACTIONS_P14 = {
       const pay = { period: String((p && p.period) || ''), from: String((p && p.from) || ''), to: String((p && p.to) || ''), account: String((p && p.account) || '').trim(), campaign_id: String((p && p.campaign_id) || '').trim() };
       return adtKvMemo(ctx.env, 'adtoolCampaignListings', adtProfitClass(ctx.user), pay, ADTOOL_KV_TTL_MS.adtoolCampaignListings,
         () => adtoolCampaignListingsCompute(ctx.env, pay),
-        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
     },
   },
   adtoolItemCampaigns: {
@@ -15699,7 +15810,7 @@ const ADTOOL_ACTIONS_P14 = {
       if (op) throw new Error('SAY: the only things this page can ask for are a reading, a re-read of the account, or a re-read of one listing');
       return adtKvMemo(ctx.env, 'adtoolItemCampaigns', adtProfitClass(ctx.user), pay, ADTOOL_KV_TTL_MS.adtoolItemCampaigns,
         () => adtoolItemCampaignsCompute(ctx.env, pay),
-        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
     },
   },
 };
@@ -16989,7 +17100,7 @@ const ADTOOL_ACTIONS_P15 = {
       const pay = { day: day, direction: dir, account: String((p && p.account) || '').trim() };
       return adtKvMemo(ctx.env, 'adtoolChangeDay', adtProfitClass(ctx.user), pay, ADTOOL_KV_TTL_MS.adtoolChangeDay,
         () => adtoolChangeDayCompute(ctx.env, pay),
-        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
     },
   },
   adtoolPeak: {
@@ -17000,7 +17111,7 @@ const ADTOOL_ACTIONS_P15 = {
       const acct = String((p && p.account) || '').trim();
       return adtKvMemo(ctx.env, 'adtoolPeak', adtProfitClass(ctx.user), { account: acct }, ADTOOL_KV_TTL_MS.adtoolPeak,
         () => adtoolPeakCompute(ctx.env, acct),
-        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
     },
   },
   adtoolPeakCampaigns: {
@@ -20970,7 +21081,7 @@ const ADTOOL_ACTIONS_P16 = {
       const per = adtPeriodOr(p, ukDate(''), 'd30');
       return adtKvMemo(ctx.env, 'adtoolVideoBoard', adtProfitClass(ctx.user), { account: acct, period: per.key, from: per.from, to: per.to }, ADTOOL_KV_TTL_MS.adtoolVideoBoard,
         () => adtoolVideoBoardCompute(ctx.env, p || {}, ctx),
-        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
     },
   },
   /* THE REAL HOURS BEHIND ONE PEAK LISTING (31 Oct, §3's last open item). The Peak page's "data
@@ -21039,7 +21150,7 @@ const ADTOOL_ACTIONS_P16 = {
       const acct = String((p && p.account) || '').trim();
       return adtKvMemo(ctx.env, 'adtoolLiveSplit', adtProfitClass(ctx.user), { account: acct }, ADTOOL_KV_TTL_MS.adtoolLiveSplit,
         () => adtoolLiveSplitCompute(ctx.env, acct),
-        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
     },
   },
   adtoolPotentialCpc: {
@@ -21055,7 +21166,7 @@ const ADTOOL_ACTIONS_P16 = {
       const acct = String((p && p.account) || '').trim();
       return adtKvMemo(ctx.env, 'adtoolPotentialCpc', adtProfitClass(ctx.user), { account: acct }, ADTOOL_KV_TTL_MS.adtoolPotentialCpc,
         () => adtoolPotentialCpcCompute(ctx.env, acct),
-        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
     },
   },
 };
@@ -24330,6 +24441,11 @@ async function ensureTruthSchema(env) {
     "CREATE INDEX IF NOT EXISTS idx_orders_item ON orders(item_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_ads_daily_date ON ads_daily(date)",
+    /* 23 Nov: idx_campaign_ads_listing — the campaign map's primary key is (account, campaign_id, listing_id), so
+       every "is this listing advertised anywhere" asked by listing alone walked the whole map: the gaps section of
+       Where each listing advertises and the never-advertised counts read 2.5 million rows a run, 208 million a day
+       between them (Cloudflare's per-query figures, 22-23 Nov). */
+    "CREATE INDEX IF NOT EXISTS idx_campaign_ads_listing ON campaign_ads(listing_id)",
     /* ---- THE NIGHT-TIME BASELINE: THE FIVE TABLES THE CRONS WERE WALKING WHOLE (6 Nov) -------
        Yesterday's three indexes took the day from 3.9 billion rows to a pace of 1.2 billion, and
        what was left was FLAT: ~40 million rows an hour between midnight and 04:00 UTC with nobody
@@ -31848,6 +31964,8 @@ const ROUTES = {
         /* the two-minute re-read of whichever account somebody has open on Where each listing
            advertises (14 Nov): run by hand it reads every watched account at once */
         adsItemsWatched,
+        /* 23 Nov: the five-minute warm of the pages people have open, run by hand to time it */
+        adtoolPagesWarm,
         /* a once-over of the peak list, run by hand and on no cron slot: it names the campaign a
            listing is already wholly switched in, and never chooses for one in two (2 Nov) */
         /* the price pulse (22 Nov): shadow by construction, so running it by key deals and stamps
@@ -34514,7 +34632,7 @@ const ADTOOL_ACTIONS_PULSE = {
       const acct = String((p && p.account) || '').trim();
       return adtKvMemo(ctx.env, 'adtoolPulse', adtProfitClass(ctx.user), { day, account: acct }, ADTOOL_KV_TTL_MS.adtoolPulse,
         () => adtoolPulseCompute(ctx.env, day, acct),
-        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null);
+        (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
     },
   },
   adtoolPulseSet: {
