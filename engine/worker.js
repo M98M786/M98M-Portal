@@ -859,7 +859,7 @@ async function ebayRestFetch(env, account, method, path, body) {
     method: m,
     headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json', accept: 'application/json',
       'content-language': 'en-GB', 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB' },
-    body: (m === 'POST' && body) ? JSON.stringify(body) : undefined,
+    body: ((m === 'POST' || m === 'PUT') && body) ? JSON.stringify(body) : undefined,
   });
   const text = await r.text();
   /* 22 Nov: createVideo answers 201 with an EMPTY body and the new video's address in the
@@ -34207,6 +34207,11 @@ const ROUTES = {
            an update_* subpath can change a campaign's own settings, never another seller's data. */
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/update_[a-z_]+$/,
         /^\/sell\/marketing\/v1\/ad_campaign\/find_campaign_by_ad_reference(\?|$)/,
+        /* 23 Nov (owner): "remove all these items from sale event" — the seven listings whose 5% sale
+           pushes profit under £1. A markdown sale's membership can only be changed by rewriting the
+           promotion, so this one path is read AND written (GET to read it, PUT with the same body minus
+           the listing). Nothing else on the promotions API: no create, no delete, no other promotion kind. */
+        /^\/sell\/marketing\/v1\/item_price_markdown\/[^/?]+$/,
         /* 31 Oct (owner, §4): ONE video read, so the upload day behind a product video can be looked
            up by hand the same way the sweep looks it up. READ ONLY and GET only, enforced below.
            It is the only path on this list that does not live on api.ebay.com: the Media API is served
@@ -34219,13 +34224,16 @@ const ROUTES = {
         /^\/developer\/analytics\/v1_beta\/(user_)?rate_limit(\?|$)/,
       ];
       if (!ok.some((r) => r.test(path))) throw new Error('SAY: path not allowed');
-      if (['GET', 'POST'].indexOf(method) < 0) throw new Error('SAY: GET or POST only');
+      const MARKDOWN_PATH = /^\/sell\/marketing\/v1\/item_price_markdown\/[^/?]+$/;
+      if (['GET', 'POST', 'PUT'].indexOf(method) < 0) throw new Error('SAY: GET, POST or PUT only');
+      /* PUT exists for ONE path only — the markdown sale rewrite. Everywhere else it stays refused. */
+      if (method === 'PUT' && !MARKDOWN_PATH.test(path)) throw new Error('SAY: PUT is only for a markdown sale');
       if (/^\/commerce\/media\//.test(path) && method !== 'GET') throw new Error('SAY: the video read is GET only');
       if (/^\/developer\//.test(path) && method !== 'GET') throw new Error('SAY: the quota read is GET only');
       /* THE CALL ITSELF IS THE SHARED ONE. The video sweep's date pass reads the very same media path
          through this same function, so what works here is what the job does: same host, same headers,
          same token minted for the named account. */
-      const r = await ebayRestFetch(ctx.env, String(p.account || ''), method, path, method === 'POST' ? p.body : null);
+      const r = await ebayRestFetch(ctx.env, String(p.account || ''), method, path, (method === 'POST' || method === 'PUT') ? p.body : null);
       return { status: r.status, body: r.body };
     },
   },
