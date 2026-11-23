@@ -3909,7 +3909,7 @@ async function adWatchWarmPages(env, accts, tickStart) {
         const data = await adtoolItemCampaignsCompute(env, pay);
         await adtKvPut(env, adtKvKey('adtoolItemCampaigns', 'p', pay), ADTOOL_KV_TTL_MS.adtoolItemCampaigns, adtStripCollectiveProfit(JSON.parse(JSON.stringify(data)), { keepCollective: true }), true, Date.now() + ADTOOL_CAMPAIGN_WATCH_WARM_UNTIL_MS);
         out.push(acct + (state ? ':' + state : ''));
-      } catch (e) { /* the page composes on demand, as before */ }
+      } catch (e) { out.push(acct + (state ? ':' + state : '') + ' failed (' + String((e && e.message) || e).replace(/^SAY: /, '').slice(0, 80) + ')'); }   /* the page composes on demand, as before; the note says why */
     }
   }
   return out;
