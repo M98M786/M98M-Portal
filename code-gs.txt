@@ -7746,6 +7746,7 @@ const ACTIONS_HUNTING = {
   reviseHunt: [actionReviseHunt_, 'any'],  // hunter-own or management, gated inside
   approvedArchive: [actionApprovedArchive_, 'any'],   // 22 Oct — the send-to-lister archive (read; hunt roles gated inside)
   huntSendToLister: [actionHuntSendToLister_, 'any'], // 22 Oct — create the listing task from the archive (mgmt gated inside)
+  huntTakeBack: [actionHuntTakeBack_, 'any'],         // 23 Nov — withdraw a listing task back into the send tray (mgmt gated inside)
 };
 
 
@@ -8133,6 +8134,63 @@ function huntSendCore_(payload, by) {
       '🔵 "' + title + '" · ' + account + ' — ' + lister.name + ' lists it next.', 'hunt:' + rec.hunt_id);
   } catch (e) {}
   return { ok: true, hunt_id: rec.hunt_id, task_id: taskId, assigned_to: lister.email, account: account, advertising_type: advertising, deadline_pkt: deadline };
+}
+
+/* 23 Nov (owner, the Listing desk): "we can take the listing's task back". A listing_new task
+   sitting with a lister (or undrafted at go-live) is WITHDRAWN: the task row is deleted, the
+   holder is told, and the hunt goes BACK into the PENDING_SEND tray so Send to listers offers it
+   again — unlike goLiveDelete, which stamps the hunt so it is never re-sent. The hunt's approval
+   is not touched. Refuses a listing already carrying an Item ID (it is live on eBay). Mgmt only. */
+function actionHuntTakeBack_(payload, ctx) {
+  if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw authErr_('not a hunt approver', ctx.ident.email);
+  const sh = tasksSheet_();
+  const pre = taskFind_(sh, payload.task_id);          // heavy read outside the lock
+  let rec = null, huntId = '';
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const found = taskVerify_(sh, pre, payload.task_id);
+    rec = found.rec;
+    if (String(rec.type) !== 'listing_new') throw new Error(SAFE_ERROR_PREFIX + 'only a new-listing task can be taken back');
+    if (String(rec.item_id || '').trim()) throw new Error(SAFE_ERROR_PREFIX + 'this listing already carries an Item ID — it is live on eBay, so there is nothing to take back');
+    try { huntId = String((JSON.parse(String(rec.details || '{}')) || {}).hunt_id || ''); } catch (e) {}
+    sh.deleteRow(found.row);
+  } finally { lock.releaseLock(); }
+  const holder = normalizeEmail(rec.assigned_to || '');
+  logActivity_(ctx.ident.email, 'HUNT_TAKE_BACK', String(rec.task_id), String(rec.status || ''), 'taken back',
+    String(rec.account || '') + ' · ' + String(rec.title || '').slice(0, 60) + (huntId ? ' · hunt ' + huntId : '') + ' · was with ' + holder);
+  /* Re-queue the hunt for sending — read the record under its own lock, then append to the
+     PENDING_SEND tray OUTSIDE it (pendingSendAdd_ takes the script lock itself; never nest). */
+  let requeued = false, hrec = null;
+  if (huntId) {
+    try {
+      const hsh = huntSheet_();
+      const hpre = huntFind_(hsh, huntId);
+      const hlock = LockService.getScriptLock();
+      try {
+        hlock.waitLock(8000);
+        const hfound = huntVerify_(hsh, hpre, huntId);
+        hrec = huntRecord_(hfound.rec);
+      } finally { hlock.releaseLock(); }
+    } catch (e) { logActivity_('system', 'HUNT_TAKE_BACK_READ_FAIL', huntId, '', '', String(e && e.message || e).slice(0, 120)); }
+    if (hrec && hrec.approval_status === HUNT_APPROVED &&
+        String(hrec[HC_COMMENTS] || '').indexOf('listing DELETED at go-live') < 0) {
+      try { pendingSendAdd_(hrec); requeued = true; } catch (e) {}
+    }
+  }
+  if (holder && holder.indexOf('system:') !== 0) {
+    try {
+      notify_(holder, 'Task withdrawn',
+        '🟠 "' + String(rec.title || '').slice(0, 60) + '" · ' + String(rec.account || '') +
+        ' — ' + (ctx.user.name || 'Management') + ' took this listing task back' +
+        (requeued ? '; it returns to Send to listers for re-assignment.' : '.') + ' Nothing more to do on it.', 'task:' + String(rec.task_id));
+    } catch (e) {}
+  }
+  /* Reconcile the engine task mirror so the task leaves the desk at once (same shape as
+     goLiveDelete: the row is gone from the sheet; a full push prunes it from D1). */
+  let mirror = 'mirror not pushed';
+  try { if (typeof pushEngineTasks === 'function') mirror = String(pushEngineTasks()); } catch (e) { mirror = 'mirror push failed: ' + (e && e.message || e); }
+  return { ok: true, task_id: String(rec.task_id), hunt_id: huntId, requeued: requeued, mirror: mirror };
 }
 
 
