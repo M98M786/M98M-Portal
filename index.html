@@ -988,7 +988,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261123-1458';
+var BUILD = '20261123-1500';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -3485,7 +3485,11 @@ VIEW_CSS.push(
     if (AC.acct) { payload.account = AC.acct; }
     if (!AC.period && AC.from && AC.to) { payload.from = AC.from; payload.to = AC.to; }
     acNegLoad();
-    api('adsBoard', payload).then(function (d) {
+    /* 23 Nov (owner: "every page takes so long to open"): a board you have opened before is drawn
+       from the last answer AT ONCE and replaced the moment the fresh one lands, instead of leaving
+       you on a spinner every single time. The same rule the Active listings page has had since
+       September. Nothing here decides or writes, so a last answer on screen is never acted on. */
+    var paintBoard = function (d) {
       d = d || {};
       var c = d.combined || {};
       /* 22 Nov (owner): "when I click the 9, send me exactly to where the 9 items are" — every tile
@@ -3624,8 +3628,17 @@ VIEW_CSS.push(
         t.onkeydown = function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } };
       });
       acPaintItems();
+    };
+    var had = (typeof cacheRead === 'function') ? cacheRead('adsBoard', payload) : null;
+    if (had) { try { paintBoard(had); } catch (e) { had = null; } }
+    api('adsBoard', payload).then(function (d) {
+      if (typeof cacheWrite === 'function') { try { cacheWrite('adsBoard', payload, d); } catch (e) {} }
+      paintBoard(d);
     }).catch(function (e) {
-      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Could not load the board.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(e.message) + '</span></div>';
+      var msg = String((e && e.message) || '');
+      if (msg === 'navigated away') { return; }          // the screen that asked is gone
+      if (had) { toast('Showing the last board \u2014 could not refresh just now.'); return; }
+      box.innerHTML = '<div style="color:var(--text-2);font-weight:700;padding:12px 0">Could not load the board.<span style="display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px">' + esc(msg) + '</span></div>';
     });
   }
 
@@ -25291,7 +25304,13 @@ function ibSchedule() {
  *  actions ask for are coalesced so a burst of clicks cannot become a burst of calls. */
 function ibPollNow() {
   if (IB.busy) { IB.again = true; return; }
-  if (document.hidden || !STATE.idToken) return;
+  /* 23 Nov: A PORTAL SESSION IS A SIGN-IN. Since 22 Nov a tab that boots from a stored session
+     never asks Google for a credential (that One Tap popping up in every new tab was the owner's
+     complaint), so STATE.idToken is null for everybody who has signed in once — and this gate,
+     which still named the Google token alone, quietly switched the bell off for the whole office.
+     The engine authenticates a session on its own; every other poll in the portal already says
+     `STATE.idToken || STATE.session`. */
+  if (document.hidden || !(STATE.idToken || STATE.session)) return;
   var wait = IB_POLL_MIN_GAP - (ibNowMs() - IB.lastAt);
   if (wait > 0) { ibClearTimer(); IB.timer = setTimeout(ibPollNow, wait); return; }
   IB.busy = true; IB.again = false;
