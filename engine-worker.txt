@@ -30357,6 +30357,55 @@ const ROUTES = {
     },
   },
 
+  /* 23 Nov (owner): the Listing desk opens a lister's stuck task and shows the LISTING itself —
+     the §8.2-limited job card the lister was handed, the task's own comment trail (the "why is
+     this sitting here"), the dates, and the hunt it came from. can_act is decided HERE so the
+     desk can never offer Take back / Delete to a role the sheet would refuse. The details JSON
+     is {hunt_id, limited:{...}} (huntAppendTask_), so the pack lives under .limited. */
+  listingTaskCard: {
+    auth: 'any', fn: async (p, ctx) => {
+      const role = String(ctx.user.role || '');
+      const me = String(ctx.user.email || '').toLowerCase();
+      const reader = ['Management', 'Ops Head', 'Team Lead', 'Listing Manager'].indexOf(role) >= 0 || ctx.user.super;
+      const t = await ctx.env.DB.prepare('SELECT * FROM tasks WHERE task_id = ?1').bind(String(p.task_id || '')).first();
+      if (!t) throw new Error('that task is not on the mirror any more — press Refresh');
+      if (!reader && String(t.assigned_to || '').toLowerCase() !== me) throw new AuthError('auth');
+      const task = {
+        task_id: String(t.task_id || ''), type: String(t.type || ''), account: String(t.account || ''),
+        item_id: String(t.item_id || ''), title: String(t.title || ''), status: String(t.status || ''),
+        priority: String(t.priority || ''), deadline_pkt: String(t.deadline_pkt || ''),
+        assigned_to: String(t.assigned_to || '').toLowerCase(), assigned_by: String(t.assigned_by || '').toLowerCase(),
+        created_at: String(t.created_at || ''), updated_at: String(t.updated_at || ''),
+        submitted_at: String(t.submitted_at || ''), decided_at: String(t.decided_at || ''),
+        comments: String(t.comments || ''), submission_note: String(t.submission_note || ''),
+        synced_at: String(t.synced_at || ''),
+      };
+      const users = await ctx.env.DB.prepare('SELECT email, name FROM users').all().catch(() => ({ results: [] }));
+      const names = {};
+      for (const u of (users.results || [])) names[String(u.email || '').toLowerCase()] = String(u.name || u.email || '');
+      task.assigned_to_name = names[task.assigned_to] || task.assigned_to;
+      task.assigned_by_name = names[task.assigned_by] || task.assigned_by;
+      let listing = null, details_text = String(t.details || ''), huntId = '';
+      const parsed = lstParseDetails(t.details);
+      if (parsed) {
+        huntId = String(parsed.hunt_id || '');
+        const pack = (parsed.limited && typeof parsed.limited === 'object') ? parsed.limited : parsed;
+        if (task.type === 'listing_new') { listing = lstLimited(pack); details_text = ''; }
+      }
+      if (!huntId) { const m = String(t.details || '').match(/H[0-9a-f]{8}/); if (m) huntId = m[0]; }
+      let hunt = null;
+      if (huntId) {
+        const h = await ctx.env.DB.prepare('SELECT hunter_email, status, account, ts FROM hunt_rows WHERE hunt_id = ?1')
+          .bind(huntId).first().catch(() => null);
+        if (h) hunt = { hunt_id: huntId, status: String(h.status || ''), account: String(h.account || ''),
+          ts: String(h.ts || ''), hunter: names[String(h.hunter_email || '').toLowerCase()] || String(h.hunter_email || '') };
+      }
+      const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0 || !!ctx.user.super;
+      const can_act = !!(mgmt && task.type === 'listing_new' && !String(task.item_id || '').trim() && task.status !== 'Completed');
+      return { task, listing, details_text, hunt_id: huntId, hunt, can_act };
+    },
+  },
+
   huntReasonsEngine: {
     auth: 'any', fn: async (p, ctx) => {
       await ensureTruthSchema(ctx.env);
