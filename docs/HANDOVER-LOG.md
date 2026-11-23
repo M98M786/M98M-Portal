@@ -992,3 +992,19 @@ which already sells the 18 models. Asked of him: the order desk should confirm t
 in all eight colours.
 
 **State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent. This listing: title on hold to 23 Dec.
+
+## 2026-11-23 23:25 UTC · WINDOWS · Frosted MagSafe iPhone case (Growmore): the standard iPhone 18 added too, on the owner's word
+
+**Done at 23:24 UTC.** Owner: "add iphone 18 too". Eight more variations, the standard iPhone 18 in the listing's eight
+colours, same price and the same fifteen available as the rest. The description's model lines now cover iPhone 18,
+18 Pro and 18 Pro Max, and iPhone 18 is gone from its not-available note. The title was already right and was not
+sent. One call, accepted first time. Read-back: all 168 older variations identical; 176 now; total sold and watchers
+unchanged.
+
+**One more fact for the recipe.** The new value was placed inside the VariationSpecificsSet, ahead of two values that
+already existed, and eBay kept that order. So the order of the set as sent is the order of the buyer's drop-down:
+it now ends 17 Air, 18, 18 Pro, 18 Pro Max.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent. This listing: three owner-approved
+revises tonight, title on hold to 23 Dec, order desk asked to confirm the supplier link carries the three iPhone 18
+models in all eight colours.
