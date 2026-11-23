@@ -3974,7 +3974,8 @@ function run(argv) {
       .every(s => s.slice(s.indexOf('[') + 1, s.indexOf(']')).split(',').length > 1);
     return slots.length === 2 && slots.indexOf('30 23 * * *') >= 0 && slots.indexOf('0 * * * *') >= 0 &&
       slots.every(s => inFile.indexOf(s) >= 0) && shared &&
-      /'0 \* \* \* \*': \[adtoolPeakPlan, financeSync/.test(block);
+      /* 22 Nov: listerTopUp joined the hourly slot behind the planner; what is pinned is that the planner rides FIRST in it */
+      /'0 \* \* \* \*': \[adtoolPeakPlan, /.test(block);
   })(), null);
 
   /* the next switch, across midnight */
@@ -5955,7 +5956,8 @@ function run(argv) {
       const inFile = (file && Array.isArray(file.crons)) ? file.crons.map(String) : [];
       const bare = cronBlk.replace(/\/\*[\s\S]*?\*\//g, '');
       const slots = (bare.match(/'[^']+':\s*\[[^\]]*\btrafficNow\b[^\]]*\]/g) || []);
-      return slots.length === 1 && slots[0].indexOf("'4-59/5 * * * *'") === 0 && /\[trafficNow\]/.test(slots[0]) &&
+      /* 23 Nov: the five-minute page warm rides this slot after the sampler */
+      return slots.length === 1 && slots[0].indexOf("'4-59/5 * * * *'") === 0 && /\[trafficNow, adtoolPagesWarm\]/.test(slots[0]) &&
         /'\*\/5 \* \* \* \*': \[orderSync, adsSync, cpcAudit, openSync\]/.test(bare) &&
         /'20 \* \* \* \*': \[adtoolRollups, trafficQuota\]/.test(bare) &&
         inFile.indexOf('4-59/5 * * * *') >= 0 && inFile.indexOf('20 * * * *') >= 0 &&
@@ -9240,6 +9242,70 @@ function run(argv) {
     const view = rdFile('frontend/view-adtool-pulse.js');
     return /VIEWS\.adtoolPulse = \{/.test(view) && /\.ppl-/.test(view) && /Shadow mode\./.test(view) &&
       /adtPoll\('pplBody', 120000/.test(view) && !/\.cdy-|\.wla-/.test(view);
+  })(), null);
+
+  /* ── 23 Nov (owner: "these pages are way too slow… make the whole advertising portal fast") ───────── */
+  t('speed (23 Nov): the memo hands a reader a stored answer past its time at once and rebuilds it behind the reply, under a lock, never for a quiet poll, never past the stale ceiling, and a prewarm forces and warms', (() => {
+    const m = src.slice(src.indexOf('async function adtKvMemo('), src.indexOf('async function adtoolTodayPrewarm('));
+    const shape = /async function adtKvMemo\(env, action, cls, payload, ttlMs, fn, waitUntil, opts\) \{/.test(m) &&
+      /let hit = null; if \(!o\.force\) \{ try \{ hit = await env\.HOT\.get\(key, 'json'\); \}/.test(m) &&
+      /const stale = !!\(hit && hit\.at && hit\.data !== undefined && age < ADTOOL_KV_STALE_MAX_MS\);/.test(m) &&
+      /if \(stale && waitUntil && !o\.fresh\) \{\n\s+later\(adtKvRefresh\(env, key, action, ttlMs, fn\)\);\n\s+later\(adtCacheTick\(env, action, true\)\);\n\s+return hit\.data;/.test(m) &&
+      /later\(adtKvPut\(env, key, ttlMs, data, o\.warm\)\);/.test(m);
+    const r = src.slice(src.indexOf('async function adtKvRefresh('), src.indexOf('async function adtKvMemo('));
+    const lock = /const lock = key \+ ':r';/.test(r) && /if \(await env\.HOT\.get\(lock\)\) return false;/.test(r) &&
+      /expirationTtl: ADTOOL_KV_REFRESH_LOCK_S/.test(r) && /finally \{ try \{ await env\.HOT\.delete\(lock\); \}/.test(r) && /await adtCacheTick\(env, action, false\);/.test(r);
+    const consts = /const ADTOOL_KV_STALE_MAX_MS = 20 \* 60000;/.test(src) && /const ADTOOL_KV_REFRESH_LOCK_S = 120;/.test(src) &&
+      /function adtMemoOpts\(ctx\) \{ return \{ force: !!\(ctx && ctx\.prewarm\), warm: !!\(ctx && ctx\.prewarm\), fresh: !!\(ctx && ctx\.fresh\) \}; \}/.test(src);
+    /* a good entry is still a plain hit, before any of this */
+    const first = m.indexOf('if (good) { later(adtCacheTick(env, action, true)); return hit.data; }') < m.indexOf('const stale =');
+    return shape && lock && consts && first;
+  })(), null);
+  t('speed (23 Nov): the request flag reaches every memo — the router sets ctx.fresh off _fresh and passes the options, every route memo passes them, and the key canon ignores any underscore key', (() => {
+    const router = src.slice(src.indexOf('const rcTtl = hasWriteIntent(body.payload)'), src.indexOf('let data;\n      try { data = await runRoute(); }'));
+    const rt = /ctx2\.fresh = !!\(body\.payload && body\.payload\._fresh\);/.test(router) && router.indexOf('ctx2.fresh =') < router.indexOf('const runRoute') &&
+      /adtKvMemo\(env, action, adtProfitClass\(ctx2\.user\), body\.payload \|\| \{\}, rcTtl, \(\) => route\.fn\(body\.payload \|\| \{\}, ctx2\), ctx2\.waitUntil, adtMemoOpts\(ctx2\)\)/.test(router);
+    const inner = (src.match(/adtMemoOpts\(ctx\)\)/g) || []).length;
+    const every = (src.match(/adtKvMemo\(ctx\.env, 'adtool/g) || []).length + (src.match(/adtKvMemo\(env, 'adtoolRunToday'/g) || []).length === inner;
+    const canon = JSON.stringify(F.adtKvCanon('adtoolPeak', { _fresh: 1, account: '' })) === '{}' && JSON.stringify(F.adtKvCanon('adtoolItemCampaigns', { state: 'multi', _fresh: 1 })) === JSON.stringify(F.adtKvCanon('adtoolItemCampaigns', { state: 'multi' }));
+    return rt && inner === 12 && every && canon;
+  })(), [(src.match(/adtMemoOpts\(ctx\)\)/g) || []).length]);
+  t('speed (23 Nov): the five-minute warm covers the pages that move inside the hour, only while somebody has read them, inside a budget, forcing a warm entry; it rides the sampler\'s slot and can be run by key', (() => {
+    const w = src.slice(src.indexOf('const ADTOOL_PAGES_WARM = ['), src.indexOf('/* ---- hourly pre-warm of the heavy first-open pages'));
+    const list = /\['adtoolPeak', \{\}\], \['adtoolPlan', \{ period: 'd30', cohort: 'peak' \}\], \['adtoolCommand', \{ cohort: 'peak' \}\],\n\s+\['adtoolItemCampaigns', \{\}\], \['adtoolItemCampaigns', \{ state: 'multi' \}\], \['adtoolItemCampaigns', \{ state: 'none' \}\],\n\s+\['adtoolRunToday', \{\}\], \['adtoolReport', \{\}\], \['adtoolSales', \{\}\]\];/.test(w);
+    const demand = /const ADTOOL_PAGES_WARM_DEMAND_MS = 6 \* 3600000;/.test(w) && /const ADTOOL_PAGES_WARM_BUDGET_MS = 200000;/.test(w) &&
+      /SELECT account, last_ok FROM sync_state WHERE job = 'adtoolCache'/.test(w) && /const due = adtPagesWarmDue\(ADTOOL_PAGES_WARM, readAt, t0, ADTOOL_PAGES_WARM_DEMAND_MS\);/.test(w);
+    const ctxw = /const ctx = \{ env, user: \{ role: 'Management', email: 'warm@engine' \}, waitUntil: null, prewarm: true \};/.test(w) &&
+      /if \(!ADTOOL_INNER_MEMO\.has\(action\)\) await adtKvPut\(env, adtKvKey\(action, 'p', payload\), ADTOOL_KV_TTL_MS\[action\] \|\| 120000, adtStripCollectiveProfit\(JSON\.parse\(JSON\.stringify\(data\)\), \{ keepCollective: true \}\), true\);/.test(w);
+    /* the inner-memo set names exactly the routes that memoise in their own body */
+    const setM = src.match(/const ADTOOL_INNER_MEMO = new Set\(\[([^\]]*)\]\);/); const names = setM ? setM[1].split(',').map(x => x.trim().replace(/'/g, '')).filter(Boolean) : [];
+    const own = names.length >= 2 && names.every(a => { const i = src.indexOf('\n  ' + a + ': {\n'); const j = src.indexOf('\n  },\n', i); return i > 0 && src.slice(i, j).indexOf("adtKvMemo(ctx.env, '" + a + "'") > 0; }) &&
+      names.indexOf('adtoolPeak') >= 0 && names.indexOf('adtoolItemCampaigns') >= 0;
+    const slot = /'4-59\/5 \* \* \* \*': \[trafficNow, adtoolPagesWarm\],/.test(src) && /\n        adtoolPagesWarm,\n/.test(src.slice(src.indexOf('  runJobKey: {'), src.indexOf('  runJobKey: {') + 4000));
+    return list && demand && ctxw && own && slot;
+  })(), null);
+  t('speed (23 Nov): the two-minute reading warms Where each listing advertises for the account it read — three lists, after the memo drop, inside its own bound, good until after the next tick', (() => {
+    const f = src.slice(src.indexOf('async function adWatchWarmPages('), src.indexOf('async function adsItemsWatched('));
+    const fn = /for \(const state of \['', 'multi', 'none'\]\)/.test(f) && /const pay = \{ account: String\(acct\), q: '', state: state \};/.test(f) &&
+      /await adtoolItemCampaignsCompute\(env, pay\)/.test(f) && /adtKvPut\(env, adtKvKey\('adtoolItemCampaigns', 'p', pay\), ADTOOL_KV_TTL_MS\.adtoolItemCampaigns, [^\n]*true, Date\.now\(\) \+ ADTOOL_CAMPAIGN_WATCH_WARM_UNTIL_MS\)/.test(f) &&
+      /if \(Date\.now\(\) - t0 > ADTOOL_CAMPAIGN_WATCH_WARM_MS\) return out;/.test(f) && /const ADTOOL_CAMPAIGN_WATCH_WARM_MS = 25000;/.test(src) && /const ADTOOL_CAMPAIGN_WATCH_WARM_UNTIL_MS = 150000;/.test(src);
+    const w = src.slice(src.indexOf('async function adsItemsWatched('), src.indexOf('/* THE DUPLICATION SQL') > 0 ? src.indexOf('async function adsItemsWatched(') + 6000 : 0);
+    const order = w.indexOf('await adWatchCacheClear(env, acct);') < w.indexOf('const warmed = await adWatchWarmPages(env, warmAccts, now);') &&
+      w.indexOf('const warmed = await adWatchWarmPages(env, warmAccts, now);') < w.indexOf('const spentNow = await adWatchCountCalls(env, budget.fetches, used);') &&
+      /warmAccts\.push\(acct\);/.test(w) && /\(warmed\.length \? ' · warmed ' \+ warmed\.join\('\+'\) : ''\)/.test(w);
+    return fn && order;
+  })(), null);
+  t('speed (23 Nov): the campaign map carries an index on its listing column, the two Peak expanders are in the page cache, and the schema marker moved with the index', (() => {
+    const idx = /"CREATE INDEX IF NOT EXISTS idx_campaign_ads_listing ON campaign_ads\(listing_id\)",/.test(src);
+    const cache = /adtoolPeakProfile: 120000, adtoolPeakCampaigns: 60000 \};/.test(src);
+    const v = (src.match(/const ADTOOL_SCHEMA_VERSION = '([^']+)';/) || [])[1] || '';
+    return idx && cache && v >= '2026-11-23.1';
+  })(), null);
+  t('speed (23 Nov): the shell marks a quiet poll\'s advertising reads _fresh for the synchronous part of the tick, and nothing else', (() => {
+    const sh = rdFile('src/shell.html');
+    return /var ADT_QUIET_TICK = false;/.test(sh) && /var p; ADT_QUIET_TICK = true; try \{ p = fn\(\); \} catch \(e\) \{ p = Promise\.reject\(e\); \} finally \{ ADT_QUIET_TICK = false; \}/.test(sh) &&
+      /if \(ADT_QUIET_TICK && String\(action \|\| ''\)\.indexOf\('adtool'\) === 0\) \{ payload = Object\.assign\(\{\}, payload \|\| \{\}, \{ _fresh: 1 \}\); \}/.test(sh) &&
+      (sh.match(/_fresh/g) || []).length === 2;
   })(), null);
 
   const passed = results.filter(r => r.ok).length;

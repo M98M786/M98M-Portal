@@ -676,3 +676,54 @@ same), not from this change.
 200-version cap — an old version must be deleted before "New version" can be deployed; until that lands the
 worker's midnight call answers "unknown job". (2) `node scripts/adtool-test.js` to be run by the owner or the Mac.
 (3) First real run = tonight 00:00 UK; read sync_state @last and ACTIVITY_LOG LISTER_TOP_UP in the morning.
+
+## 2026-11-23 09:05 UTC · MAC · 64 Smart campaigns for last week's new listings, all eight accounts (owner, 23 Nov)
+
+**Done.** Hasib (23 Nov, Urdu): the listings that went live over the last week on every account need campaigns too, the
+same way as before — £3 a day, £0.20 bid, one Smart campaign per product, campaign name = the item number — and then
+the item numbers so he can add them to the peak list. Read-only first: of the 115 listings that started in the last
+seven days, 44 already had their own per-item campaign with the ad paused by the peak switch (left alone), 7 had a live
+pay-per-click ad, and 64 had no pay-per-click campaign at all; each of the 64 was checked live on eBay with the
+find-campaign-by-ad-reference call before anything was created. Then one SMART campaign per item (name = item number,
+GB marketplace, £3 daily, max CPC £0.20, start two minutes out) and its ad by listing number: 64 of 64 created, no
+errors. Fifteen of them also sit in a Dynamic or General campaign (ten Yaseen Bhai, three Rabia Masood, two NEXGEN);
+not removed, Hasib did not ask.
+
+**Counts by account.** Amna Baji 18, Azhar Bhai 12, Yaseen Bhai 10, Zareen Star 8, AZHAR ABRT 6, Perfect Deals 5,
+Rabia Masood 3, NEXGEN M98M 2.
+
+**Files.** `M98M-SQR-Agent/lib/smart_launch.py` (idempotent; results in
+`proposals/smart_results_2026-11-23.json`), `logs/smart_campaigns_2026-11-23.{txt,csv}` (item, campaign and ad ids
+by account; the txt is the list handed to Hasib for the peak list). This log entry only; no portal code.
+
+**Separate, paused on Hasib's word.** He also asked for the 46 drafts on the Go-live desk to be published "by API call".
+21 of them were flagged up to 20 Nov. They are Seller Hub web drafts (lstng?draftId), invisible to every eBay API; the
+Inventory API holds zero items on the accounts checked. Publishing needs the listing page in a Chrome signed in to
+each account; the browser choice was put to Hasib and he dismissed it. Nothing published, waiting.
+
+**Note for Windows.** Error 240 / SP_Item_Condition_Misrep on the NEXGEN iPhone ring-stand case revise was answered
+in chat: twenty Mac revises never hit it; the likely trigger is the new "not made for iPhone 18 / Plus / Mini / 16e /
+17e" text contradicting the item specifics or variation models; test by resending the live description unchanged.
+
+**State.** MAC PRIMARY. The campaigns above read SCHEDULED at creation and flip to RUNNING on their own.
+
+## 2026-11-23 13:44 UTC · MAC · Advertising portal speed: stored answers served at once, rebuilt behind; five-minute warm; Where warmed by the reading; campaign-map index (owner, 23 Nov)
+
+**Why.** The owner, with Peak time listings and Where each listing advertises on "Loading…": "these pages are way too
+slow, make the whole advertising portal fast". Measured: the page download is 388 KB and arrives in a quarter of a
+second; the time is in the engine. The memo records (sync_state adtoolCache = hits/misses) showed most opens recompute:
+Peak 242/1051, Where 214/1349, Running today 738/4051, Plan 1589/2756, Departments 60/889, because memos live 30 s to
+2 min and pages poll every 5, and the composes are 10-20 s chains of medium queries (adtoolSlow high-water marks).
+
+**What changed.** (1) adtKvMemo: a stored answer past its time is returned at once and rebuilt behind the reply under
+a 120 s lock (adtKvRefresh); never for a quiet poll (the shell marks a poll's advertising reads _fresh; the key canon
+ignores underscore keys; the router sets ctx.fresh); never past 20 min; a prewarm forces and writes a warm entry
+(adtMemoOpts on the router and all 12 route memos). (2) adtoolPagesWarm on the 4-59/5 slot after trafficNow: Peak,
+Plan (d30, peak cohort), Command (peak), Where ×3, Running today, Report, Sale events — only pages read in the last
+6 h (adtoolCache last_ok), 200 s budget, note in sync_state adtoolPagesWarm; runnable by key. (3) adsItemsWatched
+warms the three Where lists for the account it just read (adWatchWarmPages, 25 s bound, good 150 s). (4)
+ROUTE_CACHE_MS: adtoolPeakProfile 120 s, adtoolPeakCampaigns 60 s. (5) Index idx_campaign_ads_listing on
+campaign_ads(listing_id): the never-advertised scans read 208M rows/day. Schema marker 2026-11-23.1 / 218-9d38cd43.
+(6) Two stale pins from other sessions' commits re-pointed (planner first in the hourly slot). Suite 1514/1514.
+
+**Nothing sent to eBay.** Reads and stored answers only.
