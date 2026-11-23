@@ -796,3 +796,93 @@ including nothing and why: the first notes after it shipped carried no warm line
 a warm that found no account from one that failed. Marker 2026-11-23.2 / 219-e230ddd8. Suite 1514/1514.
 
 **Nothing sent to eBay.**
+---
+
+## 2026-11-23 16:59 UTC · WINDOWS · Heated gloves (Zareen Star): five-day review of its manual campaign applied; description revised; title kept on hold
+
+**What was done.** Hasib sent the manual campaign's search query report (17 to 23 Nov) and the old smart campaign's
+report for the USB heated gloves and said "revise it". The title was revised by the Mac on 18 Nov, so it stays on its
+30-day hold; this was a review. Findings: the campaign's two units in five days came from placements, its 27 keywords
+took 33 clicks for none; "heated gloves" at the lowest bid got no impressions at all; "mens heated gloves" spent over
+£3 without a sale; the broad keyword leaked to bike, battery and brand searches. On his go: "mens heated gloves" moved
+from the middle bid to the lowest (he accepted a demotion in place of the £2 block), "winter gloves" paused, eight
+negative phrase keywords added (the misspelling and plural the live list missed, bike terms, a rival brand, scarf,
+winter gloves), all read back. Description revised: the Pro versions are now explained as five-finger heating, which
+the last gallery pictures show, and a pasted "5+ heat levels / 5 or more heat settings" block that contradicted the
+listing's own "no settings" line was removed. Sold, watchers, price and quantity unchanged on read-back.
+
+**Still open, Hasib's side.** The heating-technology gallery picture still promises twelve hours of warmth with an
+included power bank, a three-second heat-up and full-hand coverage; the text says no power bank and back-of-hand
+heating. Flagged on 18 Nov by the Mac and again today. "heated gloves" stays at the lowest bid unless he lifts it.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent; ten twin sessions stand ready for
+parallel items. Next review of the gloves on 18 Dec with the title.
+
+## 2026-11-23 17:35 UTC · MAC · Listings archive: the §8.2 pack was being read one level too high
+
+**The report.** Owner: "item listers are not getting whole listing archive, refresh it."
+
+**What was actually wrong.** Not access, not rows, not the mirror — the engine served every lister all 882
+completed listing jobs and revisions, fresh (taskMirror had synced minutes before). The RECORD was empty.
+A listing task's `details` is `{hunt_id, limited:{… 21 §8.2 columns …}}` (huntAppendTask_, since the
+pipeline's first day — all 735 listing rows on the mirror are this shape). `lstParseDetails` returns the
+OUTER object, and `lstLimited` then indexed `hunt_id` / `limited` as column headers: **1.00 filled field
+per row against 15.60 in the stored record**, measured over all 665 completed listings. 664 of them hold a
+title and at least one link; none of it reached a lister. The Details panel therefore showed a hunt id,
+"Listing Update Pending" and the live supplier block — which only 316 of 665 listings and 109 of 217
+revisions even have. My tasks looked right the whole time because `tkDetailsHtml` renders the RAW details
+in the browser and digs into `.limited` itself; that is why the owner could point at a full card on 21 Nov.
+
+**Fix (6db2548, engine deployed 17:31 UTC, live script == main, verified).** One helper `lstPack(parsed)`
+for the whole engine: `listingArchiveEngine`, `myListingWorkEngine` (the lister's own Assigned-listings
+card and the Listing pipeline were blank in the same way) and `listingTaskCard` (which had the unwrap
+inline and correct since this morning). `lstFamily` uses it too, behaviour unchanged. §8.2 untouched: same
+21-column whitelist, and the stored packs carry nothing outside it (checked on all 735 rows) — no cost or
+earning field exists anywhere in this path. Engine-only: no portal build, the archive's Refresh is enough.
+
+**Traps worth keeping.** (1) THE PACK LIVES UNDER `.limited` — any new reader of a listing task's details
+must go through `lstPack`. (2) Apps Script has the same wrong level (`listingParseDetails_` →
+`listingBuildLimitedPayload_` indexes the outer object) and could not be fixed: /exec is pinned and the
+project is at its 200-version limit. It only answers if the engine is unreachable, so it is not in anyone's
+way today — fix it the day AS can deploy again. (3) A lister's REVISION rows still show only the live
+supplier block; the revision's own `details` prose is management's reasoning and routinely carries profit
+and CPC figures, so it must never be drawn on a lister's screen.
+
+**Open question for the owner.** The archive is the record of portal-era WORK: 882 completed jobs back to
+August, 678 distinct items. The eBay catalogue holds 2,013 listings across the 8 accounts, so ~1,336 older
+listings have no task row and appear nowhere in it. If "whole archive" means every listing the company has
+ever put up, that is a different page (built from items_api + the sourcing tables) and needs his word.
+
+## 2026-11-23 17:55 UTC · MAC · Listings archive part two: the page was giving up after 30 seconds and saying nothing
+
+**The report.** Owner sent Bilal's screen: Listings archive showing his own two September listings,
+"currently ये देखो यार … कोई पुराना डेटा नहीं पड़ा हुआ, इसको अपडेट करा दो".
+
+**The tell.** In the screenshot the **All listers / Mine chips are missing**. `laPaint` hides them only
+when `LA.mineOnly` is true, and that flag is set in exactly one place: the catch that falls back from
+the team feed to `myListingWork` (the person's own work). So the archive call was failing, silently,
+for every lister — my 21 Nov Details work was never even reached.
+
+**Why it failed.** `listingArchiveEngine` built the whole page in one answer: `SELECT *` over 882
+completed listing tasks (1.6 MB of `details` the list never draws) and then the live supplier record for
+all 678 items in IN-chunks of 50 — about **73 D1 queries per page open**. Cloudflare's analytics for the
+Worker: 779 invocations in three hours ended `clientDisconnected` with wall-time P99 **30.02 s** — the
+browser's own abort, to the millisecond. (Nothing shows in `errors`: the engine catches route failures
+and answers HTTP 200 `{ok:false}`, so analytics counts them as successes. Check `status` dimensions, not
+`errors`, when hunting this kind of thing.)
+
+**Fix (b6b89ac, build 20261123-1750, engine deployed 17:51Z, live == main, verified).** The list is three
+cheap queries (users, provenance, the completed listing tasks BY NAME — never `SELECT *` on tasks) and
+carries no record. `listingArchiveRow` reads ONE row's record when its Details is opened: the §8.2 pack
+plus that item's live supplier rows, six single-row reads, cached for the visit, dropped on Refresh. When
+the team feed does not answer, the count line now says "N of your own — the team archive did not answer,
+press Refresh" instead of showing own-work in silence.
+
+**Law worth keeping.** A silent fallback hid this for weeks. Any fallback that narrows what a person can
+see must say so on the screen; the 2 Nov "a fallback that announces itself reads as a breakage" lesson is
+about the fast/slow PATH, not about showing someone less data than they asked for.
+
+**Still open.** The archive is the record of portal-era work (882 jobs, 678 items). The eBay catalogue
+holds 2,013 listings, so ~1,336 older ones appear nowhere — a different page if the owner wants it.
+Apps Script still reads the §8.2 pack one level too high (`listingParseDetails_`); it is only the
+fallback and cannot be deployed while the project sits at its 200-version limit.

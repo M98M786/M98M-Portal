@@ -27,6 +27,11 @@
     '.la-det td{padding:0 11px 12px!important;border-bottom:1px solid var(--gold-line)}'
   );
   var LA_OPEN = {};   // task_id → details panel open
+  /* 23 Nov: the record of ONE row, read when it is opened (engine listingArchiveRow) and kept
+     for the rest of the visit. The list itself carries no record at all — building all 882 of
+     them in one answer is what pushed this page past the 30-second abort and dropped every
+     lister back onto their own two rows. */
+  var LA_DET = {};    // task_id → {state:'loading'|'ok'|'err', data, msg}
 
   function laStr(v) { return String(v == null ? '' : v).trim(); }
   function laMe() { return ((STATE.user && STATE.user.email) || '').toLowerCase(); }
@@ -62,7 +67,13 @@
       });
     }
     var cnt = $('laCount');
-    if (cnt) { cnt.textContent = rows.length + ((q || LA.who === 'mine') ? ' of ' + (LA.rows || []).length : '') + ' completed'; }
+    if (cnt) {
+      /* 23 Nov: when the team feed does not answer, this page quietly showed the person their OWN
+         work and said nothing — a lister read that as "the archive is empty". It says so now. */
+      cnt.textContent = LA.mineOnly
+        ? rows.length + ' of your own — the team archive did not answer, press Refresh'
+        : rows.length + ((q || LA.who === 'mine') ? ' of ' + (LA.rows || []).length : '') + ' completed';
+    }
     if (!rows.length) {
       box.innerHTML = '<div class="alx-empty">' + (q ? 'Nothing in the archive matches that.' :
         'Nothing completed yet — finished listings and revisions land here on their own.') + '</div>';
@@ -105,7 +116,12 @@
     if (open) { h += '</tbody></table></div>'; }
     box.innerHTML = h;
     [].slice.call(box.querySelectorAll('[data-la-more]')).forEach(function (b) {
-      b.onclick = function () { var k = this.getAttribute('data-la-more'); LA_OPEN[k] = !LA_OPEN[k]; laPaint(); };
+      b.onclick = function () {
+        var k = this.getAttribute('data-la-more');
+        LA_OPEN[k] = !LA_OPEN[k];
+        if (LA_OPEN[k] && !LA_DET[k]) { laRowFetch(k); }
+        laPaint();
+      };
     });
   }
 
@@ -115,12 +131,30 @@
      it) and `listing` (the hunt-form details the lister was given, §8.2-limited). Nothing here is
      an earning; the profit rule for listers is untouched. */
 
+  function laRowFetch(id) {
+    LA_DET[id] = { state: 'loading' };
+    engineCall('listingArchiveRow', { task_id: id }, 20000).then(function (d) {
+      LA_DET[id] = { state: 'ok', data: d || {} };
+    }).catch(function (e) {
+      LA_DET[id] = { state: 'err', msg: (e && e.message) || 'could not read it' };
+    }).then(function () { if (LA_OPEN[id]) { laPaint(); } });
+  }
+
+  function laBox(inner) {
+    return '<div class="tk-box tk-det" style="margin-top:4px"><div class="k">Details</div><div class="tk-txt">' + inner + '</div></div>';
+  }
+
   function laDetails(r) {
-    var sc = r.sourcing || {};
+    var key = laStr(r.task_id);
+    var st = LA_DET[key];
+    if (!st || st.state === 'loading') { return laBox('<div class="spinner"></div>'); }
+    if (st.state === 'err') { return laBox('<div class="tk-sub">Could not read this listing\u2019s record \u2014 ' + esc(st.msg) + '</div>'); }
+    var d = st.data || {};
+    var sc = d.sourcing || {};
     var id = laStr(r.item_id);
     var card = '';
-    if (window.M98M_taskDetailsHtml && r.listing) {
-      card = window.M98M_taskDetailsHtml(JSON.stringify({ limited: r.listing, hunt_id: laStr(r.hunt_id) }));
+    if (window.M98M_taskDetailsHtml && d.listing) {
+      card = window.M98M_taskDetailsHtml(JSON.stringify({ limited: d.listing, hunt_id: laStr(d.hunt_id) || laStr(r.hunt_id) }));
     }
     /* the live supplier record, in the card's own grid and pill styles so it reads as one card */
     var rows = [];
@@ -139,7 +173,7 @@
       return '<div class="tk-dt-row"><span class="k">' + esc(kv[0]) + '</span><span class="v">' + esc(kv[1]) + '</span></div>';
     }).join('') + '</div>' +
       (pills.length ? '<div class="tk-dt-links">' + pills.join('') + '</div>' : '<div class="tk-sub" style="margin-top:10px">No sourcing link anywhere for this item.</div>');
-    return '<div class="tk-box tk-det" style="margin-top:4px"><div class="k">Details</div><div class="tk-txt">' + card + live + '</div></div>';
+    return laBox(card + live);
   }
 
 
@@ -167,7 +201,7 @@
     },
     init: function () {
       var rf = $('laRefresh');
-      if (rf) { rf.onclick = function () { LA.rows = null; laLoad(); }; }
+      if (rf) { rf.onclick = function () { LA.rows = null; LA_DET = {}; laLoad(); }; }
       var qb = $('laQ');
       if (qb) {
         qb.value = LA.q;

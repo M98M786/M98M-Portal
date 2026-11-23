@@ -1,5 +1,56 @@
 # CHANGELOG
 
+## 2026-11-23 - LISTINGS ARCHIVE: two rows instead of 882, because the page gave up after 30 seconds
+
+Owner, with Bilal's screen in front of him: the archive showed his own two September listings and
+nothing else - "कोई पुराना डेटा नहीं पड़ा हुआ". The giveaway is in the screenshot: the **All listers /
+Mine chips were gone**, and `laPaint` hides them only when `LA.mineOnly` is true - the flag the page
+sets when the TEAM feed fails and it quietly falls back to `myListingWork`, the person's own work.
+
+`listingArchiveEngine` was building the whole page in one answer: `SELECT *` over 882 completed tasks
+(1.6 MB of `details` nobody draws), then the live supplier record for all 678 items in IN-chunks of 50
+- about **73 D1 queries per page open**. Cloudflare's own analytics show the price: 779 invocations in
+three hours ended `clientDisconnected`, wall-time P99 **30.02 s**, which is exactly the browser's
+30-second abort. So every lister who opened the archive waited half a minute and was then handed their
+own two rows with no error anywhere - and 21 Nov's Details work was never even reached.
+
+**The list is now three queries** - users, provenance, and the completed listing tasks by name (never
+`SELECT *`: `details` is up to 8 KB a row and the list draws none of it). It carries no record at all.
+**The record for ONE row is read when the person opens it** (`listingArchiveRow`: the §8.2 hunt-form
+pack plus that item's live supplier rows, six single-row reads), so opening a row costs what one row
+costs. The view keeps the opened records for the visit, and a Refresh forgets them.
+
+Also: when the team feed does not answer, the count line now says so - "N of your own - the team
+archive did not answer, press Refresh" - instead of letting a lister read an empty page as the truth.
+
+§8.2 unchanged: same 21-column whitelist, no cost or earning on this path, and a revision's own
+details prose (management's reasoning, which carries profit and CPC figures) is still never returned.
+
+Build 20261123-1750 · engine deployed.
+## 2026-11-23 - LISTINGS ARCHIVE: the record itself was being stripped away, not withheld
+
+Owner, 23 Nov: "item listers are not getting whole listing archive, refresh it." The archive's Details
+panel (21 Nov) drew a shell - a hunt id, "Listing Update Pending", and whatever live supplier rows the
+item happened to have (only 316 of 665 listings and 109 of 217 revisions have one). The listing record
+itself never arrived. A listing task's details JSON is `{hunt_id, limited:{… the 21 §8.2 columns …}}`,
+written that way by `huntAppendTask_` since the pipeline's first day, so THE PACK LIVES UNDER `.limited`.
+`lstParseDetails` hands back the OUTER object (it only unwraps a `.listing`), and `lstLimited` then
+indexed `hunt_id` / `limited` as if they were column headers: every one of the 21 columns came out empty
+but the 'Listing Update' default. Measured over all 665 completed listings on the live mirror, the engine
+was shipping **1.00 filled field per row where the stored record holds 15.60** - 664 rows have a title and
+at least one link, and not one of them reached a lister. My tasks looked right the whole time because that
+card renders the RAW details in the browser and digs into `.limited` itself, which is exactly why the owner
+could see a full card on 21 Nov and point at it.
+
+One law, one helper (`lstPack`), three callers: `listingArchiveEngine` (the team archive every lister
+reads), `myListingWorkEngine` (the lister's own Assigned-listings card and the Listing pipeline, blank the
+same way), and `listingTaskCard`, which had the unwrap inline and correct since this morning and now shares
+the helper. `lstFamily` keeps its behaviour and uses the helper too. §8.2 is untouched: the pack is still
+built through the 21-column whitelist, the stored packs carry nothing outside it (checked on all 735
+listing rows), and no cost or earning field exists in this path - the Details panel still shows supplier
+names and links only.
+
+Engine-only change, no portal build: a lister presses Refresh on the archive and the record is there.
 ## 2026-11-23 - SEND TO LISTERS: every lister topped up to 12 at UK midnight
 
 Owner, 23 Nov: "When I approve hunts and they go into the Send to lister box, every day at UK midnight

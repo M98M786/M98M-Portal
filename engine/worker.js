@@ -859,7 +859,7 @@ async function ebayRestFetch(env, account, method, path, body) {
     method: m,
     headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json', accept: 'application/json',
       'content-language': 'en-GB', 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB' },
-    body: (m === 'POST' && body) ? JSON.stringify(body) : undefined,
+    body: ((m === 'POST' || m === 'PUT') && body) ? JSON.stringify(body) : undefined,
   });
   const text = await r.text();
   /* 22 Nov: createVideo answers 201 with an EMPTY body and the new video's address in the
@@ -24981,6 +24981,20 @@ function lstParseDetails(details) {
   if (!p || typeof p !== 'object') return null;
   return (p.listing && typeof p.listing === 'object') ? p.listing : p;
 }
+/* 23 Nov (owner: "item listers are not getting whole listing archive"). A listing task's details
+   JSON is {hunt_id, limited:{… the 21 §8.2 columns …}} — written that way by huntAppendTask_ since
+   the pipeline's first day — so THE PACK LIVES UNDER .limited. lstParseDetails hands back the OUTER
+   object (it only unwraps a `.listing`), and lstLimited then indexed `hunt_id` / `limited` as if
+   they were column headers: every one of the 21 columns came out empty but the 'Listing Update'
+   default. That is why the archive's Details card and the lister's own job card drew a shell with
+   no title, no category and no links, while My tasks — which renders the RAW details in the
+   browser and digs into .limited itself — showed the whole record. One law, one helper, three
+   callers. */
+function lstPack(parsed) {
+  if (!parsed || typeof parsed !== 'object') return {};
+  const inner = parsed.limited;
+  return (inner && typeof inner === 'object' && !Array.isArray(inner)) ? inner : parsed;
+}
 function lstLimited(parsed) {
   const index = {};
   Object.keys(parsed || {}).forEach((k) => { index[lstNorm(k)] = parsed[k]; });
@@ -25000,7 +25014,7 @@ function lstLimited(parsed) {
 }
 function lstFamily(details) {
   const p = lstParseDetails(details);
-  const lim = (p && p.limited) || p || {};
+  const lim = lstPack(p);
   const adv = String(lim['CPC Selling Chance'] || '');
   if (!adv) return 'Unassigned';
   return /CPC/i.test(adv) ? 'CPC' : 'General/Dynamic';
@@ -30294,7 +30308,7 @@ const ROUTES = {
         };
         if (t.type === 'listing_new') {
           const parsed = lstParseDetails(t.details);
-          rec.listing = lstLimited(parsed || {});
+          rec.listing = lstLimited(lstPack(parsed));
           if (parsed) rec.details_text = '';
           listings.push(rec);
         } else {
@@ -30314,11 +30328,19 @@ const ROUTES = {
   /* ————— the collective listings archive (11 Sept, owner: "start showing … all previous
      listings archive to product listers as well" + "show whole archive of all product listers
      to every product lister collectively"). Every COMPLETED listing job and revision across the
-     whole team, newest first, with who did it. Reads only; listing_new details go through the
-     same lstLimited §8.2 whitelist as a lister's own work, so nothing extra leaks. */
+     whole team, newest first, with who did it.
+
+     23 Nov (owner, with Bilal's screen: two rows in the archive and "कोई पुराना डेटा नहीं"): this
+     route used to build the whole page in one answer — SELECT * over 882 completed tasks (1.6 MB of
+     `details`), then the live supplier record for all 678 items in IN-chunks of 50, about 73 D1
+     queries per page open. It ran past the browser's 30-second abort (779 invocations a day
+     disconnected at exactly 30.02 s in the Workers analytics), and view-listingArchive.js then fell
+     back to the OWN-WORK feed without a word — which is why a lister saw his own two listings and
+     the "All listers" chips vanished. The list is now three cheap queries and carries no record at
+     all; the record for ONE row is read on demand by listingArchiveRow when the person opens it.
+     Reads only, and the §8.2 whitelist still guards everything a lister can see. */
   listingArchiveEngine: {
     auth: 'any', fn: async (p, ctx) => {
-      await ensureTruthSchema(ctx.env);
       const role = String(ctx.user.role || '');
       const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0 || ctx.user.super;
       if (['Item Lister', 'Listing Manager', 'Team Lead'].indexOf(role) < 0 && !mgmt) throw new AuthError('role has no listing archive');
@@ -30331,81 +30353,94 @@ const ROUTES = {
          lister is in provenance (re-stamped from the activity log). Prefer it for new listings. */
       const pv = {};
       try {
-        const ps = await ctx.env.DB.prepare("SELECT item_id, lister_email FROM provenance WHERE lister_email != ''").all();
-        for (const r of (ps.results || [])) pv[String(r.item_id)] = String(r.lister_email).toLowerCase();
+        const ps = await ctx.env.DB.prepare("SELECT item_id, lister_email, hunt_id FROM provenance").all();
+        for (const r of (ps.results || [])) pv[String(r.item_id)] = { lister: String(r.lister_email || '').toLowerCase(), hunt_id: String(r.hunt_id || '') };
       } catch (e) {}
+      /* never SELECT * here: `details` is up to 8 KB a row and the list draws none of it */
       const rs = await ctx.env.DB.prepare(
-        "SELECT * FROM tasks WHERE type IN ('listing_new','listing_revision') AND status = 'Completed'"
+        'SELECT task_id, type, account, item_id, title, submitted_at, created_at, assigned_to FROM tasks ' +
+        "WHERE type IN ('listing_new','listing_revision') AND status = 'Completed'"
       ).all();
       const rows = [];
       for (const t of (rs.results || [])) {
-        const who = (String(t.type) === 'listing_new' && pv[String(t.item_id || '')]) || String(t.assigned_to || '').toLowerCase();
+        const prov = pv[String(t.item_id || '')] || null;
+        const who = (String(t.type) === 'listing_new' && prov && prov.lister) || String(t.assigned_to || '').toLowerCase();
         const rec = {
           task_id: String(t.task_id || ''), type: String(t.type), account: String(t.account || ''),
           item_id: String(t.item_id || ''), title: String(t.title || ''), status: 'Completed',
           submitted_at: String(t.submitted_at || ''), created_at: String(t.created_at || ''),
           assigned_to: who, assigned_name: names[who] || who,
         };
-        if (t.type === 'listing_new') {
-          const parsed = lstParseDetails(t.details);
-          if (parsed) rec.listing = lstLimited(parsed);
-        } else {
-          rec.is_72h = String(t.title || '').indexOf('listing_revision_72h') === 0;
-        }
+        if (t.type !== 'listing_new') rec.is_72h = String(t.title || '').indexOf('listing_revision_72h') === 0;
+        if (prov && prov.hunt_id) rec.hunt_id = prov.hunt_id;
         rec.sort = Date.parse(String(t.submitted_at || t.created_at || '')) || 0;
         rows.push(rec);
       }
       rows.sort((a, b) => b.sort - a.sort);
       if (rows.length > 1500) rows.length = 1500;
       rows.forEach((r) => { delete r.sort; });
-      /* 21 Nov (owner): "the listers' archive must carry the previous details — the item's supplier,
-         its links, the previous sourcing suppliers, all of it; today only management sees them."
-         Each row now carries a `sourcing` block read from the LIVE tables, in the same source order
-         the Product sourcing card uses per slot — portal save → Main Sheet → go-live record → hunt.
-         WHAT IS DELIBERATELY NOT HERE: any cost or earning. Supplier NAMES and LINKS are not money;
-         ali_cost / oe together reconstruct profit, which is why stripItem withholds them from a
-         lister, and that rule stands — this block carries none of those fields. Batched by IN-chunks,
-         never one query per row (the archive holds up to 1,500). */
-      const ids = Array.from(new Set(rows.map((r) => r.item_id).filter((x) => /^\d{9,15}$/.test(x))));
-      const chunk = async (sql, list, key) => {
-        const out = {};
-        for (let i = 0; i < list.length; i += 50) {
-          const part = list.slice(i, i + 50);
-          const rs2 = await ctx.env.DB.prepare(sql.replace('?LIST', part.map(() => '?').join(','))).bind(...part).all().catch(() => ({ results: [] }));
-          for (const r of (rs2.results || [])) out[String(r[key])] = r;
+      return { rows, total: rows.length, columns: LST_LIMITED_MAP.map((c) => c.to) };
+    },
+  },
+
+  /* 23 Nov (owner): ONE archive row's record, read when the person opens its Details — the §8.2
+     hunt-form pack the lister was handed (21 Nov: "the previous details — the item's supplier, its
+     links, the previous sourcing suppliers, all of it") plus the LIVE supplier record, in the same
+     per-slot source order the Product sourcing card uses: portal save → Main Sheet → go-live record
+     → hunt form. WHAT IS DELIBERATELY NOT HERE: any cost or earning. Supplier NAMES and LINKS are
+     not money; ali_cost / oe together reconstruct profit, which is why stripItem withholds them
+     from a lister, and that rule stands — this carries none of those fields, and a REVISION's own
+     details prose (management's reasoning, routinely carrying profit and CPC figures) is never
+     returned. Six single-row reads, so opening a row costs what one row costs. */
+  listingArchiveRow: {
+    auth: 'any', fn: async (p, ctx) => {
+      const role = String(ctx.user.role || '');
+      const mgmt = ['Management', 'Ops Head'].indexOf(role) >= 0 || ctx.user.super;
+      if (['Item Lister', 'Listing Manager', 'Team Lead'].indexOf(role) < 0 && !mgmt) throw new AuthError('role has no listing archive');
+      const t = await ctx.env.DB.prepare(
+        'SELECT task_id, type, item_id, title, details, status FROM tasks WHERE task_id = ?1'
+      ).bind(String(p.task_id || '')).first();
+      if (!t) throw new Error('SAY: that listing is not on the mirror any more — press Refresh');
+      if (['listing_new', 'listing_revision'].indexOf(String(t.type)) < 0 || String(t.status) !== 'Completed') throw new AuthError('not an archive row');
+      const item = String(t.item_id || '');
+      const out = { task_id: String(t.task_id || ''), item_id: item, type: String(t.type) };
+      if (String(t.type) === 'listing_new') {
+        const parsed = lstParseDetails(t.details);
+        if (parsed) {
+          out.listing = lstLimited(lstPack(parsed));
+          if (parsed.hunt_id) out.hunt_id = String(parsed.hunt_id);
         }
-        return out;
-      };
-      const facts = await chunk("SELECT item_id, COALESCE(current_sup,'') AS current_sup, COALESCE(sup1,'') AS sup1, COALESCE(sup2,'') AS sup2, COALESCE(sup3,'') AS sup3, COALESCE(sup1_link,'') AS l1, COALESCE(sup2_link,'') AS l2, COALESCE(sup3_link,'') AS l3 FROM items_facts WHERE item_id IN (?LIST)", ids, 'item_id');
-      const src = await chunk("SELECT item_id, COALESCE(s1,'') AS s1, COALESCE(s2,'') AS s2, COALESCE(s3,'') AS s3 FROM sourcing WHERE item_id IN (?LIST)", ids, 'item_id');
-      const gol = await chunk("SELECT item_id, COALESCE(ali_link,'') AS ali_link FROM golive WHERE item_id IN (?LIST)", ids, 'item_id');
-      const prov = await chunk("SELECT item_id, COALESCE(hunter_email,'') AS hunter_email, COALESCE(hunt_id,'') AS hunt_id FROM provenance WHERE item_id IN (?LIST)", ids, 'item_id');
-      const huntIds = Array.from(new Set(Object.values(prov).map((r) => String(r.hunt_id || '')).filter(Boolean)));
-      const hunts = await chunk('SELECT hunt_id, vals FROM hunt_rows WHERE hunt_id IN (?LIST)', huntIds, 'hunt_id');
+      }
+      const one = async (sql) => ctx.env.DB.prepare(sql).bind(item).first().catch(() => null);
+      const f = /^\d{9,15}$/.test(item) ? await one("SELECT COALESCE(current_sup,'') AS current_sup, COALESCE(sup1,'') AS sup1, COALESCE(sup2,'') AS sup2, COALESCE(sup3,'') AS sup3, COALESCE(sup1_link,'') AS l1, COALESCE(sup2_link,'') AS l2, COALESCE(sup3_link,'') AS l3 FROM items_facts WHERE item_id = ?1") : null;
+      const sv = /^\d{9,15}$/.test(item) ? await one("SELECT COALESCE(s1,'') AS s1, COALESCE(s2,'') AS s2, COALESCE(s3,'') AS s3 FROM sourcing WHERE item_id = ?1") : null;
+      const g = /^\d{9,15}$/.test(item) ? await one("SELECT COALESCE(ali_link,'') AS ali_link FROM golive WHERE item_id = ?1") : null;
+      const pv2 = /^\d{9,15}$/.test(item) ? await one("SELECT COALESCE(hunter_email,'') AS hunter_email, COALESCE(hunt_id,'') AS hunt_id FROM provenance WHERE item_id = ?1") : null;
+      let h = null;
+      const huntId = String((pv2 && pv2.hunt_id) || out.hunt_id || '');
+      if (huntId) {
+        const hr = await ctx.env.DB.prepare('SELECT vals FROM hunt_rows WHERE hunt_id = ?1').bind(huntId).first().catch(() => null);
+        if (hr) { try { const v = JSON.parse(hr.vals || '{}'); h = { l1: v['Product Link 1 Main supplier'] || '', l2: v['Product Link 2'] || '', l3: v['Product Link 3'] || '', temu: v['Temu Link'] || '' }; } catch (e) { h = null; } }
+        out.hunt_id = huntId;
+      }
+      if (pv2 && pv2.hunter_email) {
+        const u = await ctx.env.DB.prepare('SELECT name FROM users WHERE lower(email) = ?1').bind(String(pv2.hunter_email).toLowerCase()).first().catch(() => null);
+        out.hunter = String((u && u.name) || pv2.hunter_email);
+      }
       const isUrl2 = (v) => /^https?:\/\//i.test(String(v || '').trim());
       const pick2 = (cands, name) => { for (const [from, v] of cands) if (isUrl2(v)) return { url: String(v).trim(), src: from, supplier: String(name || '') }; return null; };
-      for (const r of rows) {
-        const f = facts[r.item_id], sv = src[r.item_id], g = gol[r.item_id], pv2 = prov[r.item_id];
-        let h = null;
-        if (pv2 && pv2.hunt_id && hunts[pv2.hunt_id]) {
-          try { const v = JSON.parse(hunts[pv2.hunt_id].vals || '{}'); h = { l1: v['Product Link 1 Main supplier'] || '', l2: v['Product Link 2'] || '', l3: v['Product Link 3'] || '', temu: v['Temu Link'] || '' }; } catch (e) { h = null; }
-        }
-        if (pv2 && pv2.hunt_id) r.hunt_id = String(pv2.hunt_id);   // the card prints it under the title
-        if (!f && !sv && !g && !h) continue;
-        const links = [
+      out.sourcing = {
+        supplier: f ? String(f.current_sup || '') : '',
+        sup_names: f ? [f.sup1, f.sup2, f.sup3].map(String).filter(Boolean) : [],
+        links: [
           pick2([['portal', sv && sv.s1], ['sheet', f && f.l1], ['go-live', g && g.ali_link], ['hunt', h && h.l1]], f && f.sup1),
           pick2([['portal', sv && sv.s2], ['sheet', f && f.l2], ['hunt', h && h.l2]], f && f.sup2),
           pick2([['portal', sv && sv.s3], ['sheet', f && f.l3], ['hunt', h && h.l3]], f && f.sup3),
-        ].filter(Boolean);
-        r.sourcing = {
-          supplier: f ? String(f.current_sup || '') : '',
-          sup_names: f ? [f.sup1, f.sup2, f.sup3].map(String).filter(Boolean) : [],
-          links,
-          temu: h && isUrl2(h.temu) ? String(h.temu).trim() : '',
-          hunter: pv2 ? (names[String(pv2.hunter_email).toLowerCase()] || String(pv2.hunter_email || '')) : '',
-        };
-      }
-      return { rows, total: rows.length };
+        ].filter(Boolean),
+        temu: h && isUrl2(h.temu) ? String(h.temu).trim() : '',
+        hunter: out.hunter || '',
+      };
+      return out;
     },
   },
 
@@ -30527,8 +30562,7 @@ const ROUTES = {
       const parsed = lstParseDetails(t.details);
       if (parsed) {
         huntId = String(parsed.hunt_id || '');
-        const pack = (parsed.limited && typeof parsed.limited === 'object') ? parsed.limited : parsed;
-        if (task.type === 'listing_new') { listing = lstLimited(pack); details_text = ''; }
+        if (task.type === 'listing_new') { listing = lstLimited(lstPack(parsed)); details_text = ''; }
       }
       if (!huntId) { const m = String(t.details || '').match(/H[0-9a-f]{8}/); if (m) huntId = m[0]; }
       let hunt = null;
@@ -34207,6 +34241,11 @@ const ROUTES = {
            an update_* subpath can change a campaign's own settings, never another seller's data. */
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/update_[a-z_]+$/,
         /^\/sell\/marketing\/v1\/ad_campaign\/find_campaign_by_ad_reference(\?|$)/,
+        /* 23 Nov (owner): "remove all these items from sale event" — the seven listings whose 5% sale
+           pushes profit under £1. A markdown sale's membership can only be changed by rewriting the
+           promotion, so this one path is read AND written (GET to read it, PUT with the same body minus
+           the listing). Nothing else on the promotions API: no create, no delete, no other promotion kind. */
+        /^\/sell\/marketing\/v1\/item_price_markdown\/[^/?]+$/,
         /* 31 Oct (owner, §4): ONE video read, so the upload day behind a product video can be looked
            up by hand the same way the sweep looks it up. READ ONLY and GET only, enforced below.
            It is the only path on this list that does not live on api.ebay.com: the Media API is served
@@ -34219,13 +34258,16 @@ const ROUTES = {
         /^\/developer\/analytics\/v1_beta\/(user_)?rate_limit(\?|$)/,
       ];
       if (!ok.some((r) => r.test(path))) throw new Error('SAY: path not allowed');
-      if (['GET', 'POST'].indexOf(method) < 0) throw new Error('SAY: GET or POST only');
+      const MARKDOWN_PATH = /^\/sell\/marketing\/v1\/item_price_markdown\/[^/?]+$/;
+      if (['GET', 'POST', 'PUT'].indexOf(method) < 0) throw new Error('SAY: GET, POST or PUT only');
+      /* PUT exists for ONE path only — the markdown sale rewrite. Everywhere else it stays refused. */
+      if (method === 'PUT' && !MARKDOWN_PATH.test(path)) throw new Error('SAY: PUT is only for a markdown sale');
       if (/^\/commerce\/media\//.test(path) && method !== 'GET') throw new Error('SAY: the video read is GET only');
       if (/^\/developer\//.test(path) && method !== 'GET') throw new Error('SAY: the quota read is GET only');
       /* THE CALL ITSELF IS THE SHARED ONE. The video sweep's date pass reads the very same media path
          through this same function, so what works here is what the job does: same host, same headers,
          same token minted for the named account. */
-      const r = await ebayRestFetch(ctx.env, String(p.account || ''), method, path, method === 'POST' ? p.body : null);
+      const r = await ebayRestFetch(ctx.env, String(p.account || ''), method, path, (method === 'POST' || method === 'PUT') ? p.body : null);
       return { status: r.status, body: r.body };
     },
   },
