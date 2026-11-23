@@ -886,3 +886,30 @@ about the fast/slow PATH, not about showing someone less data than they asked fo
 holds 2,013 listings, so ~1,336 older ones appear nowhere — a different page if the owner wants it.
 Apps Script still reads the §8.2 pack one level too high (`listingParseDetails_`); it is only the
 fallback and cannot be deployed while the project sits at its 200-version limit.
+
+## 2026-11-23 20:01 UTC · WINDOWS · Frosted MagSafe iPhone case (Growmore), the biggest listing: deep revision PROPOSED, waiting for the owner's go; nothing revised
+
+**The ask.** Owner: this is his biggest listing; revise it very carefully, title and description only, show everything
+first, and no keyword plan or campaign change (it stays in the campaigns it is in).
+
+**What is on the desk.** A 74-character title that adds Max, satisfies the "Case For iPhone" law, moves the phone and the
+models to the front and drops only Luxury and the dash; three alternates, one of them 80 characters that only he can
+allow; and a description with 20 in-place edits (no more Plus, the 19 real models, eight colours, material as the gallery
+picture shows it, a not-Apple line beside the MagSafe wording). Proposal only, nothing sent to eBay.
+**Do not revise this listing from the Mac until he answers.**
+
+**Method worth keeping.**
+- The rank lab can test what a title word does: run the same search with and without one word and read the listing's
+  position. eBay found this listing through item specifics and variation names as well as the title, and never through
+  the description. A word missing from the title cost rank in 8 of 8 Pro Max pairs.
+- Split a search report into typed searches and pasted listing titles (nine or more words, or three or more models).
+  Pasted titles are related-item placements: here 886 clicks for 19 units. Judge words on the typed side.
+- Search for copies of the live title. 53 competitor listings carry this one word for word; the largest sells at under
+  half the price and outranks it.
+- Trading GetItem answers for a public listing with any account's token. Match the seller id to the account before
+  trusting the first success (I stopped on the wrong account at first).
+- On this four-core PC a Workflow runs two agents at a time; direct agents ran in parallel. Panel used: two analysts,
+  two title writers, four judges (units sold, buyer on a phone, risk, the title laws), two description reviewers.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent. This listing: proposal waiting. If he
+approves, the title is held to 23 Dec and re-scanned after 7, 14 and 30 days against the baseline saved today.
