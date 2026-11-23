@@ -565,7 +565,10 @@ function chartBars(pts, opt){
   out += chartValueDots(dots, { color: opt.pillColor || 'var(--gold-a)', ink: '#1c1200', fontSize: 9.5, minGap: opt.minGap != null ? opt.minGap : 44 });
   return out + '</svg>';
 }
-function toast(m){ $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
+function toast(m){
+  /* a read dropped because its screen was left behind is not news for the screen you are on */
+  if(String(m||'').indexOf('navigated away') >= 0){ return; }
+  $('toastMsg').textContent=m; var t=$('toast'); t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show');},2600); }
 /* Phone-style pop message. notifPop({title, body, icon, onopen}) — slides in top-right, holds
    7 seconds, click opens its screen. At most 3 on screen; oldest yields. */
 function notifPop(o){
@@ -674,10 +677,15 @@ function apiSend(action, payload, timeoutMs){
      a slow answer becomes a fast, retryable failure instead of a queue-blocker. */
   var ac = new AbortController();
   var t = setTimeout(function(){ ac.abort(); }, timeoutMs || 25000);
+  var free = navHold(action, ac);
   return fetch(BACKEND, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:body, redirect:'follow', signal: ac.signal })
     .then(function(r){ return r.json(); })
-    .then(function(j){ clearTimeout(t); apiFinished(); return j; },
-          function(e){ clearTimeout(t); apiFinished(); throw (e && e.name === 'AbortError' ? new Error('the sheet backend is overloaded right now — it will retry on the next refresh') : e); });
+    .then(function(j){ clearTimeout(t); free(); apiFinished(); return j; },
+          function(e){
+            clearTimeout(t); free(); apiFinished();
+            if(ac.navAborted && e && e.name === 'AbortError'){ var g = new Error('navigated away'); g.name = 'AbortError'; g.navAborted = true; throw g; }
+            throw (e && e.name === 'AbortError' ? new Error('the sheet backend is overloaded right now — it will retry on the next refresh') : e);
+          });
 }
 
 /* 26 Sept: the ENGINE path has always self-healed an expired session (engineApi: "if(j.error==='auth'
@@ -790,26 +798,65 @@ function enginePin(u){ try{ if(u === ENGINE_URL_ALT){ localStorage.setItem(ENGIN
    the single try and the "refresh before retrying" message. Nothing is shown to the person: the
    2 Nov lesson is that a fallback that announces itself reads as a breakage. */
 var ENGINE_NET_RETRIES = 1;   // one retry on the default door, then the second door — a dead host must not cost twelve seconds
+/* ══ LEAVING A SCREEN LETS GO OF WHAT IT WAS WAITING FOR (owner, 23 Nov) ══════════════════
+   "Every page takes so long that you open it, forget it, and then it opens."
+   A screen's reads used to keep running after you left it. Each one holds one of the browser's
+   ~6 connections per site, and an engine read could hold it for THIRTY-FIVE seconds (a 15 s try
+   plus a 20 s retry). Click through three screens and the fourth one queued behind nine dead
+   requests belonging to screens nobody was looking at — which is exactly the wait he describes,
+   on every page, in every department.
+   Every READ now carries the screen it was fired for. Changing screens lets go of that screen's
+   reads at once, so the screen you just opened finds the connections free.
+   WHAT IS NEVER LET GO OF: writes (a save must finish, always), the portal's own background
+   traffic (sign-in, the bell, the poller), and the idle warm-up below. */
+var NAV_EPOCH = 0;         // bumped by renderView; a read remembers the epoch it was fired in
+var INFLIGHT = [];         // { epoch, ac } for every read a screen is waiting for
+var NAV_PREFETCH = false;  // true while the idle warm-up fires: those belong to no screen
+var NAV_KEEP = { getPublicConfig:1, whoami:1, sessionHello:1, sessionMint:1, sessionEnd:1,
+                 pollEngine:1, poll:1, notifMarkRead:1, markNotifRead:1, markThreadRead:1,
+                 engineHealth:1, selfTest:1, register:1 };
+function navHold(action, ac){
+  if(NAV_PREFETCH || NAV_KEEP[action] || isSheetWrite(action) || ENGINE_WRITE_ACTIONS.indexOf(action) >= 0){ return function(){}; }
+  var rec = { epoch: NAV_EPOCH, ac: ac };
+  INFLIGHT.push(rec);
+  return function(){ var i = INFLIGHT.indexOf(rec); if(i >= 0){ INFLIGHT.splice(i, 1); } };
+}
+function navLetGo(){
+  var keep = [];
+  for(var i = 0; i < INFLIGHT.length; i++){
+    if(INFLIGHT[i].epoch === NAV_EPOCH){ keep.push(INFLIGHT[i]); continue; }
+    try{ INFLIGHT[i].ac.navAborted = true; INFLIGHT[i].ac.abort(); }catch(e){}
+  }
+  INFLIGHT = keep;
+}
+function navGone(e){ return !!(e && e.name === 'AbortError' && e.navAborted); }
 function engineCall(action, payload, timeoutMs){
   var url = engineBase();
   var canRetry = ENGINE_WRITE_ACTIONS.indexOf(action) < 0;
   var once = function(u){
     var ac = new AbortController();
     var t = setTimeout(function(){ ac.abort(); }, timeoutMs);
+    var free = navHold(action, ac);
     return fetch(u, { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} }), signal: ac.signal })
       .then(function(r){ return r.json(); })
-      .then(function(j){ clearTimeout(t); if(!j.ok){ if(j.error==='auth' && STATE.session){ authSelfHeal(); } throw new Error(j.error||'request failed'); } return j.data; },
-            function(e){ clearTimeout(t); throw e; });
+      .then(function(j){ clearTimeout(t); free(); if(!j.ok){ if(j.error==='auth' && STATE.session){ authSelfHeal(); } throw new Error(j.error||'request failed'); } return j.data; },
+            function(e){
+              clearTimeout(t); free();
+              if(ac.navAborted && e && e.name === 'AbortError'){ var g = new Error('navigated away'); g.name = 'AbortError'; g.navAborted = true; throw g; }
+              throw e;
+            });
   };
   var attempt = function(left){
     return once(url).catch(function(e){
+      if(navGone(e)){ throw e; }                            // the screen that asked is gone: no retry, no second door
       var netFail = e && e.name === 'TypeError';            // "Failed to fetch": the connection never formed
       if(!canRetry || !netFail || left <= 0){ throw e; }
       return new Promise(function(res){ setTimeout(res, 250); }).then(function(){ return attempt(left - 1); });
     });
   };
   return attempt(ENGINE_NET_RETRIES).catch(function(e){
+    if(navGone(e)){ throw e; }
     var netFail = e && e.name === 'TypeError';
     if(!canRetry || !netFail){ throw e; }
     if(url !== ENGINE_URL_ALT){
@@ -830,14 +877,20 @@ function engineApi(action, payload, engineOnly){
   /* Engine-ONLY actions (the ENGINE_ACTIONS list) get a patient first try and NEVER detour
      through Apps Script: AS cannot know them, and asking it costs 10–20 s of "unknown action"
      before the engine got its real retry. That detour is what made the truth pages crawl. */
-  return engineCall(action, payload, isWrite ? 15000 : (engineOnly ? 15000 : (ENGINE_PATIENT[action] || 2500)))
+  /* 23 Nov (owner): an engine-only read used to wait 15 s and then try again for 20 — thirty-five
+     seconds on one connection before the screen said anything, and a retry that lands on an engine
+     already struggling only adds to it. Twelve and twelve: still patient for a heavy board, half
+     the wait, and the connection is back in less than half the time. */
+  return engineCall(action, payload, isWrite ? 15000 : (engineOnly ? 12000 : (ENGINE_PATIENT[action] || 2500)))
     .catch(function(e){
+      if(navGone(e)){ throw e; }                       // the screen that asked is gone
       if(e && e.message === 'auth'){ throw e; }        // a real refusal is an answer, not an outage
       if(isWrite){
         throw new Error(e && e.name === 'AbortError' ? 'the Engine did not answer in time — REFRESH the screen you acted on before retrying; the action may have completed' : (e && e.message) || 'request failed');
       }
       if(engineOnly){
-        return engineCall(action, payload, 20000).catch(function(e2){
+        return engineCall(action, payload, 12000).catch(function(e2){
+          if(navGone(e2)){ throw e2; }
           throw new Error(e2 && e2.name === 'AbortError'
             ? 'the Engine is taking long on this screen — wait a moment and press refresh'
             : (e2 && e2.message) || 'request failed');
@@ -935,7 +988,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261123-1450';
+var BUILD = '20261123-1452';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -47644,6 +47697,9 @@ function enterApp(user){
   renderView(landing);
   var navTo = function(key){ renderView(key); };   // renderView marks the sidebar and unfolds its group
   window.addEventListener('hashchange', function(){
+    /* already on screen for this exact address (the click that set the hash drew it): do not draw
+       it again. A different address — back button, deep link, another product id — still draws. */
+    if (String(location.hash || '') === CUR_HASH) { return; }
     var k = adtRoute().key;
     if (k && VIEWS[k] && canSee(VIEWS[k])) { navTo(k); }
   });
@@ -47692,13 +47748,23 @@ function warmUp(){
       var view = VIEWS[v.key];
       if(view && typeof view.prefetch === 'function') pf.push(view);
     });
+    /* 23 Nov (owner): management can open nearly every screen, so this warmed TWENTY-NINE of them,
+       three at a time — a steady stream of background reads competing for the same six connections
+       as the screen the person is actually looking at, for the first minute of every session. It
+       now warms ONE at a time and only while nothing of theirs is waiting, so a warm-up can never
+       be the reason a page is slow to open. */
+    var warmBusy = false;
     var fire = function(){
-      pf.splice(0, 3).forEach(function(view){
-        try{ Promise.resolve(view.prefetch()).catch(function(){}); }catch(e){}
-      });
-      if(pf.length) setTimeout(fire, 1500);
+      if(!pf.length){ return; }
+      if(warmBusy || INFLIGHT.length){ setTimeout(fire, 2000); return; }   // the person comes first
+      var view = pf.shift();
+      warmBusy = true;
+      var done = function(){ warmBusy = false; setTimeout(fire, 1200); };
+      NAV_PREFETCH = true;
+      try{ Promise.resolve(view.prefetch()).then(done, done); }catch(e){ done(); }
+      NAV_PREFETCH = false;
     };
-    setTimeout(fire, 2500);
+    setTimeout(fire, 4000);
   }catch(e){}
 }
 /* 11 Nov (owner, with a screenshot of Advertising overview open while the sidebar held Business
@@ -47745,8 +47811,18 @@ function navMark(key){
     if (!(sec && sec.getAttribute('data-dept') === 'Pinned') && window.__navReveal) { window.__navReveal(key); }
   }catch(e){}
 }
+/* The address on screen, as it was last DRAWN. A sidebar click sets the hash AND draws the page,
+   and setting the hash fires a hashchange that drew it a second time — so every click ran the
+   screen's init() twice and sent every one of its reads twice, racing each other for the same six
+   connections. Remembering what is drawn lets the hashchange skip the repeat and still do its real
+   job: the back button, a deep link, and a product link that changes only the id after the key.
+   (owner, 23 Nov — "every page takes so long".) */
+var CUR_HASH = null;
 function renderView(key){
   var v=VIEWS[key]; var m=$('mainView');
+  /* the screen you are leaving stops holding connections the screen you are opening needs */
+  NAV_EPOCH++; try{ navLetGo(); }catch(e){}
+  CUR_HASH = String(location.hash || '');
   navMark(key);
   if(!v || !canSee(v)){
     m.innerHTML='<div class="hgroup enter d1"><h1>Not available</h1><span class="sub">This section is not part of your version.</span></div>';
