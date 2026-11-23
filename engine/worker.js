@@ -24981,6 +24981,20 @@ function lstParseDetails(details) {
   if (!p || typeof p !== 'object') return null;
   return (p.listing && typeof p.listing === 'object') ? p.listing : p;
 }
+/* 23 Nov (owner: "item listers are not getting whole listing archive"). A listing task's details
+   JSON is {hunt_id, limited:{… the 21 §8.2 columns …}} — written that way by huntAppendTask_ since
+   the pipeline's first day — so THE PACK LIVES UNDER .limited. lstParseDetails hands back the OUTER
+   object (it only unwraps a `.listing`), and lstLimited then indexed `hunt_id` / `limited` as if
+   they were column headers: every one of the 21 columns came out empty but the 'Listing Update'
+   default. That is why the archive's Details card and the lister's own job card drew a shell with
+   no title, no category and no links, while My tasks — which renders the RAW details in the
+   browser and digs into .limited itself — showed the whole record. One law, one helper, three
+   callers. */
+function lstPack(parsed) {
+  if (!parsed || typeof parsed !== 'object') return {};
+  const inner = parsed.limited;
+  return (inner && typeof inner === 'object' && !Array.isArray(inner)) ? inner : parsed;
+}
 function lstLimited(parsed) {
   const index = {};
   Object.keys(parsed || {}).forEach((k) => { index[lstNorm(k)] = parsed[k]; });
@@ -25000,7 +25014,7 @@ function lstLimited(parsed) {
 }
 function lstFamily(details) {
   const p = lstParseDetails(details);
-  const lim = (p && p.limited) || p || {};
+  const lim = lstPack(p);
   const adv = String(lim['CPC Selling Chance'] || '');
   if (!adv) return 'Unassigned';
   return /CPC/i.test(adv) ? 'CPC' : 'General/Dynamic';
@@ -30294,7 +30308,7 @@ const ROUTES = {
         };
         if (t.type === 'listing_new') {
           const parsed = lstParseDetails(t.details);
-          rec.listing = lstLimited(parsed || {});
+          rec.listing = lstLimited(lstPack(parsed));
           if (parsed) rec.details_text = '';
           listings.push(rec);
         } else {
@@ -30348,7 +30362,7 @@ const ROUTES = {
         };
         if (t.type === 'listing_new') {
           const parsed = lstParseDetails(t.details);
-          if (parsed) rec.listing = lstLimited(parsed);
+          if (parsed) rec.listing = lstLimited(lstPack(parsed));
         } else {
           rec.is_72h = String(t.title || '').indexOf('listing_revision_72h') === 0;
         }
@@ -30527,8 +30541,7 @@ const ROUTES = {
       const parsed = lstParseDetails(t.details);
       if (parsed) {
         huntId = String(parsed.hunt_id || '');
-        const pack = (parsed.limited && typeof parsed.limited === 'object') ? parsed.limited : parsed;
-        if (task.type === 'listing_new') { listing = lstLimited(pack); details_text = ''; }
+        if (task.type === 'listing_new') { listing = lstLimited(lstPack(parsed)); details_text = ''; }
       }
       if (!huntId) { const m = String(t.details || '').match(/H[0-9a-f]{8}/); if (m) huntId = m[0]; }
       let hunt = null;
