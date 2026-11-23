@@ -9264,7 +9264,10 @@ function run(argv) {
   t('speed (23 Nov): the request flag reaches every memo — the router sets ctx.fresh off _fresh and passes the options, every route memo passes them, and the key canon ignores any underscore key', (() => {
     const router = src.slice(src.indexOf('const rcTtl = hasWriteIntent(body.payload)'), src.indexOf('let data;\n      try { data = await runRoute(); }'));
     const rt = /ctx2\.fresh = !!\(body\.payload && body\.payload\._fresh\);/.test(router) && router.indexOf('ctx2.fresh =') < router.indexOf('const runRoute') &&
-      /adtKvMemo\(env, action, adtProfitClass\(ctx2\.user\), body\.payload \|\| \{\}, rcTtl, \(\) => route\.fn\(body\.payload \|\| \{\}, ctx2\), ctx2\.waitUntil, adtMemoOpts\(ctx2\)\)/.test(router);
+      /* once the engine has decided to compute, the compute is fresh: the one action memoised at both levels cannot
+         be handed its inner memo's stale answer and store it under a fresh stamp */
+      /adtKvMemo\(env, action, adtProfitClass\(ctx2\.user\), body\.payload \|\| \{\}, rcTtl, \(\) => \{ ctx2\.fresh = true; return route\.fn\(body\.payload \|\| \{\}, ctx2\); \}, ctx2\.waitUntil, adtMemoOpts\(ctx2\)\)/.test(router) &&
+      router.indexOf('ctx2.fresh = !!(body.payload && body.payload._fresh)') < router.indexOf('ctx2.fresh = true;');
     const inner = (src.match(/adtMemoOpts\(ctx\)\)/g) || []).length;
     const every = (src.match(/adtKvMemo\(ctx\.env, 'adtool/g) || []).length + (src.match(/adtKvMemo\(env, 'adtoolRunToday'/g) || []).length === inner;
     const canon = JSON.stringify(F.adtKvCanon('adtoolPeak', { _fresh: 1, account: '' })) === '{}' && JSON.stringify(F.adtKvCanon('adtoolItemCampaigns', { state: 'multi', _fresh: 1 })) === JSON.stringify(F.adtKvCanon('adtoolItemCampaigns', { state: 'multi' }));

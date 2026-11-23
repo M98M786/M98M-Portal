@@ -471,7 +471,11 @@ export default {
       const runRoute = () => !rcTtl
         ? route.fn(body.payload || {}, ctx2)
         : action.indexOf('adtool') === 0
-          ? adtKvMemo(env, action, adtProfitClass(ctx2.user), body.payload || {}, rcTtl, () => route.fn(body.payload || {}, ctx2), ctx2.waitUntil, adtMemoOpts(ctx2))
+          /* 23 Nov: ONCE THE ENGINE HAS DECIDED TO COMPUTE, IT COMPUTES. Running today is the one action memoised at
+             both levels (here, and per account inside its own route), and without this line a rebuild behind the reply
+             could be handed the INNER memo's own stale answer and store it under a fresh stamp. The flag is set when the
+             compute actually runs, so the decision above still honours what the caller asked for. */
+          ? adtKvMemo(env, action, adtProfitClass(ctx2.user), body.payload || {}, rcTtl, () => { ctx2.fresh = true; return route.fn(body.payload || {}, ctx2); }, ctx2.waitUntil, adtMemoOpts(ctx2))
           : memo('rt:' + action + ':' + String((ctx2.user && ctx2.user.role) || '') + ':' + JSON.stringify(body.payload || {}), rcTtl, () => route.fn(body.payload || {}, ctx2));
       let data;
       try { data = await runRoute(); }
