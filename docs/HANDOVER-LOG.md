@@ -817,3 +817,38 @@ heating. Flagged on 18 Nov by the Mac and again today. "heated gloves" stays at 
 
 **State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent; ten twin sessions stand ready for
 parallel items. Next review of the gloves on 18 Dec with the title.
+
+## 2026-11-23 17:35 UTC · MAC · Listings archive: the §8.2 pack was being read one level too high
+
+**The report.** Owner: "item listers are not getting whole listing archive, refresh it."
+
+**What was actually wrong.** Not access, not rows, not the mirror — the engine served every lister all 882
+completed listing jobs and revisions, fresh (taskMirror had synced minutes before). The RECORD was empty.
+A listing task's `details` is `{hunt_id, limited:{… 21 §8.2 columns …}}` (huntAppendTask_, since the
+pipeline's first day — all 735 listing rows on the mirror are this shape). `lstParseDetails` returns the
+OUTER object, and `lstLimited` then indexed `hunt_id` / `limited` as column headers: **1.00 filled field
+per row against 15.60 in the stored record**, measured over all 665 completed listings. 664 of them hold a
+title and at least one link; none of it reached a lister. The Details panel therefore showed a hunt id,
+"Listing Update Pending" and the live supplier block — which only 316 of 665 listings and 109 of 217
+revisions even have. My tasks looked right the whole time because `tkDetailsHtml` renders the RAW details
+in the browser and digs into `.limited` itself; that is why the owner could point at a full card on 21 Nov.
+
+**Fix (6db2548, engine deployed 17:31 UTC, live script == main, verified).** One helper `lstPack(parsed)`
+for the whole engine: `listingArchiveEngine`, `myListingWorkEngine` (the lister's own Assigned-listings
+card and the Listing pipeline were blank in the same way) and `listingTaskCard` (which had the unwrap
+inline and correct since this morning). `lstFamily` uses it too, behaviour unchanged. §8.2 untouched: same
+21-column whitelist, and the stored packs carry nothing outside it (checked on all 735 rows) — no cost or
+earning field exists anywhere in this path. Engine-only: no portal build, the archive's Refresh is enough.
+
+**Traps worth keeping.** (1) THE PACK LIVES UNDER `.limited` — any new reader of a listing task's details
+must go through `lstPack`. (2) Apps Script has the same wrong level (`listingParseDetails_` →
+`listingBuildLimitedPayload_` indexes the outer object) and could not be fixed: /exec is pinned and the
+project is at its 200-version limit. It only answers if the engine is unreachable, so it is not in anyone's
+way today — fix it the day AS can deploy again. (3) A lister's REVISION rows still show only the live
+supplier block; the revision's own `details` prose is management's reasoning and routinely carries profit
+and CPC figures, so it must never be drawn on a lister's screen.
+
+**Open question for the owner.** The archive is the record of portal-era WORK: 882 completed jobs back to
+August, 678 distinct items. The eBay catalogue holds 2,013 listings across the 8 accounts, so ~1,336 older
+listings have no task row and appear nowhere in it. If "whole archive" means every listing the company has
+ever put up, that is a different page (built from items_api + the sourcing tables) and needs his word.
