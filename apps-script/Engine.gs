@@ -311,6 +311,7 @@ const ENGINE_RUNNABLE = {
   wbInspect: function (args) { return typeof wbInspect === 'function' ? wbInspect(args) : 'absent'; },
   phase0Dump: function (args) { return typeof phase0Dump === 'function' ? phase0Dump(args) : 'absent'; },
   pushSheetRowsHot: function () { return typeof pushSheetRowsHot === 'function' ? String(pushSheetRowsHot()) : 'absent'; },
+  listerTopUp: function (args) { return typeof listerTopUp === 'function' ? String(listerTopUp(args)) : 'absent'; },   // 23 Nov: the UK-midnight top-up of every lister to 12 (worker listerTopUp)
   computeSignals: function (args) { return typeof computeSignals === 'function' ? String(computeSignals(args || null)) : 'absent'; },
   pushSheetRowsCold: function () { return typeof pushSheetRowsCold === 'function' ? String(pushSheetRowsCold()) : 'absent'; },
   ensureTruthTriggers: function () { return typeof ensureTruthTriggers === 'function' ? String(ensureTruthTriggers()) : 'absent'; },

@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## 2026-11-23 - SEND TO LISTERS: every lister topped up to 12 at UK midnight
+
+Owner, 23 Nov: "When I approve hunts and they go into the Send to lister box, every day at UK midnight
+look at how many listings each of the four listers has. Whoever has fewer than 12, pick listings from the
+box and send them automatically, each up to a total of 12 - if they have 6, send 6 more. Never more than
+12 in a day." The engine's hourly clock now takes the tick that is UK midnight (the clock decides, so
+summer and winter both land on 00:00 UK), once per UK day, and calls the Apps Script job `listerTopUp`
+through the deployed /exec, up to four times while listers are still short and cards remain. The job
+counts each lister's listing_new tasks still on their desk (Pending, Working, Updated - a submitted one is
+waiting on us, as the Send page's own workload boxes count it), deals the Pending-send cards oldest first,
+one per lister per round, round the listers under 12, and sends each through the same core the Send
+button uses (`huntSendCore_`, split out of `actionHuntSendToLister_` with no change to the click path):
+same task row, mirror pushes and bells. Picks are what the page pre-selects: the hunter's account when it
+is one the rotation allows, else accounts dealt round-robin skipping Rabia's and Yaseen's and any paused
+one; the hunter's campaign pick when it is a known type, else '100 % Strong '; the deadline two days on at
+23:59 PKT with a Sunday moved to the Monday. Task `assigned_by` reads `system:lister-top-up`; the night's
+result lands in `sync_state` (job listerTopUp, account @last) and the ACTIVITY_LOG as LISTER_TOP_UP.
+Listers = approved Item Listers and the Listing Manager, the Send form's own list.
+
 ## 2026-11-22 - ENGINE: ebayVideoUpload carries the whole file in one piece (WINDOWS)
 
 The first real video (Perfect Super Deals, 11 MB) showed eBay does not take pieces: the create answered

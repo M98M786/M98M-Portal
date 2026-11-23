@@ -249,7 +249,12 @@ function cronMap() {
        ahead of the API syncs, which are what exhaust an invocation's subrequest budget; and in this slot
        rather than one of its own because it fetches nothing and needs no budget to protect. Its nightly
        run is on the 23:30 slot below. */
-    '0 * * * *': [adtoolPeakPlan, financeSync, csSync, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
+    /* 23 Nov: listerTopUp rides SECOND, for the same reasons. On every tick but the one that is UK
+       midnight it is one D1 read and a return; at midnight it is one to four fetches to Apps Script,
+       ahead of the API syncs so a stretched invocation can never be the reason the listers' desks
+       were not filled. The owner's rule and the dealing live in Apps Script (listerTopUp there), which
+       owns the TASKS and PENDING_SEND tabs; this entry is only the clock. */
+    '0 * * * *': [adtoolPeakPlan, listerTopUp, financeSync, csSync, stockWatch, lateDeliveryWatch, truthTier3Gate, standardsSync],
     /* 12 Sept (owner: "3D Sellers sent perfect messages at the perfect time, no matter how many
        orders"). Buyer auto-messages get their OWN 5-minute invocation, offset two minutes after
        the five-minute order sync (:02, :07, :12 …): the sync lands a new order, and this tick scans it
@@ -2371,6 +2376,46 @@ async function signalsPull(env) {
    moved to the quarter-hour trigger, so the alerts refresh is not run four times as often. */
 async function alertsPull(env) {
   try { await asRunJobDirect(env, 'alertsRefresh'); } catch (e) {}
+}
+
+/* 23 Nov (owner): "every day at UK midnight look at how many listings each of the four listers has;
+   whoever has fewer than 12, send them listings from the Send to lister box up to a total of 12,
+   never more than 12 in a day." The hourly slot offers a turn every hour; this takes it only when the
+   UK clock reads midnight (00:00 GMT in winter, which is 23:00 UTC in summer — the clock, not the
+   slot, decides), and only once per UK day, so a late or doubled tick cannot deal twice. The day
+   marker is written BEFORE the call, so a crash can never loop the dealing. The dealing itself is the
+   Apps Script job of the same name, through the deployed /exec; one call does what it can inside its
+   own time budget and says `more` while listers are still short and cards remain, so up to four calls
+   ride one night. The result lands in sync_state for the morning read. */
+async function listerTopUp(env) {
+  const ms = Date.now();
+  if (ukHourAt(ms) !== 0) return;
+  const day = ukDate(new Date(ms).toISOString());
+  const done = await env.DB.prepare("SELECT cursor FROM sync_state WHERE job = 'listerTopUp' AND account = '@day'").first().catch(() => null);
+  if (done && String(done.cursor || '') === day) return;
+  await env.DB.prepare(
+    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('listerTopUp', '@day', ?1, datetime('now'), '') " +
+    "ON CONFLICT(job, account) DO UPDATE SET cursor = ?1, last_ok = datetime('now')"
+  ).bind(day).run();
+  const notes = [];
+  let more = true;
+  for (let i = 0; i < 4 && more; i++) {
+    more = false;
+    let r = null;
+    try { r = await asRunJobDirect(env, 'listerTopUp'); }
+    catch (e) { notes.push('call ' + (i + 1) + ' ERR ' + String(e && e.message || e).slice(0, 120)); break; }
+    let res = null;
+    try { res = JSON.parse(String((r && r.result) || '')); } catch (e) { res = null; }
+    if (!res) { notes.push('call ' + (i + 1) + ': ' + JSON.stringify(r).slice(0, 220)); break; }
+    notes.push('call ' + (i + 1) + ': sent ' + res.sent + ' of target ' + res.target + ', pool left ' + res.pool_left +
+      ' · ' + (res.listers || []).map(l => l.lister + ' ' + l.had + '+' + l.sent).join(', ') +
+      (res.errors && res.errors.length ? ' · refused: ' + res.errors.join(' | ') : ''));
+    more = !!res.more;
+  }
+  await env.DB.prepare(
+    "INSERT INTO sync_state (job, account, cursor, last_ok, last_error) VALUES ('listerTopUp', '@last', ?1, datetime('now'), '') " +
+    "ON CONFLICT(job, account) DO UPDATE SET cursor = ?1, last_ok = datetime('now')"
+  ).bind((day + ' · ' + notes.join(' || ')).slice(0, 1800)).run();
 }
 
 /* Owner (5 Sept): reports now SUBMIT on the engine (submitReportEngine) so staff get an instant,

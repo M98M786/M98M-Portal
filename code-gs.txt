@@ -8060,6 +8060,14 @@ function actionApprovedArchive_(payload, ctx) {
 
 function actionHuntSendToLister_(payload, ctx) {
   if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw authErr_('not a hunt approver', ctx.ident.email);
+  return huntSendCore_(payload, ctx.ident.email);
+}
+
+/* 23 Nov: the Send itself, apart from its gate, so the nightly top-up (listerTopUp, below) sends
+   exactly as a manager's click does — same checks, same task row, same mirror pushes, same bells.
+   `by` is who the task says assigned it: the manager's email from the page, 'system:lister-top-up'
+   from the clock. */
+function huntSendCore_(payload, by) {
   const account = huntAccount_(payload.account);
   const advertising = huntAdvertisingType_(payload.advertising_type, true);
   const lister = huntResolveLister_(payload.lister_email);
@@ -8094,7 +8102,7 @@ function actionHuntSendToLister_(payload, ctx) {
       task_id: taskId, type: 'listing_new', account: account, item_id: '',
       title: String(rec[HC_TITLE] || '').slice(0, 400),
       details: JSON.stringify({ hunt_id: rec.hunt_id, limited: limited }),
-      assigned_by: ctx.ident.email, assigned_to: lister.email,
+      assigned_by: by, assigned_to: lister.email,
       deadline_pkt: deadline, status: TASK_STATUS_PENDING, created_at: stamp, updated_at: stamp,
     }) || null;
   } finally { lock.releaseLock(); }
@@ -8102,7 +8110,7 @@ function actionHuntSendToLister_(payload, ctx) {
   rec.approval_status = HUNT_APPROVED;
   try { pendingSendRemove_(rec.hunt_id); } catch (e) {}   // it is with a lister now — out of the send queue
   const title = String(rec[HC_TITLE] || rec.hunt_id).slice(0, 120);
-  logActivity_(ctx.ident.email, 'HUNT_SEND_TO_LISTER', rec.hunt_id, 'approved', lister.email,
+  logActivity_(by, 'HUNT_SEND_TO_LISTER', rec.hunt_id, 'approved', lister.email,
     account + ' · ' + advertising + ' · due ' + deadline + ' · task ' + taskId);
   /* 20 Nov: the hunt mirror and the task push used to be two sequential Google→engine hops (and
      the task one re-read all of TASKS to find the row this request had just written). One parallel
@@ -8125,6 +8133,119 @@ function actionHuntSendToLister_(payload, ctx) {
       '🔵 "' + title + '" · ' + account + ' — ' + lister.name + ' lists it next.', 'hunt:' + rec.hunt_id);
   } catch (e) {}
   return { ok: true, hunt_id: rec.hunt_id, task_id: taskId, assigned_to: lister.email, account: account, advertising_type: advertising, deadline_pkt: deadline };
+}
+
+
+/* ===================== 23 Nov — the NIGHTLY TOP-UP (owner's rule, verbatim in spirit) ===========
+   "When I approve hunts and they go into the Send to lister box: every day at UK midnight, look at
+   how many listings each of the four listers has. Whoever has fewer than 12, pick listings from the
+   Send to lister box and send them automatically, each one up to a total of 12 — if they have 6,
+   send 6 more. Never more than 12 in a day; the fewer they hold, the more they get for the next
+   day's work."
+   The engine's hourly clock calls this once per UK day (worker listerTopUp → engineRunJob). Each
+   send goes through huntSendCore_ — the same path as a manager's click — so the task, the mirror
+   pushes and the bells are the ones the page would have made. What the clock chooses is what the
+   page pre-selects (13 Nov rules): the hunter's own account pick when it is one the rotation
+   allows, else the accounts dealt round-robin skipping Rabia's and Yaseen's (and a paused one);
+   the hunter's campaign pick when it is a known type, else '100 % Strong '; the deadline two days on
+   in Pakistan time at 23:59, a Sunday moved to the Monday.
+   "How many they have" = listing_new tasks still on the lister's desk: Pending, Working or Updated.
+   A submitted one is waiting on US, not on them, and the Send page's own workload boxes count the
+   same way. Oldest approval goes first. The pool is dealt one at a time round the listers still
+   under 12, so a short night is shared and nobody is filled while another gets none. */
+const LISTER_TOP_UP_TARGET = 12;
+const LISTER_TOP_UP_ROLES = ['Item Lister', 'Listing Manager'];   // the Send form's own list (the Team Lead left it 14 Nov)
+const LISTER_TOP_UP_DEFAULT_ADV = '100 % Strong ';
+const LISTER_TOP_UP_BUDGET_MS = 240000;                          // one /exec call stays well under the 6-minute ceiling; the clock calls again while `more`
+const LISTER_TOP_UP_BY = 'system:lister-top-up';
+function listerTopUpSkipAccount_(name) { return /\b(rabia|yaseen)\b/i.test(String(name || '')); }
+/* two days on, PKT, 23:59; a Sunday becomes the Monday — the page's aaTodayEndPkt, server-side */
+function listerTopUpDeadline_(nowMs) {
+  let pk = new Date((nowMs == null ? Date.now() : nowMs) + 5 * 3600000 + 2 * 86400000);
+  if (pk.getUTCDay() === 0) pk = new Date(pk.getTime() + 86400000);
+  const y = pk.getUTCFullYear(), m = ('0' + (pk.getUTCMonth() + 1)).slice(-2), d = ('0' + pk.getUTCDate()).slice(-2);
+  return y + '-' + m + '-' + d + 'T23:59';
+}
+/* open listing_new tasks per lister email (lower-cased) — three columns of TASKS, never the JSON */
+function listerOpenCounts_() {
+  const out = {};
+  const sh = getPortalDb_(false).getSheetByName('TASKS');
+  if (!sh) return out;
+  const lr = sh.getLastRow();
+  if (lr < 2) return out;
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const iType = head.indexOf('type'), iTo = head.indexOf('assigned_to'), iSt = head.indexOf('status');
+  if (iType < 0 || iTo < 0 || iSt < 0) return out;
+  const types = sh.getRange(2, iType + 1, lr - 1, 1).getValues();
+  const tos = sh.getRange(2, iTo + 1, lr - 1, 1).getValues();
+  const sts = sh.getRange(2, iSt + 1, lr - 1, 1).getValues();
+  const open = {}; open[TASK_STATUS_PENDING] = 1; open[TASK_STATUS_WORKING] = 1; open[TASK_STATUS_UPDATED] = 1;
+  for (let i = 0; i < types.length; i++) {
+    if (String(types[i][0] || '') !== 'listing_new') continue;
+    if (!open[String(sts[i][0] || '')]) continue;
+    const k = normalizeEmail(tos[i][0] || '');
+    if (!k) continue;
+    out[k] = (out[k] || 0) + 1;
+  }
+  return out;
+}
+function listerTopUp(args) {
+  const started = Date.now();
+  const target = Number((args && args.target) || LISTER_TOP_UP_TARGET) || LISTER_TOP_UP_TARGET;
+  const listers = readTab_('USERS').filter(function (u) {
+    return String(u.status) === 'approved' && LISTER_TOP_UP_ROLES.indexOf(String(u.role)) >= 0;
+  }).map(function (u) { return { email: String(u.email), name: String(u.name || u.email) }; });
+  if (!listers.length) return JSON.stringify({ ok: false, reason: 'no listers', sent: 0, more: false });
+  const counts = listerOpenCounts_();
+  const pool = pendingSendCards_();                                        // appended in approval order = oldest first
+  const accounts = ((connectionHealth().perAccount || []).map(function (a) { return String(a.account || ''); }))
+    .filter(function (a) { return a && !listerTopUpSkipAccount_(a) && !accountPaused_(a); });
+  const deadline = listerTopUpDeadline_();
+  const plan = listers.map(function (l) {
+    const open = counts[normalizeEmail(l.email)] || 0;
+    return { email: l.email, name: l.name, open: open, need: Math.max(0, target - open), sent: 0 };
+  });
+  const errors = [];
+  let sent = 0, ai = 0, budgetHit = false;
+  const skipped = {};                                                       // a card that refuses once is not retried tonight
+  /* deal one card per lister per round, round after round, while cards and room remain */
+  for (;;) {
+    let dealt = false;
+    for (let li = 0; li < plan.length; li++) {
+      const p = plan[li];
+      if (p.need <= 0) continue;
+      if (Date.now() - started > LISTER_TOP_UP_BUDGET_MS) { budgetHit = true; break; }
+      let card = null;
+      while (pool.length) { const c = pool.shift(); if (!skipped[c.hunt_id]) { card = c; break; } }
+      if (!card) break;
+      const h = card.card || {};
+      let account = String(h.account_hint || '').trim();
+      if (!account || listerTopUpSkipAccount_(account) || accountPaused_(account)) account = '';
+      if (account) { try { huntAccount_(account); } catch (e) { account = ''; } }
+      if (!account) { if (!accounts.length) { errors.push(card.hunt_id + ': no account to deal'); skipped[card.hunt_id] = 1; continue; } account = accounts[ai++ % accounts.length]; }
+      let adv = '';
+      try { adv = huntAdvertisingType_(h['CPC Selling Chance'], false); } catch (e) { adv = ''; }
+      if (!adv) adv = LISTER_TOP_UP_DEFAULT_ADV;
+      try {
+        huntSendCore_({ hunt_id: card.hunt_id, account: account, advertising_type: adv, lister_email: p.email, deadline_pkt: deadline }, LISTER_TOP_UP_BY);
+        p.need--; p.sent++; sent++; dealt = true;
+      } catch (e) {
+        skipped[card.hunt_id] = 1;
+        errors.push(card.hunt_id + ': ' + String(e && e.message || e).replace(SAFE_ERROR_PREFIX, '').slice(0, 90));
+      }
+    }
+    if (budgetHit || !dealt) break;
+  }
+  const stillShort = plan.some(function (p) { return p.need > 0; });
+  const poolLeft = pool.filter(function (c) { return !skipped[c.hunt_id]; }).length;
+  const summary = {
+    ok: true, sent: sent, target: target, deadline: deadline, pool_left: poolLeft,
+    more: budgetHit && stillShort && poolLeft > 0,
+    listers: plan.map(function (p) { return { lister: p.name, had: p.open, sent: p.sent, now: p.open + p.sent }; }),
+    errors: errors.slice(0, 12), seconds: Math.round((Date.now() - started) / 1000),
+  };
+  logActivity_('system', 'LISTER_TOP_UP', '', '', String(sent) + ' sent', JSON.stringify(summary).slice(0, 900));
+  return JSON.stringify(summary);
 }
 
 
@@ -24953,6 +25074,7 @@ const ENGINE_RUNNABLE = {
   wbInspect: function (args) { return typeof wbInspect === 'function' ? wbInspect(args) : 'absent'; },
   phase0Dump: function (args) { return typeof phase0Dump === 'function' ? phase0Dump(args) : 'absent'; },
   pushSheetRowsHot: function () { return typeof pushSheetRowsHot === 'function' ? String(pushSheetRowsHot()) : 'absent'; },
+  listerTopUp: function (args) { return typeof listerTopUp === 'function' ? String(listerTopUp(args)) : 'absent'; },   // 23 Nov: the UK-midnight top-up of every lister to 12 (worker listerTopUp)
   computeSignals: function (args) { return typeof computeSignals === 'function' ? String(computeSignals(args || null)) : 'absent'; },
   pushSheetRowsCold: function () { return typeof pushSheetRowsCold === 'function' ? String(pushSheetRowsCold()) : 'absent'; },
   ensureTruthTriggers: function () { return typeof ensureTruthTriggers === 'function' ? String(ensureTruthTriggers()) : 'absent'; },
