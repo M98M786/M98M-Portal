@@ -1423,6 +1423,7 @@ const ACTIONS_HUNTING = {
   approvedArchive: [actionApprovedArchive_, 'any'],   // 22 Oct — the send-to-lister archive (read; hunt roles gated inside)
   huntSendToLister: [actionHuntSendToLister_, 'any'], // 22 Oct — create the listing task from the archive (mgmt gated inside)
   huntTakeBack: [actionHuntTakeBack_, 'any'],         // 23 Nov — withdraw a listing task back into the send tray (mgmt gated inside)
+  huntSendBackToHunter: [actionHuntSendBackToHunter_, 'any'], // 24 Nov — withdraw a listing task and send the hunt back to a chosen hunter for rework (mgmt gated inside)
 };
 
 
@@ -1867,6 +1868,130 @@ function actionHuntTakeBack_(payload, ctx) {
   let mirror = 'mirror not pushed';
   try { if (typeof pushEngineTasks === 'function') mirror = String(pushEngineTasks()); } catch (e) { mirror = 'mirror push failed: ' + (e && e.message || e); }
   return { ok: true, task_id: String(rec.task_id), hunt_id: huntId, requeued: requeued, mirror: mirror };
+}
+
+/* 24 Nov (owner, the Listing desk, beside Delete): "give me a second option there — send the listing
+   back to the hunters. Jahanzaib, Irfan and Ahmad by name; I pick one and resend them that product to
+   work on. Time-bound: two days at most, with the time block selectable, two days by default, and a
+   one-day grace before it shows overdue."
+   What it does, in order, so nothing is lost if a step fails part-way:
+   1. reads the listing_new task (no Item ID, not completed) and the hunt it came from (approved);
+   2. the hunt goes to REVISION REQUIRED with the note in Comments — when the reviser revises it, it
+      returns to the approval queue as pending, the normal revision road; if the chosen hunter is not
+      the one who hunted it, the hunt moves to the chosen hunter (hunters' screens list only their own
+      hunts, so it would otherwise be invisible to them) and the original hunter is named in Comments;
+   3. the listing task is deleted and its holder told (as Take back does, but NOT back into the send
+      tray — it is with a hunter now);
+   4. a hunt_revision task lands on the hunter's desk with the chosen deadline. The deadline may be at
+      most two days on (23:59 PKT of the second day); the portal-wide one-day grace (TASK_GRACE_MS,
+      the 18 Nov quiet day) is what keeps it off "overdue" until the day after. Mgmt only. */
+const HUNT_SEND_BACK_ROLES = ['Product Hunter'];
+function huntSendBackMaxPkt_(nowMs) {
+  const pk = new Date((nowMs == null ? Date.now() : nowMs) + 5 * 3600000 + 2 * 86400000);
+  const y = pk.getUTCFullYear(), m = ('0' + (pk.getUTCMonth() + 1)).slice(-2), d = ('0' + pk.getUTCDate()).slice(-2);
+  return y + '-' + m + '-' + d + 'T23:59:00+05:00';
+}
+function actionHuntSendBackToHunter_(payload, ctx) {
+  if (!isMgmt_(ctx.user.role, ctx.ident.email)) throw authErr_('not a hunt approver', ctx.ident.email);
+  const want = normalizeEmail(payload.hunter_email || '');
+  if (!want) throw new Error(SAFE_ERROR_PREFIX + 'choose the hunter to send it back to');
+  let hunter = null;
+  readTab_('USERS').forEach(function (u) {
+    if (hunter || normalizeEmail(u.email) !== want) return;
+    if (String(u.status) !== 'approved' || HUNT_SEND_BACK_ROLES.indexOf(String(u.role)) < 0) throw new Error(SAFE_ERROR_PREFIX + 'that person is not an approved product hunter');
+    hunter = { email: String(u.email), name: String(u.name || u.email) };
+  });
+  if (!hunter) throw new Error(SAFE_ERROR_PREFIX + 'that person is not an approved product hunter');
+  const maxIso = huntSendBackMaxPkt_();
+  let deadline = taskPktIso_(payload.deadline_pkt) || maxIso;
+  if (deadline > maxIso) throw new Error(SAFE_ERROR_PREFIX + 'the deadline can be at most two days on — ' + maxIso.slice(0, 16).replace('T', ' ') + ' PKT');
+  if (deadline < now_()) throw new Error(SAFE_ERROR_PREFIX + 'that deadline is already past');
+  const note = String(payload.note || '').trim().slice(0, 600);
+
+  /* 1. the task, read only */
+  const tsh = tasksSheet_();
+  const tpre = taskFind_(tsh, payload.task_id);
+  const trec = tpre.rec;
+  if (String(trec.type) !== 'listing_new') throw new Error(SAFE_ERROR_PREFIX + 'only a new-listing task can be sent back to a hunter');
+  if (String(trec.item_id || '').trim()) throw new Error(SAFE_ERROR_PREFIX + 'this listing already carries an Item ID — it is live on eBay');
+  if (String(trec.status || '') === TASK_STATUS_COMPLETED) throw new Error(SAFE_ERROR_PREFIX + 'this listing task is already completed');
+  let huntId = '';
+  try { huntId = String((JSON.parse(String(trec.details || '{}')) || {}).hunt_id || ''); } catch (e) {}
+  if (!huntId) throw new Error(SAFE_ERROR_PREFIX + 'this task has no hunt behind it — nothing to send back to a hunter');
+
+  /* 2. the hunt */
+  let hrec = null, fromHunter = '';
+  const hsh = huntSheet_();
+  const hpre = huntFind_(hsh, huntId);
+  const hlock = LockService.getScriptLock();
+  try {
+    try { hlock.waitLock(15000); }
+    catch (lockErr) { throw new Error(SAFE_ERROR_PREFIX + 'the hunting sheet is busy — press Send back again in a moment'); }
+    const hfound = huntVerify_(hsh, hpre, huntId);
+    hrec = huntRecord_(hfound.rec);
+    if (hrec.approval_status !== HUNT_APPROVED) throw new Error(SAFE_ERROR_PREFIX + 'its hunt is ' + (String(hrec.approval_status || 'pending').toLowerCase()) + ', not approved — refresh the desk');
+    fromHunter = normalizeEmail(hrec.hunter_email || '');
+    const moved = fromHunter !== normalizeEmail(hunter.email);
+    const trail = 'Sent back from the Listing desk ' + huntPktDate_() + ' to ' + hunter.name +
+      (moved ? ' (hunted by ' + (fromHunter || 'unknown') + ')' : '') + (note ? ': ' + note : '');
+    const patch = {};
+    patch[HC_APPROVAL] = HUNT_REVISION;
+    patch[HC_COMMENTS] = (String(hrec[HC_COMMENTS] || '').slice(0, 1200) + (hrec[HC_COMMENTS] ? ' · ' : '') + trail).slice(0, 1900);
+    const allow = HUNT_DECISION_COLS.slice();
+    if (moved && hfound.head.indexOf('hunter_email') >= 0) { patch.hunter_email = hunter.email; allow.push('hunter_email'); }
+    huntWrite_(hsh, hfound, patch, allow);
+    Object.keys(patch).forEach(function (k) { hrec[k] = patch[k]; });
+    hrec.approval_status = HUNT_REVISION;
+  } finally { hlock.releaseLock(); }
+  try { pendingSendRemove_(huntId); } catch (e) {}
+
+  /* 3. the listing task leaves its holder */
+  const tlock = LockService.getScriptLock();
+  try {
+    tlock.waitLock(10000);
+    const tfound = taskVerify_(tsh, tpre, payload.task_id);
+    tsh.deleteRow(tfound.row);
+  } finally { tlock.releaseLock(); }
+  const holder = normalizeEmail(trec.assigned_to || '');
+
+  /* 4. the hunter's task — any older open revision task for this hunt is closed first, so one hunt never carries two */
+  try { huntCloseRevisionTasks_(huntId, '', fromHunter, 'superseded — sent back from the Listing desk by ' + ctx.ident.email); } catch (e) {}
+  const title = String(hrec[HC_TITLE] || trec.title || huntId).slice(0, 120);
+  const s2 = now_();
+  const revId = 'T' + Utilities.getUuid().slice(0, 8);
+  const revRec = huntAppendTask_({
+    task_id: revId, type: 'hunt_revision', account: String(trec.account || ''), item_id: '',
+    title: 'hunt_revision — ' + title.slice(0, 60),
+    details: 'Management sent this product back to you from the Listing desk (hunt:' + huntId + ')' +
+      (note ? ':\n' + note : '.') + '\nOpen Product hunting → Revise, work on it, and it returns to the approval queue.',
+    assigned_by: ctx.ident.email, assigned_to: hunter.email, priority: '',
+    deadline_pkt: deadline, status: TASK_STATUS_PENDING, created_at: s2, updated_at: s2,
+  }) || null;
+
+  logActivity_(ctx.ident.email, 'HUNT_SEND_BACK_TO_HUNTER', huntId, 'listing task ' + String(trec.task_id) + ' with ' + holder,
+    hunter.email, title.slice(0, 60) + ' · due ' + deadline + (fromHunter !== normalizeEmail(hunter.email) ? ' · moved from ' + fromHunter : '') + (note ? ' · ' + note.slice(0, 120) : ''));
+
+  /* mirrors: the hunt row, the new task; then a full task push so the deleted listing task leaves D1 */
+  try { huntMirrorPush_(hrec); } catch (e) {}
+  if (revRec) { try { engineTaskPush_(revId, revRec); } catch (e) {} }
+  let mirror = 'mirror not pushed';
+  try { if (typeof pushEngineTasks === 'function') mirror = String(pushEngineTasks()); } catch (e) { mirror = 'mirror push failed: ' + (e && e.message || e); }
+
+  /* bells */
+  try {
+    notify_(hunter.email, 'Product sent back to you',
+      '🟡 "' + title.slice(0, 80) + '" — Management sent it back from the Listing desk for you to work on' +
+      (note ? ': ' + note : '') + '. Due ' + deadline.slice(0, 16).replace('T', ' ') + ' PKT. Open Product hunting → Revise.', 'task:' + revId);
+  } catch (e) {}
+  if (holder && holder.indexOf('system:') !== 0) {
+    try {
+      notify_(holder, 'Task withdrawn',
+        '🟠 "' + title.slice(0, 60) + '" · ' + String(trec.account || '') + ' — ' + (ctx.user.name || 'Management') +
+        ' sent this product back to the hunters for rework. Nothing more to do on it.', 'task:' + String(trec.task_id));
+    } catch (e) {}
+  }
+  return { ok: true, task_id: String(trec.task_id), hunt_id: huntId, revision_task_id: revId, hunter: hunter.email,
+    moved_from: fromHunter !== normalizeEmail(hunter.email) ? fromHunter : '', deadline_pkt: deadline, mirror: mirror };
 }
 
 

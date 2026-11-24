@@ -988,7 +988,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261124-0023';
+var BUILD = '20261124-1043';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -26168,7 +26168,11 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       'font-size:11.5px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto}' +
     '.ld-acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:12px;border-top:1px solid var(--gold-line)}' +
     '.ld-acts input{flex:1;min-width:160px;padding:8px 11px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel-2);color:var(--text);font:inherit;font-size:12px}' +
-    '.ld-del{border-color:rgba(240,96,90,.5)!important;color:var(--bad)!important}'
+    '.ld-del{border-color:rgba(240,96,90,.5)!important;color:var(--bad)!important}' +
+    /* 24 Nov — send back to a hunter */
+    '.ld-back{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}' +
+    '.ld-back select,.ld-back input[type=datetime-local]{padding:8px 11px;border-radius:9px;border:1px solid var(--gold-line-hi);background:var(--panel-2);color:var(--text);font:inherit;font-size:12px;font-weight:600}' +
+    '.ld-back .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}'
   );
 
   function ldS(v) { return String(v == null ? '' : v); }
@@ -26190,7 +26194,17 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   function ldGoneClear(id) { delete LD_GONE[id]; ldGoneSave(); }
   var LD_SLOW_RE = /overloaded|timeout|timed out|did not answer|taking long|aborted|failed to fetch|network/i;
 
-  var LD = { load: null, staff: [], open: '', det: {}, show: {}, seq: 0 };
+  var LD = { load: null, staff: [], hunters: [], open: '', det: {}, show: {}, seq: 0 };
+
+  /* 24 Nov (owner): send a listing back to a hunter, two days at most, two days by default. The box
+     is a Pakistan-time datetime-local; its default and its ceiling are both 23:59 PKT two days on —
+     the server refuses anything later. The one-day grace before "overdue" is the portal-wide quiet
+     day, so nothing extra is added here. */
+  function ldBackMaxPkt() {
+    var pk = new Date(Date.now() + 5 * 3600000 + 2 * 86400000);
+    return pk.getUTCFullYear() + '-' + ('0' + (pk.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + pk.getUTCDate()).slice(-2) + 'T23:59';
+  }
+  function ldNowPkt() { return new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 16); }
 
   VIEWS.listDesk = {
     label: 'Listing desk',
@@ -26232,11 +26246,13 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     if (!LD.load || force) { box.innerHTML = '<div class="spinner"></div>'; }
     Promise.all([
       engineCall('listingLoad', {}, 20000),
-      api('assignableStaff', { roles: ['Item Lister', 'Listing Manager'] }).catch(function () { return { staff: [] }; })
+      api('assignableStaff', { roles: ['Item Lister', 'Listing Manager'] }).catch(function () { return { staff: [] }; }),
+      api('assignableStaff', { roles: ['Product Hunter'] }).catch(function () { return { staff: [] }; })
     ]).then(function (res) {
       if (seq !== LD.seq || !$('ldBoard')) { return; }
       LD.load = res[0] || {};
       LD.staff = (res[1] && res[1].staff) || [];
+      LD.hunters = (res[2] && res[2].staff) || [];
       /* forget a taken-back/deleted task the moment the mirror no longer lists it as open */
       var openNow = {};
       (LD.load.tasks || []).forEach(function (t) { if (t.open) { openNow[ldS(t.task_id)] = 1; } });
@@ -26480,6 +26496,17 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<button class="minibtn" data-ld-take="' + ldAttr(id) + '">Take back → Send to listers</button>' +
         '<button class="minibtn ld-del" data-ld-delbtn="' + ldAttr(id) + '">Delete task</button>' +
         '<input type="text" maxlength="200" placeholder="reason (optional — the holder is told)" data-ld-note="' + ldAttr(id) + '">' +
+        '</div>' +
+        '<div class="ld-back"><span class="k">Send back to a hunter</span>' +
+          '<select data-ld-hunter="' + ldAttr(id) + '"><option value="">— choose hunter —</option>' +
+            LD.hunters.map(function (h) {
+              var hw = d.hunt ? ldS(d.hunt.hunter).toLowerCase() : '';
+              var me = !!hw && (hw === ldS(h.email).toLowerCase() || hw === ldS(h.name).toLowerCase());
+              return '<option value="' + ldAttr(h.email) + '"' + (me ? ' selected' : '') + '>' + esc(ldS(h.name)) + (me ? ' — hunted it' : '') + '</option>';
+            }).join('') + '</select>' +
+          '<input type="datetime-local" data-ld-due="' + ldAttr(id) + '" value="' + ldBackMaxPkt() + '" min="' + ldNowPkt() + '" max="' + ldBackMaxPkt() + '" title="Deadline, Pakistan time — two days at most">' +
+          '<button class="minibtn" data-ld-backbtn="' + ldAttr(id) + '">Send back to hunter</button>' +
+          '<span class="hu-hint" style="margin:0">two days at most · one day of grace before it shows overdue · the reason above goes with it</span>' +
         '</div>';
     } else if (ldS(t.item_id)) {
       acts = '<div class="ld-acts"><span class="hu-hint" style="margin:0">Already live on eBay — nothing to take back or delete here.</span></div>';
@@ -26515,6 +26542,35 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
              than showing the router's "unknown action". Retires itself the day it deploys. */
           if (/unknown action/i.test(m)) { toast('Take back is not live yet — the backend deploy is waiting on the Apps Script version limit. Delete task works in the meantime.'); }
           else { toast('NOT taken back — ' + m); }
+          ldBoardLoad(true);
+        });
+      };
+    });
+    host.querySelectorAll('[data-ld-backbtn]').forEach(function (b) {
+      b.onclick = function () {
+        var id = this.getAttribute('data-ld-backbtn');
+        var q = function (k) { return host.querySelector('[data-ld-' + k + '="' + id.replace(/"/g, '') + '"]'); };
+        var hs = q('hunter'), due = q('due'), note = q('note');
+        var hunter = hs ? ldS(hs.value) : '';
+        var dueV = due ? ldS(due.value) : '';
+        var reason = note ? ldS(note.value).trim() : '';
+        if (!hunter) { toast('Choose the hunter to send it back to.'); if (hs) { hs.focus(); } return; }
+        if (!dueV) { dueV = ldBackMaxPkt(); }
+        if (dueV > ldBackMaxPkt()) { toast('Two days at most — the latest deadline is ' + ldBackMaxPkt().replace('T', ' ') + ' PKT.'); if (due) { due.focus(); } return; }
+        if (dueV < ldNowPkt()) { toast('That deadline is already past.'); if (due) { due.focus(); } return; }
+        var name = hs.options[hs.selectedIndex] ? hs.options[hs.selectedIndex].text.split(' — ')[0] : hunter;
+        if (!window.confirm('Send this product back to ' + name + '? The listing task leaves its lister, the hunt goes back for revision, and ' + name + ' gets it due ' + dueV.replace('T', ' ') + ' PKT.' + (reason ? '\n\nReason: ' + reason : ''))) { return; }
+        var btn = this;
+        btn.disabled = true;
+        toast('Sending it back…');
+        api('huntSendBackToHunter', { task_id: id, hunter_email: hunter, deadline_pkt: dueV, note: reason }).then(function () {
+          ldAfterAction(id, 'Sent back to ' + name + ' — due ' + dueV.replace('T', ' ') + ' PKT.');
+        }).catch(function (e) {
+          var m = ldS(e && e.message);
+          if (LD_SLOW_RE.test(m)) { ldAfterAction(id, 'Google is slow right now — the send-back is finishing on the server; the task stays off the board.'); return; }
+          btn.disabled = false;
+          if (/unknown action/i.test(m)) { toast('Send back is not live yet — the backend deploy is waiting on the Apps Script version limit.'); }
+          else { toast('NOT sent back — ' + m); }
           ldBoardLoad(true);
         });
       };
