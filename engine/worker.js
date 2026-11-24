@@ -1207,7 +1207,10 @@ function pvTokens(s) {
    every DDL statement in the file, which is wider than these families on purpose: a CREATE put
    anywhere is a reason to look. That is deliberate: a marker that could go stale by accident is a
    column that never lands. */
-const ADTOOL_SCHEMA_VERSION = '2026-11-23.2';
+/* 24 Nov: moved so the pulse family runs its seeds again — the mode row has to be SET to live and
+   every account's switch written, and a marker from the rehearsal build would skip that family. No
+   DDL statement changed with it. */
+const ADTOOL_SCHEMA_VERSION = '2026-11-24.1';
 /* the fingerprint of every DDL statement in engine/worker.js, held to this value by the suite */
 /* 22 Nov: the count moved to 215 on 21 Nov with adtool_neg_ack (Ads command centre), a table created at its own two
    sites on every use rather than under a guard, so nothing was missing from the database; the marker simply had not
@@ -34538,6 +34541,56 @@ function adtPulseWheel(members, day) {
   for (const m of (members || [])) wheel[adtPulseCohortOf(m.item_id)].members++;
   return wheel;
 }
+/* ══ GOING LIVE (owner, 24 Nov: "make dynamic listings automation live") ══════════════════
+   Two answers of his shape this build, and nothing else changes:
+   · "don't touch items in sales events" — a listing sitting in ANY promotion that has not ended is
+     left alone. eBay's markdown clock counts fourteen days at one price and a pulse restarts it; a
+     volume discount does not clash on paper, but his word was plain and the wider reading costs
+     sixty-eight listings out of twelve hundred, so the wider reading is what this takes. If the
+     sale list cannot be read at all, NOTHING is pulsed that evening — not knowing is not knowing.
+   · "all accounts" — every account's switch is seeded on. Each is still its own row, so one
+     account can be stopped without stopping the rest.
+   WHAT KEEPS IT HONEST: a step advances ONLY when eBay accepted it. A cut that fails stays
+   'planned' and is tried again on the next tick; a restore that fails stays 'cut' and is tried
+   again every five minutes until the price is back — the one thing that must never be lost. Each
+   send is read back (HTTP status AND the Trading Ack, which is how a refusal arrives as a 200) and
+   written to adtool_apply_log under its own op, which is also where the attempt count is counted
+   from, so no row is retried for ever. */
+const ADTOOL_PULSE_OPS = { cut: 'pulse_cut', readd: 'pulse_readd', restore: 'pulse_restore', readd2: 'pulse_readd2' };
+/* how many sends one five-minute tick may make, all accounts together: an evening deals about a
+   hundred and thirty listings and the window is six hours, so the cuts are out inside a quarter of
+   an hour and no single invocation sits on a hundred and thirty round trips */
+const ADTOOL_PULSE_TICK_BUDGET = 60;
+/* and how many times one listing's step may be tried in a day before it is left alone and said */
+const ADTOOL_PULSE_MAX_TRIES = 6;
+/* except the morning pair, which put the price back: those keep trying all day, because a listing
+   left at the cut price is the only failure here that costs money every hour it stands */
+const ADTOOL_PULSE_MAX_TRIES_RESTORE = 150;
+function adtPulsePriceFor(due, row) {
+  if (due === 'cut') return (row && row.new_price != null) ? Number(row.new_price) : null;
+  if (due === 'restore') return (row && row.price != null) ? Number(row.price) : null;
+  return null;
+}
+/* the Trading request that moves one listing's price. The floor is the same one the plan used, so a
+   malformed or nonsense price cannot reach eBay even if a row carried one. */
+function adtPulseReviseXml(itemId, price) {
+  const id = String(itemId == null ? '' : itemId).replace(/\D/g, '');
+  const p = Number(price);
+  if (!id) return { ok: false, xml: '', error: 'no item number on the row' };
+  if (!isFinite(p) || p < ADTOOL_PULSE_PRICE_FLOOR) return { ok: false, xml: '', error: 'the price on the row is below the floor (' + ADTOOL_PULSE_PRICE_FLOOR + ') — nothing sent' };
+  return { ok: true, error: '',
+    xml: '<?xml version="1.0" encoding="utf-8"?>\n' +
+      '<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">' +
+      '<Item><ItemID>' + id + '</ItemID><StartPrice currencyID="GBP">' + p.toFixed(2) + '</StartPrice></Item>' +
+      '</ReviseFixedPriceItemRequest>' };
+}
+/* 'live' only when the mode says live AND this account's own switch is on; otherwise the step is
+   stamped exactly as the rehearsal stamped it and the row says which of the two held it */
+function adtPulseModeFor(cfg, account, switches) {
+  if (!cfg || cfg.mode !== 'live') return { mode: 'would-send', why: 'the pulse is in shadow' };
+  if (!switches || !switches[String(account || '')]) return { mode: 'would-send', why: 'this account\u2019s switch is off' };
+  return { mode: 'live', why: '' };
+}
 /* ADTOOL-PULSE-PURE-END */
 
 let ADTOOL_PULSE_SCHEMA_OK = false;
@@ -34553,9 +34606,16 @@ async function ensureAdtoolPulseSchema(env) {
   for (const key of ['adtool_page_pulse', 'adtool_job_pulse']) {
     stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, 'on', datetime('now')) ON CONFLICT(key) DO NOTHING").bind(key));
   }
-  const seed = { adtool_pulse_mode: 'shadow', adtool_pulse_amount: '0.10', adtool_pulse_start_hour: '17', adtool_pulse_restore_hour: '7', adtool_pulse_readd_min: '20', adtool_pulse_min_unit_profit: '1' };
+  const seed = { adtool_pulse_amount: '0.10', adtool_pulse_start_hour: '17', adtool_pulse_restore_hour: '7', adtool_pulse_readd_min: '20', adtool_pulse_min_unit_profit: '1' };
   for (const k of Object.keys(seed)) {
     stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, ?2, datetime('now')) ON CONFLICT(key) DO NOTHING").bind(k, seed[k]));
+  }
+  /* 24 Nov (owner): "make dynamic listings automation live", "all accounts". The mode is SET, not
+     merely seeded — the row already exists saying shadow from the rehearsal build. Each account's
+     own switch is only seeded, so one turned off later stays off. */
+  stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES ('adtool_pulse_mode', 'live', datetime('now')) ON CONFLICT(key) DO UPDATE SET value = 'live', updated_at = datetime('now')"));
+  for (const r of ((await env.DB.prepare('SELECT name FROM accounts').all().catch(() => ({ results: [] }))).results || [])) {
+    stmts.push(env.DB.prepare("INSERT INTO portal_config (key, value, updated_at) VALUES (?1, 'on', datetime('now')) ON CONFLICT(key) DO NOTHING").bind('adtool_pulse_live_' + String(r.name)));
   }
   await adtSeedRun(env, [
     ['PULSE_WHEEL', 'The four-day price wheel', 'Every listing with a live ad in a running Dynamic or General (cost-per-sale) campaign is dealt onto one of four days by the digits of its own item number, so a quarter of them take their turn each evening and each listing comes round once in four days, never more often. The wheel is dealt from the campaign map at the start hour, so a listing that joined that afternoon is in and one that left is not.', 'campaigns, campaign_ads, items_api, adtool_pulse_plan', 'Each evening at the start hour, and the page reads the live map whenever it is opened', 'Unit tests hold the deal steady (same listing, same cohort, always) and the turn spacing at exactly four days'],
@@ -34572,10 +34632,61 @@ async function adtPulseConfig(env) {
     if (k === 'mode') { out.mode = v; continue; }
     if (out[k] !== undefined) { const n = Number(v); if (isFinite(n)) out[k] = n; }
   }
-  /* shadow by construction: a mode row asking for live is reported, never obeyed */
-  out.live_refused = out.mode !== 'shadow';
-  out.mode = 'shadow';
+  /* 24 Nov: the mode is obeyed. Anything that is not the word 'live' is read as shadow, and 'live'
+     still sends nothing by itself — an account's own switch below is the second key. */
+  out.mode = out.mode === 'live' ? 'live' : 'shadow';
+  out.live_refused = false;
+  out.switches = {};
+  for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_pulse_live_%'").all()).results || [])) {
+    out.switches[String(r.key).replace('adtool_pulse_live_', '')] = String(r.value || '').toLowerCase() === 'on';
+  }
+  out.accounts_live = Object.keys(out.switches).filter(k => out.switches[k]).sort();
   return out;
+}
+
+/* Every listing sitting in a promotion that has not ended. A null answer means the question could
+   not be asked — the caller must then pulse nothing, because not knowing is not the same as none. */
+async function adtPulseSaleSet(env) {
+  try {
+    const rs = await env.DB.prepare(
+      "SELECT DISTINCT pm.item_id AS item_id FROM promo_members pm " +
+      "JOIN promotions p ON p.account = pm.account AND p.promo_id = pm.promo_id " +
+      "WHERE UPPER(COALESCE(p.status, '')) NOT LIKE '%ENDED%'"
+    ).all();
+    const out = new Set();
+    for (const r of (rs.results || [])) out.add(String(r.item_id));
+    return out;
+  } catch (e) { return null; }
+}
+
+/* one listing's step, sent for real. Returns what eBay said; the caller decides what to stamp. */
+async function adtPulseSendStep(env, row, due) {
+  const op = ADTOOL_PULSE_OPS[due] || ('pulse_' + due);
+  const acct = String(row.account || ''), item = String(row.item_id || '');
+  if (due === 'cut' || due === 'restore') {
+    const price = adtPulsePriceFor(due, row);
+    const x = adtPulseReviseXml(item, price);
+    if (!x.ok) return { ok: false, status: 0, response: x.error, op, payload: { price } };
+    const tok = await ebayAccessToken(env, acct);
+    const r = await fetch('https://api.ebay.com/ws/api.dll', {
+      method: 'POST',
+      headers: { 'X-EBAY-API-COMPATIBILITY-LEVEL': '1477', 'X-EBAY-API-CALL-NAME': 'ReviseFixedPriceItem',
+        'X-EBAY-API-SITEID': '3', 'X-EBAY-API-IAF-TOKEN': tok, 'content-type': 'text/xml' },
+      body: x.xml });
+    const body = await r.text();
+    const ack = adTradeAckOf(body);
+    /* a refusal arrives as HTTP 200 with Ack Failure — the shape that hid a fault for four days */
+    return { ok: !!(r.ok && ack.ok), status: r.status, op, payload: { price },
+      response: (ack.ok ? 'Ack ' + ack.ack + ' \u00b7 \u00a3' + Number(price).toFixed(2) : ('Ack ' + (ack.ack || '?') + ' ' + (ack.error_codes.join(',') || '') + ' ' + ack.first_message).trim()).slice(0, 300) };
+  }
+  const camp = String(row.campaign_id || '');
+  if (!camp) return { ok: false, status: 0, response: 'no campaign was recorded for this listing', op, payload: {} };
+  const tok = await ebayAccessToken(env, acct);
+  const r = await fetch('https://api.ebay.com/sell/marketing/v1/ad_campaign/' + encodeURIComponent(camp) + '/bulk_create_ads_by_listing_id',
+    { method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json' },
+      body: JSON.stringify({ requests: [{ listingId: item }] }) });
+  const body = await r.text();
+  return { ok: !!(r.ok || r.status === 204), status: r.status, op, payload: { campaign_id: camp }, response: body.slice(0, 300) };
 }
 
 /* the one membership rule every advertising page shares (ADTOOL_LIVE_AD_SQL), narrowed to its
@@ -34603,6 +34714,11 @@ async function adtPulsePlanBuild(env, cfg, uk) {
   const idx = adtPulseDayIndex(today);
   const members = (await adtPulseMembers(env, '')).filter(m => adtPulseCohortOf(m.item_id) === idx);
   if (!members.length) return 0;
+  /* owner, 24 Nov: "don't touch items in sales events". A listing in any promotion that has not
+     ended is dealt onto tonight's plan and immediately set aside, so the evening still says out
+     loud which listings it left and why. A sale list that cannot be read sets EVERY listing aside. */
+  const inSale = await adtPulseSaleSet(env);
+  const saleUnknown = inSale === null;
   const ids = members.map(m => m.item_id), from = adtAddDays(today, -30), sums = {};
   for (const ch of adtChunks(ids)) {
     for (const r of ((await env.DB.prepare('SELECT item_id, SUM(units) AS u, SUM(actual_profit) AS p FROM adtool_listing_day WHERE day >= ?1 AND item_id IN ' + adtInList(ch, 1) + ' GROUP BY item_id').bind(from, ...ch).all()).results || [])) sums[String(r.item_id)] = r;
@@ -34612,7 +34728,9 @@ async function adtPulsePlanBuild(env, cfg, uk) {
     const s = sums[m.item_id] || {};
     const units = Number(s.u) || 0;
     const unitProfit = (units > 0 && s.p !== null && s.p !== undefined) ? Math.round(Number(s.p) / units * 100) / 100 : null;
-    const a = adtPulseAfford({ price: m.price, units_30d: units, unit_profit_30d: unitProfit }, cfg);
+    let a = adtPulseAfford({ price: m.price, units_30d: units, unit_profit_30d: unitProfit }, cfg);
+    if (saleUnknown) a = { ok: false, reason: 'the sale events could not be read, so nothing was pulsed tonight' };
+    else if (inSale.has(String(m.item_id))) a = { ok: false, reason: 'in a sale event \u2014 left alone' };
     const newPrice = a.ok ? Math.round((Number(m.price) - Number(cfg.amount)) * 100) / 100 : null;
     stmts.push(env.DB.prepare('INSERT OR IGNORE INTO adtool_pulse_plan (day, account, item_id, cohort, campaign_id, campaign_name, title, price, new_price, unit_profit_30d, units_30d, eligible, reason, step, mode, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)')
       .bind(today, m.account, m.item_id, idx, m.campaign_id, m.campaign_name, m.title.slice(0, 90), m.price, newPrice, unitProfit, units, a.ok ? 1 : 0, a.reason, a.ok ? 'planned' : 'skipped', 'shadow', nowIso));
@@ -34635,12 +34753,55 @@ async function adtoolPricePulse(env) {
     const cfg = await adtPulseConfig(env);
     let built = 0;
     if (uk.hour >= cfg.start_hour && uk.hour < 23) { built = await adtPulsePlanBuild(env, cfg, uk); written += built; }
-    const rows = (await env.DB.prepare("SELECT day, account, item_id, step, cut_at, restored_at FROM adtool_pulse_plan WHERE step IN ('planned', 'cut', 'readded', 'restored') AND day >= ?1 ORDER BY day LIMIT 1200").bind(adtAddDays(uk.date, -6)).all()).results || [];
+    const rows = (await env.DB.prepare("SELECT day, account, item_id, step, cut_at, restored_at, price, new_price, campaign_id FROM adtool_pulse_plan WHERE step IN ('planned', 'cut', 'readded', 'restored') AND day >= ?1 ORDER BY day LIMIT 1200").bind(adtAddDays(uk.date, -6)).all()).results || [];
     const stmts = [], n = { cut: 0, readd: 0, restore: 0, readd2: 0, lapse: 0 };
+    /* how often each listing's step has already been tried today, counted from the send log so no
+       column is needed and a row can never be retried for ever */
+    const tries = {};
+    for (const r of ((await env.DB.prepare("SELECT item_id, op, COUNT(*) AS n FROM adtool_apply_log WHERE day = ?1 AND op LIKE 'pulse_%' GROUP BY item_id, op").bind(uk.date).all()).results || [])) {
+      tries[String(r.item_id) + '|' + String(r.op)] = Number(r.n) || 0;
+    }
+    /* a listing that has joined a sale event since the plan was dealt is let go of mid-flight — but
+       only before its price has moved. One already cut is still restored: leaving it cut would be
+       the one unforgivable outcome. */
+    const inSaleNow = await adtPulseSaleSet(env);
+    let sent = 0, failed = 0, held = 0, budget = ADTOOL_PULSE_TICK_BUDGET;
     for (const r of rows) {
       const due = adtPulseDue(r, uk, cfg, nowMs);
       if (!due) continue;
       n[due] = (n[due] || 0) + 1;
+      const m = adtPulseModeFor(cfg, r.account, cfg.switches);
+      if (m.mode === 'live' && (due === 'cut') && inSaleNow && inSaleNow.has(String(r.item_id))) {
+        stmts.push(env.DB.prepare("UPDATE adtool_pulse_plan SET step = 'skipped', eligible = 0, reason = 'joined a sale event after the plan was dealt \u2014 left alone', updated_at = ?4 WHERE day = ?1 AND account = ?2 AND item_id = ?3 AND step = 'planned'").bind(r.day, r.account, r.item_id, nowIso));
+        held++; continue;
+      }
+      /* A LAPSE IS BOOKKEEPING, NOT A SEND. Only the four steps named in ADTOOL_PULSE_OPS ever
+         reach eBay; without this guard a lapsed row — one whose evening passed before its price
+         ever moved — would fall through to the re-add branch and push an ad back into a campaign
+         nobody asked it to join. */
+      if (m.mode === 'live' && ADTOOL_PULSE_OPS[due]) {
+        const op = ADTOOL_PULSE_OPS[due];
+        /* THE RESTORE IS NEVER ABANDONED. Giving up on a cut only means a listing keeps its price;
+           giving up on a restore would leave it 10p down for good, which is the one outcome this
+           whole design exists to prevent. The morning pair keep trying all day. */
+        const ceiling = (due === 'restore' || due === 'readd2') ? ADTOOL_PULSE_MAX_TRIES_RESTORE : ADTOOL_PULSE_MAX_TRIES;
+        if ((tries[String(r.item_id) + '|' + op] || 0) >= ceiling) { held++; continue; }
+        if (budget <= 0) { held++; continue; }
+        budget--;
+        let res;
+        try { res = await adtPulseSendStep(env, r, due); }
+        catch (e) { res = { ok: false, status: 0, op, payload: {}, response: String((e && e.message) || e).slice(0, 200) }; }
+        stmts.push(env.DB.prepare("INSERT INTO adtool_apply_log (day, account, item_id, campaign_id, decision_id, op, payload_json, mode, http_status, response, undo_json, at) VALUES (?1, ?2, ?3, ?4, 'pulse', ?5, ?6, 'live', ?7, ?8, '', datetime('now'))")
+          .bind(uk.date, r.account, r.item_id, String(r.campaign_id || ''), res.op, JSON.stringify(res.payload || {}), res.status, String(res.response || '').slice(0, 300)));
+        if (!res.ok) {
+          failed++;
+          /* the step is NOT advanced: the next tick tries it again. A restore keeps trying until
+             the price is back, which is the whole point of counting tries per step and not per row. */
+          stmts.push(env.DB.prepare("UPDATE adtool_pulse_plan SET reason = ?4, updated_at = ?5 WHERE day = ?1 AND account = ?2 AND item_id = ?3").bind(r.day, r.account, r.item_id, ('eBay refused the ' + due + ': ' + String(res.response || '').slice(0, 140)), nowIso));
+          continue;
+        }
+        sent++;
+      }
       /* each UPDATE re-states the step it is leaving, so a tick racing itself cannot stamp twice */
       if (due === 'cut') stmts.push(env.DB.prepare("UPDATE adtool_pulse_plan SET step = 'cut', cut_at = ?4, updated_at = ?4 WHERE day = ?1 AND account = ?2 AND item_id = ?3 AND step = 'planned'").bind(r.day, r.account, r.item_id, nowIso));
       else if (due === 'readd') stmts.push(env.DB.prepare("UPDATE adtool_pulse_plan SET step = 'readded', readd_at = ?4, updated_at = ?4 WHERE day = ?1 AND account = ?2 AND item_id = ?3 AND step = 'cut'").bind(r.day, r.account, r.item_id, nowIso));
@@ -34649,8 +34810,12 @@ async function adtoolPricePulse(env) {
       else if (due === 'lapse') stmts.push(env.DB.prepare("UPDATE adtool_pulse_plan SET step = 'lapsed', reason = 'the evening passed before the cut was stamped — the listing kept its price', updated_at = ?4 WHERE day = ?1 AND account = ?2 AND item_id = ?3 AND step = 'planned'").bind(r.day, r.account, r.item_id, nowIso));
     }
     written += await adtBatch(env, stmts);
+    const liveFor = (cfg.accounts_live || []);
     await adtJobEnd(env, 'adtoolPricePulse', t, written, 'ok',
-      'shadow · dealt ' + built + ' · cut ' + n.cut + ' · re-add ' + n.readd + ' · restore ' + n.restore + ' · done ' + n.readd2 + (n.lapse ? ' · lapsed ' + n.lapse : '') + (cfg.live_refused ? ' · A LIVE MODE ROW WAS REFUSED: this build only rehearses' : ''));
+      (cfg.mode === 'live' && liveFor.length ? 'live for ' + liveFor.join(', ') : 'shadow') +
+      ' · dealt ' + built + ' · cut ' + n.cut + ' · re-add ' + n.readd + ' · restore ' + n.restore + ' · done ' + n.readd2 +
+      (n.lapse ? ' · lapsed ' + n.lapse : '') +
+      (sent || failed || held ? ' · sent ' + sent + (failed ? ' · REFUSED ' + failed + ' (tried again next tick)' : '') + (held ? ' · held ' + held : '') : ''));
   } catch (e) {
     await adtJobEnd(env, 'adtoolPricePulse', t, written, 'error', String((e && e.message) || e).slice(0, 200));
   }
@@ -34672,7 +34837,9 @@ async function adtoolPulseCompute(env, day, acct) {
   const accounts = {};
   for (const m of members) accounts[m.account] = (accounts[m.account] || 0) + 1;
   return {
-    day: d, today, day_index: adtPulseDayIndex(d), cfg, shadow: true,
+    day: d, today, day_index: adtPulseDayIndex(d), cfg,
+    shadow: !(cfg.mode === 'live' && (cfg.accounts_live || []).length),
+    accounts_live: cfg.accounts_live || [],
     members_total: members.length, wheel,
     accounts: Object.keys(accounts).sort().map(a => ({ account: a, members: accounts[a] })),
     rows, steps, reasons: Object.keys(reasons).map(k => ({ reason: k, listings: reasons[k] })).sort((a, b) => b.listings - a.listings),
