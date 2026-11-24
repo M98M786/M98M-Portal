@@ -34733,7 +34733,7 @@ async function adtPulsePlanBuild(env, cfg, uk) {
     else if (inSale.has(String(m.item_id))) a = { ok: false, reason: 'in a sale event \u2014 left alone' };
     const newPrice = a.ok ? Math.round((Number(m.price) - Number(cfg.amount)) * 100) / 100 : null;
     stmts.push(env.DB.prepare('INSERT OR IGNORE INTO adtool_pulse_plan (day, account, item_id, cohort, campaign_id, campaign_name, title, price, new_price, unit_profit_30d, units_30d, eligible, reason, step, mode, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)')
-      .bind(today, m.account, m.item_id, idx, m.campaign_id, m.campaign_name, m.title.slice(0, 90), m.price, newPrice, unitProfit, units, a.ok ? 1 : 0, a.reason, a.ok ? 'planned' : 'skipped', 'shadow', nowIso));
+      .bind(today, m.account, m.item_id, idx, m.campaign_id, m.campaign_name, m.title.slice(0, 90), m.price, newPrice, unitProfit, units, a.ok ? 1 : 0, a.reason, a.ok ? 'planned' : 'skipped', cfg.mode, nowIso));
   }
   return adtBatch(env, stmts);
 }
@@ -34753,7 +34753,7 @@ async function adtoolPricePulse(env) {
     const cfg = await adtPulseConfig(env);
     let built = 0;
     if (uk.hour >= cfg.start_hour && uk.hour < 23) { built = await adtPulsePlanBuild(env, cfg, uk); written += built; }
-    const rows = (await env.DB.prepare("SELECT day, account, item_id, step, cut_at, restored_at, price, new_price, campaign_id FROM adtool_pulse_plan WHERE step IN ('planned', 'cut', 'readded', 'restored') AND day >= ?1 ORDER BY day LIMIT 1200").bind(adtAddDays(uk.date, -6)).all()).results || [];
+    const rows = (await env.DB.prepare("SELECT day, account, item_id, step, cut_at, restored_at, price, new_price, campaign_id, mode FROM adtool_pulse_plan WHERE step IN ('planned', 'cut', 'readded', 'restored') AND day >= ?1 ORDER BY day LIMIT 1200").bind(adtAddDays(uk.date, -6)).all()).results || [];
     const stmts = [], n = { cut: 0, readd: 0, restore: 0, readd2: 0, lapse: 0 };
     /* how often each listing's step has already been tried today, counted from the send log so no
        column is needed and a row can never be retried for ever */
@@ -34779,7 +34779,13 @@ async function adtoolPricePulse(env) {
          reach eBay; without this guard a lapsed row — one whose evening passed before its price
          ever moved — would fall through to the re-add branch and push an ad back into a campaign
          nobody asked it to join. */
-      if (m.mode === 'live' && ADTOOL_PULSE_OPS[due]) {
+      /* A REHEARSAL ROW IS NEVER CARRIED OUT. Every row remembers the build that dealt it. The
+         evenings already written down were decided while nothing could be sent, and their prices
+         were never actually cut — so putting one "back" this morning would be a price change
+         nobody made, and its re-add an ad nobody removed. Those rows finish their bookkeeping and
+         touch nothing. Only a row dealt by a live evening is carried out. */
+      if (m.mode === 'live' && String(r.mode || '') !== 'live') { stmts.push(env.DB.prepare("UPDATE adtool_pulse_plan SET reason = 'dealt while the pulse was a rehearsal \u2014 finished on paper, nothing sent', updated_at = ?4 WHERE day = ?1 AND account = ?2 AND item_id = ?3 AND COALESCE(reason, '') = ''").bind(r.day, r.account, r.item_id, nowIso)); }
+      else if (m.mode === 'live' && ADTOOL_PULSE_OPS[due]) {
         const op = ADTOOL_PULSE_OPS[due];
         /* THE RESTORE IS NEVER ABANDONED. Giving up on a cut only means a listing keeps its price;
            giving up on a restore would leave it 10p down for good, which is the one outcome this

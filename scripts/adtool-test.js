@@ -9274,6 +9274,14 @@ function run(argv) {
       /inSale\.has\(String\(m\.item_id\)\)/.test(body) &&
       /NOT LIKE '%ENDED%'/.test(src.slice(src.indexOf('async function adtPulseSaleSet')));
   })(), null);
+  t('pulse: an evening dealt while the pulse was a rehearsal is finished on paper and never carried out', (() => {
+    const i = src.indexOf('async function adtoolPricePulse(env) {');
+    const clean = (i < 0 ? '' : src.slice(i, src.indexOf('async function adtoolPulseCompute', i))).replace(/\/\*[\s\S]*?\*\//g, '');
+    const plan = src.slice(src.indexOf('async function adtPulsePlanBuild'), src.indexOf('async function adtoolPricePulse'));
+    return /campaign_id, mode FROM adtool_pulse_plan/.test(clean) &&
+      /String\(r\.mode \|\| ''\) !== 'live'/.test(clean) &&
+      /a\.ok \? 'planned' : 'skipped', cfg\.mode, nowIso/.test(plan);
+  })(), null);
   t('pulse: a lapse is bookkeeping and never a send, and the morning pair that put the price back are never abandoned', (() => {
     const i = src.indexOf('async function adtoolPricePulse(env) {');
     const clean = (i < 0 ? '' : src.slice(i, src.indexOf('async function adtoolPulseCompute', i))).replace(/\/\*[\s\S]*?\*\//g, '');
