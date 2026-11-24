@@ -886,3 +886,125 @@ about the fast/slow PATH, not about showing someone less data than they asked fo
 holds 2,013 listings, so ~1,336 older ones appear nowhere — a different page if the owner wants it.
 Apps Script still reads the §8.2 pack one level too high (`listingParseDetails_`); it is only the
 fallback and cannot be deployed while the project sits at its 200-version limit.
+
+## 2026-11-23 20:01 UTC · WINDOWS · Frosted MagSafe iPhone case (Growmore), the biggest listing: deep revision PROPOSED, waiting for the owner's go; nothing revised
+
+**The ask.** Owner: this is his biggest listing; revise it very carefully, title and description only, show everything
+first, and no keyword plan or campaign change (it stays in the campaigns it is in).
+
+**What is on the desk.** A 74-character title that adds Max, satisfies the "Case For iPhone" law, moves the phone and the
+models to the front and drops only Luxury and the dash; three alternates, one of them 80 characters that only he can
+allow; and a description with 20 in-place edits (no more Plus, the 19 real models, eight colours, material as the gallery
+picture shows it, a not-Apple line beside the MagSafe wording). Proposal only, nothing sent to eBay.
+**Do not revise this listing from the Mac until he answers.**
+
+**Method worth keeping.**
+- The rank lab can test what a title word does: run the same search with and without one word and read the listing's
+  position. eBay found this listing through item specifics and variation names as well as the title, and never through
+  the description. A word missing from the title cost rank in 8 of 8 Pro Max pairs.
+- Split a search report into typed searches and pasted listing titles (nine or more words, or three or more models).
+  Pasted titles are related-item placements: here 886 clicks for 19 units. Judge words on the typed side.
+- Search for copies of the live title. 53 competitor listings carry this one word for word; the largest sells at under
+  half the price and outranks it.
+- Trading GetItem answers for a public listing with any account's token. Match the seller id to the account before
+  trusting the first success (I stopped on the wrong account at first).
+- On this four-core PC a Workflow runs two agents at a time; direct agents ran in parallel. Panel used: two analysts,
+  two title writers, four judges (units sold, buyer on a phone, risk, the title laws), two description reviewers.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent. This listing: proposal waiting. If he
+approves, the title is held to 23 Dec and re-scanned after 7, 14 and 30 days against the baseline saved today.
+
+## 2026-11-23 22:48 UTC · WINDOWS (the bilal PC, standby) · Toothbrush replacement heads (AZHAR ABRT): title and description revised on the owner's go
+
+**The ask.** Owner, in chat on the bilal PC: revise this listing and go. No search report was given, so this was a
+title and description revision only: no keyword plan, no campaign change. The PC is standby; the owner's go covered
+this one listing and nothing else was sent from here.
+
+**What was done (23 Nov, 22:38 and 22:39 UTC, two `ReviseFixedPriceItem` calls through `ebayTradeCall`, both Success).**
+- Title: "Braun" dropped and "Brush" added, 79 characters. Old: *Electric Toothbrush Heads Compatible With Oral B Braun
+  Replacement 4 12 16 Pack*. New: *Electric Toothbrush Heads Compatible With Oral B Replacement Brush 4 12 16 Pack*.
+  Reason: the Listing Safety Archive flags this listing for two trademark words and this leaves one, inside "Compatible
+  With"; and almost every top-20 market title carries "Brush Head", a word the old title had lost.
+- Description: eight in-place edits in the same Listing Tool template. The DuPont name removed in three places; "Size 1"
+  replaced with the real size from the gallery picture; the compatible handle ranges named in the intro and in a new
+  spec row; pack contents stated; two new notes (does not fit iO or sonic handles; a compatible part, not made by or
+  endorsed by Oral B or Braun).
+
+**Files.** In `M98M-SQR-Agent` on the bilal PC only (not in this repo): the proposal folder for the listing, two backups
+under `backups/AZHAR ABRT/` (before the title, before the description) and two rows in `logs/sqr-revisions.csv`.
+
+**What was verified.** GetItem after each call: the title and the description equal the proposal; price, quantity, the
+three pack variations and the sold count are unchanged. The October refusal on ABRT variation listings ("missing
+required variation specifics") did NOT appear in this category.
+
+**Still open (flagged to the owner, not touched).**
+- Zero sold since it went live on 3 Aug. Price is the likelier cause: same-title listings in the top five sell the small
+  pack well under ours, and ours is in no top 20 on five searches. A 5% markdown runs to 3 Dec.
+- Gallery picture 3 shows genuine Oral-B handles and Oral-B's own product names: the biggest takedown risk on the listing.
+- Picture 1 shows 20 heads and there is no 20 pack; Country of Origin says United Kingdom; Features list both Soft and
+  Medium bristles; the pack size sits under a variation called "Colour".
+- The "does not fit iO or sonic" note comes from general knowledge of this head type, not from supplier data.
+
+**State.** MAC PRIMARY. Title held to 24 Dec (30-day window): do not change it from either machine before then.
+
+## 2026-11-23 23:01 UTC · WINDOWS · Frosted MagSafe iPhone case (Growmore), the biggest listing: title and description REVISED on the owner's go; his iPhone 18 request held on a fact
+
+**Done at 22:58 UTC.** Owner: "Go for it and revise it", no campaign. Title is now the one he pasted, 72 characters:
+MagSafe, then "Case For iPhone", the six models, Pro Max, Shockproof Phone Cover. Max and Phone are new; Luxury, Frosted
+and the dash are gone. The description went with its 20 in-place edits. eBay accepted both first time. Read-back: live
+description identical to the reviewed file; sold, watchers, price, quantity, all variations, specifics and pictures
+unchanged. Backup taken first. No campaign was touched.
+
+**Held, and why.** He also asked for iPhone 18 in place of 12 at the start of the title. Not applied: this listing has no
+iPhone 18 variation, so the word would be untrue and an iPhone 18 buyer has nothing to select; it also still sells the
+iPhone 12 family. His copy of the same case on the Sir Hasib account already carries the three iPhone 18 variations, so
+the supplier makes them. When the 18 variations are added to this listing, 18 goes first; with 12 kept the title is 75
+characters. The description's model list and its "not available for iPhone 18" note must change in the same revise.
+
+**Lesson.** I showed an interim title labelled "Proposed" before the judge panel finished; the panel then picked another,
+and he answered "going with proposed" with the interim title pasted. Never label a provisional pick "Proposed". When
+titles change between messages, go by the text he pastes.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent. This listing: title on hold to 23 Dec
+unless he asks for the iPhone 18 change sooner; baseline rank scans from before the revise are saved for comparison.
+
+## 2026-11-23 23:18 UTC · WINDOWS · Frosted MagSafe iPhone case (Growmore): iPhone 18 Pro and 18 Pro Max ADDED as variations on the owner's word, 18 now first in the title
+
+**The order.** After the 18 request was held on the fact that nothing for iPhone 18 could be bought there, the owner
+answered: add iPhone 18 Pro and 18 Pro Max, and revise the title.
+
+**Done at 23:15 UTC, in one call so it was all or nothing.** Sixteen new variations: both models in the listing's eight
+existing colours, same price as the rest, fifteen available each (the listing's standing level). Title now opens
+MagSafe, "Case For iPhone", then 18 17 16 15 14 13 12, Pro Max, Shockproof Phone Cover (75 characters; 12 kept because
+that family still sells there). Four model lines of the description were updated and its not-available note now says
+"the standard iPhone 18". eBay accepted it first time. Read-back: all 152 older variations identical in price,
+quantity and sold count; 168 now; total sold and watchers unchanged; specifics and pictures untouched.
+
+**Recipe worth keeping (Trading, through the engine's trade route).** To ADD variations to a live listing send
+ReviseFixedPriceItem with the new Variation nodes only (price, the quantity available, the two specifics) plus the
+whole VariationSpecificsSet: every existing value in its current order, the new values at the end. Variations not
+named in the call are left alone. Pictures keyed on the other specific (colour here) need no Pictures node. The
+script does a dry run by default and verifies every older variation after the live call.
+
+**Note for whoever touches this listing next.** The SQR agent's rule "never change variations" still stands for our own
+initiative; this was the owner's explicit instruction. Colours were taken from his Sir Hasib copy of the same case,
+which already sells the 18 models. Asked of him: the order desk should confirm the supplier link carries both models
+in all eight colours.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent. This listing: title on hold to 23 Dec.
+
+## 2026-11-23 23:25 UTC · WINDOWS · Frosted MagSafe iPhone case (Growmore): the standard iPhone 18 added too, on the owner's word
+
+**Done at 23:24 UTC.** Owner: "add iphone 18 too". Eight more variations, the standard iPhone 18 in the listing's eight
+colours, same price and the same fifteen available as the rest. The description's model lines now cover iPhone 18,
+18 Pro and 18 Pro Max, and iPhone 18 is gone from its not-available note. The title was already right and was not
+sent. One call, accepted first time. Read-back: all 168 older variations identical; 176 now; total sold and watchers
+unchanged.
+
+**One more fact for the recipe.** The new value was placed inside the VariationSpecificsSet, ahead of two values that
+already existed, and eBay kept that order. So the order of the set as sent is the order of the buyer's drop-down:
+it now ends 17 Air, 18, 18 Pro, 18 Pro Max.
+
+**State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent. This listing: three owner-approved
+revises tonight, title on hold to 23 Dec, order desk asked to confirm the supplier link carries the three iPhone 18
+models in all eight colours.

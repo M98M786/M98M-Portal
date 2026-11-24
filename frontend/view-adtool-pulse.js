@@ -130,9 +130,17 @@
     var fr = $('pplFresh'); if (fr && D) fr.textContent = 'updated ' + ukClock(D.computed_at) + ' · every 2 min · job every 5 min';
     var bn = $('pplBanner');
     if (bn) {
-      bn.innerHTML = '<div class="ppl-banner"><b>Shadow mode.</b> Every step below is decided on the clock and written down, ' +
-        'and <b>nothing is sent to eBay</b> — no price changes, no campaign changes. Turning it live is a separate, later build.' +
-        (D && D.cfg && D.cfg.live_refused ? ' <span class="ppl-skip">A config row asking for live mode was refused.</span>' : '') + '</div>';
+      /* 24 Nov (owner): "make dynamic listings automation live". The banner now says which it is,
+         and when it is live it names the accounts actually sending — a page that still said shadow
+         while prices moved would be the worst screen in the portal. */
+      var liveFor = (D && D.accounts_live) || [];
+      bn.innerHTML = D && D.shadow === false
+        ? '<div class="ppl-banner"><b>Live.</b> The evening cut, the re-add, the morning restore and its re-add are <b>sent to eBay</b> for ' +
+          '<b>' + esc(liveFor.join(', ')) + '</b>. Listings sitting in a sale event are left alone. A step is only marked done once eBay has accepted it; ' +
+          'anything refused is tried again on the next five-minute tick, and a price that has been cut keeps trying until it is back.</div>'
+        : '<div class="ppl-banner"><b>Shadow mode.</b> Every step below is decided on the clock and written down, ' +
+          'and <b>nothing is sent to eBay</b> — no price changes, no campaign changes.' +
+          (liveFor.length ? '' : ' No account has its switch on.') + '</div>';
     }
     var cfg = cfgOf();
     var lw = $('pplLaw');
