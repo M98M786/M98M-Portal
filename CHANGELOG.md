@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## 2026-11-24 - LISTING DESK: Send back to a hunter, beside Take back and Delete
+
+Owner: "when I open Details on the Listing desk, give me a second option beside deletion: send the listing
+back to the hunters - Jahanzaib, Irfan and Ahmad by name. I pick one and resend them the product to work on.
+Time-bound, two days at most, the time block selectable, two days by default, with one day of grace before
+it shows overdue." The Details card now carries a hunter picker (the approved Product Hunters; the one who
+hunted it is pre-picked), a Pakistan-time deadline box that defaults to and cannot go past 23:59 two days on,
+and Send back to hunter. The reason box that Delete uses goes with it. New Apps Script action
+`huntSendBackToHunter`: the hunt goes to REVISION REQUIRED with the note in Comments; the listing task is
+deleted and its lister told (not back into Send to listers); any older open revision task for the hunt is
+closed; a hunt_revision task lands on the chosen hunter with the chosen deadline and a bell. When the chosen
+hunter is not the one who hunted it, the hunt moves to them (hunters' screens list only their own hunts) and
+the original hunter is named in Comments and the activity log. Revising it returns it to the approval queue.
+The one-day grace is the portal-wide quiet day (TASK_GRACE_MS), so it shows overdue only after day three.
+
 ## 2026-11-23 - LISTINGS ARCHIVE: two rows instead of 882, because the page gave up after 30 seconds
 
 Owner, with Bilal's screen in front of him: the archive showed his own two September listings and

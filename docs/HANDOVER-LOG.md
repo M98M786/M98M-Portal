@@ -1008,3 +1008,19 @@ it now ends 17 Air, 18, 18 Pro, 18 Pro Max.
 **State.** MAC PRIMARY for standing duties. WINDOWS runs the SQR Listing Agent. This listing: three owner-approved
 revises tonight, title on hold to 23 Dec, order desk asked to confirm the supplier link carries the three iPhone 18
 models in all eight colours.
+
+## 2026-11-24 10:40 UTC · WINDOWS · Listing desk: Send back to a hunter (owner, 24 Nov); Apps Script still at v201
+
+**Change.** Details card on the Listing desk: hunter picker (approved Product Hunters, original hunter pre-picked),
+deadline box defaulting to and capped at 23:59 PKT two days on, "Send back to hunter" button sharing the Delete
+reason box. AS action `huntSendBackToHunter` (Hunting.gs): validates hunter + deadline (refuses past or beyond
+two days), hunt -> REVISION REQUIRED with a Comments trail, moves `hunter_email` to the chosen hunter only when
+different (original named in Comments + ACTIVITY_LOG HUNT_SEND_BACK_TO_HUNTER), deletes the listing_new task and
+bells its lister, closes older open hunt_revision tasks for the hunt, appends a hunt_revision task with the chosen
+deadline, pushes hunt mirror + task + full task push. Grace = existing TASK_GRACE_MS quiet day. No engine change.
+
+**Deploy state, important.** /exec is STILL v201 (20 Nov). Not live there yet: the 23 Nov lister top-up (so the
+24 Nov 00:00 UK run could not have dealt anything), the Mac's 23 Nov `huntTakeBack`, and this send-back. The
+project is at the 200-version cap; the bulk-delete confirmation for versions 1-25 is staged in the owner's Chrome
+and needs his click (the auto-mode classifier refuses the destructive confirm). After it: Manage deployments ->
+Edit -> New version -> Deploy, then verify the three actions answer.
