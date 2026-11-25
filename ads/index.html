@@ -830,6 +830,40 @@ function navLetGo(){
   INFLIGHT = keep;
 }
 function navGone(e){ return !!(e && e.name === 'AbortError' && e.navAborted); }
+/* ══ WHEN THE OFFICE NETWORK BLOCKS THE ENGINE HOST (owner, 25 Nov: "almost every staff … login
+   fetched failed … portal working on one device and not on other") ══════════════════════════════
+   The engine is a Cloudflare Worker reached at m98m-engine.m98m786.workers.dev. Some networks —
+   an office firewall, a filtering DNS, an antivirus web shield — block the whole *.workers.dev
+   name, and then every engine call fails with the browser's own "Failed to fetch" before it ever
+   reaches the Worker, which is why those failures are invisible in the server's own error log and
+   why the SAME account works on mobile data and not on the office Wi-Fi. There is nothing wrong
+   with the account; the data host simply cannot be reached from that network.
+   This cannot be cured from the page — the cure is to let the host through on the network, or to
+   give the engine a second address that network does allow. What the page CAN do, and now does, is
+   two honest things: complete sign-in through the Apps Script backend (script.google.com, a Google
+   host these networks do not block) so a person is not stranded at a dead login box, and say
+   plainly what is wrong and what to do about it instead of a bare "Failed to fetch". */
+var ENGINE_DARK = false;
+/* the handful of actions the Apps Script backend can also answer — sign-in and the public config.
+   Only these may detour to it when the engine host is unreachable; every other engine action would
+   get "unknown action" from Apps Script, so they stay on the engine and surface the dark banner. */
+var ENGINE_AS_CAN = { whoami:1, getPublicConfig:1, register:1, ping:1 };
+function engineDarkSet(on){
+  on = !!on;
+  if(on === ENGINE_DARK){ return; }
+  ENGINE_DARK = on;
+  var el = $('engineDark');
+  if(on){
+    if(!el){
+      el = document.createElement('div'); el.id = 'engineDark';
+      el.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:10000;background:#5a1111;color:#ffe9e4;font-weight:700;font-size:12.5px;padding:9px 16px;text-align:center;box-shadow:0 2px 14px rgba(0,0,0,.5)';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = 'This network is blocking the portal\u2019s data service, so pages cannot load. ' +
+      'Your account is fine \u2014 switch this device to <b>mobile data / a hotspot</b>, or ask whoever runs the office internet to allow <b>m98m-engine.m98m786.workers.dev</b>.';
+  } else if(el){ el.remove(); }
+}
+function engineDark(){ return ENGINE_DARK; }
 function engineCall(action, payload, timeoutMs){
   var url = engineBase();
   var canRetry = ENGINE_WRITE_ACTIONS.indexOf(action) < 0;
@@ -840,7 +874,7 @@ function engineCall(action, payload, timeoutMs){
     return fetch(u, { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ action:action, idToken:STATE.idToken, session:STATE.session, payload:payload||{} }), signal: ac.signal })
       .then(function(r){ return r.json(); })
-      .then(function(j){ clearTimeout(t); free(); if(!j.ok){ if(j.error==='auth' && STATE.session){ authSelfHeal(); } throw new Error(j.error||'request failed'); } return j.data; },
+      .then(function(j){ clearTimeout(t); free(); engineDarkSet(false); if(!j.ok){ if(j.error==='auth' && STATE.session){ authSelfHeal(); } throw new Error(j.error||'request failed'); } return j.data; },
             function(e){
               clearTimeout(t); free();
               if(ac.navAborted && e && e.name === 'AbortError'){ var g = new Error('navigated away'); g.name = 'AbortError'; g.navAborted = true; throw g; }
@@ -866,6 +900,12 @@ function engineCall(action, payload, timeoutMs){
     /* the pinned second door is dark: let go of it and give the default one more chance */
     enginePin(null);
     return once(ENGINE_URL_DEFAULT);
+  }).catch(function(e){
+    /* every door has been tried. A TypeError escaping here means not one of them formed a
+       connection — this network blocks the engine host; raise the banner. A timeout (AbortError)
+       or a real refusal is the engine answering, so it is NOT darkness. */
+    if(e && e.name === 'TypeError'){ engineDarkSet(true); }
+    throw e;
   });
 }
 /* 13 Sept: a 2.5 s first try sent the checkpoint LIST to Apps Script on any slow engine moment
@@ -889,6 +929,18 @@ function engineApi(action, payload, engineOnly){
         throw new Error(e && e.name === 'AbortError' ? 'the Engine did not answer in time — REFRESH the screen you acted on before retrying; the action may have completed' : (e && e.message) || 'request failed');
       }
       if(engineOnly){
+        /* 25 Nov: a network that blocks the engine host fails with TypeError ("Failed to fetch"),
+           not a timeout. For the few actions Apps Script can also answer — chiefly whoami, so a
+           fresh Google sign-in still completes — detour there rather than leave the person at a
+           dead login box. Everything else stays on the engine and the dark banner explains the
+           empty pages. A real refusal ('auth') and a slow engine (AbortError) never come here. */
+        if(e && e.name === 'TypeError' && ENGINE_AS_CAN[action]){
+          return apiSend(action, payload).then(function(j){
+            if(j.ok){ return j.data; }
+            if(j.error==='auth' && STATE.session){ authSelfHeal(); }
+            throw new Error(j.error||'request failed');
+          }, function(){ throw e; });   // Apps Script unreachable too: report the original engine failure
+        }
         return engineCall(action, payload, 12000).catch(function(e2){
           if(navGone(e2)){ throw e2; }
           throw new Error(e2 && e2.name === 'AbortError'
@@ -988,7 +1040,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261124-1038';
+var BUILD = '20261125-1740';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -1374,7 +1426,11 @@ function onCredential(resp){
   $('loginStatus').className='auth-status info'; $('loginStatus').innerHTML='<div class="spinner"></div>Checking your access…';
   api('whoami').then(routeUser).catch(function(e){
     $('loginStatus').className='auth-status err';
-    $('loginStatus').textContent = (e.message==='auth') ? 'Sign-in could not be verified. Please try again.' : e.message;
+    $('loginStatus').innerHTML = (e.message==='auth')
+      ? 'Sign-in could not be verified. Please try again.'
+      : (engineDark()
+          ? 'This network is blocking the portal\u2019s data service. Your account is fine \u2014 switch this device to <b>mobile data / a hotspot</b>, or ask whoever runs the office internet to allow <b>m98m-engine.m98m786.workers.dev</b>, then sign in again.'
+          : esc(String(e.message||'Could not reach the portal \u2014 try again.')));
   });
 }
 
@@ -17777,7 +17833,12 @@ function bootSignIn(cfg){
         $('loginStatus').className='auth-status info';
         $('loginStatus').innerHTML='<div class="spinner"></div>The server hiccupped — retrying…';
         setTimeout(function(){
-          api('whoami').then(routeUser).catch(function(){ $('loginStatus').textContent='Could not reach the portal — reload to try again. You are still signed in.'; });
+          api('whoami').then(routeUser).catch(function(){
+            $('loginStatus').className='auth-status err';
+            $('loginStatus').innerHTML = engineDark()
+              ? 'This network is blocking the portal\u2019s data service. You are still signed in \u2014 switch this device to <b>mobile data / a hotspot</b>, or ask whoever runs the office internet to allow <b>m98m-engine.m98m786.workers.dev</b>.'
+              : 'Could not reach the portal \u2014 reload to try again. You are still signed in.';
+          });
         }, 4000);
       });
     } else if (localStorage.getItem('m98m:knows')) {
