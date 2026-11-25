@@ -848,6 +848,9 @@ var ENGINE_DARK = false;
    Only these may detour to it when the engine host is unreachable; every other engine action would
    get "unknown action" from Apps Script, so they stay on the engine and surface the dark banner. */
 var ENGINE_AS_CAN = { whoami:1, getPublicConfig:1, register:1, ping:1 };
+var ENGINE_DARK_MSG = 'This network is blocking the portal\u2019s data service, so it cannot open here. ' +
+  'Your account is fine \u2014 switch this device to <b>mobile data / a hotspot</b> and it will work at once, ' +
+  'or ask whoever runs the office internet to allow <b>m98m-engine.m98m786.workers.dev</b>.';
 function engineDarkSet(on){
   on = !!on;
   if(on === ENGINE_DARK){ return; }
@@ -1428,9 +1431,7 @@ function onCredential(resp){
     $('loginStatus').className='auth-status err';
     $('loginStatus').innerHTML = (e.message==='auth')
       ? 'Sign-in could not be verified. Please try again.'
-      : (engineDark()
-          ? 'This network is blocking the portal\u2019s data service. Your account is fine \u2014 switch this device to <b>mobile data / a hotspot</b>, or ask whoever runs the office internet to allow <b>m98m-engine.m98m786.workers.dev</b>, then sign in again.'
-          : esc(String(e.message||'Could not reach the portal \u2014 try again.')));
+      : (engineDark() ? ENGINE_DARK_MSG : esc(String(e.message||'Could not reach the portal \u2014 try again.')));
   });
 }
 
@@ -2733,13 +2734,16 @@ function bootSignIn(cfg){
            transient retries once, then leaves the token for the next reload. */
         if(isOfficeRefusal(e)){ sessClear(); STATE.idToken=null; $('loginStatus').className='auth-status err'; $('loginStatus').textContent = e.message; return; }
         if(e && /auth|denied|not approved/i.test(String(e.message||''))){ sessClear(); STATE.idToken=null; trySilentSignIn(); return; }
+        /* 25 Nov: a blocked engine host is not a hiccup and a second try will not cure it — say the
+           true thing immediately instead of a spinner that reads as "the portal is just slow". */
+        if(engineDark()){ $('loginStatus').className='auth-status err'; $('loginStatus').innerHTML = ENGINE_DARK_MSG; return; }
         $('loginStatus').className='auth-status info';
-        $('loginStatus').innerHTML='<div class="spinner"></div>The server hiccupped — retrying…';
+        $('loginStatus').innerHTML='<div class="spinner"></div>Reaching the portal\u2026';
         setTimeout(function(){
           api('whoami').then(routeUser).catch(function(){
             $('loginStatus').className='auth-status err';
             $('loginStatus').innerHTML = engineDark()
-              ? 'This network is blocking the portal\u2019s data service. You are still signed in \u2014 switch this device to <b>mobile data / a hotspot</b>, or ask whoever runs the office internet to allow <b>m98m-engine.m98m786.workers.dev</b>.'
+              ? ENGINE_DARK_MSG
               : 'Could not reach the portal \u2014 reload to try again. You are still signed in.';
           });
         }, 4000);
