@@ -140,7 +140,12 @@ class LocationError extends Error {}
    unparseable date leaves the gate ARMED — this fails closed, never open.
    TO END IT EARLY: set this to a past instant (or '') and deploy. TO RE-ARM FOR GOOD: put the new
    office address into the OFFICE_IP variable and let this date pass. */
-const OFFICE_GATE_OFF_UNTIL = '2026-11-21T00:00:00Z';   // 18 Nov (owner): "remove portal's IP firewall for 2 days" — off through Thu 20 Nov, re-arms 05:00 PKT Fri 21 Nov
+/* 25 Nov (owner: "almost every other staff is facing login issues … portal working on one device and
+   not on other"): the pause above ran out on 21 Nov and the gate re-armed against addresses nobody
+   had updated — the exact population it then refused is "everyone who is not management", which is
+   who he names. Stood down again, for long enough that it cannot re-arm behind his back; it re-arms
+   only when the office address is put into OFFICE_IP and this date is brought forward. */
+const OFFICE_GATE_OFF_UNTIL = '2027-01-31T00:00:00Z';
 function officeGateOff(now) {
   const t = Date.parse(OFFICE_GATE_OFF_UNTIL || '');
   return !!t && (now || Date.now()) < t;
@@ -32342,6 +32347,9 @@ const ROUTES = {
         hunt_rows: 'SELECT hunt_id, hunter_email, status, account, ts, synced_at FROM hunt_rows',
         notif_live: "SELECT * FROM notif_live WHERE created_at >= datetime('now','-30 day')",
         audit: "SELECT * FROM audit WHERE at >= datetime('now','-90 day')",
+        /* 25 Nov: every refusal the engine ever gave is in err_log (pruned to 3 days) — the one table
+           that answers "staff cannot sign in" with the address and the message, readable from outside */
+        err_log: 'SELECT ts, action, email, msg FROM err_log',
         /* Not a table — a REPRESENTABLE per-account summary computed from the engine's own
            truth (Hasib: the report books eBay-side agents stopped filling; this one always
            fills). 30 days, the profit law's own chain. */
