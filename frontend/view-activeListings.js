@@ -212,9 +212,10 @@
     /* 26 Nov (owner): "remove the hyperlink text everywhere, I only need a link to click" — the
        current-supplier field is often the working link itself; a link is drawn as one (and not twice
        when it is already among the three), only a name is printed */
-    if (cur && /^https?:/i.test(cur)) {
-      if ([axStr(r.sup1_link), axStr(r.sup2_link), axStr(r.sup3_link)].indexOf(cur) < 0) { links.unshift(alxSupLink(cur, 'Current')); }
-      cur = '';
+    var curUrl = /https?:\/\/\S+/i.exec(cur);
+    if (curUrl) {
+      if ([axStr(r.sup1_link), axStr(r.sup2_link), axStr(r.sup3_link)].indexOf(curUrl[0]) < 0) { links.unshift(alxSupLink(curUrl[0], 'Current')); }
+      cur = cur.replace(curUrl[0], '').replace(/[\s:\-\u00b7|,]+$/, '').trim();
     }
     if (!cur && !links.length) { return '<span style="color:var(--text-3)">—</span>'; }
     var head = cur ? '<div class="alx-supcur">' + esc(cur) + '</div>' : '';

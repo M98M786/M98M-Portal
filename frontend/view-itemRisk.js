@@ -43,13 +43,16 @@
     return show.map(function (id) {
       id = String(id); var k = L[id] || {};
       var sups = [sup(k.s1, 'Supplier 1'), sup(k.s2, 'Supplier 2'), sup(k.s3, 'Supplier 3')].filter(Boolean);
+      /* an address anywhere in the current-supplier field is the click link; what is left is the name */
+      var cm = /https?:\/\/\S+/i.exec(String(k.cur || '')), curUrl = cm ? cm[0] : '', curName = String(k.cur || '').replace(curUrl, '').replace(/[\s:\-\u00b7|,]+$/, '').trim();
       return '<div class="ir-links"><span class="mono">' + esc(id) + '</span>' +
         '<a href="https://www.ebay.co.uk/itm/' + esc(id) + '" target="_blank" rel="noopener noreferrer">eBay \u2197</a>' +
         '<a href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener">History \u2197</a>' +
         /* the current-supplier field is often the working link itself, not a name: a link is drawn as
            one, a name is printed, and a link already among the three is not printed twice */
-        (sups.length ? sups.join('') : (k.cur && /^https?:/i.test(k.cur) ? '' : '<span>no supplier link on file</span>')) +
-        (k.cur ? (/^https?:/i.test(k.cur) ? ([k.s1, k.s2, k.s3].indexOf(k.cur) >= 0 ? '' : sup(k.cur, 'Current supplier')) : '<span>\u00b7 ' + esc(String(k.cur).slice(0, 40)) + '</span>') : '') + '</div>';
+        (sups.length || curUrl ? sups.join('') : '<span>no supplier link on file</span>') +
+        (curUrl && [k.s1, k.s2, k.s3].indexOf(curUrl) < 0 ? sup(curUrl, 'Current supplier') : '') +
+        (curName ? '<span>\u00b7 ' + esc(curName.slice(0, 40)) + '</span>' : '') + '</div>';
     }).join('') + (all.length > show.length ? '<div class="ir-links"><span>+' + (all.length - show.length) + ' more listing' + (all.length - show.length === 1 ? '' : 's') + ' under this title</span></div>' : '');
   }
   function irWho(email) { var e = String(email || ''); return e.indexOf('@') > 0 ? e.slice(0, e.indexOf('@')) : (e || 'someone'); }

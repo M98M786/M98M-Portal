@@ -1043,7 +1043,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261126-0200';
+var BUILD = '20261126-0203';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2480,9 +2480,10 @@ VIEWS.home = {
     /* 26 Nov (owner): "remove the hyperlink text everywhere, I only need a link to click" — the
        current-supplier field is often the working link itself; a link is drawn as one (and not twice
        when it is already among the three), only a name is printed */
-    if (cur && /^https?:/i.test(cur)) {
-      if ([axStr(r.sup1_link), axStr(r.sup2_link), axStr(r.sup3_link)].indexOf(cur) < 0) { links.unshift(alxSupLink(cur, 'Current')); }
-      cur = '';
+    var curUrl = /https?:\/\/\S+/i.exec(cur);
+    if (curUrl) {
+      if ([axStr(r.sup1_link), axStr(r.sup2_link), axStr(r.sup3_link)].indexOf(curUrl[0]) < 0) { links.unshift(alxSupLink(curUrl[0], 'Current')); }
+      cur = cur.replace(curUrl[0], '').replace(/[\s:\-\u00b7|,]+$/, '').trim();
     }
     if (!cur && !links.length) { return '<span style="color:var(--text-3)">—</span>'; }
     var head = cur ? '<div class="alx-supcur">' + esc(cur) + '</div>' : '';
@@ -25846,13 +25847,16 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     return show.map(function (id) {
       id = String(id); var k = L[id] || {};
       var sups = [sup(k.s1, 'Supplier 1'), sup(k.s2, 'Supplier 2'), sup(k.s3, 'Supplier 3')].filter(Boolean);
+      /* an address anywhere in the current-supplier field is the click link; what is left is the name */
+      var cm = /https?:\/\/\S+/i.exec(String(k.cur || '')), curUrl = cm ? cm[0] : '', curName = String(k.cur || '').replace(curUrl, '').replace(/[\s:\-\u00b7|,]+$/, '').trim();
       return '<div class="ir-links"><span class="mono">' + esc(id) + '</span>' +
         '<a href="https://www.ebay.co.uk/itm/' + esc(id) + '" target="_blank" rel="noopener noreferrer">eBay \u2197</a>' +
         '<a href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener">History \u2197</a>' +
         /* the current-supplier field is often the working link itself, not a name: a link is drawn as
            one, a name is printed, and a link already among the three is not printed twice */
-        (sups.length ? sups.join('') : (k.cur && /^https?:/i.test(k.cur) ? '' : '<span>no supplier link on file</span>')) +
-        (k.cur ? (/^https?:/i.test(k.cur) ? ([k.s1, k.s2, k.s3].indexOf(k.cur) >= 0 ? '' : sup(k.cur, 'Current supplier')) : '<span>\u00b7 ' + esc(String(k.cur).slice(0, 40)) + '</span>') : '') + '</div>';
+        (sups.length || curUrl ? sups.join('') : '<span>no supplier link on file</span>') +
+        (curUrl && [k.s1, k.s2, k.s3].indexOf(curUrl) < 0 ? sup(curUrl, 'Current supplier') : '') +
+        (curName ? '<span>\u00b7 ' + esc(curName.slice(0, 40)) + '</span>' : '') + '</div>';
     }).join('') + (all.length > show.length ? '<div class="ir-links"><span>+' + (all.length - show.length) + ' more listing' + (all.length - show.length === 1 ? '' : 's') + ' under this title</span></div>' : '');
   }
   function irWho(email) { var e = String(email || ''); return e.indexOf('@') > 0 ? e.slice(0, e.indexOf('@')) : (e || 'someone'); }
