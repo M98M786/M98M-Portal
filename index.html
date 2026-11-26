@@ -1043,7 +1043,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261126-0310';
+var BUILD = '20261126-0313';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -32084,6 +32084,99 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var A = window.ADT_DAILY;
     if (A && A.ensure) { A.ensure().then(draw)['catch'](function () { el.innerHTML = '<div class="empty">The chart library did not load.</div>'; }); } else { draw(); }
   }
+  /* ── 26 Nov (owner): "a new graph with order earning, AliExpress cost and actual profit, from the
+     Sales Analysis sheet, one month at first, with the same bar on top". One mount any page can
+     call: it draws the sales chart's control bar (account, One month · days, 52 weeks, 12 months and
+     the week or month picker) over a paired-bar chart of whichever book columns the caller names.
+     Every figure is the daily books' own, through bizSalesSeries. ── */
+  window.M98M_BARS = { mount: function (host, cfg) {
+    if (!host) { return; }
+    cfg = cfg || {};
+    var st = { grain: cfg.grain || 'day', acct: cfg.acct || '', pick: '', data: null, key: '', dataKey: '' };
+    var uid = 'bars' + Math.random().toString(36).slice(2, 8);
+    host.innerHTML = '<div class="dates" style="margin:0 0 10px;padding:8px 10px;gap:6px">' +
+      '<select class="alx-sel" id="' + uid + 'A" autocomplete="off" style="min-width:140px"><option value="">All accounts</option></select>' +
+      '<div class="seg" id="' + uid + 'M">' + [['day', 'One month \u00b7 days'], ['week', '52 weeks'], ['month', '12 months']].map(function (p) { return '<button data-g="' + p[0] + '"' + (st.grain === p[0] ? ' class="on"' : '') + '>' + p[1] + '</button>'; }).join('') + '</div>' +
+      '<select class="alx-sel" id="' + uid + 'P" autocomplete="off" style="min-width:170px;display:none"></select>' +
+      '<span class="range-label" id="' + uid + 'H" style="flex-basis:100%"></span></div>' +
+      '<div id="' + uid + 'C" style="width:100%;height:' + (cfg.height || 340) + 'px"><div class="empty">Loading\u2026</div></div>';
+    var $$ = function (s) { return document.getElementById(uid + s); };
+    var pickFill = function () {
+      var sel = $$('P'); if (!sel) { return; }
+      var t = ukToday(), y = Number(t.slice(0, 4)), opts = [];
+      if (st.grain === 'day') { sel.style.display = 'none'; sel.innerHTML = ''; return; }
+      if (st.grain === 'week') { opts.push(['', 'All 52 weeks']); for (var w = 1; w <= 52; w++) { var mon = oIsoMonday(y, w); opts.push([String(w), 'Week ' + w + ' \u00b7 ' + oDayLbl(mon).slice(4) + ' \u2013 ' + oDayLbl(dShift(mon, 6)).slice(4) + (mon > t ? ' (not yet)' : '')]); } }
+      else { opts.push(['', 'All 12 months']); for (var m = 1; m <= 12; m++) { var first = y + '-' + (m < 10 ? '0' : '') + m + '-01'; opts.push([String(m), O_MON_FULL[m - 1] + ' ' + y + (first > t ? ' (not yet)' : '')]); } }
+      sel.innerHTML = opts.map(function (o) { return '<option value="' + o[0] + '"' + (st.pick === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('');
+      sel.style.display = '';
+    };
+    var params = function () {
+      var p = { grain: st.grain }; if (st.acct) { p.account = st.acct; }
+      var y = Number(ukToday().slice(0, 4));
+      if (st.grain === 'week' && st.pick) { var mon = oIsoMonday(y, Number(st.pick)); p.grain = 'day'; p.from = mon; p.to = dShift(mon, 6); }
+      if (st.grain === 'month' && st.pick) { var m = Number(st.pick); p.grain = 'day'; p.from = y + '-' + (m < 10 ? '0' : '') + m + '-01'; p.to = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); }
+      return p;
+    };
+    var series = cfg.series || [];
+    var paint = function () {
+      var el = $$('C'); if (!el) { return; }
+      var d = st.data; if (!d) { return; }
+      var rows = d.rows || [], T = d.totals || {};
+      var hint = $$('H');
+      if (hint) {
+        hint.innerHTML = (st.pick ? (st.grain === 'week' ? 'week ' + st.pick : O_MON_FULL[Number(st.pick) - 1]) + ' \u00b7 ' : '') +
+          series.map(function (s) { return '<b style="color:' + s.color + '">' + s.name + ' ' + (s.count ? (T[s.key] || 0) : oGBPs(T[s.key])) + '</b>'; }).join(' \u00b7 ') +
+          ' \u00b7 ' + esc(d.from + ' \u2192 ' + d.to) + ' \u00b7 ' + (d.account ? esc(d.account) : 'all accounts') +
+          (d.books_from && d.books_from > d.from ? ' \u00b7 the books begin ' + esc(d.books_from) : '') + (cfg.note ? ' \u00b7 ' + cfg.note : '');
+      }
+      if (!rows.length) { var ec0 = window.echarts, i0 = ec0 && ec0.getInstanceByDom(el); if (i0) { i0.dispose(); } el.innerHTML = '<div class="empty">' + (d.note && /not started/.test(d.note) ? 'That window has not started yet.' : 'Nothing in this window.') + '</div>'; return; }
+      var draw = function () {
+        var ec = window.echarts; if (!ec) { el.innerHTML = '<div class="empty">The chart library did not load.</div>'; return; }
+        var inst = ec.getInstanceByDom(el);
+        if (!inst || !el.querySelector('canvas')) { if (inst) { inst.dispose(); } el.innerHTML = ''; inst = ec.init(el, null, { renderer: 'canvas' }); }
+        var n = rows.length, up = n > 16 || series.length > 2 && n > 10;
+        var kfmt = function (v) { var a = Math.abs(v); return (v < 0 ? '\u2212' : '') + (a >= 10000 ? '\u00a3' + (a / 1000).toFixed(0) + 'k' : a >= 1000 ? '\u00a3' + (a / 1000).toFixed(1) + 'k' : '\u00a3' + Math.round(a)); };
+        var twoAxes = series.some(function (s) { return s.axis === 1; });
+        inst.setOption({
+          backgroundColor: 'transparent', animation: false,
+          tooltip: { trigger: 'axis', backgroundColor: 'rgba(4,6,10,.92)', borderColor: 'rgba(255,255,255,.14)', textStyle: { color: '#fff', fontSize: 12 },
+            formatter: function (ps) { var i = ps && ps.length ? ps[0].dataIndex : 0, r = rows[i]; if (!r) { return ''; } return esc(String(r.tip)) + series.map(function (s) { return '<br>' + s.name + ' ' + (s.count ? (r[s.key] || 0) : oGBPs(r[s.key])); }).join(''); } },
+          legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 }, data: series.map(function (s) { return s.name; }) },
+          grid: { left: 64, right: twoAxes ? 56 : 20, top: 44, bottom: up ? 64 : 30 },
+          xAxis: { type: 'category', data: rows.map(function (r) { return r.label; }), axisLabel: { color: '#66707c', fontSize: 10, interval: 0, rotate: up ? 45 : 0 }, axisTick: { show: false }, axisLine: { lineStyle: { color: 'rgba(255,255,255,.15)' } } },
+          yAxis: [
+            { type: 'value', axisLabel: { color: '#66707c', fontSize: 10, formatter: function (v) { return kfmt(v); } }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } }, max: function (v) { return Math.ceil(v.max * 1.25) || 1; }, min: function (v) { return v.min < 0 ? Math.floor(v.min * 1.25) : 0; } },
+            { type: 'value', show: twoAxes, axisLabel: { color: '#66707c', fontSize: 10 }, splitLine: { show: false }, minInterval: 1, max: function (v) { return Math.ceil(v.max * 1.25) || 1; } }
+          ],
+          series: series.map(function (s, si) {
+            return { name: s.name, type: 'bar', yAxisIndex: s.axis || 0, barMaxWidth: 24, barGap: si === 0 ? '15%' : undefined,
+              data: rows.map(function (r) { var v = Number(r[s.key]) || 0; return s.signed && v < 0 ? { value: v, itemStyle: { color: '#e0563f', opacity: .6, borderRadius: [3, 3, 0, 0] } } : v; }),
+              itemStyle: { color: s.color, borderRadius: [3, 3, 0, 0] },
+              label: { show: true, position: 'top', color: s.label || s.color, fontSize: 9, fontWeight: 700, rotate: up ? 90 : 0, align: up ? 'left' : 'center', verticalAlign: 'middle', distance: 4,
+                formatter: function (p) { var v = p.value && p.value.value !== undefined ? p.value.value : p.value; return v ? (s.count ? String(v) : kfmt(v)) : ''; } } };
+          })
+        }, true);
+        inst.resize();
+      };
+      var A = window.ADT_DAILY;
+      if (A && A.ensure) { A.ensure().then(draw)['catch'](function () { el.innerHTML = '<div class="empty">The chart library did not load.</div>'; }); } else { draw(); }
+    };
+    var load = function () {
+      var el = $$('C'); if (!el) { return; }
+      var key = st.grain + '|' + st.acct + '|' + st.pick; st.key = key;
+      if (st.dataKey !== key) { var ecOld = window.echarts, instOld = ecOld && ecOld.getInstanceByDom(el); if (instOld) { instOld.dispose(); } el.innerHTML = '<div class="empty">Loading\u2026</div>'; }
+      api('bizSalesSeries', params()).then(function (d) { if (st.key !== key) { return; } st.data = d || {}; st.dataKey = key; paint(); })
+        ['catch'](function (e) { var b = $$('C'); if (b && st.key === key) { b.innerHTML = '<div class="empty">The series did not answer \u2014 ' + esc((e && e.message) || 'no answer') + '</div>'; } });
+    };
+    var selA = $$('A');
+    if (selA) { fillAccountSelect(selA, st.acct, function () { st.acct = selA.value || ''; load(); }); setTimeout(function () { if ((selA.value || '') !== (st.acct || '')) { st.acct = selA.value || ''; load(); } }, 2500); }
+    var selP = $$('P'); if (selP) { selP.onchange = function () { st.pick = selP.value || ''; load(); }; }
+    var mode = $$('M');
+    if (mode) { mode.onclick = function (ev) { var b = ev.target && ev.target.closest ? ev.target.closest('[data-g]') : null; if (!b) { return; } st.grain = b.getAttribute('data-g') || 'day'; st.pick = ''; var bs = mode.querySelectorAll('button'); for (var i = 0; i < bs.length; i++) { bs[i].classList.toggle('on', bs[i] === b); } pickFill(); load(); }; }
+    window.addEventListener('resize', function () { var e2 = $$('C'), ec2 = window.echarts; if (e2 && ec2) { var i2 = ec2.getInstanceByDom(e2); if (i2) { i2.resize(); } } });
+    pickFill(); load();
+    return { reload: load, state: st };
+  } };
   function oK2Mount() { var t = $('o2K2Tools'); if (t && typeof window.K2_MOUNT === 'function') { window.K2_MOUNT(t, { acct: O.acct }); } }
 
   function oPulse() {
@@ -47744,7 +47837,11 @@ function saveSchedule() {
       var days = upDays;
       var spanDays = Math.round((new Date(SX.to + 'T12:00:00Z') - new Date(SX.from + 'T12:00:00Z')) / 86400000) + 1;
       h += '<div class="card" style="margin-top:12px"><div class="hd">Account to account <span class="hint">total sold · actual profit · ▲▼ vs last month</span></div><div class="bd" id="sxAcctBox"><div class="spinner"></div></div></div>';
-      h += '<div class="card" style="margin-top:14px"><div class="hd">Day by day — profit vs cost <span class="hint">where the money goes · profit line + total-cost line (ads + AliExpress)</span></div><div class="bd">' + sxChartPvC(days) + '</div></div>';
+      /* 26 Nov (owner): "a new graph with order earning, AliExpress cost and actual profit, from the
+         Sales Analysis sheet — order earning yellow, AliExpress cost red, actual profit green — one
+         month at first, with the sales chart's bar on top". The profit-vs-cost lines gave way to it;
+         the chart is the shared bar mount, fed by the daily books. */
+      h += '<div class="card" style="margin-top:14px"><div class="hd">Earnings day by day \u2014 order earning \u00b7 AliExpress cost \u00b7 actual profit <span class="hint">the daily books\u2019 own columns \u00b7 one month of days, or a week or a month from the pickers</span></div><div class="bd" id="sxEarn"><div class="empty">Loading\u2026</div></div></div>';
 
       /* per-account ledger for the range */
       var accts = Object.keys(byA).sort();
@@ -47764,6 +47861,13 @@ function saveSchedule() {
         '<button class="minibtn" id="sxItemsBest" style="margin-left:auto">Best first</button><button class="minibtn" id="sxItemsLoss">Losses first</button></div>' +
         '<div class="bd" id="sxItems"><div class="spinner"></div></div></div>';
       body.innerHTML = h;
+      if (window.M98M_BARS && $('sxEarn')) {
+        window.M98M_BARS.mount($('sxEarn'), { acct: SX.acct || '', series: [
+          { key: 'oe', name: 'Order earning', color: '#f2b035', label: '#f7c96a' },
+          { key: 'cost', name: 'AliExpress cost', color: '#e0563f', label: '#ff8a73' },
+          { key: 'actual', name: 'Actual profit', color: '#2fb170', label: '#5fd49a', signed: true }
+        ], note: 'order earning, AliExpress cost and actual profit are the Sales Analysis day tabs\u2019 own columns' });
+      }
       /* 3 Sept: account-to-account vs last month — fetch the previous calendar month per account. */
       (function () {
         var box = $('sxAcctBox');
