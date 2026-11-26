@@ -209,6 +209,13 @@
   function alxSuppliers(r) {
     var cur = axStr(r.current_sup);
     var links = [alxSupLink(r.sup1_link, '1'), alxSupLink(r.sup2_link, '2'), alxSupLink(r.sup3_link, '3')].filter(Boolean);
+    /* 26 Nov (owner): "remove the hyperlink text everywhere, I only need a link to click" — the
+       current-supplier field is often the working link itself; a link is drawn as one (and not twice
+       when it is already among the three), only a name is printed */
+    if (cur && /^https?:/i.test(cur)) {
+      if ([axStr(r.sup1_link), axStr(r.sup2_link), axStr(r.sup3_link)].indexOf(cur) < 0) { links.unshift(alxSupLink(cur, 'Current')); }
+      cur = '';
+    }
     if (!cur && !links.length) { return '<span style="color:var(--text-3)">—</span>'; }
     var head = cur ? '<div class="alx-supcur">' + esc(cur) + '</div>' : '';
     return head + (links.length ? '<div class="alx-suprow">' + links.join('') + '</div>' : '');
