@@ -7,7 +7,9 @@
 
   /* 26 Nov (owner): the page is Product Returns now; `win` is the window picker (today … all time),
      `hideAck` hides the products already acknowledged */
-  var IR = { tab: 'returns', data: null, acct: '', win: 'all', accCol: '', hideAck: false };
+  /* 26 Nov (owner): "acknowledgement to clear once seen and decided by management" — an acknowledged
+     product leaves the decision box and the table; the tick brings them back */
+  var IR = { tab: 'returns', data: null, acct: '', win: 'all', accCol: '', hideAck: true };
 
   VIEW_CSS.push(
     '.ir-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px}' +
@@ -111,20 +113,28 @@
     if (!box || !d) { return; }
     var a = d.alerts || {};
     var h = '';
+    var acksAll = d.acks || {};
     var alerts = [].concat(
-      (a.returns5 || []).map(function (x) { return { x: x, w: 'returns' }; }),
-      (a.inr5 || []).map(function (x) { return { x: x, w: 'not-received cases' }; }),
-      (a.late10 || []).map(function (x) { return { x: x, w: 'late-tracking orders' }; })
+      (a.returns5 || []).map(function (x) { return { x: x, w: 'returns', tab: 'returns' }; }),
+      (a.inr5 || []).map(function (x) { return { x: x, w: 'not-received cases', tab: 'inr' }; }),
+      (a.late10 || []).map(function (x) { return { x: x, w: 'late-tracking orders', tab: 'late' }; })
     );
-    if (alerts.length) {
-      h += '<div class="ir-alert"><b style="color:var(--bad)">🔴 ' + alerts.length + ' item(s) need a MANAGEMENT DECISION</b>';
-      alerts.slice(0, 10).forEach(function (al) {
-        h += '<div style="margin-top:5px"><b>' + esc(String(al.x.title || al.x.key).slice(0, 80)) + '</b>' +
+    var alertsAcked = alerts.filter(function (al) { return !!acksAll[al.tab + '|' + al.x.key]; }).length;
+    var alertsOpen = alerts.filter(function (al) { return !acksAll[al.tab + '|' + al.x.key]; });
+    if (alertsOpen.length || alertsAcked) {
+      h += '<div class="ir-alert"><b style="color:var(--bad)">🔴 ' + alertsOpen.length + ' item(s) need a MANAGEMENT DECISION</b>' +
+        (alertsAcked ? ' <span style="color:var(--text-3);font-weight:700">· ' + alertsAcked + ' decided and acknowledged' + (IR.hideAck ? ', cleared from here' : '') + '</span>' : '');
+      (IR.hideAck ? alertsOpen : alerts).slice(0, 12).forEach(function (al) {
+        var ak = acksAll[al.tab + '|' + al.x.key], kq = esc(String(al.x.key)).replace(/"/g, '&quot;');
+        h += '<div style="margin-top:7px;display:flex;gap:10px;align-items:flex-start" data-ir-entry="1"' + (ak ? ' data-acked="1" style="opacity:.6;margin-top:7px;display:flex;gap:10px;align-items:flex-start"' : '') + '><div style="flex:1 1 auto;min-width:0"><b>' + esc(String(al.x.title || al.x.key).slice(0, 80)) + '</b>' +
           (al.x.duplicated ? '<span class="ir-dup">DUPLICATED · ' + al.x.item_ids.length + ' listings</span>' : '') +
           ' — <b>' + al.x.all + '</b> ' + al.w + ' across ' + Object.keys(al.x.accounts || {}).length + ' account(s)' +
-          (al.x.reasons ? ' · ' + esc(String(al.x.reasons)) : '') + irLinks(al.x.item_ids) + '</div>';
+          (al.x.reasons ? ' · ' + esc(String(al.x.reasons)) : '') + irLinks(al.x.item_ids) +
+          (ak ? '<div class="ir-ack">✓ ' + esc(irWho(ak.email)) + ' · ' + esc(String(ak.at).replace('T', ' ').slice(0, 16)) + ' · ' + esc(ak.note) + '</div>' : '') + '</div>' +
+          '<button class="minibtn ir-ackb" style="flex:none;margin-top:0" data-ir-ack="' + kq + '" data-ir-tab="' + al.tab + '">' + (ak ? 'Update…' : 'Acknowledge…') + '</button></div>';
       });
-      h += '<div style="margin-top:6px;font-size:11px;color:var(--text-3);font-weight:600">The same alerts land as letters in the Alerts centre, one per tier (5, 10, 15…), so nothing rings twice.</div></div>';
+      if (!alertsOpen.length) { h += '<div style="margin-top:6px;color:var(--ok);font-weight:800">Every decision item is acknowledged.</div>'; }
+      h += '<div style="margin-top:6px;font-size:11px;color:var(--text-3);font-weight:600">The same alerts land as letters in the Alerts centre, one per tier (5, 10, 15…), so nothing rings twice. Acknowledging here records who decided, when and what; the item clears from this box and the table.</div></div>';
     }
 
     if (IR.tab === 'speed') { box.innerHTML = h + irSpeedTable(d); return; }
@@ -154,7 +164,7 @@
     var nAck = list.filter(function (r) { return !!acks[ackKey(r)]; }).length;
     if (IR.hideAck) { list = list.filter(function (r) { return !acks[ackKey(r)]; }); }
     h += '<div class="ir-tools"><span>' + esc(IR_WL[W]) + ' · ' + (A ? esc(A) : (IR.acct ? esc(IR.acct) : 'all accounts')) + ' · ' + list.length + ' product' + (list.length === 1 ? '' : 's') + (nAck ? ' · ' + nAck + ' acknowledged' : '') + '</span>' +
-      '<label class="ir-chk"><input type="checkbox" id="irHideAck"' + (IR.hideAck ? ' checked' : '') + '> hide acknowledged</label>' +
+      '<label class="ir-chk"><input type="checkbox" id="irShowAck"' + (IR.hideAck ? '' : ' checked') + '> show acknowledged</label>' +
       (list.length ? '<button class="minibtn" id="irAckAll">Acknowledge all shown\u2026</button>' : '') + '</div>';
     var winSel = '<select class="ir-hsel" id="irWinTh" title="the window this column counts">' + ['all', 'today', 'yesterday', 'd7', 'd30'].map(function (k) { return '<option value="' + k + '"' + (W === k ? ' selected' : '') + '>' + IR_WL[k] + '</option>'; }).join('') + '</select>';
     var accSel = '<select class="ir-hsel" id="irAccTh" title="the account this column counts, over the same window"><option value="">All accounts</option>' + acctNames.map(function (a2) { return '<option value="' + esc(a2).replace(/"/g, '&quot;') + '"' + (A === a2 ? ' selected' : '') + '>' + esc(a2) + '</option>'; }).join('') + '</select>';
@@ -195,7 +205,7 @@
 
   /* the acknowledgement box: one product (a comment row opens under it) or every product shown */
   function irWire(box, list) {
-    var hc = $('irHideAck'); if (hc) { hc.onchange = function () { IR.hideAck = this.checked; irPaint(); }; }
+    var hc = $('irShowAck'); if (hc) { hc.onchange = function () { IR.hideAck = !this.checked; irPaint(); }; }
     var wt = $('irWinTh'); if (wt) { wt.onchange = function () { IR.win = wt.value || 'all'; irPaint(); }; }
     var at = $('irAccTh'); if (at) { at.onchange = function () { IR.accCol = at.value || ''; irPaint(); }; }
     var aa = $('irAckAll');
@@ -215,22 +225,26 @@
     }
     box.onclick = function (ev) {
       var b = ev.target && ev.target.closest ? ev.target.closest('[data-ir-ack]') : null; if (!b) { return; }
-      var key = b.getAttribute('data-ir-ack'), tr = b.closest('tr'); if (!tr) { return; }
+      var key = b.getAttribute('data-ir-ack'), tab = b.getAttribute('data-ir-tab') || IR.tab;
+      var tr = b.closest('tr') || b.closest('[data-ir-entry]'); if (!tr) { return; }
       var nx = tr.nextElementSibling;
       if (nx && nx.classList.contains('ir-ackrow')) { nx.parentNode.removeChild(nx); return; }
-      var row = document.createElement('tr'); row.className = 'ir-ackrow';
-      row.innerHTML = '<td colspan="20" style="text-align:left"><textarea class="ir-ta" rows="2" placeholder="What did you find or decide about this product? (required)"></textarea>' +
-        '<div style="margin-top:6px;display:flex;gap:6px"><button class="minibtn ir-save">Acknowledge with this comment</button><button class="minibtn ir-cancel">Cancel</button></div></td>';
+      var inTable = tr.tagName === 'TR';
+      var row = document.createElement(inTable ? 'tr' : 'div'); row.className = 'ir-ackrow';
+      var inner = '<textarea class="ir-ta" rows="2" placeholder="What did you find or decide about this product? (required)"></textarea>' +
+        '<div style="margin-top:6px;display:flex;gap:6px"><button class="minibtn ir-save">Acknowledge with this comment</button><button class="minibtn ir-cancel">Cancel</button></div>';
+      row.innerHTML = inTable ? '<td colspan="20" style="text-align:left">' + inner + '</td>' : inner;
+      if (!inTable) { row.style.cssText = 'margin:6px 0 4px;padding:8px;border:1px solid var(--gold-line);border-radius:10px;background:var(--panel-2)'; }
       tr.parentNode.insertBefore(row, tr.nextSibling);
       var ta = row.querySelector('textarea'); if (ta) { ta.focus(); }
       row.querySelector('.ir-cancel').onclick = function () { row.parentNode.removeChild(row); };
       row.querySelector('.ir-save').onclick = function () {
         var note = String(ta.value || '').trim(); if (!note) { toast('Write a comment first.'); ta.focus(); return; }
         this.disabled = true;
-        api('itemRiskAck', { tab: IR.tab, key: key, note: note }).then(function (res) {
+        api('itemRiskAck', { tab: tab, key: key, note: note }).then(function (res) {
           IR.data.acks = IR.data.acks || {};
-          IR.data.acks[IR.tab + '|' + key] = { email: (res && res.email) || '', note: note, at: (res && res.at) || new Date().toISOString() };
-          toast('Acknowledged'); irPaint();
+          IR.data.acks[tab + '|' + key] = { email: (res && res.email) || '', note: note, at: (res && res.at) || new Date().toISOString() };
+          toast('Acknowledged — cleared'); irPaint();
         })['catch'](function (e) { toast('Not acknowledged: ' + ((e && e.message) || 'no answer')); });
       };
     };
