@@ -27390,16 +27390,34 @@ const ROUTES = {
         where.push('(a.item_id LIKE ?' + n + ' OR lower(a.title) LIKE ?' + n +
           (canCamp ? ' OR lower(f.campaign_name) LIKE ?' + n + ' OR lower(f.campaign_type) LIKE ?' + n : '') + ')');
       }
-      const rs = await ctx.env.DB.prepare(
+      /* 26 Nov (owner): "the Sourcing page has every product's supplier links, so why does this page
+         show Supplier 1 on some and nothing on others — use the same way". The three links are now
+         the Sourcing page's own chain: a link saved in the portal (sourcing), then the Central Main
+         Sheet (items_facts), then the go-live record (slot 1), then the hunt's Product Link 1/2/3. A
+         database without the newer tables falls back to the sheet columns alone. */
+      const selHead =
         'SELECT a.item_id, a.account, a.title, a.price, a.qty, a.status, a.image, a.api_synced_at, a.sold_qty, a.sold_30d, ' +
         '       a.start_time, a.first_seen, ' +
-        '       f.ali_cost, f.sup1, f.sup2, f.sup3, f.sup1_link, f.sup2_link, f.sup3_link, ' +
+        '       f.ali_cost, f.sup1, f.sup2, f.sup3, ';
+      const selTail =
         '       f.current_sup, f.category, f.oe, f.profit, f.roi, f.margin, ' +
-        '       f.avg_profit_7d, f.campaign_name, f.campaign_type, f.source ' +
-        'FROM items_api a LEFT JOIN items_facts f ON f.item_id = a.item_id ' +
-        "WHERE a.status = 'ACTIVE' " + (where.length ? 'AND ' + where.join(' AND ') + ' ' : '') +
-        'ORDER BY a.api_synced_at DESC LIMIT 1500'
-      ).bind(...bind).all();
+        '       f.avg_profit_7d, f.campaign_name, f.campaign_type, f.source ';
+      const whereSql = "WHERE a.status = 'ACTIVE' " + (where.length ? 'AND ' + where.join(' AND ') + ' ' : '') + 'ORDER BY a.api_synced_at DESC LIMIT 1500';
+      let rs;
+      try {
+        rs = await ctx.env.DB.prepare(selHead +
+          "       COALESCE(NULLIF(s.s1,''), NULLIF(f.sup1_link,''), NULLIF(g.ali_link,''), NULLIF(json_extract(h.vals, '$.\"Product Link 1 Main supplier\"'),''), '') AS sup1_link, " +
+          "       COALESCE(NULLIF(s.s2,''), NULLIF(f.sup2_link,''), NULLIF(json_extract(h.vals, '$.\"Product Link 2\"'),''), '') AS sup2_link, " +
+          "       COALESCE(NULLIF(s.s3,''), NULLIF(f.sup3_link,''), NULLIF(json_extract(h.vals, '$.\"Product Link 3\"'),''), '') AS sup3_link, " +
+          selTail +
+          'FROM items_api a LEFT JOIN items_facts f ON f.item_id = a.item_id ' +
+          'LEFT JOIN sourcing s ON s.item_id = a.item_id LEFT JOIN golive g ON g.item_id = a.item_id ' +
+          'LEFT JOIN (SELECT item_id, MIN(hunt_id) AS hunt_id FROM provenance GROUP BY item_id) pv ON pv.item_id = a.item_id ' +
+          'LEFT JOIN hunt_rows h ON h.hunt_id = pv.hunt_id ' + whereSql).bind(...bind).all();
+      } catch (e) {
+        rs = await ctx.env.DB.prepare(selHead + '       f.sup1_link, f.sup2_link, f.sup3_link, ' + selTail +
+          'FROM items_api a LEFT JOIN items_facts f ON f.item_id = a.item_id ' + whereSql).bind(...bind).all();
+      }
       const rows = (rs.results || []).map(r => stripItem(r, ctx.user));
       /* 30 Aug (owner): "listing start date ... proper breakdown of sold in last 7 / 14 / 30
          days". Start date rides from eBay's own start_time (first_seen when eBay withheld it);
@@ -27849,7 +27867,20 @@ const ROUTES = {
         const ids = Object.keys(idSet).slice(0, 540);
         for (let i = 0; i < ids.length; i += 90) {
           const chunk = ids.slice(i, i + 90);
-          const rs = (await ctx.env.DB.prepare('SELECT item_id, current_sup, sup1_link, sup2_link, sup3_link FROM items_facts WHERE item_id IN (' + chunk.map(() => '?').join(',') + ')').bind(...chunk).all()).results || [];
+          const ph = chunk.map(() => '?').join(',');
+          let rs;
+          try {
+            rs = (await ctx.env.DB.prepare(
+              "SELECT a.item_id, COALESCE(f.current_sup,'') AS current_sup, " +
+              "COALESCE(NULLIF(s.s1,''), NULLIF(f.sup1_link,''), NULLIF(g.ali_link,''), NULLIF(json_extract(h.vals, '$.\"Product Link 1 Main supplier\"'),''), '') AS sup1_link, " +
+              "COALESCE(NULLIF(s.s2,''), NULLIF(f.sup2_link,''), NULLIF(json_extract(h.vals, '$.\"Product Link 2\"'),''), '') AS sup2_link, " +
+              "COALESCE(NULLIF(s.s3,''), NULLIF(f.sup3_link,''), NULLIF(json_extract(h.vals, '$.\"Product Link 3\"'),''), '') AS sup3_link " +
+              'FROM items_api a LEFT JOIN items_facts f ON f.item_id = a.item_id LEFT JOIN sourcing s ON s.item_id = a.item_id LEFT JOIN golive g ON g.item_id = a.item_id ' +
+              'LEFT JOIN (SELECT item_id, MIN(hunt_id) AS hunt_id FROM provenance GROUP BY item_id) pv ON pv.item_id = a.item_id LEFT JOIN hunt_rows h ON h.hunt_id = pv.hunt_id ' +
+              'WHERE a.item_id IN (' + ph + ')').bind(...chunk).all()).results || [];
+          } catch (e) {
+            rs = (await ctx.env.DB.prepare('SELECT item_id, current_sup, sup1_link, sup2_link, sup3_link FROM items_facts WHERE item_id IN (' + ph + ')').bind(...chunk).all()).results || [];
+          }
           for (const f of rs) links[String(f.item_id)] = { cur: String(f.current_sup || ''), s1: String(f.sup1_link || ''), s2: String(f.sup2_link || ''), s3: String(f.sup3_link || '') };
         }
       } catch (e) { /* links are a courtesy — the board stands without them */ }
