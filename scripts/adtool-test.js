@@ -7057,7 +7057,8 @@ function run(argv) {
       src.indexOf('await adtBatch(env, ddl.map(s => env.DB.prepare(s)))') < 0;
     /* every guarded ALTER left in the families goes through adtDdlOne, and the only raw guarded
        ALTER left in the engine is the rollup's own repair of sales_daily, which is no family's */
-    const alters = (src.match(/await adtDdlOne\(env, /g) || []).length === 22 &&
+    /* 26 Nov: 23 — listing_corrections.draft_link (made at use, outside the families) goes through the same runner */
+    const alters = (src.match(/await adtDdlOne\(env, /g) || []).length === 23 &&
       (src.match(/env\.DB\.prepare\('ALTER |env\.DB\.prepare\("ALTER /g) || []).length === 1 &&
       /catch \(e\) \{ try \{ await env\.DB\.prepare\('ALTER TABLE sales_daily ADD COLUMN pri_est INTEGER DEFAULT 0'\)/.test(src);
     /* the truth family keeps the KV tag it already had: an edge-cached read is cheaper still, and it

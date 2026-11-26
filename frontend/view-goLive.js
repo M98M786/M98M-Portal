@@ -413,7 +413,10 @@
           toast('Sent back to ' + (glS(r && r.assigned_to).split('@')[0] || 'the lister') + '.');
           /* 26 Nov: the Listing corrections page and the lister's card read the engine's note too —
              raised here so they show it at once, not after the five-minute mirror */
-          try { api('listingCorrectionRaise', { task_id: id, note: msg })['catch'](function () {}); } catch (e) {}
+          try {
+            var held = null; GL_SHOWN.forEach(function (x) { if (glS(x.t.task_id) === id) { held = x; } });
+            api('listingCorrectionRaise', { task_id: id, note: msg, draft_link: held ? glS(held.f.link) : '' })['catch'](function () {});
+          } catch (e) {}
           glLoad(true);
         }).catch(function (e) {
           var m = String((e && e.message) || '');

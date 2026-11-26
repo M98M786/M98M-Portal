@@ -1043,7 +1043,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261126-1738';
+var BUILD = '20261126-1808';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -22355,7 +22355,10 @@ VIEWS.dashboard = {
           toast('Sent back to ' + (glS(r && r.assigned_to).split('@')[0] || 'the lister') + '.');
           /* 26 Nov: the Listing corrections page and the lister's card read the engine's note too —
              raised here so they show it at once, not after the five-minute mirror */
-          try { api('listingCorrectionRaise', { task_id: id, note: msg })['catch'](function () {}); } catch (e) {}
+          try {
+            var held = null; GL_SHOWN.forEach(function (x) { if (glS(x.t.task_id) === id) { held = x; } });
+            api('listingCorrectionRaise', { task_id: id, note: msg, draft_link: held ? glS(held.f.link) : '' })['catch'](function () {});
+          } catch (e) {}
           glLoad(true);
         }).catch(function (e) {
           var m = String((e && e.message) || '');
@@ -28346,21 +28349,34 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     '.lc-in{width:100%;box-sizing:border-box;padding:9px 11px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-size:12.5px}' +
     '.lc-grp{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800;margin:16px 0 8px;display:flex;gap:8px;align-items:center}' +
     '.lc-grp b{color:var(--text);font-size:13px;text-transform:none;letter-spacing:0}' +
-    '.lc-empty{color:var(--text-2);font-weight:700;padding:14px 0}.lc-empty span{display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px}'
+    '.lc-empty{color:var(--text-2);font-weight:700;padding:14px 0}.lc-empty span{display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px}' +
+    '.lc-link{display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:6px 10px;border-radius:999px;border:1px solid var(--gold-line-hi);background:var(--panel);font-size:12px;font-weight:700;text-decoration:none;color:var(--gold-a)}' +
+    '.lc-link.old{color:var(--text-2);border-color:var(--gold-line)}' +
+    '.lc-data{margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--gold-line);background:var(--panel)}' +
+    '.lc-data.hidden{display:none}'
   );
 
   function lcFetch() { return api('listingCorrections', {}); }
 
   function lcRow(r, mgmt) {
-    var id = lcS(r.task_id), link = safeUrl(lcS(r.draft_link));
+    var id = lcS(r.task_id), link = safeUrl(lcS(r.draft_link)), prev = safeUrl(lcS(r.prev_draft_link));
     var where = r.with_golive ? 'draft is with go-live' : 'with ' + (mgmt ? esc(lcS(r.lister_name)) : 'you');
+    /* 26 Nov (owner): the previous draft link and the product data on every row — the link the
+       lister handed off before it came back (the same one if it is still with go-live), and the
+       listing's own data drawn exactly as the task's Details card and the archive draw it */
+    var hasData = !!(r.listing && typeof window.M98M_taskDetailsHtml === 'function');
     var h = '<div class="lc-row' + (r.resolved_how ? ' fixed' : '') + '" data-lc-row="' + lcAttr(id) + '">' +
       '<div class="t">' + esc(lcS(r.title) || id) + '</div>' +
       '<div class="m"><span class="mono">' + esc(id) + '</span> · ' + esc(lcS(r.account)) +
         (mgmt ? ' · lister <b style="color:var(--text-2)">' + esc(lcS(r.lister_name)) + '</b>' : '') +
         ' · ' + where + (link ? ' · <a href="' + esc(link) + '" target="_blank" rel="noopener noreferrer">open the eBay draft ↗</a>' : '') + '</div>' +
       '<div class="lc-note"><div class="k">' + (r.resolved_how ? 'Fixed · ' + esc(lcS(r.resolved_how)) : 'Needs correction') + ' · sent back by ' + esc(lcS(r.by) || 'management') + ' · ' + esc(lcWhen(r.at)) + (r.resolved_how ? '' : ' (' + esc(lcAge(r.at)) + ' waiting)') + '</div>' +
-        esc(lcS(r.note)) + '</div>';
+        esc(lcS(r.note)) + '</div>' +
+      '<div class="lc-acts" style="margin-top:4px">' +
+        (prev ? '<a class="lc-link' + (link && link === prev ? '' : ' old') + '" href="' + esc(prev) + '" target="_blank" rel="noopener noreferrer">' + (link && link === prev ? '\ud83d\udfe3 Draft link' : '\u21a9 Previous draft link') + ' \u2197</a>' : '<span class="lc-link old" style="cursor:default">No draft link on record yet</span>') +
+        (hasData ? '<button class="minibtn" data-lc-act="data" data-id="' + lcAttr(id) + '">\ud83d\udce6 Product data</button>' : '') +
+      '</div>' +
+      (hasData ? '<div class="lc-data hidden" data-lc-data="' + lcAttr(id) + '">' + window.M98M_taskDetailsHtml(JSON.stringify({ limited: r.listing, hunt_id: r.hunt_id })) + '</div>' : '');
     if (!r.resolved_how) {
       h += '<div class="lc-acts">';
       if (!mgmt || lcS(r.lister) === lcS(STATE.user && STATE.user.email).toLowerCase()) {
@@ -28372,7 +28388,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       }
       h += '</div>' +
         '<div class="lc-form hidden" data-lc-form="resend:' + lcAttr(id) + '">' +
-          '<input class="lc-in" type="url" autocomplete="off" placeholder="https://www.ebay.co.uk/… the corrected draft link" data-lc-link="' + lcAttr(id) + '" value="' + lcAttr(r.draft_link) + '">' +
+          '<input class="lc-in" type="url" autocomplete="off" placeholder="https://www.ebay.co.uk/… the corrected draft link" data-lc-link="' + lcAttr(id) + '" value="' + lcAttr(r.draft_link || r.prev_draft_link) + '">' +
           '<input class="lc-in" type="text" placeholder="Note for go-live (optional) — what you changed" data-lc-rnote="' + lcAttr(id) + '">' +
           '<div class="lc-acts" style="margin-top:0"><button class="minibtn" data-lc-act="resend" data-id="' + lcAttr(id) + '" style="border-color:var(--gold-a);color:var(--gold-a)">Hand the corrected draft to go-live</button>' +
             '<button class="minibtn" data-lc-act="cancel" data-id="resend:' + lcAttr(id) + '">Cancel</button></div></div>' +
@@ -28434,6 +28450,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         return;
       }
       if (act === 'cancel') { var fc = lcForm(box, id); if (fc) { fc.classList.add('hidden'); } return; }
+      if (act === 'data') { var dd = lcPick(box, 'data-lc-data', id); if (dd) { dd.classList.toggle('hidden'); el.textContent = dd.classList.contains('hidden') ? '\ud83d\udce6 Product data' : '\ud83d\udce6 Hide product data'; } return; }
       if (act === 'resend') {
         var l = lcPick(box, 'data-lc-link', id), n = lcPick(box, 'data-lc-rnote', id);
         var link = l ? lcS(l.value) : '';

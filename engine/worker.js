@@ -1215,12 +1215,12 @@ function pvTokens(s) {
 /* 24 Nov: moved so the pulse family runs its seeds again — the mode row has to be SET to live and
    every account's switch written, and a marker from the rehearsal build would skip that family. No
    DDL statement changed with it. */
-const ADTOOL_SCHEMA_VERSION = '2026-11-26.1';   // 26 Nov: listing_corrections (made at use) joins the DDL fingerprint
+const ADTOOL_SCHEMA_VERSION = '2026-11-26.2';   // 26 Nov: listing_corrections (made at use) + its draft_link column join the DDL fingerprint
 /* the fingerprint of every DDL statement in engine/worker.js, held to this value by the suite */
 /* 22 Nov: the count moved to 215 on 21 Nov with adtool_neg_ack (Ads command centre), a table created at its own two
    sites on every use rather than under a guard, so nothing was missing from the database; the marker simply had not
    been moved with it, and the suite has said so since. Moved here, with no guarded statement added. */
-const ADTOOL_SCHEMA_DDL_HASH = '222-f4f4e6e4';
+const ADTOOL_SCHEMA_DDL_HASH = '223-3ea84565';
 const ADTOOL_SCHEMA_KEY = 'adtool_schema_version';
 let ADTOOL_SCHEMA_MARK = null;      /* the one marker read per isolate */
 let ADTOOL_SCHEMA_SETTLE = null;    /* the one apply pass per isolate, and the proof DDL ran here */
@@ -25649,7 +25649,26 @@ const LC_ALL_ROLES = ['Management', 'Ops Head', 'Listing Manager', 'Team Lead'];
 const LC_OPEN = ['Pending', 'Working', 'Updated'];
 /* made at use, as adtool_neg_ack is: one cheap IF NOT EXISTS per call, no isolate flag to forget */
 async function lcEnsure(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS listing_corrections (task_id TEXT PRIMARY KEY, lister TEXT DEFAULT '', note TEXT DEFAULT '', by_email TEXT DEFAULT '', by_name TEXT DEFAULT '', at TEXT DEFAULT '', resolved_at TEXT DEFAULT '', resolved_by TEXT DEFAULT '', resolved_how TEXT DEFAULT '')").run().catch(() => {});
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS listing_corrections (task_id TEXT PRIMARY KEY, lister TEXT DEFAULT '', note TEXT DEFAULT '', by_email TEXT DEFAULT '', by_name TEXT DEFAULT '', at TEXT DEFAULT '', resolved_at TEXT DEFAULT '', resolved_by TEXT DEFAULT '', resolved_how TEXT DEFAULT '', draft_link TEXT DEFAULT '')").run().catch(() => {});
+  /* 26 Nov (owner: "show the previous draft link"): the desk's send-back strips the draft flag, and
+     the link with it — so the link is kept here at the moment of the send-back. A table born before
+     this column gets it added; "duplicate column" is the expected answer once it is there. */
+  await adtDdlOne(env, "ALTER TABLE listing_corrections ADD COLUMN draft_link TEXT DEFAULT ''");   // the guarded runner forgives "already there"
+}
+/* the draft link a lister handed off, recovered from the hand-off bell when the flag that held it
+   is gone: the newest "Draft listing to publish" bell for the task names it as "Draft: <url>" */
+async function lcBellLinks(env, ids) {
+  const out = {};
+  if (!ids.length) return out;
+  for (let i = 0; i < ids.length; i += 60) {
+    const part = ids.slice(i, i + 60);
+    const rs = await env.DB.prepare("SELECT ref, message, created_at FROM notif_live WHERE type = 'Draft listing to publish' AND ref IN (" + part.map((_, j) => '?' + (j + 1)).join(',') + ') ORDER BY created_at ASC').bind(...part.map((x) => 'task:' + x)).all().catch(() => ({ results: [] }));
+    for (const r of (rs.results || [])) {
+      const m = /Draft:\s*(https?:\/\/\S+)/.exec(String(r.message || ''));
+      if (m) out[String(r.ref).replace(/^task:/, '')] = m[1];   // ascending order: the newest wins
+    }
+  }
+  return out;
 }
 function lcFlag(comments) {
   for (const l of String(comments || '').split('\n')) {
@@ -25698,22 +25717,34 @@ async function lcPublishers(env) {
 async function lcCompute(env, onlyLister, filterLister) {
   await lcEnsure(env);
   const pubs = await lcPublishers(env);
-  const rs = await env.DB.prepare("SELECT task_id, type, account, item_id, title, status, assigned_to, assigned_by, comments, deadline_pkt, updated_at FROM tasks WHERE type = 'listing_new'").all();
+  const rs = await env.DB.prepare("SELECT task_id, type, account, item_id, title, status, assigned_to, assigned_by, comments, details, deadline_pkt, updated_at FROM tasks WHERE type = 'listing_new'").all();
   const rows = {}; for (const r of ((await env.DB.prepare('SELECT * FROM listing_corrections').all().catch(() => ({ results: [] }))).results || [])) rows[String(r.task_id)] = r;
   const names = {}; for (const u of ((await env.DB.prepare('SELECT email, name FROM users').all().catch(() => ({ results: [] }))).results || [])) names[String(u.email || '').toLowerCase()] = String(u.name || '');
   const open = [], fixed = [], weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+  /* first pass: which tasks carry a verdict at all; their old links come from the bells in one read */
+  const judged = [];
   for (const t of (rs.results || [])) {
     const flag = lcFlag(t.comments), ret = lcReturned(t.comments), row = rows[String(t.task_id)] || null;
     const j = lcJudge(t, flag, ret, row);
-    if (!j) continue;
+    if (j) judged.push({ t, flag, ret, row, j });
+  }
+  const bellLinks = await lcBellLinks(env, judged.filter((x) => !(x.row && x.row.draft_link) && !(x.flag && x.flag.flag === 'draft' && x.flag.link)).map((x) => String(x.t.task_id)));
+  for (const x of judged) {
+    const t = x.t, flag = x.flag, row = x.row, j = x.j;
     const assignedTo = String(t.assigned_to || '').toLowerCase();
     const withGoLive = pubs.indexOf(assignedTo) >= 0;
     const lister = (row && row.lister) ? String(row.lister).toLowerCase() : (withGoLive && flag && (flag.from || flag.by) ? String(flag.from || flag.by).toLowerCase() : assignedTo);
     if (onlyLister && lister !== onlyLister && assignedTo !== onlyLister) continue;
     if (filterLister && lister !== filterLister) continue;
+    /* 26 Nov (owner): the link the lister handed off BEFORE the send-back, and the product data the
+       task was raised with, both on the row — the previous link from the correction row (kept at the
+       send-back), else the live flag, else the hand-off bell; the data as the archive draws it */
+    const prevLink = (row && row.draft_link) ? String(row.draft_link) : ((flag && flag.flag === 'draft' && flag.link) ? String(flag.link) : (bellLinks[String(t.task_id)] || ''));
+    const parsed = lstParseDetails(t.details);
     const rec = { task_id: String(t.task_id), account: String(t.account || ''), title: String(t.title || ''), status: String(t.status || ''),
       lister, lister_name: names[lister] || lister.split('@')[0], assigned_to: assignedTo, with_golive: withGoLive,
-      draft_link: (flag && flag.flag === 'draft') ? String(flag.link || '') : '', flag: flag ? String(flag.flag) : '',
+      draft_link: (flag && flag.flag === 'draft') ? String(flag.link || '') : '', prev_draft_link: prevLink, flag: flag ? String(flag.flag) : '',
+      listing: lstLimited(parsed || {}), hunt_id: String((parsed && parsed.hunt_id) || ''),
       note: j.note, by: j.by, at: j.at, source: j.source, deadline_pkt: String(t.deadline_pkt || ''),
       resolved_how: j.resolved_how, resolved_at: (row && row.resolved_at) || '' };
     if (j.open) open.push(rec);
@@ -30601,9 +30632,13 @@ const ROUTES = {
       const lister = (pubs.indexOf(assignedTo) >= 0 && flag && (flag.from || flag.by)) ? String(flag.from || flag.by).toLowerCase() : assignedTo;
       await lcEnsure(ctx.env);
       const at = new Date().toISOString();
-      await ctx.env.DB.prepare("INSERT INTO listing_corrections (task_id, lister, note, by_email, by_name, at, resolved_at, resolved_by, resolved_how) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', '', '') " +
-        "ON CONFLICT(task_id) DO UPDATE SET lister = ?2, note = ?3, by_email = ?4, by_name = ?5, at = ?6, resolved_at = '', resolved_by = '', resolved_how = ''")
-        .bind(id, lister, note, me(ctx), String(ctx.user.name || ''), at).run();
+      /* the draft link as it was at the send-back: the caller's (the desk still holds it after
+         goLiveReturn stripped the flag), else the flag's, else whatever an earlier row kept */
+      const given = String(p.draft_link || '').trim();
+      const link = /^https?:\/\//i.test(given) ? given.slice(0, 600) : ((flag && flag.flag === 'draft' && flag.link) ? String(flag.link).slice(0, 600) : '');
+      await ctx.env.DB.prepare("INSERT INTO listing_corrections (task_id, lister, note, by_email, by_name, at, resolved_at, resolved_by, resolved_how, draft_link) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', '', '', ?7) " +
+        "ON CONFLICT(task_id) DO UPDATE SET lister = ?2, note = ?3, by_email = ?4, by_name = ?5, at = ?6, resolved_at = '', resolved_by = '', resolved_how = '', draft_link = CASE WHEN ?7 <> '' THEN ?7 ELSE draft_link END")
+        .bind(id, lister, note, me(ctx), String(ctx.user.name || ''), at, link).run();
       try { await ctx.env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'LISTING_CORRECTION', ?2, ?3, ?4, datetime('now'))").bind(me(ctx), id, lister, note.slice(0, 200)).run(); } catch (e) {}
       /* the page tells the caller whether the task is sitting with go-live right now: then the
          sheet-side goLiveReturn must ALSO run (it is the only thing that can move the task back to
