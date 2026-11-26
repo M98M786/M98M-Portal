@@ -46,7 +46,10 @@
       return '<div class="ir-links"><span class="mono">' + esc(id) + '</span>' +
         '<a href="https://www.ebay.co.uk/itm/' + esc(id) + '" target="_blank" rel="noopener noreferrer">eBay \u2197</a>' +
         '<a href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener">History \u2197</a>' +
-        (sups.length ? sups.join('') : '<span>no supplier link on file</span>') + (k.cur ? '<span>\u00b7 ' + esc(k.cur) + '</span>' : '') + '</div>';
+        /* the current-supplier field is often the working link itself, not a name: a link is drawn as
+           one, a name is printed, and a link already among the three is not printed twice */
+        (sups.length ? sups.join('') : (k.cur && /^https?:/i.test(k.cur) ? '' : '<span>no supplier link on file</span>')) +
+        (k.cur ? (/^https?:/i.test(k.cur) ? ([k.s1, k.s2, k.s3].indexOf(k.cur) >= 0 ? '' : sup(k.cur, 'Current supplier')) : '<span>\u00b7 ' + esc(String(k.cur).slice(0, 40)) + '</span>') : '') + '</div>';
     }).join('') + (all.length > show.length ? '<div class="ir-links"><span>+' + (all.length - show.length) + ' more listing' + (all.length - show.length === 1 ? '' : 's') + ' under this title</span></div>' : '');
   }
   function irWho(email) { var e = String(email || ''); return e.indexOf('@') > 0 ? e.slice(0, e.indexOf('@')) : (e || 'someone'); }
@@ -168,7 +171,7 @@
       var hot = r.all > threshold, ak = acks[ackKey(r)];
       var kq = esc(String(r.key)).replace(/"/g, '&quot;');
       h += '<tr' + (hot ? ' class="ir-hot"' : '') + (ak ? ' style="opacity:.75"' : '') + '><td>' + (rank + 1) + '</td>' +
-        '<td><b>' + esc(String(r.title || r.key).slice(0, 70)) + '</b>' +
+        '<td style="text-align:left;min-width:300px"><b>' + esc(String(r.title || r.key).slice(0, 70)) + '</b>' +
         (r.duplicated ? '<span class="ir-dup">DUPLICATED</span>' : '') +
         (hot ? ' <b style="color:var(--bad)">\u00b7 DECISION</b>' : '') +
         irLinks(r.item_ids) + '</td>' +
