@@ -1188,9 +1188,25 @@
     box.innerHTML = '<div class="empty">The dispatch clock did not answer — ' + esc(oS((e && e.message) || 'try Refresh')) + (again ? ' · trying again in 15 s' : ' · it tries again every minute') + '</div>';
   }
 
+  /* 26 Nov (owner: "why not showing all accounts — Hafiza and Sir Hasib missing"): the table used to
+     drop an account with no order yet and no backlog, which early in the day is most of them. Every
+     account the portal knows is listed, zeros included, in the order of what came in. */
+  O.acctNames = O.acctNames || null;
+  function oAcctNames(cb) {
+    if (O.acctNames) { cb(O.acctNames); return; }
+    if (typeof cachedCall !== 'function') { cb([]); return; }
+    cachedCall('accountList', {}, function (d) { O.acctNames = ((d && d.accounts) || []).map(function (a) { return String(a.account || '').trim(); }).filter(Boolean); cb(O.acctNames); });
+  }
+  function oAllAccounts(list, names) {
+    var out = (list || []).slice(), have = {};
+    out.forEach(function (a) { have[oS(a.account)] = 1; });
+    (names || []).forEach(function (n) { if (!have[n]) { out.push({ account: n, came: 0, processed: 0, remaining: 0, dispatched: null, backlog: 0 }); } });
+    return out.sort(function (a, b) { return (b.came - a.came) || ((b.backlog || 0) - (a.backlog || 0)) || oS(a.account).localeCompare(oS(b.account)); });
+  }
   function oDispatchPaint(d, approx, r) {
     var box = $('o2Dispatch');
     if (!box || !d) { return; }
+    if (!O.acctNames) { oAcctNames(function () { if (O.dispKey === (r ? r.from + '|' + r.to : O.dispKey)) { oDispatchPaint(d, approx, r); } }); }
     r = r || oRange();
     var today = oDispatchIsToday(r);
     var win = today ? 'today' : r.label.toLowerCase();
@@ -1203,7 +1219,7 @@
       '<div class="o2d-t' + (t.remaining ? ' warn' : ' ok') + '"><span class="k">Remaining to buy</span><b>' + (t.remaining || 0) + '</b><span class="s">not yet bought on AliExpress</span></div>' +
       (t.backlog ? '<div class="o2d-t bad"><span class="k">Older &amp; unprocessed</span><b>' + t.backlog + '</b><span class="s">from before today — dispatch these first</span></div>' : '') +
       '</div>';
-    var accts = (d.accounts || []).filter(function (a) { return a.came || a.backlog; });
+    var accts = oAllAccounts(d.accounts || [], O.acctNames || []);
     if (!today && O.view === 'individual') {
       /* 21 Nov (owner): "the details shown the same way as the Today block for the individual days
          too — no change in the format". One block per UK day of the window, newest first: the same
@@ -1226,7 +1242,7 @@
             '<div class="o2d-t ok"><span class="k">Processed &amp; bought</span><b>' + x.processed + '</b><span class="s">' + p + '% of ' + esc(dayWord) + ' · AliExpress cost + order number' + (x.half_done ? ' · ' + x.half_done + ' started (cost, no order no.)' : '') + '</span></div>' +
             '<div class="o2d-t' + (x.remaining ? ' warn' : ' ok') + '"><span class="k">Remaining to buy</span><b>' + x.remaining + '</b><span class="s">not yet bought on AliExpress</span></div>' +
             '</div>';
-          var acc = (x.accounts || []).filter(function (a2) { return a2.came; });
+          var acc = oAllAccounts(x.accounts || [], O.acctNames || []);
           if (acc.length) {
             blk += '<div class="scroll"><table class="o2d-tbl"><thead><tr><th>Account</th><th>Came</th><th>Processed</th><th>Remaining</th><th style="text-align:left;padding-left:16px">Progress</th></tr></thead><tbody>' +
               acc.map(function (a2) {
