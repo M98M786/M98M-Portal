@@ -1043,7 +1043,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261126-0315';
+var BUILD = '20261126-0323';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -25886,7 +25886,11 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     /* 26 Nov: the window picker's column, the links under each listing, the acknowledgement box */
     '.ir-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 8px;font-size:12px;color:var(--text-2);font-weight:700}' +
     /* 26 Nov: the window and the account are each one column whose heading is the dropdown */
-    '.ir-tbl th select.ir-hsel{background:var(--panel);border:1px solid var(--gold-line-hi);color:var(--gold-a);border-radius:8px;padding:4px 8px;font:inherit;font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;max-width:170px}' +
+    /* 26 Nov (owner): the window and the account are chip rows, like Yesterday / 7 days / 30 days */
+    '.ir-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 8px}' +
+    '.ir-chips .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800;margin-right:4px}' +
+    '.ir-chips button{padding:6px 12px;border-radius:9px;font-weight:700;font-size:12px;color:var(--text-2);border:1px solid var(--gold-line);background:var(--panel);cursor:pointer;font-family:inherit}' +
+    '.ir-chips button.on{color:var(--gold-a);background:rgba(233,169,60,.12);border-color:var(--gold-line-hi);font-weight:800}' +
     '.ir-tbl td.ir-on{color:var(--gold-a);font-weight:800;font-size:13.5px}' +
     '.ir-chk{display:inline-flex;gap:5px;align-items:center;font-size:11.5px;color:var(--text-3);font-weight:700;cursor:pointer}' +
     '.ir-tbl th.ir-on,.ir-tbl td.ir-on{color:var(--gold-a)}' +
@@ -26024,11 +26028,11 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     h += '<div class="ir-tools"><span>' + esc(IR_WL[W]) + ' · ' + (A ? esc(A) : (IR.acct ? esc(IR.acct) : 'all accounts')) + ' · ' + list.length + ' product' + (list.length === 1 ? '' : 's') + (nAck ? ' · ' + nAck + ' acknowledged' : '') + '</span>' +
       '<label class="ir-chk"><input type="checkbox" id="irShowAck"' + (IR.hideAck ? '' : ' checked') + '> show acknowledged</label>' +
       (list.length ? '<button class="minibtn" id="irAckAll">Acknowledge all shown\u2026</button>' : '') + '</div>';
-    var winSel = '<select class="ir-hsel" id="irWinTh" title="the window this column counts">' + ['all', 'today', 'yesterday', 'd7', 'd30'].map(function (k) { return '<option value="' + k + '"' + (W === k ? ' selected' : '') + '>' + IR_WL[k] + '</option>'; }).join('') + '</select>';
-    var accSel = '<select class="ir-hsel" id="irAccTh" title="the account this column counts, over the same window"><option value="">All accounts</option>' + acctNames.map(function (a2) { return '<option value="' + esc(a2).replace(/"/g, '&quot;') + '"' + (A === a2 ? ' selected' : '') + '>' + esc(a2) + '</option>'; }).join('') + '</select>';
+    h += '<div class="ir-chips"><span class="k">Window</span>' + ['all', 'today', 'yesterday', 'd7', 'd30'].map(function (k) { return '<button data-ir-win="' + k + '"' + (W === k ? ' class="on"' : '') + '>' + IR_WL[k] + '</button>'; }).join('') + '</div>' +
+      '<div class="ir-chips"><span class="k">Account</span><button data-ir-acc=""' + (A ? '' : ' class="on"') + '>All accounts</button>' + acctNames.map(function (a2) { return '<button data-ir-acc="' + esc(a2).replace(/"/g, '&quot;') + '"' + (A === a2 ? ' class="on"' : '') + '>' + esc(a2) + '</button>'; }).join('') + '</div>';
     h += '<div class="scroll"><table class="ir-tbl"><thead><tr>' +
       '<th>#</th><th style="text-align:left">Product \u00b7 folded across accounts</th>' +
-      '<th>' + winSel + '</th><th>' + accSel + '</th>' +
+      '<th class="ir-on">' + esc(IR_WL[W]) + '</th><th' + (A ? ' class="ir-on"' : '') + '>' + (A ? esc(A) : 'All accounts') + '</th>' +
       (showReasons ? '<th>Refund \u00a3</th><th style="text-align:left">Reasons (qty per reason)</th>' : '') +
       '<th>% of total</th><th style="text-align:left">Acknowledged</th></tr></thead><tbody>';
     if (!list.length) {
@@ -26064,8 +26068,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
   /* the acknowledgement box: one product (a comment row opens under it) or every product shown */
   function irWire(box, list) {
     var hc = $('irShowAck'); if (hc) { hc.onchange = function () { IR.hideAck = !this.checked; irPaint(); }; }
-    var wt = $('irWinTh'); if (wt) { wt.onchange = function () { IR.win = wt.value || 'all'; irPaint(); }; }
-    var at = $('irAccTh'); if (at) { at.onchange = function () { IR.accCol = at.value || ''; irPaint(); }; }
+    box.querySelectorAll('[data-ir-win]').forEach(function (b) { b.onclick = function () { IR.win = this.getAttribute('data-ir-win') || 'all'; irPaint(); }; });
+    box.querySelectorAll('[data-ir-acc]').forEach(function (b) { b.onclick = function () { IR.accCol = this.getAttribute('data-ir-acc') || ''; irPaint(); }; });
     var aa = $('irAckAll');
     if (aa) {
       aa.onclick = function () {
