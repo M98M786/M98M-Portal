@@ -1043,7 +1043,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261126-0203';
+var BUILD = '20261126-0212';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2364,7 +2364,11 @@ VIEWS.home = {
   function axStr(v) { return String(v == null ? '' : v).trim(); }
   function axGBP(v) { var n = Number(v); return isFinite(n) && n !== 0 ? '£' + n.toFixed(2) : '—'; }
 
-  var ALX = { account: '', rows: [], q: '', tab: 'all', kind: '' };
+  /* 26 Nov (owner): "7, 14, 30 — make it a dropdown selection" — `win` is the sold window the one
+     Sold column shows; the Suppliers and Source columns are gone (the supplier links ride on the
+     listing cell now) */
+  var ALX = { account: '', rows: [], q: '', tab: 'all', kind: '', win: 7 };
+  function alxSoldWin(r) { return ALX.win === 14 ? (Number(r.sold_14d) || 0) : ALX.win === 30 ? (r.sold_30d_live !== undefined ? Number(r.sold_30d_live) : (Number(r.sold_30d) || 0)) : (Number(r.sold_7d) || 0); }
 
   /* 31 Oct (owner, showing the ad tool's row): "I need these kind of listings page" — every row is the
      portal's standard listing cell (image, title → Product history, item number, account, eBay ↗,
@@ -2543,12 +2547,12 @@ VIEWS.home = {
     var hasAds = ALX.rows.some(function (r) { return r.ad_spend_14d !== undefined; });
     var canHistory = alxCanHistory();
     var h = '<div class="scroll"><table class="alx-tbl"><thead><tr>' +
-      '<th>Listing</th><th>Listed</th><th>Price</th><th>Qty</th><th>Sold yet</th><th title="Average units per week across every week the listing has been live in our order history">Avg / week</th><th>7d</th><th>14d</th><th>30d</th>' +
+      '<th>Listing</th><th>Listed</th><th>Price</th><th>Qty</th><th>Sold yet</th><th title="Average units per week across every week the listing has been live in our order history">Avg / week</th><th title="units sold in the window picked above">Sold · ' + ALX.win + 'd</th>' +
       (hasOE ? '<th>Order earning</th>' : '') +
       (hasProfit ? '<th>Profit</th>' : '') +
       (hasAds ? '<th>Ads 14d</th>' : '') +
       (hasCampaign ? '<th>Campaign</th>' : '') +
-      '<th>Suppliers</th><th>Source</th></tr></thead><tbody>';
+      '</tr></thead><tbody>';
     all.forEach(function (r) {
       var img = axStr(r.image);
       /* The chip answers "where did this ROW come from": a row eBay itself synced is API, even
@@ -2564,15 +2568,12 @@ VIEWS.home = {
         '<td class="alx-num">' + (Number(r.qty) || 0) + '</td>' +
         '<td class="alx-num" style="font-weight:800">' + (Number(r.sold_qty) || 0) + '</td>' +
         '<td class="alx-num" style="font-weight:800">' + alxAvgWeek(r) + '</td>' +
-        '<td class="alx-num' + (Number(r.sold_7d) ? '' : ' alx-neg') + '">' + (Number(r.sold_7d) || 0) + '</td>' +
-        '<td class="alx-num">' + (Number(r.sold_14d) || 0) + '</td>' +
-        '<td class="alx-num">' + (r.sold_30d_live !== undefined ? Number(r.sold_30d_live) : (Number(r.sold_30d) || 0)) + '</td>' +
+        '<td class="alx-num' + (alxSoldWin(r) ? '' : ' alx-neg') + '">' + alxSoldWin(r) + '</td>' +
         (hasOE ? '<td class="alx-num">' + axGBP(r.oe) + '</td>' : '') +
         (hasProfit ? '<td class="alx-num ' + (Number(r.profit) < 0 ? 'alx-neg' : 'alx-pos') + '">' + axGBP(r.profit) + '</td>' : '') +
         (hasAds ? '<td class="alx-num">' + (r.ad_spend_14d !== undefined ? axGBP(r.ad_spend_14d) + (Number(r.ad_units_14d) ? '<div style="font-size:10px;color:var(--text-3)">' + Number(r.ad_units_14d) + ' sold via ads</div>' : '') : '—') + '</td>' : '') +
         (hasCampaign ? '<td>' + alxCampaignCell(r) + '</td>' : '') +
-        '<td>' + alxSuppliers(r) + '</td>' +
-        '<td><span class="alx-src ' + (src === 'API' ? 'api' : 'sheet') + '">' + src + '</span></td>' +
+
       '</tr>';
     });
     box.innerHTML = finder + h + '</tbody></table></div>';
@@ -2606,6 +2607,7 @@ VIEWS.home = {
         '<div class="card enter d2"><div class="bd">' +
           '<div class="alx-bar" id="alxTabs" style="margin-bottom:8px"></div>' +
           '<div class="alx-bar"><select class="alx-sel" id="alxAcc"><option value="">All accounts</option></select>' +
+          '<select class="alx-sel" id="alxWin" title="the window the Sold column counts">' + [7, 14, 30].map(function (n) { return '<option value="' + n + '"' + (ALX.win === n ? ' selected' : '') + '>Sold \u00b7 ' + n + ' days</option>'; }).join('') + '</select>' +
           '<input class="alx-sel alx-q" id="alxQ" type="search" autocomplete="off" placeholder="Item ID → its campaign · or search title / campaign…">' +
           '<button class="minibtn" id="alxRefresh">Refresh</button>' +
           '<button class="minibtn" id="alxExport">⬇ Export CSV</button>' +
@@ -2614,6 +2616,8 @@ VIEWS.home = {
         '</div></div>';
     },
     init: function () {
+      var sw = $('alxWin');
+      if (sw) { sw.onchange = function () { ALX.win = Number(sw.value) || 7; alxPaint(); }; }
       cachedCall('accountList', {}, function (d) {
         var sel = $('alxAcc');
         if (!sel) { return; }
