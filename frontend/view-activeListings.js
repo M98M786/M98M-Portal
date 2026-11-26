@@ -12,7 +12,7 @@
     '.alx-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}' +
     '.alx-q{min-width:270px;font-weight:600}' +
     '.alx-sel{padding:9px 12px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:700;font-size:12.5px}' +
-    '.alx-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px}' +
+    '.alx-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:0}' +
     '.alx-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);text-align:left;padding:9px 12px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
     '.alx-tbl td{padding:9px 12px;border-bottom:1px solid var(--gold-line);vertical-align:middle}' +
     '.alx-tbl tbody tr:hover{background:var(--blue-soft)}' +
@@ -36,7 +36,9 @@
     '.alx-kind{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.05em;padding:2px 8px;border-radius:99px;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap}' +
     '.alx-kind.cpc{border-color:var(--gold-a);color:var(--gold-a)}.alx-kind.dyn{border-color:rgba(155,106,230,.6);color:#9B6AE6}.alx-kind.gen{border-color:rgba(72,199,142,.5);color:var(--ok)}' +
     '.alx-kind.paused{border-color:rgba(255,159,67,.55);color:var(--warn)}.alx-kind.none{color:var(--text-3)}' +
-    '.alx-camp{font-size:11.5px;font-weight:700;margin-top:3px;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}.alx-camp .adt-camplink{color:var(--gold-a)}' +
+    '.alx-camp{font-size:11.5px;font-weight:700;margin-top:3px;white-space:normal;max-width:300px;line-height:1.35;overflow-wrap:anywhere}.alx-camp .adt-camplink{color:var(--gold-a)}' +
+    '.alx-tbl td:last-child{white-space:normal;max-width:320px}' +
+    '.alx-sheetlbl{white-space:normal;overflow-wrap:anywhere}' +
     '.alx-camp.off{color:var(--text-3)}.alx-camp.off .adt-camplink{color:var(--text-3)}' +
     '.alx-sheetlbl{font-size:10px;color:var(--text-3);font-weight:600;margin-top:2px}' +
     '.alx-finder{border:1px solid var(--gold-a);border-radius:12px;padding:12px 14px;margin-bottom:12px;background:var(--panel-2)}' +
@@ -106,7 +108,11 @@
   function axStr(v) { return String(v == null ? '' : v).trim(); }
   function axGBP(v) { var n = Number(v); return isFinite(n) && n !== 0 ? '£' + n.toFixed(2) : '—'; }
 
-  var ALX = { account: '', rows: [], q: '', tab: 'all', kind: '', accounts: [], accCounts: null };
+  /* 26 Nov (owner): "7, 14, 30 — make it a dropdown selection" — `win` is the sold window the one
+     Sold column shows; the Suppliers and Source columns are gone (the supplier links ride on the
+     listing cell now) */
+  var ALX = { account: '', rows: [], q: '', tab: 'all', kind: '', win: 7, accounts: [], accCounts: null };
+  function alxSoldWin(r) { return ALX.win === 14 ? (Number(r.sold_14d) || 0) : ALX.win === 30 ? (r.sold_30d_live !== undefined ? Number(r.sold_30d_live) : (Number(r.sold_30d) || 0)) : (Number(r.sold_7d) || 0); }
 
   /* The account box. Its names come from accountList (every account this role may see) with any
      account the rows themselves name added, so a chip exists for an account the list has not caught
@@ -239,9 +245,30 @@
     return '<a class="alx-sup alx-suplink" href="' + esc(safe) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + '</a>';
   }
 
+  /* 26 Nov (owner): "along the eBay hyperlink show the supplier-specific product links 1, 2 and 3 the
+     same way" — the three AliExpress links ride on the listing cell's own meta line, beside eBay ↗
+     and History ↗, in the same dress */
+  function alxWithSup(cell, r) {
+    var links = [['sup1_link', 'Supplier 1'], ['sup2_link', 'Supplier 2'], ['sup3_link', 'Supplier 3']].map(function (p) {
+      var u = axStr(r[p[0]]); if (!u) { return ''; }
+      var safe = typeof safeUrl === 'function' ? safeUrl(u) : '';
+      return safe ? '<a class="adt-pc-e" href="' + esc(safe) + '" target="_blank" rel="noopener noreferrer" title="' + esc(p[1] + ' · ' + u) + '">' + p[1] + ' ↗</a>' : '';
+    }).filter(Boolean).join('');
+    if (!links) { return cell; }
+    var i = cell.lastIndexOf('</div></div></div>');
+    return i < 0 ? cell + links : cell.slice(0, i) + links + cell.slice(i);
+  }
   function alxSuppliers(r) {
     var cur = axStr(r.current_sup);
     var links = [alxSupLink(r.sup1_link, '1'), alxSupLink(r.sup2_link, '2'), alxSupLink(r.sup3_link, '3')].filter(Boolean);
+    /* 26 Nov (owner): "remove the hyperlink text everywhere, I only need a link to click" — the
+       current-supplier field is often the working link itself; a link is drawn as one (and not twice
+       when it is already among the three), only a name is printed */
+    var curUrl = /https?:\/\/\S+/i.exec(cur);
+    if (curUrl) {
+      if ([axStr(r.sup1_link), axStr(r.sup2_link), axStr(r.sup3_link)].indexOf(curUrl[0]) < 0) { links.unshift(alxSupLink(curUrl[0], 'Current')); }
+      cur = cur.replace(curUrl[0], '').replace(/[\s:\-\u00b7|,]+$/, '').trim();
+    }
     if (!cur && !links.length) { return '<span style="color:var(--text-3)">—</span>'; }
     var head = cur ? '<div class="alx-supcur">' + esc(cur) + '</div>' : '';
     return head + (links.length ? '<div class="alx-suprow">' + links.join('') + '</div>' : '');
@@ -307,12 +334,12 @@
     var hasAds = ALX.rows.some(function (r) { return r.ad_spend_14d !== undefined; });
     var canHistory = alxCanHistory();
     var h = '<div class="scroll"><table class="alx-tbl"><thead><tr>' +
-      '<th>Listing</th><th>Listed</th><th>Price</th><th>Qty</th><th>Sold yet</th><th title="Average units per week across every week the listing has been live in our order history">Avg / week</th><th>7d</th><th>14d</th><th>30d</th>' +
+      '<th>Listing</th><th>Listed</th><th>Price</th><th>Qty</th><th>Sold yet</th><th title="Average units per week across every week the listing has been live in our order history">Avg / week</th><th title="units sold in the window picked above">Sold · ' + ALX.win + 'd</th>' +
       (hasOE ? '<th>Order earning</th>' : '') +
       (hasProfit ? '<th>Profit</th>' : '') +
       (hasAds ? '<th>Ads 14d</th>' : '') +
       (hasCampaign ? '<th>Campaign</th>' : '') +
-      '<th>Suppliers</th><th>Source</th></tr></thead><tbody>';
+      '</tr></thead><tbody>';
     all.forEach(function (r) {
       var img = axStr(r.image);
       /* The chip answers "where did this ROW come from": a row eBay itself synced is API, even
@@ -321,22 +348,19 @@
       var src = axStr(r.api_synced_at) ? 'API' : 'SHEET';
       h += '<tr>' +
         '<td>' + (typeof adtProductCell === 'function'
-          ? adtProductCell({ item_id: axStr(r.item_id), account: axStr(r.account), title: axStr(r.title), image: img }, { open: canHistory })
+          ? alxWithSup(adtProductCell({ item_id: axStr(r.item_id), account: axStr(r.account), title: axStr(r.title), image: img }, { open: canHistory }), r)
           : '<a class="alx-title" style="display:block;color:inherit;text-decoration:none" href="https://www.ebay.co.uk/itm/' + esc(axStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer">' + esc(axStr(r.title) || '(no title)') + '</a><div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(axStr(r.item_id)) + ' · ' + esc(axStr(r.account)) + '</div>') + '</td>' +
         '<td style="white-space:nowrap;font-size:11.5px;font-weight:700">' + alxDate(r) + '</td>' +
         '<td class="alx-num">' + axGBP(r.price) + '</td>' +
         '<td class="alx-num">' + (Number(r.qty) || 0) + '</td>' +
         '<td class="alx-num" style="font-weight:800">' + (Number(r.sold_qty) || 0) + '</td>' +
         '<td class="alx-num" style="font-weight:800">' + alxAvgWeek(r) + '</td>' +
-        '<td class="alx-num' + (Number(r.sold_7d) ? '' : ' alx-neg') + '">' + (Number(r.sold_7d) || 0) + '</td>' +
-        '<td class="alx-num">' + (Number(r.sold_14d) || 0) + '</td>' +
-        '<td class="alx-num">' + (r.sold_30d_live !== undefined ? Number(r.sold_30d_live) : (Number(r.sold_30d) || 0)) + '</td>' +
+        '<td class="alx-num' + (alxSoldWin(r) ? '' : ' alx-neg') + '">' + alxSoldWin(r) + '</td>' +
         (hasOE ? '<td class="alx-num">' + axGBP(r.oe) + '</td>' : '') +
         (hasProfit ? '<td class="alx-num ' + (Number(r.profit) < 0 ? 'alx-neg' : 'alx-pos') + '">' + axGBP(r.profit) + '</td>' : '') +
         (hasAds ? '<td class="alx-num">' + (r.ad_spend_14d !== undefined ? axGBP(r.ad_spend_14d) + (Number(r.ad_units_14d) ? '<div style="font-size:10px;color:var(--text-3)">' + Number(r.ad_units_14d) + ' sold via ads</div>' : '') : '—') + '</td>' : '') +
         (hasCampaign ? '<td>' + alxCampaignCell(r) + '</td>' : '') +
-        '<td>' + alxSuppliers(r) + '</td>' +
-        '<td><span class="alx-src ' + (src === 'API' ? 'api' : 'sheet') + '">' + src + '</span></td>' +
+
       '</tr>';
     });
     box.innerHTML = finder + h + '</tbody></table></div>';
@@ -358,18 +382,20 @@
   }
 
   VIEWS.activeListings = {
-    label: 'Active listings',
+    /* 26 Nov (owner): "change the name from Active listings to All Account Listings" */
+    label: 'All Account Listings',
     order: 6,
     roles: ALX_ROLES,
     icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 13h4M8 16h7"/>',
     prefetch: function () { return alxFetch(); },
     render: function () {
-      return '<div class="hgroup enter d1"><h1>Active <span class="goldtext">listings</span></h1>' +
+      return '<div class="hgroup enter d1"><h1>All Account <span class="goldtext">Listings</span></h1>' +
           '<span class="sub">Live from eBay every 15 minutes · joined with the sheet facts · what you may see is decided server-side</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
           '<div class="alx-accbox" id="alxAccBox"><span class="alx-acclbl">Account</span><button class="alx-acc on" data-alx-acc="">All accounts</button></div>' +
           '<div class="alx-bar" id="alxTabs" style="margin-bottom:8px"></div>' +
           '<div class="alx-bar">' +
+          '<select class="alx-sel" id="alxWin" title="the window the Sold column counts">' + [7, 14, 30].map(function (n) { return '<option value="' + n + '"' + (ALX.win === n ? ' selected' : '') + '>Sold \u00b7 ' + n + ' days</option>'; }).join('') + '</select>' +
           '<input class="alx-sel alx-q" id="alxQ" type="search" autocomplete="off" placeholder="Item ID → its campaign · or search title / campaign…">' +
           '<button class="minibtn" id="alxRefresh">Refresh</button>' +
           '<button class="minibtn" id="alxExport">⬇ Export CSV</button>' +
@@ -379,6 +405,8 @@
     },
     init: function () {
       alxAccChips();
+      var sw = $('alxWin');
+      if (sw) { sw.onchange = function () { ALX.win = Number(sw.value) || 7; alxPaint(); }; }
       cachedCall('accountList', {}, function (d) {
         ALX.accounts = ((d && d.accounts) || []).map(function (a) { return axStr(a.account); }).filter(Boolean);
         alxAccChips();

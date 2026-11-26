@@ -25964,6 +25964,59 @@ const ROUTES = {
     },
   },
 
+  /* 26 Nov (owner): the Business overview's sales bar chart — a month of days, the last 52 weeks or
+     the last 12 months, all accounts or one. Sold £ is the daily books (sales_daily, every rolled
+     day); orders are counted on the UK trading day from the order ledger, cancelled and not-found
+     orders outside the count. Empty buckets are returned as noughts so the axis never skips a day. */
+  bizSalesSeries: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      let grain = /^(day|week|month)$/.test(String(p.grain || '')) ? String(p.grain) : 'day';
+      const acctF = String(p.account || '');
+      const todayUk = ukDate('');
+      const okDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+      /* 26 Nov (owner): "a dropdown of weeks 1 to 52, and January to December" — a chosen week or
+         month comes as its own day window and is answered day by day */
+      let today = todayUk, from;
+      if (okDay(p.from) && okDay(p.to) && String(p.from) <= String(p.to)) {
+        grain = 'day'; from = String(p.from); today = String(p.to) < todayUk ? String(p.to) : todayUk;
+        if (from > today) return { grain, account: acctF, from, to: from, books_from: null, rows: [], totals: { sold: 0, orders: 0 }, note: 'that window has not started yet' };
+      } else {
+        const back = grain === 'day' ? 30 : grain === 'week' ? 7 * 52 - 1 : 365;
+        from = adtAddDays(today, -back);
+        if (grain === 'month') from = from.slice(0, 8) + '01';
+      }
+      const sd = (await ctx.env.DB.prepare('SELECT date, ROUND(SUM(sold), 2) AS sold FROM sales_daily WHERE date >= ?1 AND date <= ?2' + (acctF ? ' AND account = ?3' : '') + ' GROUP BY date')
+        .bind(...(acctF ? [from, today, acctF] : [from, today])).all().catch(() => ({ results: [] }))).results || [];
+      const bf = await ctx.env.DB.prepare('SELECT MIN(date) AS d FROM sales_daily' + (acctF ? ' WHERE account = ?1' : '')).bind(...(acctF ? [acctF] : [])).first().catch(() => null);
+      const _lonH = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hour12: false }).formatToParts(new Date()).find((x) => x.type === 'hour').value);
+      const ukOffH = ((_lonH - new Date().getUTCHours()) + 24) % 24;
+      const dayExpr = "substr(datetime(o.created_at, '+" + ukOffH + " hours'),1,10)";
+      const od = (await ctx.env.DB.prepare('SELECT ' + dayExpr + " AS d, COUNT(*) AS n FROM orders o WHERE o.created_at >= ?1 AND o.status NOT IN ('CANCELLED', 'NOT_FOUND')" + (acctF ? ' AND o.account = ?2' : '') + ' GROUP BY d')
+        .bind(...(acctF ? [ukDayStartIsoFor(from), acctF] : [ukDayStartIsoFor(from)])).all().catch(() => ({ results: [] }))).results || [];
+      const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const keyOf = (d) => grain === 'day' ? d : grain === 'month' ? d.slice(0, 7) : adtIsoWeek(d);
+      const buckets = {}; const order = [];
+      for (let d = from; d <= today; d = adtAddDays(d, 1)) {
+        const k = keyOf(d);
+        if (!buckets[k]) {
+          const dd = Number(d.slice(8, 10)), mm = Number(d.slice(5, 7)) - 1, yy = d.slice(2, 4);
+          buckets[k] = { key: k, from: d, to: d, sold: 0, orders: 0,
+            label: grain === 'day' ? dd + ' ' + MON[mm] : grain === 'month' ? MON[mm] + ' ' + yy : 'W' + String(k).slice(-2) + ' · ' + dd + ' ' + MON[mm],
+            tip: grain === 'day' ? d : grain === 'month' ? MON[mm] + ' 20' + yy : 'week from ' + d };
+          order.push(k);
+        }
+        buckets[k].to = d;
+      }
+      for (const r of sd) { const b = buckets[keyOf(String(r.date))]; if (b) b.sold += Number(r.sold) || 0; }
+      for (const r of od) { const d = String(r.d || ''); if (d < from || d > today) continue; const b = buckets[keyOf(d)]; if (b) b.orders += Number(r.n) || 0; }
+      const rows = order.map((k) => { const b = buckets[k]; b.sold = round2(b.sold); if (grain !== 'day') b.tip += ' to ' + b.to; return b; });
+      return { grain, account: acctF, from, to: today, books_from: bf && bf.d ? String(bf.d) : null, rows,
+        totals: { sold: round2(rows.reduce((s, r) => s + r.sold, 0)), orders: rows.reduce((s, r) => s + r.orders, 0) },
+        note: 'sold = the daily books, summed per ' + grain + '; orders = the order ledger on the UK trading day, cancelled and not-found orders left out; today is live on both' };
+    },
+  },
+
   /* the acknowledgement of a provisional went-negative row: who, when, and the comment the Signals
      page has always required; one per day and listing, the latest word winning */
   adsNegativeAck: {
@@ -27696,13 +27749,15 @@ const ROUTES = {
         for (const r of rows) {
           const key = String(r.title || '').trim() || String(r.item_id || '?');
           const g = (by[key] = by[key] || { key, title: String(r.title || '').trim(), items: {}, accounts: {},
-            all: 0, w30: 0, w7: 0, y1: 0, t0: 0, reasons: {}, refund: 0 });
+            all: 0, w30: 0, w7: 0, y1: 0, t0: 0, reasons: {}, refund: 0, acc: { t0: {}, y1: {}, w7: {}, w30: {} } });
           g.all++; total++;
           const d = dateOf(r);
-          if (d >= d30) g.w30++;
-          if (d >= d7) g.w7++;
-          if (d === d1) g.y1++;
-          if (d === today) g.t0++;
+          /* 26 Nov (owner): a window picker on the page — the per-account columns follow it too */
+          const bump = (m, a) => { m[a] = (m[a] || 0) + 1; };
+          if (d >= d30) { g.w30++; if (r.account) bump(g.acc.w30, r.account); }
+          if (d >= d7) { g.w7++; if (r.account) bump(g.acc.w7, r.account); }
+          if (d === d1) { g.y1++; if (r.account) bump(g.acc.y1, r.account); }
+          if (d === today) { g.t0++; if (r.account) bump(g.acc.t0, r.account); }
           if (r.item_id) g.items[r.item_id] = 1;
           if (r.account) g.accounts[r.account] = (g.accounts[r.account] || 0) + 1;
           if (withReasons) { const w = why(r.reason); g.reasons[w] = (g.reasons[w] || 0) + 1; }
@@ -27710,6 +27765,7 @@ const ROUTES = {
         }
         return Object.values(by).map(g => ({ key: g.key, title: g.title,
           item_ids: Object.keys(g.items), accounts: g.accounts,
+          accounts_by: { today: g.acc.t0, yesterday: g.acc.y1, d7: g.acc.w7, d30: g.acc.w30, all: g.accounts },
           all: g.all, d30: g.w30, d7: g.w7, yesterday: g.y1, today: g.t0,
           refund: round2(g.refund),
           pct: total ? Math.round(g.all / total * 1000) / 10 : 0,
@@ -27780,13 +27836,52 @@ const ROUTES = {
           pct: spdTotal ? Math.round(g.n / spdTotal * 1000) / 10 : 0 }))
           .sort((a, b) => (b.late_n - a.late_n) || (b.all - a.all)).slice(0, 150);
       } catch (e) { track_speed = []; }
-      return { today, returns, inr, late, track_speed, track_windows: [2, 3, 4, 5], track_truncated: trackTruncated,
+      /* 26 Nov (owner): under each listing, the eBay link, the Product history and every supplier
+         link — the supplier links are the item facts' three AliExpress links; read in chunks of 90,
+         never one query per row */
+      const links = {};
+      try {
+        const idSet = {};
+        for (const list of [returns, inr, late, track_speed]) for (const g of list) for (const id of (g.item_ids || [])) if (/^\d{9,13}$/.test(String(id))) idSet[String(id)] = 1;
+        const ids = Object.keys(idSet).slice(0, 540);
+        for (let i = 0; i < ids.length; i += 90) {
+          const chunk = ids.slice(i, i + 90);
+          const rs = (await ctx.env.DB.prepare('SELECT item_id, current_sup, sup1_link, sup2_link, sup3_link FROM items_facts WHERE item_id IN (' + chunk.map(() => '?').join(',') + ')').bind(...chunk).all()).results || [];
+          for (const f of rs) links[String(f.item_id)] = { cur: String(f.current_sup || ''), s1: String(f.sup1_link || ''), s2: String(f.sup2_link || ''), s3: String(f.sup3_link || '') };
+        }
+      } catch (e) { /* links are a courtesy — the board stands without them */ }
+      /* 26 Nov (owner): an acknowledgement box on every listing — who looked, when, and what they
+         said; kept by the engine per board and product key */
+      let acks = {};
+      try {
+        await ctx.env.DB.prepare('CREATE TABLE IF NOT EXISTS item_risk_ack (tab TEXT NOT NULL, key TEXT NOT NULL, email TEXT, note TEXT, at TEXT, PRIMARY KEY (tab, key))').run();
+        const ar = (await ctx.env.DB.prepare('SELECT tab, key, email, note, at FROM item_risk_ack').all()).results || [];
+        for (const a of ar) acks[String(a.tab) + '|' + String(a.key)] = { email: String(a.email || ''), note: String(a.note || ''), at: String(a.at || '') };
+      } catch (e) { acks = {}; }
+      return { today, returns, inr, late, track_speed, track_windows: [2, 3, 4, 5], track_truncated: trackTruncated, links, acks,
         alerts: {
           returns5: returns.filter(x => x.all > 5),
           inr5: inr.filter(x => x.all > 5),
           late10: late.filter(x => x.all > 10),
         },
         note: 'products folded across accounts by TITLE (a duplicated listing carries a different id per shop) · late-tracking marks accumulate from 21 Aug — an order that crosses 2 business days untracked is marked forever, even after it finally ships' };
+    },
+  },
+
+  /* 26 Nov (owner): acknowledging a product on the Product Returns board — one key or many at once,
+     one comment, the latest word per key winning */
+  itemRiskAck: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Management', 'Ops Head', 'CS', 'Team Lead', 'Product Hunter', 'Order Processor'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const tab = String(p.tab || '').slice(0, 20), note = String(p.note || '').trim().slice(0, 500);
+      const keys = (Array.isArray(p.keys) ? p.keys : [p.key]).map((k) => String(k || '').trim()).filter(Boolean).slice(0, 300);
+      if (!tab || !keys.length) throw new Error('SAY: the board and the product are needed');
+      if (!note) throw new Error('SAY: a comment is required to acknowledge');
+      await ctx.env.DB.prepare('CREATE TABLE IF NOT EXISTS item_risk_ack (tab TEXT NOT NULL, key TEXT NOT NULL, email TEXT, note TEXT, at TEXT, PRIMARY KEY (tab, key))').run().catch(() => {});
+      const at = new Date().toISOString(), email = String(ctx.user.email || '');
+      const stmt = ctx.env.DB.prepare('INSERT OR REPLACE INTO item_risk_ack (tab, key, email, note, at) VALUES (?1, ?2, ?3, ?4, ?5)');
+      await ctx.env.DB.batch(keys.map((k) => stmt.bind(tab, k, email, note, at)));
+      return { ok: true, n: keys.length, at, email };
     },
   },
 

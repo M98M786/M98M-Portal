@@ -134,7 +134,9 @@
     /* 21 Nov (owner): "I want both individual days' performance when clicking a days chip and the
        collective combined data too — an option to select either". `view` is that switch: collective
        is the page as it was (one figure per window); individual lays the same window out day by day. */
-    view: 'collective' };
+    view: 'collective',
+    /* 26 Nov (owner): the sales bar chart above Right now — its own grain and account */
+    ss: { grain: 'day', acct: '', pick: '', data: null, key: '', dataKey: '' } };
   var O_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], O_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   function oGBPs(v) { var n = oN(v); return (n < 0 ? '\u2212\u00a3' : '\u00a3') + Math.abs(n).toFixed(2); }
   function oGBP0s(v) { var n = oN(v), a = Math.abs(n); return (n < 0 ? '\u2212\u00a3' : '\u00a3') + (a >= 1000 ? (a / 1000).toFixed(1) + 'k' : a.toFixed(2)); }
@@ -242,6 +244,7 @@
        looked dead rather than broken. A feed that fails now says so, in its own panel, with a
        way back. */
     O.fetchGen = (O.fetchGen || 0) + 1;
+    if ($('o2Sales') && O.ss.dataKey) { oSalesLoad(true); }
     oFeed('dailyReport', {}, 0).then(function (d) {
       O.days = (d && d.rows) || [];
       /* Night-list fix ("wrong stats"): the nightly book knows nothing of today — merge the
@@ -1185,9 +1188,25 @@
     box.innerHTML = '<div class="empty">The dispatch clock did not answer — ' + esc(oS((e && e.message) || 'try Refresh')) + (again ? ' · trying again in 15 s' : ' · it tries again every minute') + '</div>';
   }
 
+  /* 26 Nov (owner: "why not showing all accounts — Hafiza and Sir Hasib missing"): the table used to
+     drop an account with no order yet and no backlog, which early in the day is most of them. Every
+     account the portal knows is listed, zeros included, in the order of what came in. */
+  O.acctNames = O.acctNames || null;
+  function oAcctNames(cb) {
+    if (O.acctNames) { cb(O.acctNames); return; }
+    if (typeof cachedCall !== 'function') { cb([]); return; }
+    cachedCall('accountList', {}, function (d) { O.acctNames = ((d && d.accounts) || []).map(function (a) { return String(a.account || '').trim(); }).filter(Boolean); cb(O.acctNames); });
+  }
+  function oAllAccounts(list, names) {
+    var out = (list || []).slice(), have = {};
+    out.forEach(function (a) { have[oS(a.account)] = 1; });
+    (names || []).forEach(function (n) { if (!have[n]) { out.push({ account: n, came: 0, processed: 0, remaining: 0, dispatched: null, backlog: 0 }); } });
+    return out.sort(function (a, b) { return (b.came - a.came) || ((b.backlog || 0) - (a.backlog || 0)) || oS(a.account).localeCompare(oS(b.account)); });
+  }
   function oDispatchPaint(d, approx, r) {
     var box = $('o2Dispatch');
     if (!box || !d) { return; }
+    if (!O.acctNames) { oAcctNames(function () { if (O.dispKey === (r ? r.from + '|' + r.to : O.dispKey)) { oDispatchPaint(d, approx, r); } }); }
     r = r || oRange();
     var today = oDispatchIsToday(r);
     var win = today ? 'today' : r.label.toLowerCase();
@@ -1200,7 +1219,7 @@
       '<div class="o2d-t' + (t.remaining ? ' warn' : ' ok') + '"><span class="k">Remaining to buy</span><b>' + (t.remaining || 0) + '</b><span class="s">not yet bought on AliExpress</span></div>' +
       (t.backlog ? '<div class="o2d-t bad"><span class="k">Older &amp; unprocessed</span><b>' + t.backlog + '</b><span class="s">from before today — dispatch these first</span></div>' : '') +
       '</div>';
-    var accts = (d.accounts || []).filter(function (a) { return a.came || a.backlog; });
+    var accts = oAllAccounts(d.accounts || [], O.acctNames || []);
     if (!today && O.view === 'individual') {
       /* 21 Nov (owner): "the details shown the same way as the Today block for the individual days
          too — no change in the format". One block per UK day of the window, newest first: the same
@@ -1223,7 +1242,7 @@
             '<div class="o2d-t ok"><span class="k">Processed &amp; bought</span><b>' + x.processed + '</b><span class="s">' + p + '% of ' + esc(dayWord) + ' · AliExpress cost + order number' + (x.half_done ? ' · ' + x.half_done + ' started (cost, no order no.)' : '') + '</span></div>' +
             '<div class="o2d-t' + (x.remaining ? ' warn' : ' ok') + '"><span class="k">Remaining to buy</span><b>' + x.remaining + '</b><span class="s">not yet bought on AliExpress</span></div>' +
             '</div>';
-          var acc = (x.accounts || []).filter(function (a2) { return a2.came; });
+          var acc = oAllAccounts(x.accounts || [], O.acctNames || []);
           if (acc.length) {
             blk += '<div class="scroll"><table class="o2d-tbl"><thead><tr><th>Account</th><th>Came</th><th>Processed</th><th>Remaining</th><th style="text-align:left;padding-left:16px">Progress</th></tr></thead><tbody>' +
               acc.map(function (a2) {
@@ -1302,6 +1321,15 @@
         '<div class="sec enter d1"><div class="sec-h"><h2 id="o2DispH">Today\u2019s orders — the dispatch clock</h2>' +
           '<span class="hint" id="o2DispStamp">came in · processed · remaining — refreshes every minute</span></div>' +
           '<div id="o2Dispatch"><div class="empty">Loading…</div></div></div>' +
+        /* 26 Nov (owner): "before Right now, a bar chart of one month's sold, all accounts, green sales
+           and blue orders side by side; on top an individual-account option and 12-month and 52-week
+           views" */
+        '<div class="sec enter d1"><div class="sec-h"><h2>Sales — sold and orders</h2><span class="hint" id="o2SsHint">green = sold £ from the daily books · blue = orders on the UK trading day</span>' +
+          '<div class="tools" style="gap:6px;flex-wrap:wrap;align-items:center"><select class="alx-sel" id="o2SsAcct" autocomplete="off" style="min-width:140px"><option value="">All accounts</option></select>' +
+          '<div class="mode" id="o2SsMode">' + [['day', 'One month · days'], ['week', '52 weeks'], ['month', '12 months']].map(function (p) { return '<button data-o2-ss="' + p[0] + '"' + (O.ss.grain === p[0] ? ' class="on"' : '') + '>' + p[1] + '</button>'; }).join('') + '</div>' +
+          /* the week or month picker: Week 1 to 52, or January to December, of this year; the first entry is the whole span */
+          '<select class="alx-sel" id="o2SsPick" autocomplete="off" style="min-width:170px;display:none" title="pick one week or one month to see it day by day"></select></div></div>' +
+          '<div class="o-card"><div id="o2Sales" style="width:100%;height:340px"><div class="empty">Loading…</div></div></div></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">live today, whatever the date range · one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>This month at a glance</h2><span class="hint">the plain headline numbers — traffic, adverts, customer service and returns · click a tile to open its board</span></div><div id="o2Extras"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2 id="o2CollH">Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
@@ -1313,6 +1341,9 @@
         '<div class="sec enter d3"><div class="sec-h"><h2>Advertising dashboard</h2><span class="hint">the chosen range · judged against the SOP main target — ROAS ≥ 5</span></div><div id="o2Ads"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Returns, refunds &amp; cases</h2><span class="hint">live from eBay via the Engine</span></div><div id="o2Cases"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Account health</h2><span class="hint">live Engine numbers · loss items red · quiet accounts amber</span></div><div id="o2Health"><div class="empty">Loading…</div></div></div>' +
+        /* 26 Nov (owner): "at the bottom, after Account health, merge Account KPIs" — the Account KPIs
+           page's own body, painted by its own module through K2_MOUNT */
+        '<div class="sec enter d3"><div class="sec-h"><h2>Account KPIs</h2><span class="hint">one register · every account, every number with its verification chip · the Account KPIs page, here</span><div class="tools" id="o2K2Tools" style="gap:6px;flex-wrap:wrap"></div></div><div id="k2Body"><div class="empty">Loading…</div></div></div>' +
         '</div>';
     },
     init: function () {
@@ -1350,6 +1381,13 @@
             var bs = document.querySelectorAll('#o2Seg button');
             for (var i = 0; i < bs.length; i++) { bs[i].classList.toggle('on', bs[i] === seg); }
             oRangeChanged(); return;
+          }
+          var ssb = t && t.closest ? t.closest('[data-o2-ss]') : null;
+          if (ssb) {
+            O.ss.grain = ssb.getAttribute('data-o2-ss') || 'day'; O.ss.pick = '';
+            var sb = document.querySelectorAll('#o2SsMode button');
+            for (var q2 = 0; q2 < sb.length; q2++) { sb[q2].classList.toggle('on', sb[q2] === ssb); }
+            oSalesPickFill(); oSalesLoad(true); return;
           }
           var vw = t && t.closest ? t.closest('[data-o2-view]') : null;
           if (vw) {
@@ -1402,13 +1440,15 @@
           /* drop everything cached for the previous scope so no all-accounts number lingers
              (truthPage's own cache is keyed by {from,to,account}, so it never crosses accounts) */
           O.days = null; O.ov = null; O.listings = null; O.cs = null; O.funds = null; O.truth = null; O.truthY = null; O.extras = null; O.truthRangeKey = '';
-          oFetchAll(); oPulse(); oDispatchLoad();
+          oFetchAll(); oPulse(); oDispatchLoad(); oSalesSync(); oK2Mount();
           toast(O.acct ? 'Loading every section for ' + O.acct + ' only' : 'Loading every section for all accounts');
         };
       }
       oScopeLabels();
       oFetchAll();
       oPulse();
+      oSalesInit();
+      oK2Mount();
     }
   };
 
@@ -1458,6 +1498,112 @@
 
   /* Hasib's closing line: "management home shows everything combined". One Engine read, every
      headline across every board — each tile deep-links to the board that owns the number. */
+  /* ── 26 Nov (owner): the sales bar chart. The engine sums the books per day, week or month and
+     counts the orders on the UK trading day; the chart is ECharts through the product page's loader,
+     sold £ in green on the left scale and orders in blue on the right, every bar carrying its figure. ── */
+  var O_MON_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  /* the Monday of ISO week `w` of year `y`: 4 January is always in week 1 */
+  function oIsoMonday(y, w) { var j4 = new Date(Date.UTC(y, 0, 4)); var dow = (j4.getUTCDay() + 6) % 7; return new Date(j4.getTime() - dow * 86400000 + (w - 1) * 7 * 86400000).toISOString().slice(0, 10); }
+  function oSalesPickFill() {
+    var sel = $('o2SsPick'); if (!sel) { return; }
+    var g = O.ss.grain, t = ukToday(), y = Number(t.slice(0, 4)), opts = [];
+    if (g === 'day') { sel.style.display = 'none'; sel.innerHTML = ''; return; }
+    if (g === 'week') {
+      opts.push(['', 'All 52 weeks']);
+      for (var w = 1; w <= 52; w++) { var mon = oIsoMonday(y, w); opts.push([String(w), 'Week ' + w + ' · ' + oDayLbl(mon).slice(4) + ' – ' + oDayLbl(dShift(mon, 6)).slice(4) + (mon > t ? ' (not yet)' : '')]); }
+    } else {
+      opts.push(['', 'All 12 months']);
+      for (var m = 1; m <= 12; m++) { var first = y + '-' + (m < 10 ? '0' : '') + m + '-01'; opts.push([String(m), O_MON_FULL[m - 1] + ' ' + y + (first > t ? ' (not yet)' : '')]); }
+    }
+    sel.innerHTML = opts.map(function (o) { return '<option value="' + o[0] + '"' + (O.ss.pick === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('');
+    sel.style.display = '';
+  }
+  /* what to ask the engine for: the whole span, or the chosen week or month as a day window */
+  function oSalesParams() {
+    var p = { grain: O.ss.grain }; if (O.ss.acct) { p.account = O.ss.acct; }
+    var y = Number(ukToday().slice(0, 4));
+    if (O.ss.grain === 'week' && O.ss.pick) { var mon = oIsoMonday(y, Number(O.ss.pick)); p.grain = 'day'; p.from = mon; p.to = dShift(mon, 6); }
+    if (O.ss.grain === 'month' && O.ss.pick) { var m = Number(O.ss.pick); p.grain = 'day'; p.from = y + '-' + (m < 10 ? '0' : '') + m + '-01'; p.to = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); }
+    return p;
+  }
+  function oSalesInit() {
+    var sel = $('o2SsAcct');
+    if (sel) { fillAccountSelect(sel, O.ss.acct, function () { O.ss.acct = sel.value || ''; oSalesLoad(true); }); }
+    var pk = $('o2SsPick');
+    if (pk) { pk.onchange = function () { O.ss.pick = pk.value || ''; oSalesLoad(true); }; }
+    /* 26 Nov (owner: "selecting an account doesn't show specific data"): after a reload the browser
+       put the dropdown back on its last choice while the chart's own state had reset to all accounts.
+       The chart now follows whatever the dropdown shows once the options are in. */
+    setTimeout(function () { var s2 = $('o2SsAcct'); if (s2 && (s2.value || '') !== (O.ss.acct || '')) { O.ss.acct = s2.value || ''; oSalesLoad(true); } }, 2500);
+    oSalesPickFill();
+    if (!O.ssResize) {
+      O.ssResize = true;
+      window.addEventListener('resize', function () { var el = $('o2Sales'), ec = window.echarts; if (el && ec) { var i = ec.getInstanceByDom(el); if (i) { i.resize(); } } });
+    }
+    oSalesLoad(true);
+  }
+  /* Apply at the top of the page moves this chart onto the same account */
+  function oSalesSync() { O.ss.acct = O.acct; var sel = $('o2SsAcct'); if (sel) { sel.value = O.acct; } oSalesLoad(true); }
+  function oSalesLoad(force) {
+    var el = $('o2Sales'); if (!el) { return; }
+    var key = O.ss.grain + '|' + O.ss.acct + '|' + O.ss.pick;
+    if (!force && O.ss.dataKey === key && O.ss.data) { oSalesPaint(); return; }
+    O.ss.key = key;
+    if (O.ss.dataKey !== key) {
+      /* the placeholder replaces the canvas, so the chart instance bound to this box must go with
+         it — a stale instance would draw the next answer into a canvas no longer on the page */
+      var ecOld = window.echarts, instOld = ecOld && ecOld.getInstanceByDom(el); if (instOld) { instOld.dispose(); }
+      el.innerHTML = '<div class="empty">Loading…</div>';
+    }
+    api('bizSalesSeries', oSalesParams()).then(function (d) {
+      if (O.ss.key !== key) { return; }
+      O.ss.data = d || {}; O.ss.dataKey = key; oSalesPaint();
+    })['catch'](function (e) { var b = $('o2Sales'); if (b && O.ss.key === key) { b.innerHTML = '<div class="empty">The sales series did not answer — ' + esc((e && e.message) || 'no answer') + '</div>'; } });
+  }
+  function oSalesPaint() {
+    var el = $('o2Sales'); if (!el) { return; }
+    var d = O.ss.data; if (!d) { return; }
+    var rows = d.rows || [], T = d.totals || {};
+    var hint = $('o2SsHint');
+    if (hint) {
+      var pickWord = O.ss.pick ? (O.ss.grain === 'week' ? 'week ' + O.ss.pick : O_MON_FULL[Number(O.ss.pick) - 1]) + ' · ' : '';
+      hint.innerHTML = pickWord + '<b style="color:var(--bad,#e0563f)">sold ' + oGBPs(T.sold) + '</b> · <b style="color:var(--ok,#2fb170)">' + (T.orders || 0) + ' orders</b> · ' + esc(d.from + ' → ' + d.to) + ' · ' + (d.account ? esc(d.account) : 'all accounts') +
+        (d.books_from && d.books_from > d.from ? ' · the books begin ' + esc(d.books_from) + ', so earlier bars carry orders only' : '') + ' · red = sold £ from the daily books, green = orders on the UK trading day';
+    }
+    if (!rows.length) { var ec0 = window.echarts, i0 = ec0 && ec0.getInstanceByDom(el); if (i0) { i0.dispose(); } el.innerHTML = '<div class="empty">' + (d.note && /not started/.test(d.note) ? 'That window has not started yet.' : 'Nothing in this window.') + '</div>'; return; }
+    var draw = function () {
+      var ec = window.echarts; if (!ec) { el.innerHTML = '<div class="empty">The chart library did not load.</div>'; return; }
+      var inst = ec.getInstanceByDom(el);
+      if (!inst || !el.querySelector('canvas')) { if (inst) { inst.dispose(); } el.innerHTML = ''; inst = ec.init(el, null, { renderer: 'canvas' }); }
+      var n = rows.length, up = n > 16;
+      var labels = rows.map(function (r) { return r.label; }), sold = rows.map(function (r) { return Math.round((Number(r.sold) || 0) * 100) / 100; }), orders = rows.map(function (r) { return Number(r.orders) || 0; });
+      var kfmt = function (v) { return v >= 10000 ? '£' + (v / 1000).toFixed(0) + 'k' : v >= 1000 ? '£' + (v / 1000).toFixed(1) + 'k' : '£' + Math.round(v); };
+      inst.setOption({
+        backgroundColor: 'transparent', animation: false,
+        tooltip: { trigger: 'axis', backgroundColor: 'rgba(4,6,10,.92)', borderColor: 'rgba(255,255,255,.14)', textStyle: { color: '#fff', fontSize: 12 },
+          formatter: function (ps) { var i = ps && ps.length ? ps[0].dataIndex : 0, r = rows[i]; return r ? esc(String(r.tip)) + '<br>sold £' + sold[i].toFixed(2) + '<br>' + orders[i] + ' order' + (orders[i] === 1 ? '' : 's') : ''; } },
+        legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 }, data: ['Sold £', 'Orders'] },
+        grid: { left: 64, right: 56, top: 44, bottom: up ? 64 : 30 },
+        xAxis: { type: 'category', data: labels, axisLabel: { color: '#66707c', fontSize: 10, interval: 0, rotate: up ? 45 : 0 }, axisTick: { show: false }, axisLine: { lineStyle: { color: 'rgba(255,255,255,.15)' } } },
+        yAxis: [
+          { type: 'value', axisLabel: { color: '#66707c', fontSize: 10, formatter: function (v) { return kfmt(v); } }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } }, max: function (v) { return Math.ceil(v.max * 1.25) || 1; } },
+          { type: 'value', axisLabel: { color: '#66707c', fontSize: 10 }, splitLine: { show: false }, minInterval: 1, max: function (v) { return Math.ceil(v.max * 1.25) || 1; } }
+        ],
+        series: [
+          /* 26 Nov (owner): sold in red, orders in green */
+          { name: 'Sold £', type: 'bar', data: sold, itemStyle: { color: '#e0563f', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, barGap: '15%',
+            label: { show: true, position: 'top', color: '#ff8a73', fontSize: 9, fontWeight: 700, rotate: up ? 90 : 0, align: up ? 'left' : 'center', verticalAlign: 'middle', distance: 4, formatter: function (p) { return p.value ? kfmt(p.value) : ''; } } },
+          { name: 'Orders', type: 'bar', yAxisIndex: 1, data: orders, itemStyle: { color: '#2fb170', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26,
+            label: { show: true, position: 'top', color: '#5fd49a', fontSize: 9, fontWeight: 700, rotate: up ? 90 : 0, align: up ? 'left' : 'center', verticalAlign: 'middle', distance: 4, formatter: function (p) { return p.value || ''; } } }
+        ]
+      }, true);
+      inst.resize();
+    };
+    var A = window.ADT_DAILY;
+    if (A && A.ensure) { A.ensure().then(draw)['catch'](function () { el.innerHTML = '<div class="empty">The chart library did not load.</div>'; }); } else { draw(); }
+  }
+  function oK2Mount() { var t = $('o2K2Tools'); if (t && typeof window.K2_MOUNT === 'function') { window.K2_MOUNT(t, { acct: O.acct }); } }
+
   function oPulse() {
     var box = $('o2Pulse');
     if (!box) { return; }
@@ -1483,7 +1629,7 @@
           Number(d.letters_backlog) > Number(d.letters_open)
             ? Number(d.letters_backlog).toLocaleString('en-GB') + ' unread in total'
             : 'the Engine’s own bells', Number(d.letters_open) > 0) +
-        t('activeListings', 'Active listings', d.active_listings, 'all accounts') +
+        t('activeListings', 'All Account Listings', d.active_listings, 'all accounts') +
       '</div>';
     }).catch(function (e) {
       box.innerHTML = '<div class="empty">The pulse could not load: ' + esc(e.message) + '</div>';
