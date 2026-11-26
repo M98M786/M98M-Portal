@@ -744,7 +744,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['priceRevisionBoard','priceItemDetail','priceDecide','adtoolPeakHold','adtoolPeakProfile','adtoolVideoBoard','adtoolPeakCampaigns','adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolPulse','adtoolPulseSet','adtoolPulseRun','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolHourWindow','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard','adsNegativeDay','adsNegativeAck', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
+var ENGINE_ACTIONS = ['priceRevisionBoard','priceItemDetail','priceDecide','adtoolPeakHold','adtoolPeakProfile','adtoolVideoBoard','adtoolPeakCampaigns','adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolPulse','adtoolPulseSet','adtoolPulseRun','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolHourWindow','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard','adsNegativeDay','adsNegativeAck','bizSalesSeries','itemRiskAck', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -1043,7 +1043,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261125-1752';
+var BUILD = '20261126-0125';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2461,6 +2461,19 @@ VIEWS.home = {
     return '<a class="alx-sup alx-suplink" href="' + esc(safe) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + '</a>';
   }
 
+  /* 26 Nov (owner): "along the eBay hyperlink show the supplier-specific product links 1, 2 and 3 the
+     same way" — the three AliExpress links ride on the listing cell's own meta line, beside eBay ↗
+     and History ↗, in the same dress */
+  function alxWithSup(cell, r) {
+    var links = [['sup1_link', 'Supplier 1'], ['sup2_link', 'Supplier 2'], ['sup3_link', 'Supplier 3']].map(function (p) {
+      var u = axStr(r[p[0]]); if (!u) { return ''; }
+      var safe = typeof safeUrl === 'function' ? safeUrl(u) : '';
+      return safe ? '<a class="adt-pc-e" href="' + esc(safe) + '" target="_blank" rel="noopener noreferrer" title="' + esc(p[1] + ' · ' + u) + '">' + p[1] + ' ↗</a>' : '';
+    }).filter(Boolean).join('');
+    if (!links) { return cell; }
+    var i = cell.lastIndexOf('</div></div></div>');
+    return i < 0 ? cell + links : cell.slice(0, i) + links + cell.slice(i);
+  }
   function alxSuppliers(r) {
     var cur = axStr(r.current_sup);
     var links = [alxSupLink(r.sup1_link, '1'), alxSupLink(r.sup2_link, '2'), alxSupLink(r.sup3_link, '3')].filter(Boolean);
@@ -2536,7 +2549,7 @@ VIEWS.home = {
       var src = axStr(r.api_synced_at) ? 'API' : 'SHEET';
       h += '<tr>' +
         '<td>' + (typeof adtProductCell === 'function'
-          ? adtProductCell({ item_id: axStr(r.item_id), account: axStr(r.account), title: axStr(r.title), image: img }, { open: canHistory })
+          ? alxWithSup(adtProductCell({ item_id: axStr(r.item_id), account: axStr(r.account), title: axStr(r.title), image: img }, { open: canHistory }), r)
           : '<a class="alx-title" style="display:block;color:inherit;text-decoration:none" href="https://www.ebay.co.uk/itm/' + esc(axStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer">' + esc(axStr(r.title) || '(no title)') + '</a><div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(axStr(r.item_id)) + ' · ' + esc(axStr(r.account)) + '</div>') + '</td>' +
         '<td style="white-space:nowrap;font-size:11.5px;font-weight:700">' + alxDate(r) + '</td>' +
         '<td class="alx-num">' + axGBP(r.price) + '</td>' +
@@ -2573,13 +2586,14 @@ VIEWS.home = {
   }
 
   VIEWS.activeListings = {
-    label: 'Active listings',
+    /* 26 Nov (owner): "change the name from Active listings to All Account Listings" */
+    label: 'All Account Listings',
     order: 6,
     roles: ALX_ROLES,
     icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 13h4M8 16h7"/>',
     prefetch: function () { return alxFetch(); },
     render: function () {
-      return '<div class="hgroup enter d1"><h1>Active <span class="goldtext">listings</span></h1>' +
+      return '<div class="hgroup enter d1"><h1>All Account <span class="goldtext">Listings</span></h1>' +
           '<span class="sub">Live from eBay every 15 minutes · joined with the sheet facts · what you may see is decided server-side</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
           '<div class="alx-bar" id="alxTabs" style="margin-bottom:8px"></div>' +
@@ -25787,7 +25801,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
  * (>5 returns, >5 INR, >10 late-tracking orders) pinned red at the top. */
 (function () {
 
-  var IR = { tab: 'returns', data: null, acct: '' };
+  /* 26 Nov (owner): the page is Product Returns now; `win` is the window picker (today … all time),
+     `hideAck` hides the products already acknowledged */
+  var IR = { tab: 'returns', data: null, acct: '', win: 'all', hideAck: false };
 
   VIEW_CSS.push(
     '.ir-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px}' +
@@ -25802,8 +25818,35 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     '.ir-st{border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px;background:var(--panel-2)}' +
     '.ir-st .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
     '.ir-st b{display:block;font-size:20px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}' +
-    '.ir-st .p{font-size:11px;color:var(--text-3);font-weight:700}.ir-st.bad b{color:var(--bad)}.ir-st.ok b{color:var(--ok)}'
+    '.ir-st .p{font-size:11px;color:var(--text-3);font-weight:700}.ir-st.bad b{color:var(--bad)}.ir-st.ok b{color:var(--ok)}' +
+    /* 26 Nov: the window picker's column, the links under each listing, the acknowledgement box */
+    '.ir-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 8px;font-size:12px;color:var(--text-2);font-weight:700}' +
+    '.ir-chk{display:inline-flex;gap:5px;align-items:center;font-size:11.5px;color:var(--text-3);font-weight:700;cursor:pointer}' +
+    '.ir-tbl th.ir-on,.ir-tbl td.ir-on{color:var(--gold-a)}' +
+    '.ir-links{font-size:10px;color:var(--text-3);margin-top:3px;display:flex;flex-wrap:wrap;gap:3px 9px;align-items:center;font-weight:700}' +
+    '.ir-links a{color:var(--text-3);font-weight:800;text-decoration:none;white-space:nowrap}.ir-links a:hover{color:var(--gold-a)}' +
+    '.ir-links .mono{font-size:9.5px;font-weight:600}' +
+    '.ir-ack{color:var(--ok);font-weight:800;font-size:11px;white-space:nowrap}.ir-acknote{font-size:10.5px;color:var(--text-2);white-space:normal;max-width:240px;line-height:1.4}' +
+    '.ir-ackb{margin-top:4px;padding:3px 8px;font-size:10.5px}' +
+    '.ir-ackrow td{background:var(--panel-2)}' +
+    '.ir-ta{width:100%;box-sizing:border-box;min-height:46px;border:1px solid var(--gold-line);border-radius:8px;background:var(--panel);color:var(--text);padding:6px 8px;font:inherit;font-size:12px}'
   );
+  /* under each listing: its number, eBay, its Product history, and every supplier link the item facts hold */
+  function irLinks(ids) {
+    var L = (IR.data && IR.data.links) || {}, all = ids || [], show = all.slice(0, 4);
+    if (!show.length) { return ''; }
+    var sup = function (u, lab) { u = String(u || ''); var s = u && typeof safeUrl === 'function' ? safeUrl(u) : ''; return s ? '<a href="' + esc(s) + '" target="_blank" rel="noopener noreferrer" title="' + esc(lab + ' \u00b7 ' + u) + '">' + lab + ' \u2197</a>' : ''; };
+    return show.map(function (id) {
+      id = String(id); var k = L[id] || {};
+      var sups = [sup(k.s1, 'Supplier 1'), sup(k.s2, 'Supplier 2'), sup(k.s3, 'Supplier 3')].filter(Boolean);
+      return '<div class="ir-links"><span class="mono">' + esc(id) + '</span>' +
+        '<a href="https://www.ebay.co.uk/itm/' + esc(id) + '" target="_blank" rel="noopener noreferrer">eBay \u2197</a>' +
+        '<a href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener">History \u2197</a>' +
+        (sups.length ? sups.join('') : '<span>no supplier link on file</span>') + (k.cur ? '<span>\u00b7 ' + esc(k.cur) + '</span>' : '') + '</div>';
+    }).join('') + (all.length > show.length ? '<div class="ir-links"><span>+' + (all.length - show.length) + ' more listing' + (all.length - show.length === 1 ? '' : 's') + ' under this title</span></div>' : '');
+  }
+  function irWho(email) { var e = String(email || ''); return e.indexOf('@') > 0 ? e.slice(0, e.indexOf('@')) : (e || 'someone'); }
+  var IR_WL = { all: 'All time', today: 'Today', yesterday: 'Yesterday', d7: '7 days', d30: '30 days' };
 
   /* 1 Oct (owner): "update late tracking with different time frames — 2, 3, 4, 5 days — in which
      time tracking is being uploaded for that item, and how much time orders are really waiting."
@@ -25866,7 +25909,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         h += '<div style="margin-top:5px"><b>' + esc(String(al.x.title || al.x.key).slice(0, 80)) + '</b>' +
           (al.x.duplicated ? '<span class="ir-dup">DUPLICATED · ' + al.x.item_ids.length + ' listings</span>' : '') +
           ' — <b>' + al.x.all + '</b> ' + al.w + ' across ' + Object.keys(al.x.accounts || {}).length + ' account(s)' +
-          (al.x.reasons ? ' · ' + esc(String(al.x.reasons)) : '') + '</div>';
+          (al.x.reasons ? ' · ' + esc(String(al.x.reasons)) : '') + irLinks(al.x.item_ids) + '</div>';
       });
       h += '<div style="margin-top:6px;font-size:11px;color:var(--text-3);font-weight:600">The same alerts land as letters in the Alerts centre, one per tier (5, 10, 15…), so nothing rings twice.</div></div>';
     }
@@ -25875,67 +25918,129 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     var list = IR.tab === 'returns' ? (d.returns || []) : IR.tab === 'inr' ? (d.inr || []) : (d.late || []);
     var threshold = IR.tab === 'late' ? 10 : 5;
     var showReasons = IR.tab !== 'late';
+    /* 26 Nov (owner): "a dropdown from today to all time — selecting one shows that window's data".
+       The list is cut to the products with a count in the window, sorted by it, the window's column is
+       lit, and the per-account columns follow the window too. */
+    var W = IR_WL[IR.win] ? IR.win : 'all';
+    var cnt = function (r) { return W === 'today' ? (r.today || 0) : W === 'yesterday' ? (r.yesterday || 0) : W === 'd7' ? (r.d7 || 0) : W === 'd30' ? (r.d30 || 0) : (r.all || 0); };
+    var accOf = function (r) { return (r.accounts_by && r.accounts_by[W]) || (W === 'all' ? (r.accounts || {}) : {}); };
+    if (W !== 'all') { list = list.filter(function (r) { return cnt(r) > 0; }).slice().sort(function (x, y) { return cnt(y) - cnt(x); }); }
+    var acks = d.acks || {};
+    var ackKey = function (r) { return IR.tab + '|' + r.key; };
+    var nAck = list.filter(function (r) { return !!acks[ackKey(r)]; }).length;
+    if (IR.hideAck) { list = list.filter(function (r) { return !acks[ackKey(r)]; }); }
     /* his Returns Summary workbook's shape: rank · product · per-account qty columns ·
        reasons "(qty per reason)" · refund £ · % of total */
     var acctSet = {};
-    list.forEach(function (r) { Object.keys(r.accounts || {}).forEach(function (a) { acctSet[a] = 1; }); });
+    list.forEach(function (r) { Object.keys(accOf(r)).forEach(function (a2) { acctSet[a2] = 1; }); });
     var acctCols = Object.keys(acctSet).sort();
     /* 2 Oct (owner): the per-account headers used only the first word, so "AZHAR ABRT" and
        "Azhar Bhai" both read "Azhar" — two different shops, indistinguishable. Use the first
        word ONLY when it is unique (case-insensitively) across the shown accounts; otherwise the
        full account name. Full name is always on hover. */
     var irFwCount = {};
-    acctCols.forEach(function (a) { var fw = String(a).trim().split(/\s+/)[0].toLowerCase(); irFwCount[fw] = (irFwCount[fw] || 0) + 1; });
-    function irAcctLabel(a) {
-      var parts = String(a).trim().split(/\s+/);
-      return irFwCount[parts[0].toLowerCase()] > 1 ? String(a).trim() : parts[0];
+    acctCols.forEach(function (a2) { var fw = String(a2).trim().split(/\s+/)[0].toLowerCase(); irFwCount[fw] = (irFwCount[fw] || 0) + 1; });
+    function irAcctLabel(a2) {
+      var parts = String(a2).trim().split(/\s+/);
+      return irFwCount[parts[0].toLowerCase()] > 1 ? String(a2).trim() : parts[0];
     }
+    h += '<div class="ir-tools"><span>' + esc(IR_WL[W]) + ' · ' + (IR.acct ? esc(IR.acct) : 'all accounts') + ' · ' + list.length + ' product' + (list.length === 1 ? '' : 's') + (nAck ? ' · ' + nAck + ' acknowledged' : '') + '</span>' +
+      '<label class="ir-chk"><input type="checkbox" id="irHideAck"' + (IR.hideAck ? ' checked' : '') + '> hide acknowledged</label>' +
+      (list.length ? '<button class="minibtn" id="irAckAll">Acknowledge all shown\u2026</button>' : '') + '</div>';
+    var thW = function (k, label) { return '<th' + (W === k ? ' class="ir-on"' : '') + '>' + label + '</th>'; };
+    var tdW = function (k, v, strong) { return '<td' + (W === k ? ' class="ir-on"' : '') + (strong ? ' style="font-weight:800"' : '') + '>' + (v || (strong ? 0 : '\u2014')) + '</td>'; };
     h += '<div class="scroll"><table class="ir-tbl"><thead><tr>' +
-      '<th>#</th><th style="text-align:left">Product · folded across accounts</th>' +
-      '<th>Today</th><th>Yesterday</th><th>7 days</th><th>30 days</th><th>All time</th>' +
-      acctCols.map(function (a) { return '<th title="' + esc(a) + '">' + esc(irAcctLabel(a)) + '</th>'; }).join('') +
-      (showReasons ? '<th>Refund £</th><th style="text-align:left">Reasons (qty per reason)</th>' : '') +
-      '<th>% of total</th></tr></thead><tbody>';
+      '<th>#</th><th style="text-align:left">Product \u00b7 folded across accounts</th>' +
+      thW('today', 'Today') + thW('yesterday', 'Yesterday') + thW('d7', '7 days') + thW('d30', '30 days') + thW('all', 'All time') +
+      acctCols.map(function (a2) { return '<th title="' + esc(a2) + (W === 'all' ? '' : ' \u00b7 ' + IR_WL[W]) + '">' + esc(irAcctLabel(a2)) + '</th>'; }).join('') +
+      (showReasons ? '<th>Refund \u00a3</th><th style="text-align:left">Reasons (qty per reason)</th>' : '') +
+      '<th>% of total</th><th style="text-align:left">Acknowledged</th></tr></thead><tbody>';
     if (!list.length) {
-      h += '<tr><td colspan="14" style="text-align:left"><div class="empty">' +
-        (IR.tab === 'late' ? 'No late-tracking marks yet — counting started 21 Aug; every order that crosses 2 business days untracked lands here permanently.' : 'Nothing recorded.') + '</div></td></tr>';
+      h += '<tr><td colspan="18" style="text-align:left"><div class="empty">' +
+        (IR.tab === 'late' ? 'No late-tracking marks yet \u2014 counting started 21 Aug; every order that crosses 2 business days untracked lands here permanently.'
+          : W !== 'all' ? 'Nothing recorded for ' + esc(IR_WL[W].toLowerCase()) + (IR.hideAck ? ' that is not acknowledged' : '') + '.' : IR.hideAck ? 'Everything here is acknowledged.' : 'Nothing recorded.') + '</div></td></tr>';
     }
     list.forEach(function (r, rank) {
-      var hot = r.all > threshold;
-      h += '<tr' + (hot ? ' class="ir-hot"' : '') + '><td>' + (rank + 1) + '</td>' +
+      var hot = r.all > threshold, ak = acks[ackKey(r)];
+      var kq = esc(String(r.key)).replace(/"/g, '&quot;');
+      h += '<tr' + (hot ? ' class="ir-hot"' : '') + (ak ? ' style="opacity:.75"' : '') + '><td>' + (rank + 1) + '</td>' +
         '<td><b>' + esc(String(r.title || r.key).slice(0, 70)) + '</b>' +
         (r.duplicated ? '<span class="ir-dup">DUPLICATED</span>' : '') +
-        (hot ? ' <b style="color:var(--bad)">· DECISION</b>' : '') +
-        '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + r.item_ids.slice(0, 4).map(function (id) {
-          return '<a href="https://www.ebay.co.uk/itm/' + esc(String(id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' + esc(String(id)) + '</a>';
-        }).join(' · ') + (r.item_ids.length > 4 ? ' +' + (r.item_ids.length - 4) : '') + '</div></td>' +
-        '<td>' + (r.today || '—') + '</td><td>' + (r.yesterday || '—') + '</td>' +
-        '<td>' + (r.d7 || '—') + '</td><td>' + (r.d30 || '—') + '</td><td style="font-weight:800">' + r.all + '</td>' +
-        acctCols.map(function (a) { var n = (r.accounts || {})[a] || 0; return '<td' + (n ? '' : ' style="color:var(--text-3)"') + '>' + (n || '—') + '</td>'; }).join('') +
+        (hot ? ' <b style="color:var(--bad)">\u00b7 DECISION</b>' : '') +
+        irLinks(r.item_ids) + '</td>' +
+        tdW('today', r.today) + tdW('yesterday', r.yesterday) + tdW('d7', r.d7) + tdW('d30', r.d30) + tdW('all', r.all, true) +
+        acctCols.map(function (a2) { var n = accOf(r)[a2] || 0; return '<td' + (n ? '' : ' style="color:var(--text-3)"') + '>' + (n || '\u2014') + '</td>'; }).join('') +
         (showReasons
-          ? '<td>' + (Number(r.refund) ? '£' + Number(r.refund).toFixed(2) : '—') + '</td>' +
+          ? '<td>' + (Number(r.refund) ? '\u00a3' + Number(r.refund).toFixed(2) : '\u2014') + '</td>' +
             '<td style="text-align:left;font-size:11px;color:var(--text-2);max-width:260px;white-space:normal">' + esc(String(r.reasons || '')) + '</td>'
           : '') +
-        '<td>' + (r.pct || 0) + '%</td></tr>';
+        '<td>' + (r.pct || 0) + '%</td>' +
+        '<td style="text-align:left;min-width:180px">' +
+          (ak ? '<span class="ir-ack">\u2713 ' + esc(irWho(ak.email)) + ' \u00b7 ' + esc(String(ak.at).replace('T', ' ').slice(0, 16)) + '</span><div class="ir-acknote">' + esc(ak.note) + '</div>' : '') +
+          '<button class="minibtn ir-ackb" data-ir-ack="' + kq + '">' + (ak ? 'Update\u2026' : 'Acknowledge\u2026') + '</button></td></tr>';
     });
     h += '</tbody></table></div>' +
-      '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">' + esc(String(d.note || '')) + '</p>';
+      '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">' + esc(String(d.note || '')) + ' Acknowledging records who looked, when, and what they said, per board and product; it hides nothing unless you tick hide acknowledged.</p>';
     box.innerHTML = h;
+    irWire(box, list);
+  }
+
+  /* the acknowledgement box: one product (a comment row opens under it) or every product shown */
+  function irWire(box, list) {
+    var hc = $('irHideAck'); if (hc) { hc.onchange = function () { IR.hideAck = this.checked; irPaint(); }; }
+    var aa = $('irAckAll');
+    if (aa) {
+      aa.onclick = function () {
+        var note = window.prompt('Acknowledge every product shown (' + list.length + '). One comment is recorded on each \u2014 what did you find or decide?');
+        if (note === null) { return; }
+        note = String(note).trim(); if (!note) { toast('A comment is required to acknowledge.'); return; }
+        aa.disabled = true;
+        api('itemRiskAck', { tab: IR.tab, keys: list.map(function (r) { return r.key; }), note: note }).then(function (res) {
+          IR.data.acks = IR.data.acks || {};
+          list.forEach(function (r) { IR.data.acks[IR.tab + '|' + r.key] = { email: (res && res.email) || '', note: note, at: (res && res.at) || new Date().toISOString() }; });
+          toast('Acknowledged ' + list.length + ' product' + (list.length === 1 ? '' : 's'));
+          irPaint();
+        })['catch'](function (e) { aa.disabled = false; toast('Not acknowledged: ' + ((e && e.message) || 'no answer')); });
+      };
+    }
+    box.onclick = function (ev) {
+      var b = ev.target && ev.target.closest ? ev.target.closest('[data-ir-ack]') : null; if (!b) { return; }
+      var key = b.getAttribute('data-ir-ack'), tr = b.closest('tr'); if (!tr) { return; }
+      var nx = tr.nextElementSibling;
+      if (nx && nx.classList.contains('ir-ackrow')) { nx.parentNode.removeChild(nx); return; }
+      var row = document.createElement('tr'); row.className = 'ir-ackrow';
+      row.innerHTML = '<td colspan="20" style="text-align:left"><textarea class="ir-ta" rows="2" placeholder="What did you find or decide about this product? (required)"></textarea>' +
+        '<div style="margin-top:6px;display:flex;gap:6px"><button class="minibtn ir-save">Acknowledge with this comment</button><button class="minibtn ir-cancel">Cancel</button></div></td>';
+      tr.parentNode.insertBefore(row, tr.nextSibling);
+      var ta = row.querySelector('textarea'); if (ta) { ta.focus(); }
+      row.querySelector('.ir-cancel').onclick = function () { row.parentNode.removeChild(row); };
+      row.querySelector('.ir-save').onclick = function () {
+        var note = String(ta.value || '').trim(); if (!note) { toast('Write a comment first.'); ta.focus(); return; }
+        this.disabled = true;
+        api('itemRiskAck', { tab: IR.tab, key: key, note: note }).then(function (res) {
+          IR.data.acks = IR.data.acks || {};
+          IR.data.acks[IR.tab + '|' + key] = { email: (res && res.email) || '', note: note, at: (res && res.at) || new Date().toISOString() };
+          toast('Acknowledged'); irPaint();
+        })['catch'](function (e) { toast('Not acknowledged: ' + ((e && e.message) || 'no answer')); });
+      };
+    };
   }
 
   VIEWS.itemRisk = {
-    label: 'Item risk',
+    /* 26 Nov (owner): "first change the name to Product Returns" */
+    label: 'Product Returns',
     order: 8.5,
     roles: ['Management', 'Ops Head', 'CS', 'Team Lead', 'Product Hunter', 'Order Processor'],
     icon: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
     prefetch: function () { return api('itemRisk', {}); },
     render: function () {
-      return '<div class="hgroup enter d1"><h1>Item <span class="goldtext">risk</span></h1>' +
+      return '<div class="hgroup enter d1"><h1>Product <span class="goldtext">Returns</span></h1>' +
         '<span class="sub">returns · item not received · late tracking by 2 / 3 / 4 / 5 days — item by item, across all accounts, with the decision alerts</span>' +
-        '<span style="margin-left:auto;display:flex;gap:6px">' +
+        '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">' +
         [['returns', 'Returns'], ['inr', 'Not received'], ['speed', 'Late tracking'], ['late', '2-day marks']].map(function (t) {
           return '<button class="minibtn' + (IR.tab === t[0] ? ' on' : '') + '" data-ir-t="' + t[0] + '">' + t[1] + '</button>';
         }).join('') +
+        '<select id="irWin" class="minibtn" style="padding:6px 8px" title="the window the counts and the per-account columns follow">' + ['all', 'today', 'yesterday', 'd7', 'd30'].map(function (k) { return '<option value="' + k + '"' + (IR.win === k ? ' selected' : '') + '>' + IR_WL[k] + '</option>'; }).join('') + '</select>' +
         '<select id="irAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
         '<button class="minibtn" id="irRefresh">Refresh</button></span></div>' +
         '<div class="card enter d2"><div class="bd" id="irBody"><div class="spinner"></div></div></div>';
@@ -25949,6 +26054,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           irPaint();
         };
       });
+      var sw = $('irWin');
+      if (sw) { sw.onchange = function () { IR.win = sw.value || 'all'; irPaint(); }; }
       var sa = $('irAcct');
       if (sa) {
         fillAccountSelect(sa, IR.acct, function () { IR.acct = sa.value; IR.data = null; irLoad(); });
@@ -26110,6 +26217,29 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       });
       k2Load();
     }
+  };
+
+  /* 26 Nov (owner): "in the Business overview, at the bottom after Account health, merge Account
+     KPIs". The overview hands over a tools strip; the account select and the day chips are built
+     there and the body paints into #k2Body exactly as on this page — one code path, two homes. */
+  window.K2_MOUNT = function (toolsEl, opts) {
+    if (opts && opts.acct !== undefined) { K2.acct = opts.acct || ''; }
+    if (toolsEl) {
+      toolsEl.innerHTML = '<select class="alx-sel" id="k2Acct"><option value="">All accounts</option></select>' +
+        [[7, '7 days'], [30, '30 days'], [90, '90 days']].map(function (p) {
+          return '<button class="minibtn' + (K2.days === p[0] ? ' on' : '') + '" data-k2-d="' + p[0] + '">' + p[1] + '</button>';
+        }).join('');
+      fillAccountSelect($('k2Acct'), K2.acct, function () { K2.acct = $('k2Acct').value; k2Load(); });
+      toolsEl.querySelectorAll('[data-k2-d]').forEach(function (b) {
+        b.onclick = function () {
+          toolsEl.querySelectorAll('[data-k2-d]').forEach(function (x) { x.classList.remove('on'); });
+          this.classList.add('on');
+          K2.days = Number(this.getAttribute('data-k2-d')) || 30;
+          k2Load();
+        };
+      });
+    }
+    k2Load();
   };
 
   /* WO-05: the old Account report route redirects into the merged page. */
@@ -30364,7 +30494,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     /* 21 Nov (owner): "I want both individual days' performance when clicking a days chip and the
        collective combined data too — an option to select either". `view` is that switch: collective
        is the page as it was (one figure per window); individual lays the same window out day by day. */
-    view: 'collective' };
+    view: 'collective',
+    /* 26 Nov (owner): the sales bar chart above Right now — its own grain and account */
+    ss: { grain: 'day', acct: '', data: null, key: '', dataKey: '' } };
   var O_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], O_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   function oGBPs(v) { var n = oN(v); return (n < 0 ? '\u2212\u00a3' : '\u00a3') + Math.abs(n).toFixed(2); }
   function oGBP0s(v) { var n = oN(v), a = Math.abs(n); return (n < 0 ? '\u2212\u00a3' : '\u00a3') + (a >= 1000 ? (a / 1000).toFixed(1) + 'k' : a.toFixed(2)); }
@@ -30472,6 +30604,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
        looked dead rather than broken. A feed that fails now says so, in its own panel, with a
        way back. */
     O.fetchGen = (O.fetchGen || 0) + 1;
+    if ($('o2Sales') && O.ss.dataKey) { oSalesLoad(true); }
     oFeed('dailyReport', {}, 0).then(function (d) {
       O.days = (d && d.rows) || [];
       /* Night-list fix ("wrong stats"): the nightly book knows nothing of today — merge the
@@ -31532,6 +31665,13 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<div class="sec enter d1"><div class="sec-h"><h2 id="o2DispH">Today\u2019s orders — the dispatch clock</h2>' +
           '<span class="hint" id="o2DispStamp">came in · processed · remaining — refreshes every minute</span></div>' +
           '<div id="o2Dispatch"><div class="empty">Loading…</div></div></div>' +
+        /* 26 Nov (owner): "before Right now, a bar chart of one month's sold, all accounts, green sales
+           and blue orders side by side; on top an individual-account option and 12-month and 52-week
+           views" */
+        '<div class="sec enter d1"><div class="sec-h"><h2>Sales — sold and orders</h2><span class="hint" id="o2SsHint">green = sold £ from the daily books · blue = orders on the UK trading day</span>' +
+          '<div class="tools" style="gap:6px;flex-wrap:wrap;align-items:center"><select class="alx-sel" id="o2SsAcct" style="min-width:140px"><option value="">All accounts</option></select>' +
+          '<div class="mode" id="o2SsMode">' + [['day', 'One month · days'], ['week', '52 weeks'], ['month', '12 months']].map(function (p) { return '<button data-o2-ss="' + p[0] + '"' + (O.ss.grain === p[0] ? ' class="on"' : '') + '>' + p[1] + '</button>'; }).join('') + '</div></div></div>' +
+          '<div class="o-card"><div id="o2Sales" style="width:100%;height:340px"><div class="empty">Loading…</div></div></div></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">live today, whatever the date range · one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>This month at a glance</h2><span class="hint">the plain headline numbers — traffic, adverts, customer service and returns · click a tile to open its board</span></div><div id="o2Extras"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2 id="o2CollH">Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
@@ -31543,6 +31683,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<div class="sec enter d3"><div class="sec-h"><h2>Advertising dashboard</h2><span class="hint">the chosen range · judged against the SOP main target — ROAS ≥ 5</span></div><div id="o2Ads"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Returns, refunds &amp; cases</h2><span class="hint">live from eBay via the Engine</span></div><div id="o2Cases"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d3"><div class="sec-h"><h2>Account health</h2><span class="hint">live Engine numbers · loss items red · quiet accounts amber</span></div><div id="o2Health"><div class="empty">Loading…</div></div></div>' +
+        /* 26 Nov (owner): "at the bottom, after Account health, merge Account KPIs" — the Account KPIs
+           page's own body, painted by its own module through K2_MOUNT */
+        '<div class="sec enter d3"><div class="sec-h"><h2>Account KPIs</h2><span class="hint">one register · every account, every number with its verification chip · the Account KPIs page, here</span><div class="tools" id="o2K2Tools" style="gap:6px;flex-wrap:wrap"></div></div><div id="k2Body"><div class="empty">Loading…</div></div></div>' +
         '</div>';
     },
     init: function () {
@@ -31580,6 +31723,13 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
             var bs = document.querySelectorAll('#o2Seg button');
             for (var i = 0; i < bs.length; i++) { bs[i].classList.toggle('on', bs[i] === seg); }
             oRangeChanged(); return;
+          }
+          var ssb = t && t.closest ? t.closest('[data-o2-ss]') : null;
+          if (ssb) {
+            O.ss.grain = ssb.getAttribute('data-o2-ss') || 'day';
+            var sb = document.querySelectorAll('#o2SsMode button');
+            for (var q2 = 0; q2 < sb.length; q2++) { sb[q2].classList.toggle('on', sb[q2] === ssb); }
+            oSalesLoad(true); return;
           }
           var vw = t && t.closest ? t.closest('[data-o2-view]') : null;
           if (vw) {
@@ -31632,13 +31782,15 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           /* drop everything cached for the previous scope so no all-accounts number lingers
              (truthPage's own cache is keyed by {from,to,account}, so it never crosses accounts) */
           O.days = null; O.ov = null; O.listings = null; O.cs = null; O.funds = null; O.truth = null; O.truthY = null; O.extras = null; O.truthRangeKey = '';
-          oFetchAll(); oPulse(); oDispatchLoad();
+          oFetchAll(); oPulse(); oDispatchLoad(); oSalesSync(); oK2Mount();
           toast(O.acct ? 'Loading every section for ' + O.acct + ' only' : 'Loading every section for all accounts');
         };
       }
       oScopeLabels();
       oFetchAll();
       oPulse();
+      oSalesInit();
+      oK2Mount();
     }
   };
 
@@ -31688,6 +31840,73 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
 
   /* Hasib's closing line: "management home shows everything combined". One Engine read, every
      headline across every board — each tile deep-links to the board that owns the number. */
+  /* ── 26 Nov (owner): the sales bar chart. The engine sums the books per day, week or month and
+     counts the orders on the UK trading day; the chart is ECharts through the product page's loader,
+     sold £ in green on the left scale and orders in blue on the right, every bar carrying its figure. ── */
+  function oSalesInit() {
+    var sel = $('o2SsAcct');
+    if (sel) { fillAccountSelect(sel, O.ss.acct, function () { O.ss.acct = sel.value || ''; oSalesLoad(true); }); }
+    if (!O.ssResize) {
+      O.ssResize = true;
+      window.addEventListener('resize', function () { var el = $('o2Sales'), ec = window.echarts; if (el && ec) { var i = ec.getInstanceByDom(el); if (i) { i.resize(); } } });
+    }
+    oSalesLoad(true);
+  }
+  /* Apply at the top of the page moves this chart onto the same account */
+  function oSalesSync() { O.ss.acct = O.acct; var sel = $('o2SsAcct'); if (sel) { sel.value = O.acct; } oSalesLoad(true); }
+  function oSalesLoad(force) {
+    var el = $('o2Sales'); if (!el) { return; }
+    var key = O.ss.grain + '|' + O.ss.acct;
+    if (!force && O.ss.dataKey === key && O.ss.data) { oSalesPaint(); return; }
+    O.ss.key = key;
+    if (O.ss.dataKey !== key) { el.innerHTML = '<div class="empty">Loading…</div>'; }
+    api('bizSalesSeries', O.ss.acct ? { grain: O.ss.grain, account: O.ss.acct } : { grain: O.ss.grain }).then(function (d) {
+      if (O.ss.key !== key) { return; }
+      O.ss.data = d || {}; O.ss.dataKey = key; oSalesPaint();
+    })['catch'](function (e) { var b = $('o2Sales'); if (b && O.ss.key === key) { b.innerHTML = '<div class="empty">The sales series did not answer — ' + esc((e && e.message) || 'no answer') + '</div>'; } });
+  }
+  function oSalesPaint() {
+    var el = $('o2Sales'); if (!el) { return; }
+    var d = O.ss.data; if (!d) { return; }
+    var rows = d.rows || [], T = d.totals || {};
+    var hint = $('o2SsHint');
+    if (hint) {
+      hint.innerHTML = '<b style="color:var(--ok,#2fb170)">sold ' + oGBPs(T.sold) + '</b> · <b style="color:#8ab4ff">' + (T.orders || 0) + ' orders</b> · ' + esc(d.from + ' → ' + d.to) + ' · ' + (d.account ? esc(d.account) : 'all accounts') +
+        (d.books_from && d.books_from > d.from ? ' · the books begin ' + esc(d.books_from) + ', so earlier bars carry orders only' : '') + ' · green = sold £ from the daily books, blue = orders on the UK trading day';
+    }
+    if (!rows.length) { el.innerHTML = '<div class="empty">Nothing in this window.</div>'; return; }
+    var draw = function () {
+      var ec = window.echarts; if (!ec) { el.innerHTML = '<div class="empty">The chart library did not load.</div>'; return; }
+      if (!ec.getInstanceByDom(el)) { el.innerHTML = ''; }
+      var inst = ec.getInstanceByDom(el) || ec.init(el, null, { renderer: 'canvas' });
+      var n = rows.length, up = n > 16;
+      var labels = rows.map(function (r) { return r.label; }), sold = rows.map(function (r) { return Math.round((Number(r.sold) || 0) * 100) / 100; }), orders = rows.map(function (r) { return Number(r.orders) || 0; });
+      var kfmt = function (v) { return v >= 10000 ? '£' + (v / 1000).toFixed(0) + 'k' : v >= 1000 ? '£' + (v / 1000).toFixed(1) + 'k' : '£' + Math.round(v); };
+      inst.setOption({
+        backgroundColor: 'transparent', animation: false,
+        tooltip: { trigger: 'axis', backgroundColor: 'rgba(4,6,10,.92)', borderColor: 'rgba(255,255,255,.14)', textStyle: { color: '#fff', fontSize: 12 },
+          formatter: function (ps) { var i = ps && ps.length ? ps[0].dataIndex : 0, r = rows[i]; return r ? esc(String(r.tip)) + '<br>sold £' + sold[i].toFixed(2) + '<br>' + orders[i] + ' order' + (orders[i] === 1 ? '' : 's') : ''; } },
+        legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 }, data: ['Sold £', 'Orders'] },
+        grid: { left: 64, right: 56, top: 44, bottom: up ? 64 : 30 },
+        xAxis: { type: 'category', data: labels, axisLabel: { color: '#66707c', fontSize: 10, interval: 0, rotate: up ? 45 : 0 }, axisTick: { show: false }, axisLine: { lineStyle: { color: 'rgba(255,255,255,.15)' } } },
+        yAxis: [
+          { type: 'value', axisLabel: { color: '#66707c', fontSize: 10, formatter: function (v) { return kfmt(v); } }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } }, max: function (v) { return Math.ceil(v.max * 1.25) || 1; } },
+          { type: 'value', axisLabel: { color: '#66707c', fontSize: 10 }, splitLine: { show: false }, minInterval: 1, max: function (v) { return Math.ceil(v.max * 1.25) || 1; } }
+        ],
+        series: [
+          { name: 'Sold £', type: 'bar', data: sold, itemStyle: { color: '#2fb170', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, barGap: '15%',
+            label: { show: true, position: 'top', color: '#2fb170', fontSize: 9, fontWeight: 700, rotate: up ? 90 : 0, align: up ? 'left' : 'center', verticalAlign: 'middle', distance: 4, formatter: function (p) { return p.value ? kfmt(p.value) : ''; } } },
+          { name: 'Orders', type: 'bar', yAxisIndex: 1, data: orders, itemStyle: { color: '#4f8df7', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26,
+            label: { show: true, position: 'top', color: '#8ab4ff', fontSize: 9, fontWeight: 700, rotate: up ? 90 : 0, align: up ? 'left' : 'center', verticalAlign: 'middle', distance: 4, formatter: function (p) { return p.value || ''; } } }
+        ]
+      }, true);
+      inst.resize();
+    };
+    var A = window.ADT_DAILY;
+    if (A && A.ensure) { A.ensure().then(draw)['catch'](function () { el.innerHTML = '<div class="empty">The chart library did not load.</div>'; }); } else { draw(); }
+  }
+  function oK2Mount() { var t = $('o2K2Tools'); if (t && typeof window.K2_MOUNT === 'function') { window.K2_MOUNT(t, { acct: O.acct }); } }
+
   function oPulse() {
     var box = $('o2Pulse');
     if (!box) { return; }
@@ -31713,7 +31932,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           Number(d.letters_backlog) > Number(d.letters_open)
             ? Number(d.letters_backlog).toLocaleString('en-GB') + ' unread in total'
             : 'the Engine’s own bells', Number(d.letters_open) > 0) +
-        t('activeListings', 'Active listings', d.active_listings, 'all accounts') +
+        t('activeListings', 'All Account Listings', d.active_listings, 'all accounts') +
       '</div>';
     }).catch(function (e) {
       box.innerHTML = '<div class="empty">The pulse could not load: ' + esc(e.message) + '</div>';

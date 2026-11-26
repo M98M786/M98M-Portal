@@ -149,6 +149,29 @@
     }
   };
 
+  /* 26 Nov (owner): "in the Business overview, at the bottom after Account health, merge Account
+     KPIs". The overview hands over a tools strip; the account select and the day chips are built
+     there and the body paints into #k2Body exactly as on this page — one code path, two homes. */
+  window.K2_MOUNT = function (toolsEl, opts) {
+    if (opts && opts.acct !== undefined) { K2.acct = opts.acct || ''; }
+    if (toolsEl) {
+      toolsEl.innerHTML = '<select class="alx-sel" id="k2Acct"><option value="">All accounts</option></select>' +
+        [[7, '7 days'], [30, '30 days'], [90, '90 days']].map(function (p) {
+          return '<button class="minibtn' + (K2.days === p[0] ? ' on' : '') + '" data-k2-d="' + p[0] + '">' + p[1] + '</button>';
+        }).join('');
+      fillAccountSelect($('k2Acct'), K2.acct, function () { K2.acct = $('k2Acct').value; k2Load(); });
+      toolsEl.querySelectorAll('[data-k2-d]').forEach(function (b) {
+        b.onclick = function () {
+          toolsEl.querySelectorAll('[data-k2-d]').forEach(function (x) { x.classList.remove('on'); });
+          this.classList.add('on');
+          K2.days = Number(this.getAttribute('data-k2-d')) || 30;
+          k2Load();
+        };
+      });
+    }
+    k2Load();
+  };
+
   /* WO-05: the old Account report route redirects into the merged page. */
   VIEWS.accountReport = {
     label: 'Account report',

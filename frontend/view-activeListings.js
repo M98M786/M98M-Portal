@@ -193,6 +193,19 @@
     return '<a class="alx-sup alx-suplink" href="' + esc(safe) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + '</a>';
   }
 
+  /* 26 Nov (owner): "along the eBay hyperlink show the supplier-specific product links 1, 2 and 3 the
+     same way" — the three AliExpress links ride on the listing cell's own meta line, beside eBay ↗
+     and History ↗, in the same dress */
+  function alxWithSup(cell, r) {
+    var links = [['sup1_link', 'Supplier 1'], ['sup2_link', 'Supplier 2'], ['sup3_link', 'Supplier 3']].map(function (p) {
+      var u = axStr(r[p[0]]); if (!u) { return ''; }
+      var safe = typeof safeUrl === 'function' ? safeUrl(u) : '';
+      return safe ? '<a class="adt-pc-e" href="' + esc(safe) + '" target="_blank" rel="noopener noreferrer" title="' + esc(p[1] + ' · ' + u) + '">' + p[1] + ' ↗</a>' : '';
+    }).filter(Boolean).join('');
+    if (!links) { return cell; }
+    var i = cell.lastIndexOf('</div></div></div>');
+    return i < 0 ? cell + links : cell.slice(0, i) + links + cell.slice(i);
+  }
   function alxSuppliers(r) {
     var cur = axStr(r.current_sup);
     var links = [alxSupLink(r.sup1_link, '1'), alxSupLink(r.sup2_link, '2'), alxSupLink(r.sup3_link, '3')].filter(Boolean);
@@ -268,7 +281,7 @@
       var src = axStr(r.api_synced_at) ? 'API' : 'SHEET';
       h += '<tr>' +
         '<td>' + (typeof adtProductCell === 'function'
-          ? adtProductCell({ item_id: axStr(r.item_id), account: axStr(r.account), title: axStr(r.title), image: img }, { open: canHistory })
+          ? alxWithSup(adtProductCell({ item_id: axStr(r.item_id), account: axStr(r.account), title: axStr(r.title), image: img }, { open: canHistory }), r)
           : '<a class="alx-title" style="display:block;color:inherit;text-decoration:none" href="https://www.ebay.co.uk/itm/' + esc(axStr(r.item_id)) + '" target="_blank" rel="noopener noreferrer">' + esc(axStr(r.title) || '(no title)') + '</a><div class="mono" style="font-size:10.5px;color:var(--text-3)">' + esc(axStr(r.item_id)) + ' · ' + esc(axStr(r.account)) + '</div>') + '</td>' +
         '<td style="white-space:nowrap;font-size:11.5px;font-weight:700">' + alxDate(r) + '</td>' +
         '<td class="alx-num">' + axGBP(r.price) + '</td>' +
@@ -305,13 +318,14 @@
   }
 
   VIEWS.activeListings = {
-    label: 'Active listings',
+    /* 26 Nov (owner): "change the name from Active listings to All Account Listings" */
+    label: 'All Account Listings',
     order: 6,
     roles: ALX_ROLES,
     icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 13h4M8 16h7"/>',
     prefetch: function () { return alxFetch(); },
     render: function () {
-      return '<div class="hgroup enter d1"><h1>Active <span class="goldtext">listings</span></h1>' +
+      return '<div class="hgroup enter d1"><h1>All Account <span class="goldtext">Listings</span></h1>' +
           '<span class="sub">Live from eBay every 15 minutes · joined with the sheet facts · what you may see is decided server-side</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
           '<div class="alx-bar" id="alxTabs" style="margin-bottom:8px"></div>' +

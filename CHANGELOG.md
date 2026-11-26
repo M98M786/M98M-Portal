@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## 2026-11-26 - BUSINESS OVERVIEW, ALL ACCOUNT LISTINGS, PRODUCT RETURNS: the owner's five-part list
+
+Business overview. Before Right now there is a sales bar chart: green sold pounds from the daily books
+and blue orders counted on the UK trading day, side by side, over one month of days, with an account
+picker and 52-week and 12-month views (the engine's new bizSalesSeries; empty buckets are noughts, and
+the hint says where the books begin when the window reaches further back). After Account health the
+Account KPIs page sits in full, painted by its own module (K2_MOUNT), with its own account select and
+7/30/90-day chips; Apply at the top moves both onto the chosen account.
+
+All Account Listings. Active listings is renamed All Account Listings, and each listing's meta line
+carries Supplier 1, 2 and 3 beside eBay and History, from the item facts' three AliExpress links.
+
+Product Returns. Item risk is renamed Product Returns. Under every listing, in the decision box and in
+the table, sit its number, eBay, its Product history and every supplier link on file. A window picker
+(All time, Today, Yesterday, 7 days, 30 days) cuts the list to the products with a count in the window,
+sorts by it, lights its column and makes the per-account columns follow it (the engine now folds the
+accounts per window). Every product has an acknowledgement box: who, when and a required comment, kept
+by the engine per board and product (item_risk_ack, itemRiskAck), with Acknowledge all shown and a hide
+acknowledged tick. The account dropdown reloads the board for that account as before.
+
 ## 2026-11-24 - LISTING DESK: Send back to a hunter, beside Take back and Delete
 
 Owner: "when I open Details on the Listing desk, give me a second option beside deletion: send the listing

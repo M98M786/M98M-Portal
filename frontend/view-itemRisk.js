@@ -5,7 +5,9 @@
  * (>5 returns, >5 INR, >10 late-tracking orders) pinned red at the top. */
 (function () {
 
-  var IR = { tab: 'returns', data: null, acct: '' };
+  /* 26 Nov (owner): the page is Product Returns now; `win` is the window picker (today … all time),
+     `hideAck` hides the products already acknowledged */
+  var IR = { tab: 'returns', data: null, acct: '', win: 'all', hideAck: false };
 
   VIEW_CSS.push(
     '.ir-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px}' +
@@ -20,8 +22,35 @@
     '.ir-st{border:1px solid var(--gold-line);border-radius:12px;padding:10px 12px;background:var(--panel-2)}' +
     '.ir-st .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
     '.ir-st b{display:block;font-size:20px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}' +
-    '.ir-st .p{font-size:11px;color:var(--text-3);font-weight:700}.ir-st.bad b{color:var(--bad)}.ir-st.ok b{color:var(--ok)}'
+    '.ir-st .p{font-size:11px;color:var(--text-3);font-weight:700}.ir-st.bad b{color:var(--bad)}.ir-st.ok b{color:var(--ok)}' +
+    /* 26 Nov: the window picker's column, the links under each listing, the acknowledgement box */
+    '.ir-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 8px;font-size:12px;color:var(--text-2);font-weight:700}' +
+    '.ir-chk{display:inline-flex;gap:5px;align-items:center;font-size:11.5px;color:var(--text-3);font-weight:700;cursor:pointer}' +
+    '.ir-tbl th.ir-on,.ir-tbl td.ir-on{color:var(--gold-a)}' +
+    '.ir-links{font-size:10px;color:var(--text-3);margin-top:3px;display:flex;flex-wrap:wrap;gap:3px 9px;align-items:center;font-weight:700}' +
+    '.ir-links a{color:var(--text-3);font-weight:800;text-decoration:none;white-space:nowrap}.ir-links a:hover{color:var(--gold-a)}' +
+    '.ir-links .mono{font-size:9.5px;font-weight:600}' +
+    '.ir-ack{color:var(--ok);font-weight:800;font-size:11px;white-space:nowrap}.ir-acknote{font-size:10.5px;color:var(--text-2);white-space:normal;max-width:240px;line-height:1.4}' +
+    '.ir-ackb{margin-top:4px;padding:3px 8px;font-size:10.5px}' +
+    '.ir-ackrow td{background:var(--panel-2)}' +
+    '.ir-ta{width:100%;box-sizing:border-box;min-height:46px;border:1px solid var(--gold-line);border-radius:8px;background:var(--panel);color:var(--text);padding:6px 8px;font:inherit;font-size:12px}'
   );
+  /* under each listing: its number, eBay, its Product history, and every supplier link the item facts hold */
+  function irLinks(ids) {
+    var L = (IR.data && IR.data.links) || {}, all = ids || [], show = all.slice(0, 4);
+    if (!show.length) { return ''; }
+    var sup = function (u, lab) { u = String(u || ''); var s = u && typeof safeUrl === 'function' ? safeUrl(u) : ''; return s ? '<a href="' + esc(s) + '" target="_blank" rel="noopener noreferrer" title="' + esc(lab + ' \u00b7 ' + u) + '">' + lab + ' \u2197</a>' : ''; };
+    return show.map(function (id) {
+      id = String(id); var k = L[id] || {};
+      var sups = [sup(k.s1, 'Supplier 1'), sup(k.s2, 'Supplier 2'), sup(k.s3, 'Supplier 3')].filter(Boolean);
+      return '<div class="ir-links"><span class="mono">' + esc(id) + '</span>' +
+        '<a href="https://www.ebay.co.uk/itm/' + esc(id) + '" target="_blank" rel="noopener noreferrer">eBay \u2197</a>' +
+        '<a href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener">History \u2197</a>' +
+        (sups.length ? sups.join('') : '<span>no supplier link on file</span>') + (k.cur ? '<span>\u00b7 ' + esc(k.cur) + '</span>' : '') + '</div>';
+    }).join('') + (all.length > show.length ? '<div class="ir-links"><span>+' + (all.length - show.length) + ' more listing' + (all.length - show.length === 1 ? '' : 's') + ' under this title</span></div>' : '');
+  }
+  function irWho(email) { var e = String(email || ''); return e.indexOf('@') > 0 ? e.slice(0, e.indexOf('@')) : (e || 'someone'); }
+  var IR_WL = { all: 'All time', today: 'Today', yesterday: 'Yesterday', d7: '7 days', d30: '30 days' };
 
   /* 1 Oct (owner): "update late tracking with different time frames — 2, 3, 4, 5 days — in which
      time tracking is being uploaded for that item, and how much time orders are really waiting."
@@ -84,7 +113,7 @@
         h += '<div style="margin-top:5px"><b>' + esc(String(al.x.title || al.x.key).slice(0, 80)) + '</b>' +
           (al.x.duplicated ? '<span class="ir-dup">DUPLICATED · ' + al.x.item_ids.length + ' listings</span>' : '') +
           ' — <b>' + al.x.all + '</b> ' + al.w + ' across ' + Object.keys(al.x.accounts || {}).length + ' account(s)' +
-          (al.x.reasons ? ' · ' + esc(String(al.x.reasons)) : '') + '</div>';
+          (al.x.reasons ? ' · ' + esc(String(al.x.reasons)) : '') + irLinks(al.x.item_ids) + '</div>';
       });
       h += '<div style="margin-top:6px;font-size:11px;color:var(--text-3);font-weight:600">The same alerts land as letters in the Alerts centre, one per tier (5, 10, 15…), so nothing rings twice.</div></div>';
     }
@@ -93,67 +122,129 @@
     var list = IR.tab === 'returns' ? (d.returns || []) : IR.tab === 'inr' ? (d.inr || []) : (d.late || []);
     var threshold = IR.tab === 'late' ? 10 : 5;
     var showReasons = IR.tab !== 'late';
+    /* 26 Nov (owner): "a dropdown from today to all time — selecting one shows that window's data".
+       The list is cut to the products with a count in the window, sorted by it, the window's column is
+       lit, and the per-account columns follow the window too. */
+    var W = IR_WL[IR.win] ? IR.win : 'all';
+    var cnt = function (r) { return W === 'today' ? (r.today || 0) : W === 'yesterday' ? (r.yesterday || 0) : W === 'd7' ? (r.d7 || 0) : W === 'd30' ? (r.d30 || 0) : (r.all || 0); };
+    var accOf = function (r) { return (r.accounts_by && r.accounts_by[W]) || (W === 'all' ? (r.accounts || {}) : {}); };
+    if (W !== 'all') { list = list.filter(function (r) { return cnt(r) > 0; }).slice().sort(function (x, y) { return cnt(y) - cnt(x); }); }
+    var acks = d.acks || {};
+    var ackKey = function (r) { return IR.tab + '|' + r.key; };
+    var nAck = list.filter(function (r) { return !!acks[ackKey(r)]; }).length;
+    if (IR.hideAck) { list = list.filter(function (r) { return !acks[ackKey(r)]; }); }
     /* his Returns Summary workbook's shape: rank · product · per-account qty columns ·
        reasons "(qty per reason)" · refund £ · % of total */
     var acctSet = {};
-    list.forEach(function (r) { Object.keys(r.accounts || {}).forEach(function (a) { acctSet[a] = 1; }); });
+    list.forEach(function (r) { Object.keys(accOf(r)).forEach(function (a2) { acctSet[a2] = 1; }); });
     var acctCols = Object.keys(acctSet).sort();
     /* 2 Oct (owner): the per-account headers used only the first word, so "AZHAR ABRT" and
        "Azhar Bhai" both read "Azhar" — two different shops, indistinguishable. Use the first
        word ONLY when it is unique (case-insensitively) across the shown accounts; otherwise the
        full account name. Full name is always on hover. */
     var irFwCount = {};
-    acctCols.forEach(function (a) { var fw = String(a).trim().split(/\s+/)[0].toLowerCase(); irFwCount[fw] = (irFwCount[fw] || 0) + 1; });
-    function irAcctLabel(a) {
-      var parts = String(a).trim().split(/\s+/);
-      return irFwCount[parts[0].toLowerCase()] > 1 ? String(a).trim() : parts[0];
+    acctCols.forEach(function (a2) { var fw = String(a2).trim().split(/\s+/)[0].toLowerCase(); irFwCount[fw] = (irFwCount[fw] || 0) + 1; });
+    function irAcctLabel(a2) {
+      var parts = String(a2).trim().split(/\s+/);
+      return irFwCount[parts[0].toLowerCase()] > 1 ? String(a2).trim() : parts[0];
     }
+    h += '<div class="ir-tools"><span>' + esc(IR_WL[W]) + ' · ' + (IR.acct ? esc(IR.acct) : 'all accounts') + ' · ' + list.length + ' product' + (list.length === 1 ? '' : 's') + (nAck ? ' · ' + nAck + ' acknowledged' : '') + '</span>' +
+      '<label class="ir-chk"><input type="checkbox" id="irHideAck"' + (IR.hideAck ? ' checked' : '') + '> hide acknowledged</label>' +
+      (list.length ? '<button class="minibtn" id="irAckAll">Acknowledge all shown\u2026</button>' : '') + '</div>';
+    var thW = function (k, label) { return '<th' + (W === k ? ' class="ir-on"' : '') + '>' + label + '</th>'; };
+    var tdW = function (k, v, strong) { return '<td' + (W === k ? ' class="ir-on"' : '') + (strong ? ' style="font-weight:800"' : '') + '>' + (v || (strong ? 0 : '\u2014')) + '</td>'; };
     h += '<div class="scroll"><table class="ir-tbl"><thead><tr>' +
-      '<th>#</th><th style="text-align:left">Product · folded across accounts</th>' +
-      '<th>Today</th><th>Yesterday</th><th>7 days</th><th>30 days</th><th>All time</th>' +
-      acctCols.map(function (a) { return '<th title="' + esc(a) + '">' + esc(irAcctLabel(a)) + '</th>'; }).join('') +
-      (showReasons ? '<th>Refund £</th><th style="text-align:left">Reasons (qty per reason)</th>' : '') +
-      '<th>% of total</th></tr></thead><tbody>';
+      '<th>#</th><th style="text-align:left">Product \u00b7 folded across accounts</th>' +
+      thW('today', 'Today') + thW('yesterday', 'Yesterday') + thW('d7', '7 days') + thW('d30', '30 days') + thW('all', 'All time') +
+      acctCols.map(function (a2) { return '<th title="' + esc(a2) + (W === 'all' ? '' : ' \u00b7 ' + IR_WL[W]) + '">' + esc(irAcctLabel(a2)) + '</th>'; }).join('') +
+      (showReasons ? '<th>Refund \u00a3</th><th style="text-align:left">Reasons (qty per reason)</th>' : '') +
+      '<th>% of total</th><th style="text-align:left">Acknowledged</th></tr></thead><tbody>';
     if (!list.length) {
-      h += '<tr><td colspan="14" style="text-align:left"><div class="empty">' +
-        (IR.tab === 'late' ? 'No late-tracking marks yet — counting started 21 Aug; every order that crosses 2 business days untracked lands here permanently.' : 'Nothing recorded.') + '</div></td></tr>';
+      h += '<tr><td colspan="18" style="text-align:left"><div class="empty">' +
+        (IR.tab === 'late' ? 'No late-tracking marks yet \u2014 counting started 21 Aug; every order that crosses 2 business days untracked lands here permanently.'
+          : W !== 'all' ? 'Nothing recorded for ' + esc(IR_WL[W].toLowerCase()) + (IR.hideAck ? ' that is not acknowledged' : '') + '.' : IR.hideAck ? 'Everything here is acknowledged.' : 'Nothing recorded.') + '</div></td></tr>';
     }
     list.forEach(function (r, rank) {
-      var hot = r.all > threshold;
-      h += '<tr' + (hot ? ' class="ir-hot"' : '') + '><td>' + (rank + 1) + '</td>' +
+      var hot = r.all > threshold, ak = acks[ackKey(r)];
+      var kq = esc(String(r.key)).replace(/"/g, '&quot;');
+      h += '<tr' + (hot ? ' class="ir-hot"' : '') + (ak ? ' style="opacity:.75"' : '') + '><td>' + (rank + 1) + '</td>' +
         '<td><b>' + esc(String(r.title || r.key).slice(0, 70)) + '</b>' +
         (r.duplicated ? '<span class="ir-dup">DUPLICATED</span>' : '') +
-        (hot ? ' <b style="color:var(--bad)">· DECISION</b>' : '') +
-        '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + r.item_ids.slice(0, 4).map(function (id) {
-          return '<a href="https://www.ebay.co.uk/itm/' + esc(String(id)) + '" target="_blank" rel="noopener noreferrer" style="color:inherit">' + esc(String(id)) + '</a>';
-        }).join(' · ') + (r.item_ids.length > 4 ? ' +' + (r.item_ids.length - 4) : '') + '</div></td>' +
-        '<td>' + (r.today || '—') + '</td><td>' + (r.yesterday || '—') + '</td>' +
-        '<td>' + (r.d7 || '—') + '</td><td>' + (r.d30 || '—') + '</td><td style="font-weight:800">' + r.all + '</td>' +
-        acctCols.map(function (a) { var n = (r.accounts || {})[a] || 0; return '<td' + (n ? '' : ' style="color:var(--text-3)"') + '>' + (n || '—') + '</td>'; }).join('') +
+        (hot ? ' <b style="color:var(--bad)">\u00b7 DECISION</b>' : '') +
+        irLinks(r.item_ids) + '</td>' +
+        tdW('today', r.today) + tdW('yesterday', r.yesterday) + tdW('d7', r.d7) + tdW('d30', r.d30) + tdW('all', r.all, true) +
+        acctCols.map(function (a2) { var n = accOf(r)[a2] || 0; return '<td' + (n ? '' : ' style="color:var(--text-3)"') + '>' + (n || '\u2014') + '</td>'; }).join('') +
         (showReasons
-          ? '<td>' + (Number(r.refund) ? '£' + Number(r.refund).toFixed(2) : '—') + '</td>' +
+          ? '<td>' + (Number(r.refund) ? '\u00a3' + Number(r.refund).toFixed(2) : '\u2014') + '</td>' +
             '<td style="text-align:left;font-size:11px;color:var(--text-2);max-width:260px;white-space:normal">' + esc(String(r.reasons || '')) + '</td>'
           : '') +
-        '<td>' + (r.pct || 0) + '%</td></tr>';
+        '<td>' + (r.pct || 0) + '%</td>' +
+        '<td style="text-align:left;min-width:180px">' +
+          (ak ? '<span class="ir-ack">\u2713 ' + esc(irWho(ak.email)) + ' \u00b7 ' + esc(String(ak.at).replace('T', ' ').slice(0, 16)) + '</span><div class="ir-acknote">' + esc(ak.note) + '</div>' : '') +
+          '<button class="minibtn ir-ackb" data-ir-ack="' + kq + '">' + (ak ? 'Update\u2026' : 'Acknowledge\u2026') + '</button></td></tr>';
     });
     h += '</tbody></table></div>' +
-      '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">' + esc(String(d.note || '')) + '</p>';
+      '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">' + esc(String(d.note || '')) + ' Acknowledging records who looked, when, and what they said, per board and product; it hides nothing unless you tick hide acknowledged.</p>';
     box.innerHTML = h;
+    irWire(box, list);
+  }
+
+  /* the acknowledgement box: one product (a comment row opens under it) or every product shown */
+  function irWire(box, list) {
+    var hc = $('irHideAck'); if (hc) { hc.onchange = function () { IR.hideAck = this.checked; irPaint(); }; }
+    var aa = $('irAckAll');
+    if (aa) {
+      aa.onclick = function () {
+        var note = window.prompt('Acknowledge every product shown (' + list.length + '). One comment is recorded on each \u2014 what did you find or decide?');
+        if (note === null) { return; }
+        note = String(note).trim(); if (!note) { toast('A comment is required to acknowledge.'); return; }
+        aa.disabled = true;
+        api('itemRiskAck', { tab: IR.tab, keys: list.map(function (r) { return r.key; }), note: note }).then(function (res) {
+          IR.data.acks = IR.data.acks || {};
+          list.forEach(function (r) { IR.data.acks[IR.tab + '|' + r.key] = { email: (res && res.email) || '', note: note, at: (res && res.at) || new Date().toISOString() }; });
+          toast('Acknowledged ' + list.length + ' product' + (list.length === 1 ? '' : 's'));
+          irPaint();
+        })['catch'](function (e) { aa.disabled = false; toast('Not acknowledged: ' + ((e && e.message) || 'no answer')); });
+      };
+    }
+    box.onclick = function (ev) {
+      var b = ev.target && ev.target.closest ? ev.target.closest('[data-ir-ack]') : null; if (!b) { return; }
+      var key = b.getAttribute('data-ir-ack'), tr = b.closest('tr'); if (!tr) { return; }
+      var nx = tr.nextElementSibling;
+      if (nx && nx.classList.contains('ir-ackrow')) { nx.parentNode.removeChild(nx); return; }
+      var row = document.createElement('tr'); row.className = 'ir-ackrow';
+      row.innerHTML = '<td colspan="20" style="text-align:left"><textarea class="ir-ta" rows="2" placeholder="What did you find or decide about this product? (required)"></textarea>' +
+        '<div style="margin-top:6px;display:flex;gap:6px"><button class="minibtn ir-save">Acknowledge with this comment</button><button class="minibtn ir-cancel">Cancel</button></div></td>';
+      tr.parentNode.insertBefore(row, tr.nextSibling);
+      var ta = row.querySelector('textarea'); if (ta) { ta.focus(); }
+      row.querySelector('.ir-cancel').onclick = function () { row.parentNode.removeChild(row); };
+      row.querySelector('.ir-save').onclick = function () {
+        var note = String(ta.value || '').trim(); if (!note) { toast('Write a comment first.'); ta.focus(); return; }
+        this.disabled = true;
+        api('itemRiskAck', { tab: IR.tab, key: key, note: note }).then(function (res) {
+          IR.data.acks = IR.data.acks || {};
+          IR.data.acks[IR.tab + '|' + key] = { email: (res && res.email) || '', note: note, at: (res && res.at) || new Date().toISOString() };
+          toast('Acknowledged'); irPaint();
+        })['catch'](function (e) { toast('Not acknowledged: ' + ((e && e.message) || 'no answer')); });
+      };
+    };
   }
 
   VIEWS.itemRisk = {
-    label: 'Item risk',
+    /* 26 Nov (owner): "first change the name to Product Returns" */
+    label: 'Product Returns',
     order: 8.5,
     roles: ['Management', 'Ops Head', 'CS', 'Team Lead', 'Product Hunter', 'Order Processor'],
     icon: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
     prefetch: function () { return api('itemRisk', {}); },
     render: function () {
-      return '<div class="hgroup enter d1"><h1>Item <span class="goldtext">risk</span></h1>' +
+      return '<div class="hgroup enter d1"><h1>Product <span class="goldtext">Returns</span></h1>' +
         '<span class="sub">returns · item not received · late tracking by 2 / 3 / 4 / 5 days — item by item, across all accounts, with the decision alerts</span>' +
-        '<span style="margin-left:auto;display:flex;gap:6px">' +
+        '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">' +
         [['returns', 'Returns'], ['inr', 'Not received'], ['speed', 'Late tracking'], ['late', '2-day marks']].map(function (t) {
           return '<button class="minibtn' + (IR.tab === t[0] ? ' on' : '') + '" data-ir-t="' + t[0] + '">' + t[1] + '</button>';
         }).join('') +
+        '<select id="irWin" class="minibtn" style="padding:6px 8px" title="the window the counts and the per-account columns follow">' + ['all', 'today', 'yesterday', 'd7', 'd30'].map(function (k) { return '<option value="' + k + '"' + (IR.win === k ? ' selected' : '') + '>' + IR_WL[k] + '</option>'; }).join('') + '</select>' +
         '<select id="irAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
         '<button class="minibtn" id="irRefresh">Refresh</button></span></div>' +
         '<div class="card enter d2"><div class="bd" id="irBody"><div class="spinner"></div></div></div>';
@@ -167,6 +258,8 @@
           irPaint();
         };
       });
+      var sw = $('irWin');
+      if (sw) { sw.onchange = function () { IR.win = sw.value || 'all'; irPaint(); }; }
       var sa = $('irAcct');
       if (sa) {
         fillAccountSelect(sa, IR.acct, function () { IR.acct = sa.value; IR.data = null; irLoad(); });
