@@ -1533,7 +1533,12 @@
     var key = O.ss.grain + '|' + O.ss.acct + '|' + O.ss.pick;
     if (!force && O.ss.dataKey === key && O.ss.data) { oSalesPaint(); return; }
     O.ss.key = key;
-    if (O.ss.dataKey !== key) { el.innerHTML = '<div class="empty">Loading…</div>'; }
+    if (O.ss.dataKey !== key) {
+      /* the placeholder replaces the canvas, so the chart instance bound to this box must go with
+         it — a stale instance would draw the next answer into a canvas no longer on the page */
+      var ecOld = window.echarts, instOld = ecOld && ecOld.getInstanceByDom(el); if (instOld) { instOld.dispose(); }
+      el.innerHTML = '<div class="empty">Loading…</div>';
+    }
     api('bizSalesSeries', oSalesParams()).then(function (d) {
       if (O.ss.key !== key) { return; }
       O.ss.data = d || {}; O.ss.dataKey = key; oSalesPaint();
@@ -1552,8 +1557,8 @@
     if (!rows.length) { var ec0 = window.echarts, i0 = ec0 && ec0.getInstanceByDom(el); if (i0) { i0.dispose(); } el.innerHTML = '<div class="empty">' + (d.note && /not started/.test(d.note) ? 'That window has not started yet.' : 'Nothing in this window.') + '</div>'; return; }
     var draw = function () {
       var ec = window.echarts; if (!ec) { el.innerHTML = '<div class="empty">The chart library did not load.</div>'; return; }
-      if (!ec.getInstanceByDom(el)) { el.innerHTML = ''; }
-      var inst = ec.getInstanceByDom(el) || ec.init(el, null, { renderer: 'canvas' });
+      var inst = ec.getInstanceByDom(el);
+      if (!inst || !el.querySelector('canvas')) { if (inst) { inst.dispose(); } el.innerHTML = ''; inst = ec.init(el, null, { renderer: 'canvas' }); }
       var n = rows.length, up = n > 16;
       var labels = rows.map(function (r) { return r.label; }), sold = rows.map(function (r) { return Math.round((Number(r.sold) || 0) * 100) / 100; }), orders = rows.map(function (r) { return Number(r.orders) || 0; });
       var kfmt = function (v) { return v >= 10000 ? '£' + (v / 1000).toFixed(0) + 'k' : v >= 1000 ? '£' + (v / 1000).toFixed(1) + 'k' : '£' + Math.round(v); };
