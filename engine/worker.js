@@ -34476,8 +34476,13 @@ const ROUTES = {
          fees + errors, creates nothing), AddFixedPriceItem (the create), UploadSiteHostedPictures (re-host the
          source photos under the destination seller when eBay refuses a cross-seller PictureURL) and read-only
          GetUserPreferences (the destination's business-policy ids). Same sync-key gate, token stays here. */
+      /* 26 Nov (owner): a listing eBay took down under the counterfeit policy cannot be relisted, and the
+         rest of that product range has to come off sale with it. EndFixedPriceItem is the only way to do
+         that from here. It ENDS a listing — orders already placed are untouched, but the listing and its
+         sales history stop. Nothing calls it on a schedule; it is only ever run from a named list. */
       const TRADE_CALLS = ['GetItem', 'ReviseFixedPriceItem', 'GetSellerList', 'GetMyMessages', 'GetMemberMessages',
-        'VerifyAddFixedPriceItem', 'AddFixedPriceItem', 'UploadSiteHostedPictures', 'GetUserPreferences'];
+        'VerifyAddFixedPriceItem', 'AddFixedPriceItem', 'UploadSiteHostedPictures', 'GetUserPreferences',
+        'EndFixedPriceItem'];
       if (TRADE_CALLS.indexOf(call) < 0) {
         throw new Error('SAY: call must be one of ' + TRADE_CALLS.join(', ') + ' or taxonomyAspects');
       }
