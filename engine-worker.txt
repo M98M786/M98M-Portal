@@ -1215,12 +1215,12 @@ function pvTokens(s) {
 /* 24 Nov: moved so the pulse family runs its seeds again — the mode row has to be SET to live and
    every account's switch written, and a marker from the rehearsal build would skip that family. No
    DDL statement changed with it. */
-const ADTOOL_SCHEMA_VERSION = '2026-11-24.1';
+const ADTOOL_SCHEMA_VERSION = '2026-11-26.1';   // 26 Nov: listing_corrections (made at use) joins the DDL fingerprint
 /* the fingerprint of every DDL statement in engine/worker.js, held to this value by the suite */
 /* 22 Nov: the count moved to 215 on 21 Nov with adtool_neg_ack (Ads command centre), a table created at its own two
    sites on every use rather than under a guard, so nothing was missing from the database; the marker simply had not
    been moved with it, and the suite has said so since. Moved here, with no guarded statement added. */
-const ADTOOL_SCHEMA_DDL_HASH = '219-e230ddd8';
+const ADTOOL_SCHEMA_DDL_HASH = '222-f4f4e6e4';
 const ADTOOL_SCHEMA_KEY = 'adtool_schema_version';
 let ADTOOL_SCHEMA_MARK = null;      /* the one marker read per isolate */
 let ADTOOL_SCHEMA_SETTLE = null;    /* the one apply pass per isolate, and the proof DDL ran here */
@@ -25643,6 +25643,88 @@ async function truthTier3(env) {
 }
 
 
+/* ---- listing corrections: the roles that see everyone's, the open statuses, the flag and the
+   returned-line readers (the same shapes view-tasks.js reads), and the one judgement ---- */
+const LC_ALL_ROLES = ['Management', 'Ops Head', 'Listing Manager', 'Team Lead'];
+const LC_OPEN = ['Pending', 'Working', 'Updated'];
+/* made at use, as adtool_neg_ack is: one cheap IF NOT EXISTS per call, no isolate flag to forget */
+async function lcEnsure(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS listing_corrections (task_id TEXT PRIMARY KEY, lister TEXT DEFAULT '', note TEXT DEFAULT '', by_email TEXT DEFAULT '', by_name TEXT DEFAULT '', at TEXT DEFAULT '', resolved_at TEXT DEFAULT '', resolved_by TEXT DEFAULT '', resolved_how TEXT DEFAULT '')").run().catch(() => {});
+}
+function lcFlag(comments) {
+  for (const l of String(comments || '').split('\n')) {
+    if (l.indexOf('@LFLAG@') === 0) { try { const o = JSON.parse(l.slice(7)); return (o && o.flag) ? o : null; } catch (e) { return null; } }
+  }
+  return null;
+}
+/* the LAST "[stamp] Name returned: note" line — what goLiveReturn and an approver's Return write */
+function lcReturned(comments) {
+  const lines = String(comments || '').split('\n').filter((l) => l.indexOf('@LFLAG@') !== 0);
+  const re = /^\[([^\]]+)\]\s*(.*?)\s+returned:\s*([\s\S]*)$/;
+  let at = -1;
+  for (let i = 0; i < lines.length; i++) if (re.test(lines[i])) at = i;
+  if (at < 0) return null;
+  const m = re.exec(lines.slice(at).join('\n'));
+  return m ? { at: lcIso(m[1]), by: String(m[2] || '').trim(), note: String(m[3] || '').trim() } : null;
+}
+/* the sheet stamps PKT ISO ("2026-11-23T18:06:12+05:00"); a bare or odd stamp is kept as text */
+function lcIso(v) { const ms = Date.parse(String(v || '')); return isFinite(ms) ? new Date(ms).toISOString() : String(v || ''); }
+/* ONE judgement for every row, pure so it can be held by a test: given the task's state, its flag,
+   the newest sheet-side return and the engine-side row, is a correction open, and what is it? */
+function lcJudge(task, flag, ret, row) {
+  const status = String((task && task.status) || '');
+  const cands = [];
+  if (ret && ret.note) cands.push({ at: ret.at, by: ret.by, note: ret.note, source: 'go-live' });
+  if (row && row.note) cands.push({ at: String(row.at || ''), by: String(row.by_name || row.by_email || ''), note: String(row.note), source: 'management' });
+  if (!cands.length) return null;
+  cands.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  const c = cands[0];
+  let resolved = '';
+  if (LC_OPEN.indexOf(status) < 0) resolved = status === 'Completed' ? 'listing is live' : 'submitted';
+  else if (String((task && task.item_id) || '').trim()) resolved = 'listing is live';
+  else if (row && row.resolved_at && String(row.resolved_at) >= String(c.at)) resolved = String(row.resolved_how || 'marked fixed');
+  else if (flag && flag.flag === 'draft' && lcIso(flag.at) > c.at) resolved = 'resent to go-live';
+  return { open: !resolved, resolved_how: resolved, note: c.note, by: c.by, at: c.at, source: c.source };
+}
+async function lcPublishers(env) {
+  let pool = [];
+  try {
+    const cfg = await env.DB.prepare("SELECT key, value FROM portal_config WHERE key IN ('go_live_publishers', 'go_live_approver')").all();
+    for (const r of (cfg.results || [])) String(r.value || '').split(',').forEach((e) => { e = e.trim().toLowerCase(); if (e && pool.indexOf(e) < 0) pool.push(e); });
+  } catch (e) { /* defaults below */ }
+  if (!pool.length) pool = GOLIVE_PUBLISHERS_DEFAULT.slice();
+  return pool;
+}
+async function lcCompute(env, onlyLister, filterLister) {
+  await lcEnsure(env);
+  const pubs = await lcPublishers(env);
+  const rs = await env.DB.prepare("SELECT task_id, type, account, item_id, title, status, assigned_to, assigned_by, comments, deadline_pkt, updated_at FROM tasks WHERE type = 'listing_new'").all();
+  const rows = {}; for (const r of ((await env.DB.prepare('SELECT * FROM listing_corrections').all().catch(() => ({ results: [] }))).results || [])) rows[String(r.task_id)] = r;
+  const names = {}; for (const u of ((await env.DB.prepare('SELECT email, name FROM users').all().catch(() => ({ results: [] }))).results || [])) names[String(u.email || '').toLowerCase()] = String(u.name || '');
+  const open = [], fixed = [], weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+  for (const t of (rs.results || [])) {
+    const flag = lcFlag(t.comments), ret = lcReturned(t.comments), row = rows[String(t.task_id)] || null;
+    const j = lcJudge(t, flag, ret, row);
+    if (!j) continue;
+    const assignedTo = String(t.assigned_to || '').toLowerCase();
+    const withGoLive = pubs.indexOf(assignedTo) >= 0;
+    const lister = (row && row.lister) ? String(row.lister).toLowerCase() : (withGoLive && flag && (flag.from || flag.by) ? String(flag.from || flag.by).toLowerCase() : assignedTo);
+    if (onlyLister && lister !== onlyLister && assignedTo !== onlyLister) continue;
+    if (filterLister && lister !== filterLister) continue;
+    const rec = { task_id: String(t.task_id), account: String(t.account || ''), title: String(t.title || ''), status: String(t.status || ''),
+      lister, lister_name: names[lister] || lister.split('@')[0], assigned_to: assignedTo, with_golive: withGoLive,
+      draft_link: (flag && flag.flag === 'draft') ? String(flag.link || '') : '', flag: flag ? String(flag.flag) : '',
+      note: j.note, by: j.by, at: j.at, source: j.source, deadline_pkt: String(t.deadline_pkt || ''),
+      resolved_how: j.resolved_how, resolved_at: (row && row.resolved_at) || '' };
+    if (j.open) open.push(rec);
+    else if ((rec.resolved_at || j.at) >= weekAgo) fixed.push(rec);
+  }
+  open.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));   // oldest waiting first
+  fixed.sort((a, b) => (a.at < b.at ? 1 : -1));
+  const byLister = {};
+  for (const r of open) { const k = r.lister; byLister[k] = byLister[k] || { lister: k, lister_name: r.lister_name, open: 0 }; byLister[k].open++; }
+  return { open, fixed: fixed.slice(0, 60), counts: { open: open.length, fixed_7d: fixed.length }, listers: Object.values(byLister).sort((a, b) => b.open - a.open) };
+}
 const ROUTES = {
   /* liveness — also what the client transport uses to decide Engine vs fallback */
   enginePing: { auth: 'public', fn: async () => ({ pong: Date.now() }) },
@@ -30476,6 +30558,85 @@ const ROUTES = {
      the "All listers" chips vanished. The list is now three cheap queries and carries no record at
      all; the record for ONE row is read on demand by listingArchiveRow when the person opens it.
      Reads only, and the §8.2 whitelist still guards everything a lister can see. */
+  /* ══ LISTING CORRECTIONS (owner, 26 Nov: "I am sending listings back to the listers to update them,
+     but they cannot send them back — make a listing correction page: management sees every lister's
+     listings that need correction, each lister sees his own") ═══════════════════════════════════════
+     Until now a listing could be sent back ONLY from the go-live desk, and only while it sat there as
+     a draft (goLiveReturn); it came back to the lister as a plain Working task with the note buried in
+     the comments, and nothing on either side said "this needs correcting". Two sources now feed one
+     answer: the sheet's own "[stamp] Name returned: note" lines (what goLiveReturn and an approver's
+     Return write) and this engine's listing_corrections table (what management raises from the page
+     or any task card, for a task in ANY open state). A correction is OPEN until the lister hands the
+     draft off again (a draft flag newer than the note), the listing is submitted or live, or someone
+     marks it fixed. The sheet is never written here — the Apps Script project is at its version cap. */
+  listingCorrections: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const role = String(ctx.user.role || '');
+      const all = LC_ALL_ROLES.indexOf(role) >= 0 || !!ctx.user.super;
+      if (!all && role !== 'Item Lister') throw new AuthError('auth');
+      const me = String(ctx.user.email || '').toLowerCase();
+      const out = await lcCompute(ctx.env, all ? '' : me, String(p.lister || '').toLowerCase());
+      return out;
+    },
+  },
+  listingCorrectionRaise: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      const role = String(ctx.user.role || '');
+      if (LC_ALL_ROLES.indexOf(role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const id = String(p.task_id || '').trim(), note = String(p.note || '').trim().slice(0, 500);
+      if (!id) throw new Error('SAY: which task');
+      if (!note) throw new Error('SAY: say what the lister must fix');
+      const t = await ctx.env.DB.prepare("SELECT task_id, type, status, assigned_to, comments, item_id FROM tasks WHERE task_id = ?1").bind(id).first();
+      if (!t) throw new Error('SAY: that task is not on the board yet — try again in a minute');
+      if (String(t.type) !== 'listing_new') throw new Error('SAY: only a new-listing task can be sent back for correction');
+      if (LC_OPEN.indexOf(String(t.status || '')) < 0) throw new Error('SAY: this listing is ' + String(t.status || 'closed') + ' — nothing to correct');
+      if (String(t.item_id || '').trim()) throw new Error('SAY: this listing already carries an Item ID — it is live; raise a revision instead');
+      const pubs = await lcPublishers(ctx.env);
+      const flag = lcFlag(t.comments);
+      const assignedTo = String(t.assigned_to || '').toLowerCase();
+      /* the lister is whoever did the work: the person the draft came FROM when it sits with
+         go-live, else the person it is assigned to */
+      const lister = (pubs.indexOf(assignedTo) >= 0 && flag && (flag.from || flag.by)) ? String(flag.from || flag.by).toLowerCase() : assignedTo;
+      await lcEnsure(ctx.env);
+      const at = new Date().toISOString();
+      await ctx.env.DB.prepare("INSERT INTO listing_corrections (task_id, lister, note, by_email, by_name, at, resolved_at, resolved_by, resolved_how) VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', '', '') " +
+        "ON CONFLICT(task_id) DO UPDATE SET lister = ?2, note = ?3, by_email = ?4, by_name = ?5, at = ?6, resolved_at = '', resolved_by = '', resolved_how = ''")
+        .bind(id, lister, note, me(ctx), String(ctx.user.name || ''), at).run();
+      try { await ctx.env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'LISTING_CORRECTION', ?2, ?3, ?4, datetime('now'))").bind(me(ctx), id, lister, note.slice(0, 200)).run(); } catch (e) {}
+      /* the page tells the caller whether the task is sitting with go-live right now: then the
+         sheet-side goLiveReturn must ALSO run (it is the only thing that can move the task back to
+         the lister), and the page calls it next */
+      return { ok: true, task_id: id, lister, at, with_golive: pubs.indexOf(assignedTo) >= 0 && !!(flag && flag.flag === 'draft') };
+      function me(c) { return String(c.user.email || '').toLowerCase(); }
+    },
+  },
+  listingCorrectionResolve: {
+    auth: 'any', fn: async (p, ctx) => {
+      await ensureTruthSchema(ctx.env);
+      await lcEnsure(ctx.env);
+      const role = String(ctx.user.role || ''), me = String(ctx.user.email || '').toLowerCase();
+      const id = String(p.task_id || '').trim();
+      if (!id) throw new Error('SAY: which task');
+      const row = await ctx.env.DB.prepare('SELECT task_id, lister FROM listing_corrections WHERE task_id = ?1').bind(id).first();
+      const mgmt = LC_ALL_ROLES.indexOf(role) >= 0 || !!ctx.user.super;
+      if (!mgmt && !(row && String(row.lister || '') === me)) {
+        /* a lister may also close a sheet-side return of his own by resending — recorded here so
+           the page clears at once instead of waiting for the mirror to show the new draft flag */
+        const t = await ctx.env.DB.prepare('SELECT assigned_to, comments FROM tasks WHERE task_id = ?1').bind(id).first();
+        const f = t ? lcFlag(t.comments) : null;
+        const his = t && (String(t.assigned_to || '').toLowerCase() === me || (f && String(f.from || f.by || '').toLowerCase() === me));
+        if (!his) throw new AuthError('auth');
+      }
+      const how = String(p.how || (mgmt ? 'marked fixed' : 'resent')).slice(0, 40);
+      await ctx.env.DB.prepare("INSERT INTO listing_corrections (task_id, lister, note, by_email, by_name, at, resolved_at, resolved_by, resolved_how) VALUES (?1, ?2, '', '', '', ?3, ?3, ?4, ?5) " +
+        "ON CONFLICT(task_id) DO UPDATE SET resolved_at = ?3, resolved_by = ?4, resolved_how = ?5")
+        .bind(id, (row && row.lister) || me, new Date().toISOString(), me, how).run();
+      return { ok: true, task_id: id, resolved_how: how };
+    },
+  },
+
   listingArchiveEngine: {
     auth: 'any', fn: async (p, ctx) => {
       const role = String(ctx.user.role || '');
