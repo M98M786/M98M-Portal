@@ -1043,7 +1043,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261126-0220';
+var BUILD = '20261126-0223';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2280,7 +2280,7 @@ VIEWS.home = {
     '.alx-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}' +
     '.alx-q{min-width:270px;font-weight:600}' +
     '.alx-sel{padding:9px 12px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-weight:700;font-size:12.5px}' +
-    '.alx-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px}' +
+    '.alx-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:0}' +
     '.alx-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);text-align:left;padding:9px 12px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
     '.alx-tbl td{padding:9px 12px;border-bottom:1px solid var(--gold-line);vertical-align:middle}' +
     '.alx-tbl tbody tr:hover{background:var(--blue-soft)}' +
@@ -2304,7 +2304,9 @@ VIEWS.home = {
     '.alx-kind{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.05em;padding:2px 8px;border-radius:99px;border:1px solid var(--gold-line);color:var(--text-2);white-space:nowrap}' +
     '.alx-kind.cpc{border-color:var(--gold-a);color:var(--gold-a)}.alx-kind.dyn{border-color:rgba(155,106,230,.6);color:#9B6AE6}.alx-kind.gen{border-color:rgba(72,199,142,.5);color:var(--ok)}' +
     '.alx-kind.paused{border-color:rgba(255,159,67,.55);color:var(--warn)}.alx-kind.none{color:var(--text-3)}' +
-    '.alx-camp{font-size:11.5px;font-weight:700;margin-top:3px;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}.alx-camp .adt-camplink{color:var(--gold-a)}' +
+    '.alx-camp{font-size:11.5px;font-weight:700;margin-top:3px;white-space:normal;max-width:300px;line-height:1.35;overflow-wrap:anywhere}.alx-camp .adt-camplink{color:var(--gold-a)}' +
+    '.alx-tbl td:last-child{white-space:normal;max-width:320px}' +
+    '.alx-sheetlbl{white-space:normal;overflow-wrap:anywhere}' +
     '.alx-camp.off{color:var(--text-3)}.alx-camp.off .adt-camplink{color:var(--text-3)}' +
     '.alx-sheetlbl{font-size:10px;color:var(--text-3);font-weight:600;margin-top:2px}' +
     '.alx-finder{border:1px solid var(--gold-a);border-radius:12px;padding:12px 14px;margin-bottom:12px;background:var(--panel-2)}' +
