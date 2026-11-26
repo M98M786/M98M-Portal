@@ -1043,7 +1043,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261126-0936';
+var BUILD = '20261126-0938';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -17283,8 +17283,17 @@ function createMeeting() {
           toast('Sent to ' + (aaStr(r && r.assigned_to).split('@')[0] || 'the lister') + ' ✓');
           aaAfterSent(id, r, account, lister);
         }).catch(function (e) {
+          var msg = String((e && e.message) || '');
+          /* 26 Nov (owner): "this item is already with … — refresh the archive" is the sheet telling us
+             a lister holds it; the card leaves the board here and now rather than asking for a refresh */
+          if (/already with/i.test(msg)) {
+            if (AA.data && AA.data.pending_send) { AA.data.pending_send = AA.data.pending_send.filter(function (c) { return String(c.hunt_id || '') !== id; }); }
+            if (card) { card.style.transition = 'opacity .3s'; card.style.opacity = '0'; setTimeout(function () { aaPaint(); }, 320); }
+            toast('Already with a lister \u2014 ' + msg.replace(/\s*\u2014\s*refresh the archive\.?$/i, '').replace(/^this item is already with\s*/i, '') + ' \u00b7 taken off the board');
+            return;
+          }
           btn.disabled = false; btn.textContent = 'Send to lister';
-          toast('NOT sent — ' + String((e && e.message) || ''));
+          toast('NOT sent \u2014 ' + msg);
         });
       };
     });

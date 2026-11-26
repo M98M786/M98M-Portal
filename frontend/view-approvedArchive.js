@@ -390,8 +390,17 @@
           toast('Sent to ' + (aaStr(r && r.assigned_to).split('@')[0] || 'the lister') + ' ✓');
           aaAfterSent(id, r, account, lister);
         }).catch(function (e) {
+          var msg = String((e && e.message) || '');
+          /* 26 Nov (owner): "this item is already with … — refresh the archive" is the sheet telling us
+             a lister holds it; the card leaves the board here and now rather than asking for a refresh */
+          if (/already with/i.test(msg)) {
+            if (AA.data && AA.data.pending_send) { AA.data.pending_send = AA.data.pending_send.filter(function (c) { return String(c.hunt_id || '') !== id; }); }
+            if (card) { card.style.transition = 'opacity .3s'; card.style.opacity = '0'; setTimeout(function () { aaPaint(); }, 320); }
+            toast('Already with a lister \u2014 ' + msg.replace(/\s*\u2014\s*refresh the archive\.?$/i, '').replace(/^this item is already with\s*/i, '') + ' \u00b7 taken off the board');
+            return;
+          }
           btn.disabled = false; btn.textContent = 'Send to lister';
-          toast('NOT sent — ' + String((e && e.message) || ''));
+          toast('NOT sent \u2014 ' + msg);
         });
       };
     });
