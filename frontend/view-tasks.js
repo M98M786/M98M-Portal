@@ -85,6 +85,8 @@
     }).catch(function () {});
   }
   function tkIsMgmt() { return !!(STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super)); }
+  /* who may send a listing back for correction: management, and the two roles that run listing */
+  function tkCorrMayRaise() { return !!(STATE.user && (['Management', 'Ops Head', 'Listing Manager', 'Team Lead'].indexOf(STATE.user.role) >= 0 || STATE.user.super)); }
   function tkSelIds() { return Object.keys(TKV.sel).filter(function (k) { return TKV.sel[k]; }); }
   function tkUpdateBulkBar() {
     var bar = $('tkBulkBar'); if (!bar) { return; }
@@ -492,6 +494,29 @@
     return m ? { when: m[1], by: m[2], text: m[3] } : null;
   }
   function tkApprover(t) { return tkStr(t.assigned_by) || 'Management'; }
+  /* 26 Nov (owner): "a listing correction page". The engine judges which listings still need
+     correcting — from the sheet's own returned notes AND from corrections management raises here —
+     and every listing card draws that verdict in red, so a lister never again gets a sent-back
+     listing as a plain Working task with the reason buried. Fetched once per load, by task id. */
+  var TK_CORR = {}, TK_CORR_AT = 0;
+  function tkCorrLoad(then) {
+    if (!STATE.user || !(STATE.idToken || STATE.session)) { return; }
+    var role = tkStr(STATE.user.role);
+    if (['Item Lister', 'Listing Manager', 'Team Lead', 'Management', 'Ops Head'].indexOf(role) < 0 && !STATE.user.super) { return; }
+    api('listingCorrections', {}).then(function (d) {
+      var m = {}; ((d && d.open) || []).forEach(function (r) { m[tkStr(r.task_id)] = r; });
+      TK_CORR = m; TK_CORR_AT = Date.now();
+      try { STATE.counts.listingCorrections = role === 'Item Lister' ? ((d && d.counts && d.counts.open) || 0) : 0; if (typeof refreshBadges === 'function') { refreshBadges(); } } catch (e) {}
+      if (typeof then === 'function') { then(); }
+    })['catch'](function () {});
+  }
+  function tkCorrBox(t, id) {
+    var c = TK_CORR[tkStr(t.task_id)];
+    if (!c) { return ''; }
+    return '<div class="tk-box tk-ret" data-tk-corr="' + tkAttr(id) + '"><div class="k">\ud83d\udd34 Needs correction \u00b7 sent back by ' + esc(tkStr(c.by) || 'management') + ' \u00b7 ' + esc(tkWhen(c.at) || '') + '</div>' +
+      '<div class="tk-txt">' + tkText(tkStr(c.note)) + '</div>' +
+      '<div class="tk-sub" style="margin-top:6px">' + (c.with_golive ? 'The draft is with go-live \u2014 it comes back to you the moment this is read.' : 'Fix the listing, then <b>Leave in draft</b> below with the corrected eBay draft link \u2014 that sends it back to go-live and clears this.') + '</div></div>';
+  }
 
   // ============================== MY TASKS ==============================
   VIEWS.tasks = {
@@ -763,6 +788,9 @@
     else { box.innerHTML = '<div class="spinner"></div>'; }
     tkFetchTasks().then(function (d) {
       tkPaintTasks(box, d);
+      /* 26 Nov: the correction verdicts arrive beside the tasks; a card already drawn gets its red
+         box on the repaint, and nothing waits on this read */
+      if (!TK_CORR_AT || Date.now() - TK_CORR_AT > 20000) { tkCorrLoad(function () { if (TKV.lastData === d && $('tkBody')) { tkPaintTasks(box, d); } }); }
     }).catch(function (e) {
       if (had) { toast('Showing your last task list — could not refresh just now.'); return; }
       box.innerHTML = '<div class="tk-empty">Your tasks could not be loaded just now.<span>' + esc(e.message) + '</span>' +
@@ -860,7 +888,9 @@
       }
     }
 
-    if (ret) {
+    var corr = (type === 'listing_new') ? tkCorrBox(t, id) : '';
+    if (corr) { extra += corr; }
+    else if (ret) {
       extra += '<div class="tk-box tk-ret"><div class="k">Returned by ' + esc(ret.by) + ' · ' + esc(tkWhen(ret.when)) + '</div>' +
         '<div class="tk-txt">' + tkText(ret.text) + '</div></div>';
     }
@@ -877,12 +907,27 @@
     if (type === 'listing_new') {
       extra += tkFlagBanner(t, id, status);
       if (status === TK_WORKING || status === TK_UPDATED) { extra += tkListerBar(id); }
+      /* 26 Nov (owner): management can send ANY open listing back for correction from here — not
+         only a draft on the go-live desk. The note goes to the engine (the page and the lister's
+         card read it); if the draft is with go-live, goLiveReturn also runs so the task itself moves
+         back to the lister. */
+      if (tkCorrMayRaise() && (status === TK_PENDING || status === TK_WORKING || status === TK_UPDATED) && !tkStr(t.item_id)) {
+        extra += '<div class="tk-lform hidden" data-lform="corr:' + tkAttr(id) + '">' +
+          '<div class="field"><label>What must the lister correct?</label>' +
+            '<textarea class="tk-ta" data-lcorr-note="' + tkAttr(id) + '" placeholder="e.g. title too long, wrong main image, draft link does not open"></textarea></div>' +
+          '<div class="tk-btns"><button class="minibtn tk-revbtn" data-act="corrSend" data-id="' + tkAttr(id) + '">Send back for correction</button>' +
+            '<button class="minibtn" data-act="leverCancel" data-id="corr:' + tkAttr(id) + '">Cancel</button></div>' +
+          '<div class="tk-sub" style="margin-top:8px">The lister sees this on the listing and on the Listing corrections page; it clears when they hand the corrected draft back.</div></div>';
+      }
     }
     if (status === TK_WORKING || status === TK_UPDATED) {
       extra += tkSubmitForm(t, id, type);
     }
     /* Management authority (owner 5 Sept): the manage handle on EVERY task — edit its details,
        reassign it, extend the deadline, end it, or delete it outright. */
+    if (tkCorrMayRaise() && type === 'listing_new' && (status === TK_PENDING || status === TK_WORKING || status === TK_UPDATED) && !tkStr(t.item_id)) {
+      act += '<button class="minibtn tk-revbtn" data-act="corrOpen" data-id="' + tkAttr(id) + '">Send back</button>';
+    }
     if (tkIsMgmt() && status !== TK_COMPLETED) {
       act += '<button class="minibtn" data-act="mgmt" data-id="' + tkAttr(id) + '" style="border-color:var(--gold-a);color:var(--gold-a)">Manage</button>';
       extra += tkManagePanel(t, id);
@@ -1133,8 +1178,8 @@
       return;
     }
     /* R7-4 lister levers — open one inline form, close the others; then the three actions. */
-    if (act === 'needTimeF' || act === 'needInfoF' || act === 'draftF' || act === 'rejectF') {
-      var want = act === 'needTimeF' ? 'time:' : act === 'needInfoF' ? 'info:' : act === 'draftF' ? 'draft:' : 'reject:';
+    if (act === 'needTimeF' || act === 'needInfoF' || act === 'draftF' || act === 'rejectF' || act === 'corrOpen') {
+      var want = act === 'needTimeF' ? 'time:' : act === 'needInfoF' ? 'info:' : act === 'draftF' ? 'draft:' : act === 'corrOpen' ? 'corr:' : 'reject:';
       if (act === 'rejectF') { tkFillRejectReasons(box, id); }
       var forms = box.querySelectorAll('[data-lform]'), j;
       for (j = 0; j < forms.length; j++) {
@@ -1147,6 +1192,19 @@
     if (act === 'leverCancel') {
       block = box.querySelector('[data-lform="' + String(id).replace(/"/g, '') + '"]');
       if (block) { block.classList.add('hidden'); }
+      return;
+    }
+    if (act === 'corrSend') {
+      var cta = tkPick(box, 'data-lcorr-note', id), cnote = cta ? tkStr(cta.value) : '';
+      if (!cnote) { toast('Say what the lister must correct.'); if (cta) { cta.focus(); } return; }
+      btn.disabled = true;
+      var raise = (typeof window.M98M_listingCorrectionRaise === 'function')
+        ? window.M98M_listingCorrectionRaise(id, cnote)
+        : api('listingCorrectionRaise', { task_id: id, note: cnote }).then(function (res) { if (res && res.with_golive) { return api('goLiveReturn', { task_id: id, note: cnote })['catch'](function () {}); } });
+      raise.then(function () {
+        toast('Sent back for correction \u2014 the lister sees it on the listing and on Listing corrections.');
+        tkCorrLoad(function () { if (TKV.lastData && $('tkBody')) { tkPaintTasks($('tkBody'), TKV.lastData); } });
+      })['catch'](function (e) { btn.disabled = false; toast('Not sent: ' + ((e && e.message) || 'request failed')); });
       return;
     }
     if (act === 'needTime') { tkSendNeedTime(box, id, btn); return; }

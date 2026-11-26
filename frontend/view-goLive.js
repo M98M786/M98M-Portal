@@ -411,6 +411,9 @@
         api('goLiveReturn', { task_id: id, note: msg }).then(function (r) {
           delete GL_DRAFT[id];
           toast('Sent back to ' + (glS(r && r.assigned_to).split('@')[0] || 'the lister') + '.');
+          /* 26 Nov: the Listing corrections page and the lister's card read the engine's note too —
+             raised here so they show it at once, not after the five-minute mirror */
+          try { api('listingCorrectionRaise', { task_id: id, note: msg })['catch'](function () {}); } catch (e) {}
           glLoad(true);
         }).catch(function (e) {
           var m = String((e && e.message) || '');

@@ -744,7 +744,7 @@ function apiRetrySingly(batch){
    When CONFIG serves an engine_url, the actions on this list go to the Engine (50–150ms edge
    reads) with a hard 2.5s abort; any failure falls straight back to Apps Script, so pulling the
    Engine's plug can never break a screen. Everything not listed keeps its old path untouched. */
-var ENGINE_ACTIONS = ['priceRevisionBoard','priceItemDetail','priceDecide','adtoolPeakHold','adtoolPeakProfile','adtoolVideoBoard','adtoolPeakCampaigns','adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolPulse','adtoolPulseSet','adtoolPulseRun','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolHourWindow','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard','adsNegativeDay','adsNegativeAck','bizSalesSeries','itemRiskAck', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad'];
+var ENGINE_ACTIONS = ['priceRevisionBoard','priceItemDetail','priceDecide','adtoolPeakHold','adtoolPeakProfile','adtoolVideoBoard','adtoolPeakCampaigns','adtoolDepts','adtoolLiveSplit','adtoolPotentialCpc','adtoolChangeDay','adtoolPeak','adtoolPeakAdd','adtoolPeakRemove','adtoolPulse','adtoolPulseSet','adtoolPulseRun','adtoolCampaignBoard','adtoolCampaignListings','adtoolItemCampaigns','adtoolPlan','adtoolToday','adtoolSales','adtoolStopToday','adtoolRunToday','adtoolCpcListings','adtoolOverview','adtoolNarrative','adtoolApplyPage','adtoolCommand','adtoolHourWindow','adtoolAlerts','adtoolReport','adtoolHealthPage','adtoolAccounts','adtoolCategories','adtoolCases','adtoolSlots','adtoolWhereIs','adtoolCampaigns','adtoolFlags','adtoolSearch','adtoolListing','adtoolActionLog','adtoolHealth','adtoolRegister','whoami','getPublicConfig','mgmtPendingEngine','priceBoard','priceAck','activeSplit','activeListings','engineHealth','ebayConsentLinks','ebaySubmitConsent','campaignWatch','accountHealth','dailyReport','campaignRemoveItem','recheckFeed','mgmtOverview','csDesk','autoMsgConfig','autoMsgSet','ackViolation','csReply','csRefund','courierList','ordersLive', 'dispatchLive', 'orderFind', 'orderPushTracking', 'ordersBoard', 'itemPnl', 'adsBoard','adsNegativeDay','adsNegativeAck','bizSalesSeries','itemRiskAck', 'trafficBoard', 'zeroSaleList', 'zeroSaleDecide', 'alertMail', 'alertMailResolve', 'mgmtPulse', 'sessionMint', 'sessionHello', 'sessionEnd', 'selfTest', 'alertMailResolveAll', 'accountKpisEngine','orderAddAliLink','runJobNow','deliveryCheckpoints','accountDay','itemRisk','marketingBoard','feedbackBoard','promoMembers','sourcingBoard','sourcingSave','fundsSummary','vatBoard','accountReport2','oosReport','toolStateLoad','toolStateSave','listingPipeline','pageMetrics','truthBoard','adsTruth','adsPauseListing','keywordBoard','keywordDecide','aliCheck','inboxThreads','inboxThread','inboxSend','inboxPoll','inboxPeople','deptPendingEngine','sheetItems','csPlaybook','csPlaybookSave','csPlaybookImport','csToolLog','csToolStats','csFillContext','recoveryBoard','recoveryUpsert','pollEngine','notifMarkRead','serviceCases','bizExtras','allTasksEngine','staffReportsDay','staffReportsArchive','policyArchive','policyCheck','profitBoard','refundsBoard','recheckNoteSave','recheckNoteList','ordersPulse','revisionBoard','listingLoad','listingCorrections','listingCorrectionRaise','listingCorrectionResolve'];
 /* Prefer the Engine, but survive an Engine that has not shipped the action yet. Key = the action
    the screen calls; value = the Engine's equivalent. These are the sheet-backed boards that cost
    3-6 seconds because Apps Script re-reads the whole TASKS tab per request; the Engine answers the
@@ -762,7 +762,7 @@ var ENGINE_MISSING = {};
 /* Writes never fall back and get a patient timeout: a 2.5s abort on a write could report
    failure while the Engine finishes the change — the read path's resilience trick becomes a
    lie on a mutation. The Engine is the ONLY server that knows these actions. */
-var ENGINE_WRITE_ACTIONS = ['priceDecide','campaignRemoveItem','autoMsgSet','ackViolation','csReply','csRefund','ebaySubmitConsent','orderAddAliLink','orderPushTracking'];
+var ENGINE_WRITE_ACTIONS = ['priceDecide','campaignRemoveItem','autoMsgSet','ackViolation','csReply','csRefund','ebaySubmitConsent','orderAddAliLink','orderPushTracking','listingCorrectionRaise','listingCorrectionResolve'];
 /* The Engine's address is stable infrastructure — baked as the fallback so sign-in and config
    can reach it BEFORE any config exists (the AS front door proved it can vanish under everyone). */
 var ENGINE_URL_DEFAULT = 'https://m98m-engine.m98m786.workers.dev/';
@@ -1043,7 +1043,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261126-0939';
+var BUILD = '20261126-1745';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -22401,6 +22401,9 @@ VIEWS.dashboard = {
         api('goLiveReturn', { task_id: id, note: msg }).then(function (r) {
           delete GL_DRAFT[id];
           toast('Sent back to ' + (glS(r && r.assigned_to).split('@')[0] || 'the lister') + '.');
+          /* 26 Nov: the Listing corrections page and the lister's card read the engine's note too —
+             raised here so they show it at once, not after the five-minute mirror */
+          try { api('listingCorrectionRaise', { task_id: id, note: msg })['catch'](function () {}); } catch (e) {}
           glLoad(true);
         }).catch(function (e) {
           var m = String((e && e.message) || '');
@@ -28346,6 +28349,220 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       box.innerHTML = '<div class="alx-empty">Could not load the archive.<span>' + esc(e.message) + '</span></div>';
     });
   }
+})();
+
+/* ---------- view-listingCorrections.js ---------- */
+/* view-listingCorrections.js — Listing corrections (26 Nov, owner: "I am sending listings back to
+ * the listers to update them, but they cannot send them back — make a listing correction page; in
+ * the management portal show every lister's listings that need correction, in a lister's own portal
+ * show him the ones that need correcting again").
+ * ONE feed (engine listingCorrections) judges which new-listing tasks still need correcting: the
+ * sheet's own "returned:" notes (the go-live desk's Send back) and the notes management raises from
+ * any task card or from here. A correction stays open until the lister hands the corrected draft
+ * back (Leave in draft / Resend here), the listing is submitted or live, or management marks it
+ * fixed. A lister sees his own and resends from the row; management and the listing leads see every
+ * lister's, grouped, with Send back again and Mark fixed. Nothing here writes the tasks sheet. */
+(function () {
+  'use strict';
+
+  var LC_MGMT = ['Management', 'Ops Head', 'Listing Manager', 'Team Lead'];
+  var LC_ROLES = ['Item Lister'].concat(LC_MGMT);
+  var LC = { data: null, seq: 0, open: {} };
+
+  function lcS(v) { return String(v == null ? '' : v).trim(); }
+  function lcAttr(v) { return esc(lcS(v)).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+  function lcMgmt() { return !!(STATE.user && (LC_MGMT.indexOf(STATE.user.role) >= 0 || STATE.user.super)); }
+  function lcWhen(iso) { var d = new Date(iso); if (isNaN(d.getTime())) { return lcS(iso); } return d.toLocaleString('en-GB', { timeZone: 'Asia/Karachi', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true }); }
+  function lcAge(iso) { var ms = Date.now() - Date.parse(iso); if (!isFinite(ms) || ms < 0) { return ''; } var h = Math.floor(ms / 3600000); if (h < 1) { return 'just now'; } if (h < 24) { return h + ' h'; } var d = Math.floor(h / 24); return d + ' day' + (d === 1 ? '' : 's'); }
+
+  VIEW_CSS.push(
+    '.lc-tiles{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:0 0 14px}' +
+    '.lc-tile{border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;background:var(--panel-2);cursor:pointer}' +
+    '.lc-tile.on{border-color:var(--gold-a);box-shadow:0 0 0 1px var(--gold-a) inset}' +
+    '.lc-tile .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800}' +
+    '.lc-tile b{display:block;font-size:22px;margin-top:4px}' +
+    '.lc-tile.bad b{color:var(--bad)}' +
+    '.lc-row{border:1px solid var(--gold-line);border-left:4px solid var(--bad);border-radius:12px;padding:12px 14px;margin:0 0 10px;background:var(--panel-2)}' +
+    '.lc-row.fixed{border-left-color:var(--ok);opacity:.85}' +
+    '.lc-row .t{font-weight:800;font-size:13.5px}' +
+    '.lc-row .m{font-size:11px;color:var(--text-3);font-weight:700;margin-top:3px}' +
+    '.lc-note{margin-top:8px;padding:9px 11px;border-radius:10px;background:rgba(255,80,80,.08);border:1px solid rgba(255,80,80,.25);font-size:12.5px;white-space:pre-wrap}' +
+    '.lc-note .k{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--bad);font-weight:800;margin-bottom:3px}' +
+    '.lc-row.fixed .lc-note{background:rgba(80,200,120,.08);border-color:rgba(80,200,120,.25)}.lc-row.fixed .lc-note .k{color:var(--ok)}' +
+    '.lc-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}' +
+    '.lc-form{margin-top:10px;display:grid;gap:8px}' +
+    '.lc-in{width:100%;box-sizing:border-box;padding:9px 11px;border-radius:10px;border:1px solid var(--gold-line-hi);background:var(--panel);color:var(--text);font:inherit;font-size:12.5px}' +
+    '.lc-grp{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);font-weight:800;margin:16px 0 8px;display:flex;gap:8px;align-items:center}' +
+    '.lc-grp b{color:var(--text);font-size:13px;text-transform:none;letter-spacing:0}' +
+    '.lc-empty{color:var(--text-2);font-weight:700;padding:14px 0}.lc-empty span{display:block;color:var(--text-3);font-weight:600;font-size:12px;margin-top:4px}'
+  );
+
+  function lcFetch() { return api('listingCorrections', {}); }
+
+  function lcRow(r, mgmt) {
+    var id = lcS(r.task_id), link = safeUrl(lcS(r.draft_link));
+    var where = r.with_golive ? 'draft is with go-live' : 'with ' + (mgmt ? esc(lcS(r.lister_name)) : 'you');
+    var h = '<div class="lc-row' + (r.resolved_how ? ' fixed' : '') + '" data-lc-row="' + lcAttr(id) + '">' +
+      '<div class="t">' + esc(lcS(r.title) || id) + '</div>' +
+      '<div class="m"><span class="mono">' + esc(id) + '</span> · ' + esc(lcS(r.account)) +
+        (mgmt ? ' · lister <b style="color:var(--text-2)">' + esc(lcS(r.lister_name)) + '</b>' : '') +
+        ' · ' + where + (link ? ' · <a href="' + esc(link) + '" target="_blank" rel="noopener noreferrer">open the eBay draft ↗</a>' : '') + '</div>' +
+      '<div class="lc-note"><div class="k">' + (r.resolved_how ? 'Fixed · ' + esc(lcS(r.resolved_how)) : 'Needs correction') + ' · sent back by ' + esc(lcS(r.by) || 'management') + ' · ' + esc(lcWhen(r.at)) + (r.resolved_how ? '' : ' (' + esc(lcAge(r.at)) + ' waiting)') + '</div>' +
+        esc(lcS(r.note)) + '</div>';
+    if (!r.resolved_how) {
+      h += '<div class="lc-acts">';
+      if (!mgmt || lcS(r.lister) === lcS(STATE.user && STATE.user.email).toLowerCase()) {
+        h += '<button class="minibtn" data-lc-act="resendOpen" data-id="' + lcAttr(id) + '" style="border-color:var(--gold-a);color:var(--gold-a)">✅ Resend corrected draft</button>';
+      }
+      if (mgmt) {
+        h += '<button class="minibtn" data-lc-act="againOpen" data-id="' + lcAttr(id) + '">Send back again</button>' +
+             '<button class="minibtn" data-lc-act="fixed" data-id="' + lcAttr(id) + '">Mark fixed</button>';
+      }
+      h += '</div>' +
+        '<div class="lc-form hidden" data-lc-form="resend:' + lcAttr(id) + '">' +
+          '<input class="lc-in" type="url" autocomplete="off" placeholder="https://www.ebay.co.uk/… the corrected draft link" data-lc-link="' + lcAttr(id) + '" value="' + lcAttr(r.draft_link) + '">' +
+          '<input class="lc-in" type="text" placeholder="Note for go-live (optional) — what you changed" data-lc-rnote="' + lcAttr(id) + '">' +
+          '<div class="lc-acts" style="margin-top:0"><button class="minibtn" data-lc-act="resend" data-id="' + lcAttr(id) + '" style="border-color:var(--gold-a);color:var(--gold-a)">Hand the corrected draft to go-live</button>' +
+            '<button class="minibtn" data-lc-act="cancel" data-id="resend:' + lcAttr(id) + '">Cancel</button></div></div>' +
+        '<div class="lc-form hidden" data-lc-form="again:' + lcAttr(id) + '">' +
+          '<textarea class="lc-in" rows="2" placeholder="What must the lister correct this time?" data-lc-anote="' + lcAttr(id) + '"></textarea>' +
+          '<div class="lc-acts" style="margin-top:0"><button class="minibtn" data-lc-act="again" data-id="' + lcAttr(id) + '">Send back</button>' +
+            '<button class="minibtn" data-lc-act="cancel" data-id="again:' + lcAttr(id) + '">Cancel</button></div></div>';
+    }
+    return h + '</div>';
+  }
+
+  function lcPaint() {
+    var box = $('lcBody'), D = LC.data, mgmt = lcMgmt();
+    if (!box) { return; }
+    if (!D) { box.innerHTML = '<div class="spinner"></div>'; return; }
+    var open = D.open || [], fixed = D.fixed || [];
+    var h = '';
+    if (mgmt) {
+      h += '<div class="lc-tiles">' +
+        '<div class="lc-tile' + (open.length ? ' bad' : '') + (LC.lister === '' ? ' on' : '') + '" data-lc-lister=""><span class="k">Need correction · all listers</span><b>' + open.length + '</b></div>' +
+        (D.listers || []).map(function (l) {
+          return '<div class="lc-tile' + (LC.lister === l.lister ? ' on' : '') + '" data-lc-lister="' + lcAttr(l.lister) + '"><span class="k">' + esc(lcS(l.lister_name)) + '</span><b>' + l.open + '</b></div>';
+        }).join('') +
+        '<div class="lc-tile" style="cursor:default"><span class="k">Fixed · last 7 days</span><b style="color:var(--ok)">' + (D.counts && D.counts.fixed_7d || 0) + '</b></div>' +
+      '</div>';
+    }
+    var shown = LC.lister ? open.filter(function (r) { return lcS(r.lister) === LC.lister; }) : open;
+    if (!shown.length) {
+      h += '<div class="lc-empty">' + (mgmt ? 'Nothing is waiting for correction' + (LC.lister ? ' with this lister' : '') + '.' : 'Nothing of yours needs correcting right now.') +
+        '<span>' + (mgmt ? 'Send a listing back from any listing task (Send back) or from the go-live desk; it appears here until the lister hands the corrected draft back.' : 'When management sends a listing back, it appears here with what to fix.') + '</span></div>';
+    } else if (mgmt && !LC.lister) {
+      var by = {}; shown.forEach(function (r) { (by[lcS(r.lister)] = by[lcS(r.lister)] || []).push(r); });
+      Object.keys(by).sort(function (a, b) { return by[b].length - by[a].length; }).forEach(function (k) {
+        h += '<div class="lc-grp"><b>' + esc(lcS(by[k][0].lister_name)) + '</b> ' + by[k].length + ' listing' + (by[k].length === 1 ? '' : 's') + ' to correct</div>' + by[k].map(function (r) { return lcRow(r, true); }).join('');
+      });
+    } else {
+      h += shown.map(function (r) { return lcRow(r, mgmt); }).join('');
+    }
+    if (fixed.length && (mgmt || !LC.lister)) {
+      var mine = mgmt ? fixed : fixed;
+      h += '<div class="lc-grp">Fixed recently</div>' + mine.slice(0, 20).map(function (r) { return lcRow(r, mgmt); }).join('');
+    }
+    box.innerHTML = h;
+    lcWire(box);
+  }
+
+  function lcForm(box, key) { var fs = box.querySelectorAll('[data-lc-form]'), i; for (i = 0; i < fs.length; i++) { if (fs[i].getAttribute('data-lc-form') === key) { return fs[i]; } } return null; }
+  function lcPick(box, attr, id) { var els = box.querySelectorAll('[' + attr + ']'), i; for (i = 0; i < els.length; i++) { if (els[i].getAttribute(attr) === id) { return els[i]; } } return null; }
+
+  function lcWire(box) {
+    box.querySelectorAll('[data-lc-lister]').forEach(function (t) { t.onclick = function () { LC.lister = this.getAttribute('data-lc-lister') || ''; lcPaint(); }; });
+    box.onclick = function (ev) {
+      var el = ev.target && ev.target.closest ? ev.target.closest('[data-lc-act]') : null;
+      if (!el || !box.contains(el)) { return; }
+      var act = el.getAttribute('data-lc-act'), id = el.getAttribute('data-id') || '';
+      if (act === 'resendOpen' || act === 'againOpen') {
+        var f = lcForm(box, (act === 'resendOpen' ? 'resend:' : 'again:') + id);
+        if (f) { f.classList.remove('hidden'); var first = f.querySelector('input,textarea'); if (first) { first.focus(); } }
+        return;
+      }
+      if (act === 'cancel') { var fc = lcForm(box, id); if (fc) { fc.classList.add('hidden'); } return; }
+      if (act === 'resend') {
+        var l = lcPick(box, 'data-lc-link', id), n = lcPick(box, 'data-lc-rnote', id);
+        var link = l ? lcS(l.value) : '';
+        if (!safeUrl(link)) { toast('Paste the corrected eBay draft link (it must start with http/https).'); if (l) { l.focus(); } return; }
+        el.disabled = true;
+        /* the same hand-off the task card makes (listerDraft): the draft flag is rewritten with the
+           new link and the task moves to go-live; the engine then sees a flag newer than the note
+           and the correction closes on its own. The resolve call below only makes it close NOW,
+           ahead of the five-minute mirror. */
+        api('listerDraft', { task_id: id, draft_link: link, note: n ? lcS(n.value) : '' }).then(function (res) {
+          toast('Handed to ' + (lcS(res && res.assigned_to_name) || 'go-live') + ' ✓ — correction cleared.');
+          return api('listingCorrectionResolve', { task_id: id, how: 'resent' })['catch'](function () {});
+        }).then(lcLoad)['catch'](function (e) {
+          el.disabled = false;
+          var msg = String((e && e.message) || '');
+          if (/overloaded|timeout|did not answer|taking long|aborted|failed to fetch/i.test(msg)) { toast('Google is slow — the hand-off is finishing on the server; this clears on the next refresh.'); setTimeout(lcLoad, 15000); return; }
+          toast('Not sent: ' + msg);
+        });
+        return;
+      }
+      if (act === 'again') {
+        var ta = lcPick(box, 'data-lc-anote', id), note = ta ? lcS(ta.value) : '';
+        if (!note) { toast('Say what the lister must correct.'); if (ta) { ta.focus(); } return; }
+        el.disabled = true;
+        lcRaise(id, note).then(function () { toast('Sent back — the lister sees it on the listing and here.'); lcLoad(); })['catch'](function (e) { el.disabled = false; toast('Not sent: ' + ((e && e.message) || 'request failed')); });
+        return;
+      }
+      if (act === 'fixed') {
+        el.disabled = true;
+        api('listingCorrectionResolve', { task_id: id, how: 'marked fixed' }).then(function () { toast('Marked fixed.'); lcLoad(); })['catch'](function (e) { el.disabled = false; toast('Not marked: ' + ((e && e.message) || 'request failed')); });
+      }
+    };
+  }
+
+  /* raising a correction: the note goes to the engine; when the draft sits with go-live the sheet's
+     own goLiveReturn runs too, because only it can move the task back to the lister */
+  function lcRaise(id, note) {
+    return api('listingCorrectionRaise', { task_id: id, note: note }).then(function (res) {
+      if (res && res.with_golive) { return api('goLiveReturn', { task_id: id, note: note })['catch'](function () {}); }
+    });
+  }
+  window.M98M_listingCorrectionRaise = lcRaise;
+
+  function lcLoad() {
+    var seq = ++LC.seq;
+    return lcFetch().then(function (d) {
+      if (seq !== LC.seq) { return; }
+      LC.data = d || { open: [], fixed: [], counts: {}, listers: [] };
+      try { if (STATE.user && STATE.user.role === 'Item Lister') { STATE.counts.listingCorrections = (d && d.counts && d.counts.open) || 0; if (typeof refreshBadges === 'function') { refreshBadges(); } } } catch (e) {}
+      lcPaint();
+      var fr = $('lcFresh'); if (fr) { fr.textContent = (LC.data.counts && LC.data.counts.open || 0) + ' waiting'; }
+    })['catch'](function (e) {
+      var box = $('lcBody'); if (box && !LC.data) { box.innerHTML = '<div class="lc-empty">Could not load.<span>' + esc((e && e.message) || '') + '</span></div>'; }
+    });
+  }
+
+  VIEWS.listingCorrections = {
+    label: 'Listing corrections',
+    order: 12.4,
+    roles: LC_ROLES,
+    icon: '<path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M13 7l4 4"/>',
+    badge: function () { return (STATE.counts && STATE.counts.listingCorrections) || 0; },
+    prefetch: function () {
+      return lcFetch().then(function (d) {
+        try { if (STATE.user && STATE.user.role === 'Item Lister') { STATE.counts.listingCorrections = (d && d.counts && d.counts.open) || 0; if (typeof refreshBadges === 'function') { refreshBadges(); } } } catch (e) {}
+        return d;
+      });
+    },
+    render: function () {
+      var mgmt = lcMgmt();
+      return '<div class="hgroup enter d1"><h1>Listing <span class="goldtext">corrections</span></h1>' +
+          '<span class="sub">' + (mgmt ? 'every lister’s listings sent back for correction, until the corrected draft comes back' : 'listings sent back to you — what to fix, and one click to hand the corrected draft back') + '</span>' +
+          '<span style="margin-left:auto;display:flex;gap:6px;align-items:center"><span class="hint" id="lcFresh"></span><button class="minibtn" id="lcRefresh">Refresh</button></span></div>' +
+        '<div class="card enter d2"><div class="bd" id="lcBody"><div class="spinner"></div></div></div>';
+    },
+    init: function () {
+      LC.lister = '';
+      var r = $('lcRefresh'); if (r) { r.onclick = function () { lcLoad(); }; }
+      lcLoad();
+    }
+  };
 })();
 
 /* ---------- view-listingDecisions.js ---------- */
@@ -42723,6 +42940,8 @@ function saveSchedule() {
     }).catch(function () {});
   }
   function tkIsMgmt() { return !!(STATE.user && (['Management', 'Ops Head'].indexOf(STATE.user.role) >= 0 || STATE.user.super)); }
+  /* who may send a listing back for correction: management, and the two roles that run listing */
+  function tkCorrMayRaise() { return !!(STATE.user && (['Management', 'Ops Head', 'Listing Manager', 'Team Lead'].indexOf(STATE.user.role) >= 0 || STATE.user.super)); }
   function tkSelIds() { return Object.keys(TKV.sel).filter(function (k) { return TKV.sel[k]; }); }
   function tkUpdateBulkBar() {
     var bar = $('tkBulkBar'); if (!bar) { return; }
@@ -43130,6 +43349,29 @@ function saveSchedule() {
     return m ? { when: m[1], by: m[2], text: m[3] } : null;
   }
   function tkApprover(t) { return tkStr(t.assigned_by) || 'Management'; }
+  /* 26 Nov (owner): "a listing correction page". The engine judges which listings still need
+     correcting — from the sheet's own returned notes AND from corrections management raises here —
+     and every listing card draws that verdict in red, so a lister never again gets a sent-back
+     listing as a plain Working task with the reason buried. Fetched once per load, by task id. */
+  var TK_CORR = {}, TK_CORR_AT = 0;
+  function tkCorrLoad(then) {
+    if (!STATE.user || !(STATE.idToken || STATE.session)) { return; }
+    var role = tkStr(STATE.user.role);
+    if (['Item Lister', 'Listing Manager', 'Team Lead', 'Management', 'Ops Head'].indexOf(role) < 0 && !STATE.user.super) { return; }
+    api('listingCorrections', {}).then(function (d) {
+      var m = {}; ((d && d.open) || []).forEach(function (r) { m[tkStr(r.task_id)] = r; });
+      TK_CORR = m; TK_CORR_AT = Date.now();
+      try { STATE.counts.listingCorrections = role === 'Item Lister' ? ((d && d.counts && d.counts.open) || 0) : 0; if (typeof refreshBadges === 'function') { refreshBadges(); } } catch (e) {}
+      if (typeof then === 'function') { then(); }
+    })['catch'](function () {});
+  }
+  function tkCorrBox(t, id) {
+    var c = TK_CORR[tkStr(t.task_id)];
+    if (!c) { return ''; }
+    return '<div class="tk-box tk-ret" data-tk-corr="' + tkAttr(id) + '"><div class="k">\ud83d\udd34 Needs correction \u00b7 sent back by ' + esc(tkStr(c.by) || 'management') + ' \u00b7 ' + esc(tkWhen(c.at) || '') + '</div>' +
+      '<div class="tk-txt">' + tkText(tkStr(c.note)) + '</div>' +
+      '<div class="tk-sub" style="margin-top:6px">' + (c.with_golive ? 'The draft is with go-live \u2014 it comes back to you the moment this is read.' : 'Fix the listing, then <b>Leave in draft</b> below with the corrected eBay draft link \u2014 that sends it back to go-live and clears this.') + '</div></div>';
+  }
 
   // ============================== MY TASKS ==============================
   VIEWS.tasks = {
@@ -43401,6 +43643,9 @@ function saveSchedule() {
     else { box.innerHTML = '<div class="spinner"></div>'; }
     tkFetchTasks().then(function (d) {
       tkPaintTasks(box, d);
+      /* 26 Nov: the correction verdicts arrive beside the tasks; a card already drawn gets its red
+         box on the repaint, and nothing waits on this read */
+      if (!TK_CORR_AT || Date.now() - TK_CORR_AT > 20000) { tkCorrLoad(function () { if (TKV.lastData === d && $('tkBody')) { tkPaintTasks(box, d); } }); }
     }).catch(function (e) {
       if (had) { toast('Showing your last task list — could not refresh just now.'); return; }
       box.innerHTML = '<div class="tk-empty">Your tasks could not be loaded just now.<span>' + esc(e.message) + '</span>' +
@@ -43498,7 +43743,9 @@ function saveSchedule() {
       }
     }
 
-    if (ret) {
+    var corr = (type === 'listing_new') ? tkCorrBox(t, id) : '';
+    if (corr) { extra += corr; }
+    else if (ret) {
       extra += '<div class="tk-box tk-ret"><div class="k">Returned by ' + esc(ret.by) + ' · ' + esc(tkWhen(ret.when)) + '</div>' +
         '<div class="tk-txt">' + tkText(ret.text) + '</div></div>';
     }
@@ -43515,12 +43762,27 @@ function saveSchedule() {
     if (type === 'listing_new') {
       extra += tkFlagBanner(t, id, status);
       if (status === TK_WORKING || status === TK_UPDATED) { extra += tkListerBar(id); }
+      /* 26 Nov (owner): management can send ANY open listing back for correction from here — not
+         only a draft on the go-live desk. The note goes to the engine (the page and the lister's
+         card read it); if the draft is with go-live, goLiveReturn also runs so the task itself moves
+         back to the lister. */
+      if (tkCorrMayRaise() && (status === TK_PENDING || status === TK_WORKING || status === TK_UPDATED) && !tkStr(t.item_id)) {
+        extra += '<div class="tk-lform hidden" data-lform="corr:' + tkAttr(id) + '">' +
+          '<div class="field"><label>What must the lister correct?</label>' +
+            '<textarea class="tk-ta" data-lcorr-note="' + tkAttr(id) + '" placeholder="e.g. title too long, wrong main image, draft link does not open"></textarea></div>' +
+          '<div class="tk-btns"><button class="minibtn tk-revbtn" data-act="corrSend" data-id="' + tkAttr(id) + '">Send back for correction</button>' +
+            '<button class="minibtn" data-act="leverCancel" data-id="corr:' + tkAttr(id) + '">Cancel</button></div>' +
+          '<div class="tk-sub" style="margin-top:8px">The lister sees this on the listing and on the Listing corrections page; it clears when they hand the corrected draft back.</div></div>';
+      }
     }
     if (status === TK_WORKING || status === TK_UPDATED) {
       extra += tkSubmitForm(t, id, type);
     }
     /* Management authority (owner 5 Sept): the manage handle on EVERY task — edit its details,
        reassign it, extend the deadline, end it, or delete it outright. */
+    if (tkCorrMayRaise() && type === 'listing_new' && (status === TK_PENDING || status === TK_WORKING || status === TK_UPDATED) && !tkStr(t.item_id)) {
+      act += '<button class="minibtn tk-revbtn" data-act="corrOpen" data-id="' + tkAttr(id) + '">Send back</button>';
+    }
     if (tkIsMgmt() && status !== TK_COMPLETED) {
       act += '<button class="minibtn" data-act="mgmt" data-id="' + tkAttr(id) + '" style="border-color:var(--gold-a);color:var(--gold-a)">Manage</button>';
       extra += tkManagePanel(t, id);
@@ -43771,8 +44033,8 @@ function saveSchedule() {
       return;
     }
     /* R7-4 lister levers — open one inline form, close the others; then the three actions. */
-    if (act === 'needTimeF' || act === 'needInfoF' || act === 'draftF' || act === 'rejectF') {
-      var want = act === 'needTimeF' ? 'time:' : act === 'needInfoF' ? 'info:' : act === 'draftF' ? 'draft:' : 'reject:';
+    if (act === 'needTimeF' || act === 'needInfoF' || act === 'draftF' || act === 'rejectF' || act === 'corrOpen') {
+      var want = act === 'needTimeF' ? 'time:' : act === 'needInfoF' ? 'info:' : act === 'draftF' ? 'draft:' : act === 'corrOpen' ? 'corr:' : 'reject:';
       if (act === 'rejectF') { tkFillRejectReasons(box, id); }
       var forms = box.querySelectorAll('[data-lform]'), j;
       for (j = 0; j < forms.length; j++) {
@@ -43785,6 +44047,19 @@ function saveSchedule() {
     if (act === 'leverCancel') {
       block = box.querySelector('[data-lform="' + String(id).replace(/"/g, '') + '"]');
       if (block) { block.classList.add('hidden'); }
+      return;
+    }
+    if (act === 'corrSend') {
+      var cta = tkPick(box, 'data-lcorr-note', id), cnote = cta ? tkStr(cta.value) : '';
+      if (!cnote) { toast('Say what the lister must correct.'); if (cta) { cta.focus(); } return; }
+      btn.disabled = true;
+      var raise = (typeof window.M98M_listingCorrectionRaise === 'function')
+        ? window.M98M_listingCorrectionRaise(id, cnote)
+        : api('listingCorrectionRaise', { task_id: id, note: cnote }).then(function (res) { if (res && res.with_golive) { return api('goLiveReturn', { task_id: id, note: cnote })['catch'](function () {}); } });
+      raise.then(function () {
+        toast('Sent back for correction \u2014 the lister sees it on the listing and on Listing corrections.');
+        tkCorrLoad(function () { if (TKV.lastData && $('tkBody')) { tkPaintTasks($('tkBody'), TKV.lastData); } });
+      })['catch'](function (e) { btn.disabled = false; toast('Not sent: ' + ((e && e.message) || 'request failed')); });
       return;
     }
     if (act === 'needTime') { tkSendNeedTime(box, id, btn); return; }
@@ -48233,7 +48508,7 @@ function enterApp(user){
     /* 28 Oct: Activated today merged into Activated and stopped (adtoolStopped), so its key left. */
     { name:'Advertising', keys:['tasksAds','adSignals','adsCentre','adtoolStopped','adtoolPeak','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
     { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','wrongOrders'] },
-    { name:'Listings',    keys:['tasksListing','listDesk','goLive','revisionDesk','rev72','rev20','revApproval','videoRev','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
+    { name:'Listings',    keys:['tasksListing','listDesk','listingCorrections','goLive','revisionDesk','rev72','rev20','revApproval','videoRev','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','approvedArchive','huntRevised','huntRevisions','huntRecords','ideaBox'] },
     { name:'Customer Service', keys:['tasksCS','csSignals','csDesk','csReplyDesk','csDefenseDesk','csRecoveryDesk','cs','returns','refunds','inbox','feedback'] },
     { name:'Library',     keys:['tools','rules'] },
