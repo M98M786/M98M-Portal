@@ -26107,7 +26107,12 @@ const ROUTES = {
       const _lonH = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hour12: false }).formatToParts(new Date()).find((x) => x.type === 'hour').value);
       const ukOffH = ((_lonH - new Date().getUTCHours()) + 24) % 24;
       const dayExpr = "substr(datetime(o.created_at, '+" + ukOffH + " hours'),1,10)";
-      const od = (await ctx.env.DB.prepare('SELECT ' + dayExpr + " AS d, COUNT(*) AS n FROM orders o WHERE o.created_at >= ?1 AND o.status NOT IN ('CANCELLED', 'NOT_FOUND')" + (acctF ? ' AND o.account = ?2' : '') + ' GROUP BY d')
+      /* 26 Nov (owner: "the sold figure is not updated for today"): the books are rolled nightly and
+         filled by the team a day or two behind, so today's sold read £40 beside 246 live orders. The
+         order ledger's own revenue, cost and fee-landed earning per UK day ride alongside the count,
+         and a day takes the larger of the books and the ledger — the overlay the Business overview's
+         own tiles have always used for today, here for every day the books trail. */
+      const od = (await ctx.env.DB.prepare('SELECT ' + dayExpr + " AS d, COUNT(*) AS n, ROUND(COALESCE(SUM(o.sold), 0), 2) AS rev, ROUND(COALESCE(SUM(o.cost), 0), 2) AS cost, ROUND(COALESCE(SUM(CASE WHEN o.ebay_fees > 0 THEN o.sold - o.ebay_fees ELSE 0 END), 0), 2) AS oe_known FROM orders o WHERE o.created_at >= ?1 AND o.status NOT IN ('CANCELLED', 'NOT_FOUND')" + (acctF ? ' AND o.account = ?2' : '') + ' GROUP BY d')
         .bind(...(acctF ? [ukDayStartIsoFor(from), acctF] : [ukDayStartIsoFor(from)])).all().catch(() => ({ results: [] }))).results || [];
       const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const keyOf = (d) => grain === 'day' ? d : grain === 'month' ? d.slice(0, 7) : adtIsoWeek(d);
@@ -26123,13 +26128,27 @@ const ROUTES = {
         }
         buckets[k].to = d;
       }
-      for (const r of sd) { const b = buckets[keyOf(String(r.date))]; if (b) { b.sold += Number(r.sold) || 0; b.oe += Number(r.oe) || 0; b.cost += Number(r.cost) || 0; b.actual += Number(r.actual) || 0; b.ads += Number(r.ads) || 0; } }
-      for (const r of od) { const d = String(r.d || ''); if (d < from || d > today) continue; const b = buckets[keyOf(d)]; if (b) b.orders += Number(r.n) || 0; }
+      /* per day first — the larger of the books and the ledger for sold, cost and earning — then the bucket */
+      const books = {}; for (const r of sd) books[String(r.date)] = r;
+      const ledger = {}; for (const r of od) ledger[String(r.d || '')] = r;
+      let liveDays = 0;
+      for (let d = from; d <= today; d = adtAddDays(d, 1)) {
+        const b = buckets[keyOf(d)]; if (!b) continue;
+        const bk = books[d] || {}, lg = ledger[d] || {};
+        const soldB = Number(bk.sold) || 0, soldL = Number(lg.rev) || 0;
+        if (soldL > soldB + 0.005) liveDays++;
+        b.sold += Math.max(soldB, soldL);
+        b.cost += Math.max(Number(bk.cost) || 0, Number(lg.cost) || 0);
+        b.oe += Math.max(Number(bk.oe) || 0, Number(lg.oe_known) || 0);
+        b.actual += Number(bk.actual) || 0; b.ads += Number(bk.ads) || 0;
+        b.orders += Number(lg.n) || 0;
+      }
       const rows = order.map((k) => { const b = buckets[k]; b.sold = round2(b.sold); b.oe = round2(b.oe); b.cost = round2(b.cost); b.actual = round2(b.actual); b.ads = round2(b.ads); if (grain !== 'day') b.tip += ' to ' + b.to; return b; });
       const sum = (f) => round2(rows.reduce((s, r) => s + (Number(r[f]) || 0), 0));
       return { grain, account: acctF, from, to: today, books_from: bf && bf.d ? String(bf.d) : null, rows,
         totals: { sold: sum('sold'), orders: rows.reduce((s, r) => s + r.orders, 0), oe: sum('oe'), cost: sum('cost'), actual: sum('actual'), ads: sum('ads') },
-        note: 'sold = the daily books, summed per ' + grain + '; orders = the order ledger on the UK trading day, cancelled and not-found orders left out; today is live on both' };
+        live_days: liveDays,
+        note: 'sold, cost and order earning = the larger of the daily books and the order ledger per UK day (the ledger stands in where the books have not been written yet; ' + liveDays + ' such day' + (liveDays === 1 ? '' : 's') + ' in this window); orders = the order ledger on the UK trading day, cancelled and not-found orders left out; actual profit = the books alone' };
     },
   },
 
@@ -34476,8 +34495,13 @@ const ROUTES = {
          fees + errors, creates nothing), AddFixedPriceItem (the create), UploadSiteHostedPictures (re-host the
          source photos under the destination seller when eBay refuses a cross-seller PictureURL) and read-only
          GetUserPreferences (the destination's business-policy ids). Same sync-key gate, token stays here. */
+      /* 26 Nov (owner): a listing eBay took down under the counterfeit policy cannot be relisted, and the
+         rest of that product range has to come off sale with it. EndFixedPriceItem is the only way to do
+         that from here. It ENDS a listing — orders already placed are untouched, but the listing and its
+         sales history stop. Nothing calls it on a schedule; it is only ever run from a named list. */
       const TRADE_CALLS = ['GetItem', 'ReviseFixedPriceItem', 'GetSellerList', 'GetMyMessages', 'GetMemberMessages',
-        'VerifyAddFixedPriceItem', 'AddFixedPriceItem', 'UploadSiteHostedPictures', 'GetUserPreferences'];
+        'VerifyAddFixedPriceItem', 'AddFixedPriceItem', 'UploadSiteHostedPictures', 'GetUserPreferences',
+        'EndFixedPriceItem'];
       if (TRADE_CALLS.indexOf(call) < 0) {
         throw new Error('SAY: call must be one of ' + TRADE_CALLS.join(', ') + ' or taxonomyAspects');
       }
