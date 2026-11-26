@@ -1043,7 +1043,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261126-0346';
+var BUILD = '20261126-0936';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -17084,6 +17084,7 @@ function createMeeting() {
       AA.loadDays = (d && d.history_days) || 60;
       AA.loadErr = '';
       aaPaintLoad();
+      if (AA.tab === 'pending') { aaPaint(); }
     }).catch(function (e) {
       AA.load = null; AA.loadErr = (e && e.message) || 'no answer';
       aaPaintLoad();
@@ -17197,14 +17198,32 @@ function createMeeting() {
     if (AA.tab === 'sent' || !d || !d.pending_send.length) { aaPaint(); }   /* the Sent table, or the empty state */
     setTimeout(aaLoadLoad, 1500);
   }
+  /* 26 Nov (owner: "why does this page show products already sent?"): the PENDING_SEND store on the
+     sheet keeps a row when its delete after a Send fails quietly (a lock that timed out), so a card
+     came back although a lister already held the listing. The board now checks every pending card
+     against the engine's task mirror (the same read that draws the lister boxes) and the Sent list:
+     a hunt that already has a listing task, open or done, is not pending whatever the store says. */
+  function aaHeld() {
+    var held = {};
+    (AA.load || []).forEach(function (t) { if (t && t.hunt_id) { held[String(t.hunt_id)] = t; } });
+    ((AA.sentData && AA.sentData.sent) || []).forEach(function (s) { if (s && s.hunt_id) { held[String(s.hunt_id)] = held[String(s.hunt_id)] || s; } });
+    return held;
+  }
+  function aaPending() {
+    var d = AA.data, held = aaHeld();
+    return ((d && d.pending_send) || []).filter(function (c) { return !held[String(c.hunt_id || '')]; });
+  }
   function aaPaint() {
     aaPaintTop();
     var d = AA.data;
     var body = $('aaBody'); if (!body || !d) { return; }
     if (AA.tab === 'pending') {
-      var items = d.pending_send || [];
-      if (!items.length) { body.innerHTML = '<div class="aa-empty">Nothing waiting to be sent.<span>Approved items land here; choose a lister and send each one.</span></div>'; return; }
-      body.innerHTML = '<div class="aa-grid">' + items.map(function (h, i) { return aaCard(h, !!d.can_send, i); }).join('') + '</div>';
+      var items = aaPending();
+      var hidden = ((d.pending_send || []).length - items.length);
+      if (STATE.counts) { STATE.counts.approvedArchive = items.length; if (typeof refreshBadges === 'function') { try { refreshBadges(); } catch (e) {} } }
+      if (!items.length) { body.innerHTML = '<div class="aa-empty">Nothing waiting to be sent.<span>Approved items land here; choose a lister and send each one.' + (hidden ? ' ' + hidden + ' item' + (hidden === 1 ? '' : 's') + ' the store still lists ' + (hidden === 1 ? 'is' : 'are') + ' already with a lister and ' + (hidden === 1 ? 'is' : 'are') + ' not shown.' : '') + '</span></div>'; return; }
+      body.innerHTML = (hidden ? '<div class="aa-load-h" style="margin-bottom:8px"><span>' + hidden + ' item' + (hidden === 1 ? '' : 's') + ' the store still lists ' + (hidden === 1 ? 'is' : 'are') + ' already with a lister and ' + (hidden === 1 ? 'is' : 'are') + ' not shown.</span></div>' : '') +
+        '<div class="aa-grid">' + items.map(function (h, i) { return aaCard(h, !!d.can_send, i); }).join('') + '</div>';
       aaWireSend(body);
     } else {
       if (!AA.sentData) { body.innerHTML = '<div class="spinner"></div>'; aaLoadSent(); return; }
@@ -17236,7 +17255,7 @@ function createMeeting() {
     aaPaintLoad();   // AA.listers arrives with the archive, so the boxes are drawn with it
     var tabs = $('aaTabs'); if (tabs && d) {
       tabs.innerHTML =
-        '<button class="aa-tab' + (AA.tab === 'pending' ? ' on' : '') + '" data-aa-tab="pending">Pending send <span style="opacity:.7">' + (d.counts ? d.counts.pending_send : 0) + '</span></button>' +
+        '<button class="aa-tab' + (AA.tab === 'pending' ? ' on' : '') + '" data-aa-tab="pending">Pending send <span style="opacity:.7">' + aaPending().length + '</span></button>' +
         '<button class="aa-tab' + (AA.tab === 'sent' ? ' on' : '') + '" data-aa-tab="sent">Sent to listers <span style="opacity:.7">' + ((AA.sentData && AA.sentData.counts) ? AA.sentData.counts.sent : '…') + '</span></button>';
       Array.prototype.forEach.call(tabs.querySelectorAll('[data-aa-tab]'), function (b) {
         b.onclick = function () { AA.tab = this.getAttribute('data-aa-tab'); if (AA.tab === 'sent' && !AA.sentData) { aaLoadSent(); } aaPaint(); };
