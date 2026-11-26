@@ -74,14 +74,15 @@
   function cfgOf() { return (S.D && S.D.cfg) || {}; }
 
   VIEWS.adtoolPulse = {
-    label: 'Price automation',
+    /* 26 Nov (owner): named for what it drives */
+    label: 'Dynamic Listings Price automation',
     /* hidden here, carried by the /ads/ sidebar and the owner's pinned group — the same second-link
        road adtoolItemCampaigns and Product history already ride */
     hidden: true, order: 95, roles: ROLES,
     icon: '<path d="M12 3v18"/><path d="M8 7h5a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h7"/><path d="M4 12h2M18 12h2"/>',
     render: function () {
       return '<div class="ppl-wrap">' +
-        adtHgroup('Price automation', 'The peak-time 10p pulse on the Dynamic and General listings', 'pplFresh') +
+        adtHgroup('Dynamic Listings Price automation', 'The peak-time 10p pulse on the Dynamic and General listings', 'pplFresh') +
         '<div id="pplBanner"></div>' +
         '<div id="pplLaw"></div>' +
         '<div id="pplSet"></div>' +
