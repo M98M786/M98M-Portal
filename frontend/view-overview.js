@@ -1612,13 +1612,17 @@
     cfg = cfg || {};
     var st = { grain: cfg.grain || 'day', acct: cfg.acct || '', pick: '', data: null, key: '', dataKey: '' };
     var uid = 'bars' + Math.random().toString(36).slice(2, 8);
-    host.innerHTML = '<div class="dates" style="margin:0 0 10px;padding:8px 10px;gap:6px">' +
+    /* the bar's styles live under .ov2 (the overview's scope); the mount brings that scope with it
+       so the bar dresses the same on any page */
+    host.innerHTML = '<div class="ov2"><div class="dates" style="margin:0 0 10px;padding:8px 10px;gap:6px">' +
       '<select class="alx-sel" id="' + uid + 'A" autocomplete="off" style="min-width:140px"><option value="">All accounts</option></select>' +
       '<div class="seg" id="' + uid + 'M">' + [['day', 'One month \u00b7 days'], ['week', '52 weeks'], ['month', '12 months']].map(function (p) { return '<button data-g="' + p[0] + '"' + (st.grain === p[0] ? ' class="on"' : '') + '>' + p[1] + '</button>'; }).join('') + '</div>' +
       '<select class="alx-sel" id="' + uid + 'P" autocomplete="off" style="min-width:170px;display:none"></select>' +
       '<span class="range-label" id="' + uid + 'H" style="flex-basis:100%"></span></div>' +
-      '<div id="' + uid + 'C" style="width:100%;height:' + (cfg.height || 340) + 'px"><div class="empty">Loading\u2026</div></div>';
+      '<div id="' + uid + 'C" style="width:100%;height:' + (cfg.height || 340) + 'px"><div class="empty">Loading\u2026</div></div></div>';
     var $$ = function (s) { return document.getElementById(uid + s); };
+    /* the account list may be filled twice (a cached answer, then a fresh one): one option per account */
+    var dedupe = function (sel) { if (!sel) { return; } var seen = {}; for (var i = sel.options.length - 1; i >= 0; i--) { var v = sel.options[i].value; if (seen[v]) { sel.remove(i); } else { seen[v] = 1; } } };
     var pickFill = function () {
       var sel = $$('P'); if (!sel) { return; }
       var t = ukToday(), y = Number(t.slice(0, 4)), opts = [];
@@ -1687,7 +1691,7 @@
         ['catch'](function (e) { var b = $$('C'); if (b && st.key === key) { b.innerHTML = '<div class="empty">The series did not answer \u2014 ' + esc((e && e.message) || 'no answer') + '</div>'; } });
     };
     var selA = $$('A');
-    if (selA) { fillAccountSelect(selA, st.acct, function () { st.acct = selA.value || ''; load(); }); setTimeout(function () { if ((selA.value || '') !== (st.acct || '')) { st.acct = selA.value || ''; load(); } }, 2500); }
+    if (selA) { fillAccountSelect(selA, st.acct, function () { st.acct = selA.value || ''; load(); }); setTimeout(function () { dedupe(selA); if ((selA.value || '') !== (st.acct || '')) { st.acct = selA.value || ''; load(); } }, 2500); setTimeout(function () { dedupe(selA); }, 7000); }
     var selP = $$('P'); if (selP) { selP.onchange = function () { st.pick = selP.value || ''; load(); }; }
     var mode = $$('M');
     if (mode) { mode.onclick = function (ev) { var b = ev.target && ev.target.closest ? ev.target.closest('[data-g]') : null; if (!b) { return; } st.grain = b.getAttribute('data-g') || 'day'; st.pick = ''; var bs = mode.querySelectorAll('button'); for (var i = 0; i < bs.length; i++) { bs[i].classList.toggle('on', bs[i] === b); } pickFill(); load(); }; }
