@@ -7,7 +7,7 @@
 
   /* 26 Nov (owner): the page is Product Returns now; `win` is the window picker (today … all time),
      `hideAck` hides the products already acknowledged */
-  var IR = { tab: 'returns', data: null, acct: '', win: 'all', hideAck: false };
+  var IR = { tab: 'returns', data: null, acct: '', win: 'all', accCol: '', hideAck: false };
 
   VIEW_CSS.push(
     '.ir-tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px}' +
@@ -25,6 +25,9 @@
     '.ir-st .p{font-size:11px;color:var(--text-3);font-weight:700}.ir-st.bad b{color:var(--bad)}.ir-st.ok b{color:var(--ok)}' +
     /* 26 Nov: the window picker's column, the links under each listing, the acknowledgement box */
     '.ir-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 8px;font-size:12px;color:var(--text-2);font-weight:700}' +
+    /* 26 Nov: the window and the account are each one column whose heading is the dropdown */
+    '.ir-tbl th select.ir-hsel{background:var(--panel);border:1px solid var(--gold-line-hi);color:var(--gold-a);border-radius:8px;padding:4px 8px;font:inherit;font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;max-width:170px}' +
+    '.ir-tbl td.ir-on{color:var(--gold-a);font-weight:800;font-size:13.5px}' +
     '.ir-chk{display:inline-flex;gap:5px;align-items:center;font-size:11.5px;color:var(--text-3);font-weight:700;cursor:pointer}' +
     '.ir-tbl th.ir-on,.ir-tbl td.ir-on{color:var(--gold-a)}' +
     '.ir-links{font-size:10px;color:var(--text-3);margin-top:3px;display:flex;flex-wrap:wrap;gap:3px 9px;align-items:center;font-weight:700}' +
@@ -134,41 +137,36 @@
     var W = IR_WL[IR.win] ? IR.win : 'all';
     var cnt = function (r) { return W === 'today' ? (r.today || 0) : W === 'yesterday' ? (r.yesterday || 0) : W === 'd7' ? (r.d7 || 0) : W === 'd30' ? (r.d30 || 0) : (r.all || 0); };
     var accOf = function (r) { return (r.accounts_by && r.accounts_by[W]) || (W === 'all' ? (r.accounts || {}) : {}); };
-    if (W !== 'all') { list = list.filter(function (r) { return cnt(r) > 0; }).slice().sort(function (x, y) { return cnt(y) - cnt(x); }); }
+    /* 26 Nov (owner): "a box showing all-time data with a dropdown to see today, yesterday, 7 days, 30
+       days; similarly a box showing all-account data with a dropdown for each account". Two columns:
+       the window column, whose heading is the window dropdown, and the account column, whose heading
+       is the account dropdown — all accounts by default, one account when picked. The list is cut to
+       the products with a count in that window (and for that account), sorted by it. */
+    var allAccts = {};
+    list.forEach(function (r) { Object.keys((r.accounts_by && r.accounts_by.all) || r.accounts || {}).forEach(function (a2) { allAccts[a2] = 1; }); });
+    var acctNames = Object.keys(allAccts).sort();
+    var A = IR.accCol && allAccts[IR.accCol] ? IR.accCol : '';
+    var acnt = function (r) { return A ? (accOf(r)[A] || 0) : cnt(r); };
+    var sortBy = A ? acnt : cnt;
+    if (W !== 'all' || A) { list = list.filter(function (r) { return sortBy(r) > 0; }).slice().sort(function (x, y) { return sortBy(y) - sortBy(x); }); }
     var acks = d.acks || {};
     var ackKey = function (r) { return IR.tab + '|' + r.key; };
     var nAck = list.filter(function (r) { return !!acks[ackKey(r)]; }).length;
     if (IR.hideAck) { list = list.filter(function (r) { return !acks[ackKey(r)]; }); }
-    /* his Returns Summary workbook's shape: rank · product · per-account qty columns ·
-       reasons "(qty per reason)" · refund £ · % of total */
-    var acctSet = {};
-    list.forEach(function (r) { Object.keys(accOf(r)).forEach(function (a2) { acctSet[a2] = 1; }); });
-    var acctCols = Object.keys(acctSet).sort();
-    /* 2 Oct (owner): the per-account headers used only the first word, so "AZHAR ABRT" and
-       "Azhar Bhai" both read "Azhar" — two different shops, indistinguishable. Use the first
-       word ONLY when it is unique (case-insensitively) across the shown accounts; otherwise the
-       full account name. Full name is always on hover. */
-    var irFwCount = {};
-    acctCols.forEach(function (a2) { var fw = String(a2).trim().split(/\s+/)[0].toLowerCase(); irFwCount[fw] = (irFwCount[fw] || 0) + 1; });
-    function irAcctLabel(a2) {
-      var parts = String(a2).trim().split(/\s+/);
-      return irFwCount[parts[0].toLowerCase()] > 1 ? String(a2).trim() : parts[0];
-    }
-    h += '<div class="ir-tools"><span>' + esc(IR_WL[W]) + ' · ' + (IR.acct ? esc(IR.acct) : 'all accounts') + ' · ' + list.length + ' product' + (list.length === 1 ? '' : 's') + (nAck ? ' · ' + nAck + ' acknowledged' : '') + '</span>' +
+    h += '<div class="ir-tools"><span>' + esc(IR_WL[W]) + ' · ' + (A ? esc(A) : (IR.acct ? esc(IR.acct) : 'all accounts')) + ' · ' + list.length + ' product' + (list.length === 1 ? '' : 's') + (nAck ? ' · ' + nAck + ' acknowledged' : '') + '</span>' +
       '<label class="ir-chk"><input type="checkbox" id="irHideAck"' + (IR.hideAck ? ' checked' : '') + '> hide acknowledged</label>' +
       (list.length ? '<button class="minibtn" id="irAckAll">Acknowledge all shown\u2026</button>' : '') + '</div>';
-    var thW = function (k, label) { return '<th' + (W === k ? ' class="ir-on"' : '') + '>' + label + '</th>'; };
-    var tdW = function (k, v, strong) { return '<td' + (W === k ? ' class="ir-on"' : '') + (strong ? ' style="font-weight:800"' : '') + '>' + (v || (strong ? 0 : '\u2014')) + '</td>'; };
+    var winSel = '<select class="ir-hsel" id="irWinTh" title="the window this column counts">' + ['all', 'today', 'yesterday', 'd7', 'd30'].map(function (k) { return '<option value="' + k + '"' + (W === k ? ' selected' : '') + '>' + IR_WL[k] + '</option>'; }).join('') + '</select>';
+    var accSel = '<select class="ir-hsel" id="irAccTh" title="the account this column counts, over the same window"><option value="">All accounts</option>' + acctNames.map(function (a2) { return '<option value="' + esc(a2).replace(/"/g, '&quot;') + '"' + (A === a2 ? ' selected' : '') + '>' + esc(a2) + '</option>'; }).join('') + '</select>';
     h += '<div class="scroll"><table class="ir-tbl"><thead><tr>' +
       '<th>#</th><th style="text-align:left">Product \u00b7 folded across accounts</th>' +
-      thW('today', 'Today') + thW('yesterday', 'Yesterday') + thW('d7', '7 days') + thW('d30', '30 days') + thW('all', 'All time') +
-      acctCols.map(function (a2) { return '<th title="' + esc(a2) + (W === 'all' ? '' : ' \u00b7 ' + IR_WL[W]) + '">' + esc(irAcctLabel(a2)) + '</th>'; }).join('') +
+      '<th>' + winSel + '</th><th>' + accSel + '</th>' +
       (showReasons ? '<th>Refund \u00a3</th><th style="text-align:left">Reasons (qty per reason)</th>' : '') +
       '<th>% of total</th><th style="text-align:left">Acknowledged</th></tr></thead><tbody>';
     if (!list.length) {
-      h += '<tr><td colspan="18" style="text-align:left"><div class="empty">' +
+      h += '<tr><td colspan="9" style="text-align:left"><div class="empty">' +
         (IR.tab === 'late' ? 'No late-tracking marks yet \u2014 counting started 21 Aug; every order that crosses 2 business days untracked lands here permanently.'
-          : W !== 'all' ? 'Nothing recorded for ' + esc(IR_WL[W].toLowerCase()) + (IR.hideAck ? ' that is not acknowledged' : '') + '.' : IR.hideAck ? 'Everything here is acknowledged.' : 'Nothing recorded.') + '</div></td></tr>';
+          : (W !== 'all' || A) ? 'Nothing recorded for ' + esc(IR_WL[W].toLowerCase()) + (A ? ' on ' + esc(A) : '') + (IR.hideAck ? ' that is not acknowledged' : '') + '.' : IR.hideAck ? 'Everything here is acknowledged.' : 'Nothing recorded.') + '</div></td></tr>';
     }
     list.forEach(function (r, rank) {
       var hot = r.all > threshold, ak = acks[ackKey(r)];
@@ -178,8 +176,8 @@
         (r.duplicated ? '<span class="ir-dup">DUPLICATED</span>' : '') +
         (hot ? ' <b style="color:var(--bad)">\u00b7 DECISION</b>' : '') +
         irLinks(r.item_ids) + '</td>' +
-        tdW('today', r.today) + tdW('yesterday', r.yesterday) + tdW('d7', r.d7) + tdW('d30', r.d30) + tdW('all', r.all, true) +
-        acctCols.map(function (a2) { var n = accOf(r)[a2] || 0; return '<td' + (n ? '' : ' style="color:var(--text-3)"') + '>' + (n || '\u2014') + '</td>'; }).join('') +
+        '<td class="ir-on">' + cnt(r) + '</td>' +
+        '<td' + (A ? ' class="ir-on"' : '') + '>' + (A ? (acnt(r) || '\u2014') : cnt(r)) + '</td>' +
         (showReasons
           ? '<td>' + (Number(r.refund) ? '\u00a3' + Number(r.refund).toFixed(2) : '\u2014') + '</td>' +
             '<td style="text-align:left;font-size:11px;color:var(--text-2);max-width:260px;white-space:normal">' + esc(String(r.reasons || '')) + '</td>'
@@ -198,6 +196,8 @@
   /* the acknowledgement box: one product (a comment row opens under it) or every product shown */
   function irWire(box, list) {
     var hc = $('irHideAck'); if (hc) { hc.onchange = function () { IR.hideAck = this.checked; irPaint(); }; }
+    var wt = $('irWinTh'); if (wt) { wt.onchange = function () { IR.win = wt.value || 'all'; irPaint(); }; }
+    var at = $('irAccTh'); if (at) { at.onchange = function () { IR.accCol = at.value || ''; irPaint(); }; }
     var aa = $('irAckAll');
     if (aa) {
       aa.onclick = function () {
@@ -250,7 +250,6 @@
         [['returns', 'Returns'], ['inr', 'Not received'], ['speed', 'Late tracking'], ['late', '2-day marks']].map(function (t) {
           return '<button class="minibtn' + (IR.tab === t[0] ? ' on' : '') + '" data-ir-t="' + t[0] + '">' + t[1] + '</button>';
         }).join('') +
-        '<select id="irWin" class="minibtn" style="padding:6px 8px" title="the window the counts and the per-account columns follow">' + ['all', 'today', 'yesterday', 'd7', 'd30'].map(function (k) { return '<option value="' + k + '"' + (IR.win === k ? ' selected' : '') + '>' + IR_WL[k] + '</option>'; }).join('') + '</select>' +
         '<select id="irAcct" class="minibtn" style="padding:6px 8px"><option value="">All accounts</option></select>' +
         '<button class="minibtn" id="irRefresh">Refresh</button></span></div>' +
         '<div class="card enter d2"><div class="bd" id="irBody"><div class="spinner"></div></div></div>';
@@ -264,8 +263,6 @@
           irPaint();
         };
       });
-      var sw = $('irWin');
-      if (sw) { sw.onchange = function () { IR.win = sw.value || 'all'; irPaint(); }; }
       var sa = $('irAcct');
       if (sa) {
         fillAccountSelect(sa, IR.acct, function () { IR.acct = sa.value; IR.data = null; irLoad(); });
