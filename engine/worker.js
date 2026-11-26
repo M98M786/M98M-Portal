@@ -25986,7 +25986,9 @@ const ROUTES = {
         from = adtAddDays(today, -back);
         if (grain === 'month') from = from.slice(0, 8) + '01';
       }
-      const sd = (await ctx.env.DB.prepare('SELECT date, ROUND(SUM(sold), 2) AS sold FROM sales_daily WHERE date >= ?1 AND date <= ?2' + (acctF ? ' AND account = ?3' : '') + ' GROUP BY date')
+      /* 26 Nov (owner): the earnings chart — order earning, AliExpress cost and actual profit ride
+         beside sold, all four the daily books' own columns */
+      const sd = (await ctx.env.DB.prepare('SELECT date, ROUND(SUM(sold), 2) AS sold, ROUND(SUM(COALESCE(oe, 0)), 2) AS oe, ROUND(SUM(COALESCE(cost, 0)), 2) AS cost, ROUND(SUM(COALESCE(actual, 0)), 2) AS actual, ROUND(SUM(COALESCE(ads, 0)), 2) AS ads FROM sales_daily WHERE date >= ?1 AND date <= ?2' + (acctF ? ' AND account = ?3' : '') + ' GROUP BY date')
         .bind(...(acctF ? [from, today, acctF] : [from, today])).all().catch(() => ({ results: [] }))).results || [];
       const bf = await ctx.env.DB.prepare('SELECT MIN(date) AS d FROM sales_daily' + (acctF ? ' WHERE account = ?1' : '')).bind(...(acctF ? [acctF] : [])).first().catch(() => null);
       const _lonH = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hour12: false }).formatToParts(new Date()).find((x) => x.type === 'hour').value);
@@ -26001,18 +26003,19 @@ const ROUTES = {
         const k = keyOf(d);
         if (!buckets[k]) {
           const dd = Number(d.slice(8, 10)), mm = Number(d.slice(5, 7)) - 1, yy = d.slice(2, 4);
-          buckets[k] = { key: k, from: d, to: d, sold: 0, orders: 0,
+          buckets[k] = { key: k, from: d, to: d, sold: 0, orders: 0, oe: 0, cost: 0, actual: 0, ads: 0,
             label: grain === 'day' ? dd + ' ' + MON[mm] : grain === 'month' ? MON[mm] + ' ' + yy : 'W' + String(k).slice(-2) + ' · ' + dd + ' ' + MON[mm],
             tip: grain === 'day' ? d : grain === 'month' ? MON[mm] + ' 20' + yy : 'week from ' + d };
           order.push(k);
         }
         buckets[k].to = d;
       }
-      for (const r of sd) { const b = buckets[keyOf(String(r.date))]; if (b) b.sold += Number(r.sold) || 0; }
+      for (const r of sd) { const b = buckets[keyOf(String(r.date))]; if (b) { b.sold += Number(r.sold) || 0; b.oe += Number(r.oe) || 0; b.cost += Number(r.cost) || 0; b.actual += Number(r.actual) || 0; b.ads += Number(r.ads) || 0; } }
       for (const r of od) { const d = String(r.d || ''); if (d < from || d > today) continue; const b = buckets[keyOf(d)]; if (b) b.orders += Number(r.n) || 0; }
-      const rows = order.map((k) => { const b = buckets[k]; b.sold = round2(b.sold); if (grain !== 'day') b.tip += ' to ' + b.to; return b; });
+      const rows = order.map((k) => { const b = buckets[k]; b.sold = round2(b.sold); b.oe = round2(b.oe); b.cost = round2(b.cost); b.actual = round2(b.actual); b.ads = round2(b.ads); if (grain !== 'day') b.tip += ' to ' + b.to; return b; });
+      const sum = (f) => round2(rows.reduce((s, r) => s + (Number(r[f]) || 0), 0));
       return { grain, account: acctF, from, to: today, books_from: bf && bf.d ? String(bf.d) : null, rows,
-        totals: { sold: round2(rows.reduce((s, r) => s + r.sold, 0)), orders: rows.reduce((s, r) => s + r.orders, 0) },
+        totals: { sold: sum('sold'), orders: rows.reduce((s, r) => s + r.orders, 0), oe: sum('oe'), cost: sum('cost'), actual: sum('actual'), ads: sum('ads') },
         note: 'sold = the daily books, summed per ' + grain + '; orders = the order ledger on the UK trading day, cancelled and not-found orders left out; today is live on both' };
     },
   },

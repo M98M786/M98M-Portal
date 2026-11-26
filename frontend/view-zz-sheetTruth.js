@@ -392,7 +392,11 @@
       var days = upDays;
       var spanDays = Math.round((new Date(SX.to + 'T12:00:00Z') - new Date(SX.from + 'T12:00:00Z')) / 86400000) + 1;
       h += '<div class="card" style="margin-top:12px"><div class="hd">Account to account <span class="hint">total sold · actual profit · ▲▼ vs last month</span></div><div class="bd" id="sxAcctBox"><div class="spinner"></div></div></div>';
-      h += '<div class="card" style="margin-top:14px"><div class="hd">Day by day — profit vs cost <span class="hint">where the money goes · profit line + total-cost line (ads + AliExpress)</span></div><div class="bd">' + sxChartPvC(days) + '</div></div>';
+      /* 26 Nov (owner): "a new graph with order earning, AliExpress cost and actual profit, from the
+         Sales Analysis sheet — order earning yellow, AliExpress cost red, actual profit green — one
+         month at first, with the sales chart's bar on top". The profit-vs-cost lines gave way to it;
+         the chart is the shared bar mount, fed by the daily books. */
+      h += '<div class="card" style="margin-top:14px"><div class="hd">Earnings day by day \u2014 order earning \u00b7 AliExpress cost \u00b7 actual profit <span class="hint">the daily books\u2019 own columns \u00b7 one month of days, or a week or a month from the pickers</span></div><div class="bd" id="sxEarn"><div class="empty">Loading\u2026</div></div></div>';
 
       /* per-account ledger for the range */
       var accts = Object.keys(byA).sort();
@@ -412,6 +416,13 @@
         '<button class="minibtn" id="sxItemsBest" style="margin-left:auto">Best first</button><button class="minibtn" id="sxItemsLoss">Losses first</button></div>' +
         '<div class="bd" id="sxItems"><div class="spinner"></div></div></div>';
       body.innerHTML = h;
+      if (window.M98M_BARS && $('sxEarn')) {
+        window.M98M_BARS.mount($('sxEarn'), { acct: SX.acct || '', series: [
+          { key: 'oe', name: 'Order earning', color: '#f2b035', label: '#f7c96a' },
+          { key: 'cost', name: 'AliExpress cost', color: '#e0563f', label: '#ff8a73' },
+          { key: 'actual', name: 'Actual profit', color: '#2fb170', label: '#5fd49a', signed: true }
+        ], note: 'order earning, AliExpress cost and actual profit are the Sales Analysis day tabs\u2019 own columns' });
+      }
       /* 3 Sept: account-to-account vs last month — fetch the previous calendar month per account. */
       (function () {
         var box = $('sxAcctBox');
