@@ -136,7 +136,7 @@
        is the page as it was (one figure per window); individual lays the same window out day by day. */
     view: 'collective',
     /* 26 Nov (owner): the sales bar chart above Right now — its own grain and account */
-    ss: { grain: 'day', acct: '', data: null, key: '', dataKey: '' } };
+    ss: { grain: 'day', acct: '', pick: '', data: null, key: '', dataKey: '' } };
   var O_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], O_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   function oGBPs(v) { var n = oN(v); return (n < 0 ? '\u2212\u00a3' : '\u00a3') + Math.abs(n).toFixed(2); }
   function oGBP0s(v) { var n = oN(v), a = Math.abs(n); return (n < 0 ? '\u2212\u00a3' : '\u00a3') + (a >= 1000 ? (a / 1000).toFixed(1) + 'k' : a.toFixed(2)); }
@@ -1309,8 +1309,10 @@
            and blue orders side by side; on top an individual-account option and 12-month and 52-week
            views" */
         '<div class="sec enter d1"><div class="sec-h"><h2>Sales — sold and orders</h2><span class="hint" id="o2SsHint">green = sold £ from the daily books · blue = orders on the UK trading day</span>' +
-          '<div class="tools" style="gap:6px;flex-wrap:wrap;align-items:center"><select class="alx-sel" id="o2SsAcct" style="min-width:140px"><option value="">All accounts</option></select>' +
-          '<div class="mode" id="o2SsMode">' + [['day', 'One month · days'], ['week', '52 weeks'], ['month', '12 months']].map(function (p) { return '<button data-o2-ss="' + p[0] + '"' + (O.ss.grain === p[0] ? ' class="on"' : '') + '>' + p[1] + '</button>'; }).join('') + '</div></div></div>' +
+          '<div class="tools" style="gap:6px;flex-wrap:wrap;align-items:center"><select class="alx-sel" id="o2SsAcct" autocomplete="off" style="min-width:140px"><option value="">All accounts</option></select>' +
+          '<div class="mode" id="o2SsMode">' + [['day', 'One month · days'], ['week', '52 weeks'], ['month', '12 months']].map(function (p) { return '<button data-o2-ss="' + p[0] + '"' + (O.ss.grain === p[0] ? ' class="on"' : '') + '>' + p[1] + '</button>'; }).join('') + '</div>' +
+          /* the week or month picker: Week 1 to 52, or January to December, of this year; the first entry is the whole span */
+          '<select class="alx-sel" id="o2SsPick" autocomplete="off" style="min-width:170px;display:none" title="pick one week or one month to see it day by day"></select></div></div>' +
           '<div class="o-card"><div id="o2Sales" style="width:100%;height:340px"><div class="empty">Loading…</div></div></div></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">live today, whatever the date range · one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>This month at a glance</h2><span class="hint">the plain headline numbers — traffic, adverts, customer service and returns · click a tile to open its board</span></div><div id="o2Extras"><div class="empty">Loading…</div></div></div>' +
@@ -1366,10 +1368,10 @@
           }
           var ssb = t && t.closest ? t.closest('[data-o2-ss]') : null;
           if (ssb) {
-            O.ss.grain = ssb.getAttribute('data-o2-ss') || 'day';
+            O.ss.grain = ssb.getAttribute('data-o2-ss') || 'day'; O.ss.pick = '';
             var sb = document.querySelectorAll('#o2SsMode button');
             for (var q2 = 0; q2 < sb.length; q2++) { sb[q2].classList.toggle('on', sb[q2] === ssb); }
-            oSalesLoad(true); return;
+            oSalesPickFill(); oSalesLoad(true); return;
           }
           var vw = t && t.closest ? t.closest('[data-o2-view]') : null;
           if (vw) {
@@ -1483,9 +1485,41 @@
   /* ── 26 Nov (owner): the sales bar chart. The engine sums the books per day, week or month and
      counts the orders on the UK trading day; the chart is ECharts through the product page's loader,
      sold £ in green on the left scale and orders in blue on the right, every bar carrying its figure. ── */
+  var O_MON_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  /* the Monday of ISO week `w` of year `y`: 4 January is always in week 1 */
+  function oIsoMonday(y, w) { var j4 = new Date(Date.UTC(y, 0, 4)); var dow = (j4.getUTCDay() + 6) % 7; return new Date(j4.getTime() - dow * 86400000 + (w - 1) * 7 * 86400000).toISOString().slice(0, 10); }
+  function oSalesPickFill() {
+    var sel = $('o2SsPick'); if (!sel) { return; }
+    var g = O.ss.grain, t = ukToday(), y = Number(t.slice(0, 4)), opts = [];
+    if (g === 'day') { sel.style.display = 'none'; sel.innerHTML = ''; return; }
+    if (g === 'week') {
+      opts.push(['', 'All 52 weeks']);
+      for (var w = 1; w <= 52; w++) { var mon = oIsoMonday(y, w); opts.push([String(w), 'Week ' + w + ' · ' + oDayLbl(mon).slice(4) + ' – ' + oDayLbl(dShift(mon, 6)).slice(4) + (mon > t ? ' (not yet)' : '')]); }
+    } else {
+      opts.push(['', 'All 12 months']);
+      for (var m = 1; m <= 12; m++) { var first = y + '-' + (m < 10 ? '0' : '') + m + '-01'; opts.push([String(m), O_MON_FULL[m - 1] + ' ' + y + (first > t ? ' (not yet)' : '')]); }
+    }
+    sel.innerHTML = opts.map(function (o) { return '<option value="' + o[0] + '"' + (O.ss.pick === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('');
+    sel.style.display = '';
+  }
+  /* what to ask the engine for: the whole span, or the chosen week or month as a day window */
+  function oSalesParams() {
+    var p = { grain: O.ss.grain }; if (O.ss.acct) { p.account = O.ss.acct; }
+    var y = Number(ukToday().slice(0, 4));
+    if (O.ss.grain === 'week' && O.ss.pick) { var mon = oIsoMonday(y, Number(O.ss.pick)); p.grain = 'day'; p.from = mon; p.to = dShift(mon, 6); }
+    if (O.ss.grain === 'month' && O.ss.pick) { var m = Number(O.ss.pick); p.grain = 'day'; p.from = y + '-' + (m < 10 ? '0' : '') + m + '-01'; p.to = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); }
+    return p;
+  }
   function oSalesInit() {
     var sel = $('o2SsAcct');
     if (sel) { fillAccountSelect(sel, O.ss.acct, function () { O.ss.acct = sel.value || ''; oSalesLoad(true); }); }
+    var pk = $('o2SsPick');
+    if (pk) { pk.onchange = function () { O.ss.pick = pk.value || ''; oSalesLoad(true); }; }
+    /* 26 Nov (owner: "selecting an account doesn't show specific data"): after a reload the browser
+       put the dropdown back on its last choice while the chart's own state had reset to all accounts.
+       The chart now follows whatever the dropdown shows once the options are in. */
+    setTimeout(function () { var s2 = $('o2SsAcct'); if (s2 && (s2.value || '') !== (O.ss.acct || '')) { O.ss.acct = s2.value || ''; oSalesLoad(true); } }, 2500);
+    oSalesPickFill();
     if (!O.ssResize) {
       O.ssResize = true;
       window.addEventListener('resize', function () { var el = $('o2Sales'), ec = window.echarts; if (el && ec) { var i = ec.getInstanceByDom(el); if (i) { i.resize(); } } });
@@ -1496,11 +1530,11 @@
   function oSalesSync() { O.ss.acct = O.acct; var sel = $('o2SsAcct'); if (sel) { sel.value = O.acct; } oSalesLoad(true); }
   function oSalesLoad(force) {
     var el = $('o2Sales'); if (!el) { return; }
-    var key = O.ss.grain + '|' + O.ss.acct;
+    var key = O.ss.grain + '|' + O.ss.acct + '|' + O.ss.pick;
     if (!force && O.ss.dataKey === key && O.ss.data) { oSalesPaint(); return; }
     O.ss.key = key;
     if (O.ss.dataKey !== key) { el.innerHTML = '<div class="empty">Loading…</div>'; }
-    api('bizSalesSeries', O.ss.acct ? { grain: O.ss.grain, account: O.ss.acct } : { grain: O.ss.grain }).then(function (d) {
+    api('bizSalesSeries', oSalesParams()).then(function (d) {
       if (O.ss.key !== key) { return; }
       O.ss.data = d || {}; O.ss.dataKey = key; oSalesPaint();
     })['catch'](function (e) { var b = $('o2Sales'); if (b && O.ss.key === key) { b.innerHTML = '<div class="empty">The sales series did not answer — ' + esc((e && e.message) || 'no answer') + '</div>'; } });
@@ -1511,10 +1545,11 @@
     var rows = d.rows || [], T = d.totals || {};
     var hint = $('o2SsHint');
     if (hint) {
-      hint.innerHTML = '<b style="color:var(--ok,#2fb170)">sold ' + oGBPs(T.sold) + '</b> · <b style="color:#8ab4ff">' + (T.orders || 0) + ' orders</b> · ' + esc(d.from + ' → ' + d.to) + ' · ' + (d.account ? esc(d.account) : 'all accounts') +
-        (d.books_from && d.books_from > d.from ? ' · the books begin ' + esc(d.books_from) + ', so earlier bars carry orders only' : '') + ' · green = sold £ from the daily books, blue = orders on the UK trading day';
+      var pickWord = O.ss.pick ? (O.ss.grain === 'week' ? 'week ' + O.ss.pick : O_MON_FULL[Number(O.ss.pick) - 1]) + ' · ' : '';
+      hint.innerHTML = pickWord + '<b style="color:var(--bad,#e0563f)">sold ' + oGBPs(T.sold) + '</b> · <b style="color:var(--ok,#2fb170)">' + (T.orders || 0) + ' orders</b> · ' + esc(d.from + ' → ' + d.to) + ' · ' + (d.account ? esc(d.account) : 'all accounts') +
+        (d.books_from && d.books_from > d.from ? ' · the books begin ' + esc(d.books_from) + ', so earlier bars carry orders only' : '') + ' · red = sold £ from the daily books, green = orders on the UK trading day';
     }
-    if (!rows.length) { el.innerHTML = '<div class="empty">Nothing in this window.</div>'; return; }
+    if (!rows.length) { var ec0 = window.echarts, i0 = ec0 && ec0.getInstanceByDom(el); if (i0) { i0.dispose(); } el.innerHTML = '<div class="empty">' + (d.note && /not started/.test(d.note) ? 'That window has not started yet.' : 'Nothing in this window.') + '</div>'; return; }
     var draw = function () {
       var ec = window.echarts; if (!ec) { el.innerHTML = '<div class="empty">The chart library did not load.</div>'; return; }
       if (!ec.getInstanceByDom(el)) { el.innerHTML = ''; }
@@ -1534,10 +1569,11 @@
           { type: 'value', axisLabel: { color: '#66707c', fontSize: 10 }, splitLine: { show: false }, minInterval: 1, max: function (v) { return Math.ceil(v.max * 1.25) || 1; } }
         ],
         series: [
-          { name: 'Sold £', type: 'bar', data: sold, itemStyle: { color: '#2fb170', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, barGap: '15%',
-            label: { show: true, position: 'top', color: '#2fb170', fontSize: 9, fontWeight: 700, rotate: up ? 90 : 0, align: up ? 'left' : 'center', verticalAlign: 'middle', distance: 4, formatter: function (p) { return p.value ? kfmt(p.value) : ''; } } },
-          { name: 'Orders', type: 'bar', yAxisIndex: 1, data: orders, itemStyle: { color: '#4f8df7', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26,
-            label: { show: true, position: 'top', color: '#8ab4ff', fontSize: 9, fontWeight: 700, rotate: up ? 90 : 0, align: up ? 'left' : 'center', verticalAlign: 'middle', distance: 4, formatter: function (p) { return p.value || ''; } } }
+          /* 26 Nov (owner): sold in red, orders in green */
+          { name: 'Sold £', type: 'bar', data: sold, itemStyle: { color: '#e0563f', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26, barGap: '15%',
+            label: { show: true, position: 'top', color: '#ff8a73', fontSize: 9, fontWeight: 700, rotate: up ? 90 : 0, align: up ? 'left' : 'center', verticalAlign: 'middle', distance: 4, formatter: function (p) { return p.value ? kfmt(p.value) : ''; } } },
+          { name: 'Orders', type: 'bar', yAxisIndex: 1, data: orders, itemStyle: { color: '#2fb170', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 26,
+            label: { show: true, position: 'top', color: '#5fd49a', fontSize: 9, fontWeight: 700, rotate: up ? 90 : 0, align: up ? 'left' : 'center', verticalAlign: 'middle', distance: 4, formatter: function (p) { return p.value || ''; } } }
         ]
       }, true);
       inst.resize();

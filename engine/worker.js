@@ -25971,12 +25971,21 @@ const ROUTES = {
   bizSalesSeries: {
     auth: 'any', fn: async (p, ctx) => {
       if (['Management', 'Ops Head'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
-      const grain = /^(day|week|month)$/.test(String(p.grain || '')) ? String(p.grain) : 'day';
+      let grain = /^(day|week|month)$/.test(String(p.grain || '')) ? String(p.grain) : 'day';
       const acctF = String(p.account || '');
-      const today = ukDate('');
-      const back = grain === 'day' ? 30 : grain === 'week' ? 7 * 52 - 1 : 365;
-      let from = adtAddDays(today, -back);
-      if (grain === 'month') from = from.slice(0, 8) + '01';
+      const todayUk = ukDate('');
+      const okDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+      /* 26 Nov (owner): "a dropdown of weeks 1 to 52, and January to December" — a chosen week or
+         month comes as its own day window and is answered day by day */
+      let today = todayUk, from;
+      if (okDay(p.from) && okDay(p.to) && String(p.from) <= String(p.to)) {
+        grain = 'day'; from = String(p.from); today = String(p.to) < todayUk ? String(p.to) : todayUk;
+        if (from > today) return { grain, account: acctF, from, to: from, books_from: null, rows: [], totals: { sold: 0, orders: 0 }, note: 'that window has not started yet' };
+      } else {
+        const back = grain === 'day' ? 30 : grain === 'week' ? 7 * 52 - 1 : 365;
+        from = adtAddDays(today, -back);
+        if (grain === 'month') from = from.slice(0, 8) + '01';
+      }
       const sd = (await ctx.env.DB.prepare('SELECT date, ROUND(SUM(sold), 2) AS sold FROM sales_daily WHERE date >= ?1 AND date <= ?2' + (acctF ? ' AND account = ?3' : '') + ' GROUP BY date')
         .bind(...(acctF ? [from, today, acctF] : [from, today])).all().catch(() => ({ results: [] }))).results || [];
       const bf = await ctx.env.DB.prepare('SELECT MIN(date) AS d FROM sales_daily' + (acctF ? ' WHERE account = ?1' : '')).bind(...(acctF ? [acctF] : [])).first().catch(() => null);
