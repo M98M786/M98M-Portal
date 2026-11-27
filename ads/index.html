@@ -1076,7 +1076,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261127-1452';
+var BUILD = '20261127-1514';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -13193,40 +13193,69 @@ VIEW_CSS.push(
   window.ADS_EARN = { mount: function (host, opts) {
     if (!host) { return; }
     opts = opts || {};
-    var days = Math.min(92, Math.max(3, Number(opts.days) || 14));
+    /* 27 Nov, later (owner): the Advertising money page's bar — 3d to 60d, the account, two dates and
+       Apply — is this chart's own, and the ROAS line with its pills and the dashed 5x target ride
+       over the bars. The state lives on the host, so the page's five-minute redraw keeps the window
+       and the account the reader picked. */
+    var ST = (window.__adsEarnState = window.__adsEarnState || {});
+    var key = host.id || 'adsEarn';
+    var st = ST[key] || (ST[key] = { days: Math.min(92, Math.max(3, Number(opts.days) || 14)), acct: opts.account || '', from: '', to: '', touched: false });
+    if (!st.touched && opts.account !== undefined) { st.acct = opts.account || ''; }
     var uid = 'ae' + Math.random().toString(36).slice(2, 8);
-    host.innerHTML = '<h3 style="margin:0 0 4px;font-size:15px;font-weight:800">Ad spend against what the advertised sales earned \u00b7 ' + (opts.account ? esc(opts.account) : 'all accounts') + ' \u00b7 last ' + days + ' days</h3>' +
+    var chip = function (n) { return '<button class="minibtn' + (!st.from && st.days === n ? ' on' : '') + '" data-ae-d="' + n + '">' + n + 'd</button>'; };
+    host.innerHTML = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 6px"><h3 style="margin:0;font-size:15px;font-weight:800;flex:1 1 320px">Ad spend against what the advertised sales earned</h3>' +
+      '<span style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' + [3, 7, 14, 30, 60].map(chip).join('') +
+      '<select class="alx-sel" id="' + uid + 'A" autocomplete="off" style="min-width:130px;padding:6px 8px"><option value="">All accounts</option></select>' +
+      '<input type="date" id="' + uid + 'F" class="minibtn" autocomplete="off" style="padding:5px 6px" value="' + esc(st.from) + '"><input type="date" id="' + uid + 'T" class="minibtn" autocomplete="off" style="padding:5px 6px" value="' + esc(st.to) + '">' +
+      '<button class="minibtn" id="' + uid + 'P">Apply</button></span></div>' +
       '<div class="ac-split-note" id="' + uid + 'H" style="margin:0 0 8px">Loading\u2026</div>' +
-      '<div id="' + uid + 'C" style="width:100%;height:' + (opts.height || 320) + 'px"></div>';
+      '<div id="' + uid + 'C" style="width:100%;height:' + (opts.height || 340) + 'px"></div>';
     var el = document.getElementById(uid + 'C'), hint = document.getElementById(uid + 'H');
-    var payload = { days: days }; if (opts.account) { payload.account = opts.account; }
+    var $$ = function (s) { return document.getElementById(uid + s); };
     var gbp = function (v) { var n = Number(v) || 0; return (n < 0 ? '\u2212\u00a3' : '\u00a3') + Math.abs(n).toFixed(2); };
     var kfmt = function (v) { var a = Math.abs(v); return (v < 0 ? '\u2212' : '') + (a >= 10000 ? '\u00a3' + (a / 1000).toFixed(0) + 'k' : a >= 1000 ? '\u00a3' + (a / 1000).toFixed(1) + 'k' : '\u00a3' + Math.round(a)); };
+    var remount = function () { window.ADS_EARN.mount(host, opts); };
+    /* the bar */
+    var selA = $$('A');
+    if (selA) { fillAccountSelect(selA, st.acct, function () { st.acct = selA.value || ''; st.touched = true; remount(); }); setTimeout(function () { var seen = {}; for (var i = selA.options.length - 1; i >= 0; i--) { var v = selA.options[i].value; if (seen[v]) { selA.remove(i); } else { seen[v] = 1; } } }, 2500); }
+    host.querySelectorAll('[data-ae-d]').forEach(function (b) { b.onclick = function () { st.days = Number(this.getAttribute('data-ae-d')) || 14; st.from = ''; st.to = ''; st.touched = true; remount(); }; });
+    var ap = $$('P'); if (ap) { ap.onclick = function () { var f = $$('F'), t = $$('T'); if (f && t && f.value && t.value && f.value <= t.value) { st.from = f.value; st.to = t.value; st.touched = true; remount(); } else { toast('Pick both dates first, the earlier one first.'); } }; }
+    /* the figures */
+    var payload = st.from ? { from: st.from, to: st.to } : { days: st.days }; if (st.acct) { payload.account = st.acct; }
     api('adsEarnSeries', payload).then(function (d) {
       if (!document.body.contains(el)) { return; }
       var rows = (d && d.rows) || [], T = (d && d.totals) || {};
-      hint.innerHTML = '<b style="color:#ff8a73">spend ' + gbp(T.spend) + '</b> \u00b7 <b style="color:#5fd49a">ad order earning ' + gbp(T.ad_oe) + '</b> \u00b7 <b style="color:#8ab4ff">difference ' + gbp(T.diff) + '</b> \u00b7 ' + esc((d.from || '') + ' \u2192 ' + (d.to || '')) +
-        ' \u00b7 eBay credits ' + gbp(T.ad_rev) + ' of sales to the ads; the earning is that revenue through each day\u2019s own order-earning ratio (window ' + Math.round((Number(d.ratio_window) || 0) * 100) + '%) \u00b7 spend incl VAT \u00b7 today is live, refreshed every five minutes';
+      var spendEx = rows.reduce(function (s, r) { return s + (Number(r.spend_ex_vat) || 0); }, 0);
+      var roasAll = spendEx > 0 ? (Number(T.ad_rev) || 0) / spendEx : null;
+      hint.innerHTML = '<b style="color:#ff8a73">spend ' + gbp(T.spend) + '</b> \u00b7 <b style="color:#5fd49a">ad order earning ' + gbp(T.ad_oe) + '</b> \u00b7 <b style="color:#8ab4ff">difference ' + gbp(T.diff) + '</b> \u00b7 <b style="color:#f2b035">ROAS ' + (roasAll == null ? '\u2014' : roasAll.toFixed(2) + '\u00d7') + '</b> against the 5\u00d7 target \u00b7 ' + esc((d.from || '') + ' \u2192 ' + (d.to || '')) + ' \u00b7 ' + (st.acct ? esc(st.acct) : 'all accounts') +
+        ' \u00b7 eBay credits ' + gbp(T.ad_rev) + ' of sales to the ads; the earning is that revenue through each day\u2019s own order-earning ratio (window ' + Math.round((Number(d.ratio_window) || 0) * 100) + '%) \u00b7 spend incl VAT, ROAS on spend ex VAT as the money page counts it \u00b7 today is live, refreshed every five minutes';
       if (!rows.length) { el.innerHTML = '<div class="empty">Nothing in this window.</div>'; return; }
+      var roas = rows.map(function (r) { var s = Number(r.spend_ex_vat) || 0; return s > 0 ? Math.round((Number(r.ad_rev) || 0) / s * 100) / 100 : null; });
       var draw = function () {
         var ec = window.echarts; if (!ec) { el.innerHTML = '<div class="empty">The chart library did not load.</div>'; return; }
         var inst = ec.getInstanceByDom(el); if (inst) { inst.dispose(); }
         el.innerHTML = ''; inst = ec.init(el, null, { renderer: 'canvas' });
         var up = rows.length > 14;
         var lab = function (color) { return { show: true, position: 'top', color: color, fontSize: 9, fontWeight: 700, rotate: up ? 90 : 0, align: up ? 'left' : 'center', verticalAlign: 'middle', distance: 4, formatter: function (p) { var v = p.value && p.value.value !== undefined ? p.value.value : p.value; return v ? kfmt(v) : ''; } }; };
+        var roasMax = Math.max(6, Math.ceil(Math.max.apply(null, [0].concat(roas.filter(function (v) { return v != null; }))) * 1.15));
         inst.setOption({
           backgroundColor: 'transparent', animation: false,
           tooltip: { trigger: 'axis', backgroundColor: 'rgba(4,6,10,.92)', borderColor: 'rgba(255,255,255,.14)', textStyle: { color: '#fff', fontSize: 12 },
-            formatter: function (ps) { var i = ps && ps.length ? ps[0].dataIndex : 0, r = rows[i]; if (!r) { return ''; } return r.day + (r.live ? ' \u00b7 live' : '') + (r.missing ? ' \u00b7 not published yet' : '') + '<br>ad spend incl VAT ' + gbp(r.spend) + '<br>sales credited to the ads ' + gbp(r.ad_rev) + ' \u00b7 ' + (r.units || 0) + ' units<br>ad order earning ' + gbp(r.ad_oe) + ' (ratio ' + Math.round((r.ratio || 0) * 100) + '%' + (r.ratio_own ? '' : ', the window\u2019s') + ')<br>difference ' + gbp(r.diff); } },
-          legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 }, data: ['Ad spend incl VAT', 'Ad order earning', 'Difference'] },
-          grid: { left: 64, right: 20, top: 44, bottom: up ? 60 : 30 },
+            formatter: function (ps) { var i = ps && ps.length ? ps[0].dataIndex : 0, r = rows[i]; if (!r) { return ''; } return r.day + (r.live ? ' \u00b7 live' : '') + (r.missing ? ' \u00b7 not published yet' : '') + '<br>ad spend incl VAT ' + gbp(r.spend) + ' (ex VAT ' + gbp(r.spend_ex_vat) + ')<br>sales credited to the ads ' + gbp(r.ad_rev) + ' \u00b7 ' + (r.units || 0) + ' units<br>ROAS ' + (roas[i] == null ? '\u2014' : roas[i].toFixed(2) + '\u00d7') + '<br>ad order earning ' + gbp(r.ad_oe) + ' (ratio ' + Math.round((r.ratio || 0) * 100) + '%' + (r.ratio_own ? '' : ', the window\u2019s') + ')<br>difference ' + gbp(r.diff); } },
+          legend: { top: 0, right: 0, textStyle: { color: '#9aa4b1', fontSize: 11 }, data: ['Ad spend incl VAT', 'Ad order earning', 'Difference', 'ROAS \u00b7 dashed red = the 5\u00d7 target'] },
+          grid: { left: 64, right: 56, top: 54, bottom: up ? 60 : 30 },
           xAxis: { type: 'category', data: rows.map(function (r) { return r.label; }), axisLabel: { color: '#66707c', fontSize: 10, interval: 0, rotate: up ? 45 : 0 }, axisTick: { show: false }, axisLine: { lineStyle: { color: 'rgba(255,255,255,.15)' } } },
-          yAxis: { type: 'value', axisLabel: { color: '#66707c', fontSize: 10, formatter: function (v) { return kfmt(v); } }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } }, max: function (v) { return Math.ceil(v.max * 1.25) || 1; }, min: function (v) { return v.min < 0 ? Math.floor(v.min * 1.25) : 0; } },
+          yAxis: [
+            { type: 'value', axisLabel: { color: '#66707c', fontSize: 10, formatter: function (v) { return kfmt(v); } }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } }, max: function (v) { return Math.ceil(v.max * 1.3) || 1; }, min: function (v) { return v.min < 0 ? Math.floor(v.min * 1.25) : 0; } },
+            { type: 'value', min: 0, max: roasMax, axisLabel: { color: '#f2b035', fontSize: 10, formatter: '{value}\u00d7' }, splitLine: { show: false } }
+          ],
           series: [
             { name: 'Ad spend incl VAT', type: 'bar', data: rows.map(function (r) { return r.spend; }), itemStyle: { color: '#e0563f', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 22, barGap: '12%', label: lab('#ff8a73') },
             { name: 'Ad order earning', type: 'bar', data: rows.map(function (r) { return r.ad_oe; }), itemStyle: { color: '#2fb170', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 22, label: lab('#5fd49a') },
-            { name: 'Difference', type: 'bar', data: rows.map(function (r) { return r.diff < 0 ? { value: r.diff, itemStyle: { color: '#4f8df7', opacity: .55, borderRadius: [0, 0, 3, 3] } } : r.diff; }), itemStyle: { color: '#4f8df7', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 22,
-              label: { show: true, position: 'top', color: '#8ab4ff', fontSize: 9, fontWeight: 700, rotate: up ? 90 : 0, align: up ? 'left' : 'center', verticalAlign: 'middle', distance: 4, formatter: function (p) { var v = p.value && p.value.value !== undefined ? p.value.value : p.value; return v ? kfmt(v) : ''; } } }
+            { name: 'Difference', type: 'bar', data: rows.map(function (r) { return r.diff < 0 ? { value: r.diff, itemStyle: { color: '#4f8df7', opacity: .55, borderRadius: [0, 0, 3, 3] } } : r.diff; }), itemStyle: { color: '#4f8df7', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 22, label: lab('#8ab4ff') },
+            { name: 'ROAS \u00b7 dashed red = the 5\u00d7 target', type: 'line', yAxisIndex: 1, data: roas, smooth: false, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#f2b035', width: 2 }, itemStyle: { color: '#f2b035' }, z: 10,
+              label: { show: true, position: 'top', distance: 6, formatter: function (p) { return p.value == null ? '' : Number(p.value).toFixed(1) + '\u00d7'; }, color: '#1a1205', fontSize: 10, fontWeight: 800, backgroundColor: '#f2b035', borderRadius: 9, padding: [2, 6] },
+              markLine: { silent: true, symbol: 'none', lineStyle: { color: '#e0563f', type: 'dashed', width: 1.5 }, label: { show: true, position: 'end', formatter: '5\u00d7', color: '#e0563f', fontSize: 10, fontWeight: 800 }, data: [{ yAxis: 5 }] } }
           ]
         }, true);
         inst.resize();
@@ -13236,7 +13265,8 @@ VIEW_CSS.push(
     })['catch'](function (e) { if (hint) { hint.textContent = 'This chart did not answer \u2014 ' + ((e && e.message) || 'no answer'); } });
     if (!window.__adsEarnResize) { window.__adsEarnResize = true; window.addEventListener('resize', function () { var ec = window.echarts; if (!ec) { return; } document.querySelectorAll('[id^="ae"][id$="C"]').forEach(function (e2) { var i2 = ec.getInstanceByDom(e2); if (i2) { i2.resize(); } }); }); }
     /* every five minutes, as long as the box is still on the page */
-    var tick = setInterval(function () { if (!document.body.contains(host)) { clearInterval(tick); return; } if (!document.hidden) { window.ADS_EARN.mount(host, opts); clearInterval(tick); } }, 300000);
+    if (st.tick) { clearInterval(st.tick); }
+    st.tick = setInterval(function () { if (!document.body.contains(host)) { clearInterval(st.tick); st.tick = null; return; } if (!document.hidden) { clearInterval(st.tick); st.tick = null; remount(); } }, 300000);
   } };
   /* the Product history answers, per listing, for the red rows' boxes; {data, err, at} */
   var AC_DET = {}, AC_DET_TTL = 10 * 60 * 1000, AC_DET_MAX = 80;
@@ -13747,13 +13777,10 @@ VIEW_CSS.push(
          a sort redraws it, says the same thing as the line above it */
       AC.landNote = d.ads_landing ? String(d.landing_note || '') : '';
       AC.win = d.period === 'today' ? 'today' : d.period === 'yesterday' ? 'yesterday' : AC.lastDays + 'd';
-      /* 27 Nov (owner): the ad-spend-against-earning chart, after the per-account cards */
-      h += '<div class="ac-split" id="acEarn"></div>';
       h += '<div id="acItems"></div>';
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Snapshot ' +
         esc(String(d.updated_at || '—')) + ' UTC · ' + esc(String(d.note || '')) + '</p>';
       box.innerHTML = h;
-      if (window.ADS_EARN && $('acEarn')) { window.ADS_EARN.mount($('acEarn'), { account: AC.acct || '', days: AC.period ? 14 : Math.max(3, Math.min(92, AC.lastDays || 14)) }); }
       if (typeof after === 'function') { try { after(); requestAnimationFrame(after); } catch (e) {} }
       Array.prototype.forEach.call(box.querySelectorAll('[data-ac-tile]'), function (t) {
         var go = function () { acFocus(t.getAttribute('data-ac-tile')); };
