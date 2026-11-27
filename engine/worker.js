@@ -2454,6 +2454,17 @@ async function reportsRelayToSheet(env) {
   } catch (e) { return 'reportsRelayToSheet ERR ' + String((e && e.message) || e).slice(0, 100); }
 }
 
+/* The eBay variation this order is for, spelled exactly as the order book's "Variation details"
+   column spells it — '[name:value,name:value]' from the first line item's variationAspects, or ''
+   when the listing has no variations. This is the per-variation key the cost study joins on;
+   orders.variation was blank on every row until this was added (27 Nov) — the hourly cost push
+   carries only cost+earning, so eBay here is the only source that still knows the variation. */
+function orderVariation(o) {
+  const li = (o && o.lineItems && o.lineItems[0]) || {};
+  const asp = li.variationAspects || [];
+  if (!asp.length) return '';
+  return '[' + asp.map((a) => String(a.name || '') + ':' + String(a.value || '')).join(',') + ']';
+}
 async function orderSync(env) {
   await perAccount(env, 'orderSync', async (acct) => {
     const tok = await ebayAccessToken(env, acct);
@@ -2507,14 +2518,14 @@ async function orderSync(env) {
         const shipTo = ((((o.fulfillmentStartInstructions || [])[0] || {}).shippingStep || {}).shipTo || {});
         const buyerName = String(shipTo.fullName || (o.buyer && o.buyer.buyerRegistrationAddress && o.buyer.buyerRegistrationAddress.fullName) || '').slice(0, 80);
         await env.DB.prepare(
-          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, buyer_name, created_at, qty, est_delivery, ship_by, payment_status, cancel_state, fh_count) ' +
-          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?14, ?7, ?8, ?9, ?10, ?11, ?12, ?13) ' +
-          "ON CONFLICT(order_id) DO UPDATE SET status=?5, qty=?8, est_delivery=?9, ship_by=?10, payment_status=?11, cancel_state=?12, fh_count=?13, buyer_name = CASE WHEN ?14 != '' THEN ?14 ELSE buyer_name END"
+          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, buyer_name, created_at, qty, est_delivery, ship_by, payment_status, cancel_state, fh_count, variation) ' +
+          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?14, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?15) ' +
+          "ON CONFLICT(order_id) DO UPDATE SET status=?5, qty=?8, est_delivery=?9, ship_by=?10, payment_status=?11, cancel_state=?12, fh_count=?13, buyer_name = CASE WHEN ?14 != '' THEN ?14 ELSE buyer_name END, variation = CASE WHEN ?15 != '' THEN ?15 ELSE variation END"
         ).bind(
           id, acct, String(line.legacyItemId || ''),
           Number((o.pricingSummary && o.pricingSummary.total && o.pricingSummary.total.value) || 0),
           status, String((o.buyer && o.buyer.username) || ''),
-          String(o.creationDate || ''), qty, est, shipBy, payStatus, cancelState, fhCount, buyerName
+          String(o.creationDate || ''), qty, est, shipBy, payStatus, cancelState, fhCount, buyerName, orderVariation(o)
         ).run();
       }
       n++; href = page.next || '';
@@ -24318,16 +24329,16 @@ async function openSync(env) {
           if (d2 && (!sb || d2 < sb)) sb = d2;
         }
         stmts.push(env.DB.prepare(
-          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, ship_by, payment_status, cancel_state, fh_count, open_seen_at) ' +
-          'VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13) ' +
+          'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, ship_by, payment_status, cancel_state, fh_count, open_seen_at, variation) ' +
+          'VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14) ' +
           'ON CONFLICT(order_id) DO UPDATE SET status=?5, ship_by=CASE WHEN ?9 != \'\' THEN ?9 ELSE ship_by END, ' +
-          'payment_status=?10, cancel_state=?11, fh_count=?12, open_seen_at=?13'
+          'payment_status=?10, cancel_state=?11, fh_count=?12, open_seen_at=?13, variation=CASE WHEN ?14 != \'\' THEN ?14 ELSE variation END'
         ).bind(String(o.orderId), acct, String(line.legacyItemId || ''),
           Number(((o.pricingSummary || {}).total || {}).value) || 0,
           String(o.orderFulfillmentStatus || ''), String((o.buyer || {}).username || ''),
           String(o.creationDate || ''), qty, sb, String(o.orderPaymentStatus || ''),
           String(((o.cancelStatus || {}).cancelState) || ''),
-          Array.isArray(o.fulfillmentHrefs) ? o.fulfillmentHrefs.length : 0, stamp));
+          Array.isArray(o.fulfillmentHrefs) ? o.fulfillmentHrefs.length : 0, stamp, orderVariation(o)));
       }
       href = String(page.next || '');
       pages++;
@@ -32303,11 +32314,11 @@ const ROUTES = {
             if (d2 && (!sb || d2 < sb)) sb = d2;
           }
           stmts.push(ctx.env.DB.prepare(
-            'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, ship_by, payment_status, cancel_state, fh_count) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ' +
+            'INSERT INTO orders (order_id, account, item_id, sold, status, buyer, created_at, qty, ship_by, payment_status, cancel_state, fh_count, variation) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) ' +
             'ON CONFLICT(order_id) DO UPDATE SET status = ?5, payment_status = ?10, cancel_state = ?11, fh_count = ?12, ' +
-            "ship_by = CASE WHEN ?9 != '' THEN ?9 ELSE ship_by END"
+            "ship_by = CASE WHEN ?9 != '' THEN ?9 ELSE ship_by END, variation = CASE WHEN ?13 != '' THEN ?13 ELSE variation END"
           ).bind(id, acct, String(line.legacyItemId || ''), sold, status,
-            String((o.buyer || {}).username || ''), String(o.creationDate || ''), qty, sb, payS, canS, fhN));
+            String((o.buyer || {}).username || ''), String(o.creationDate || ''), qty, sb, payS, canS, fhN, orderVariation(o)));
           inserted++;
         }
         href = String(page.next || '');
