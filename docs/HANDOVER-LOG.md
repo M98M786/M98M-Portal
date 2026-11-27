@@ -1061,3 +1061,13 @@ Each re-read first: every ad ARCHIVED, nothing live. Then POST /end, each answer
 (£100/day, 4 live ads) and Amna Baji Testing Campaign `166743121016` (£85/day, 17 live ads). Log:
 `M98M-SQR-Agent/logs/sqr-campaigns.csv`. Still open: Azhar Bhai Wireless Earbuds `168338844016` holds a second
 listing's paused ad, awaiting Hasib's word.
+
+## 27 Nov 2026 — MAC: a second front door to the engine (m98m-door) and a one-click network test
+Staff on the office network get "Failed to fetch" on every engine call while the engine itself is healthy (CSP,
+CORS, pin logic all proven clean from outside). A pass-through worker **m98m-door** (`engine/door.js`, service
+binding → m98m-engine, deployed with the Workers token, workers.dev subdomain enabled) is now `ENGINE_URL_ALT`;
+the portal tries it after the main door fails to connect and pins it per browser. It cures a block on the exact
+hostname only. The dark banner and the login message carry **Test this network** (five probes) — the owner's
+next screenshot of it decides: sibling worker OK + main FAIL = hostname block (door fixes); all workers.dev FAIL =
+domain block (office filter, or a custom domain on a Cloudflare zone — m98mltd.co.uk is on Namecheap DNS, so
+engine.m98mltd.co.uk was never possible and is retired). Build 20261127-1404, commit 042d455.
