@@ -16838,7 +16838,8 @@ async function adtoolPeakCompute(env, acct, band) {
     return { item_id: id, account: String(m.account || ''), title: String(m.title || ''), image: m.image === undefined ? null : m.image,
       live_now: true, campaign_id: c.campaign_id, campaign_name: c.campaign_name, campaigns: c.campaigns,
       spend_7d: spend7[id] === undefined ? 0 : spend7[id], units_28d: u.reduce((t, x) => t + (Number(x) || 0), 0),
-      cpc_live: cpcLive, cpc_units: cu, best: cpcLive && cu >= ADTOOL_ALLDAY_BEST_UNITS };
+      cpc_live: cpcLive, cpc_units: cu, best: cpcLive && cu >= ADTOOL_ALLDAY_BEST_UNITS,
+      band: 'allday', rule: strikeOf(id, 'allday'), stopped_today: stopBy[id] || null };
   }).sort((a, b) => ((b.best ? 1 : 0) - (a.best ? 1 : 0)) || (b.cpc_units - a.cpc_units) || (b.spend_7d - a.spend_7d) || String(a.title).localeCompare(String(b.title)));
   const sugSet = {};
   for (const s of suggested) sugSet[s.item_id] = 1;
@@ -16883,6 +16884,11 @@ async function adtoolPeakCompute(env, acct, band) {
      route ask as well, so the count in the strip, the line on the centre and the row under a listing
      are one answer and not three. */
   const stopsToday = await adtPeakStopsRead(env, today, acct);
+  /* 27 Nov (owner): the strikes of every row this answer carries, and the band limits in force */
+  const planR = adPeakPlanRules(cfg);
+  let strikesBy = {};
+  try { strikesBy = await adtPeakStrikesRead(env, manualRows.map(r => String(r.item_id)).concat(allDayIds), today, planR.strikes_max); } catch (e) { strikesBy = {}; }
+  const strikeOf = (id, band) => { const S = strikesBy[String(id)] || adPeakStrikes([], null, today, planR.strikes_max); return Object.assign({}, S, { band: band, limit_gbp: adPeakBandLimit(planR, band) }); };
   const stopBy = {};
   for (const r of (stopsToday.rows || [])) stopBy[String(r.item_id)] = r;
   const manual = manualRows.map(r => {
@@ -17005,6 +17011,7 @@ async function adtoolPeakCompute(env, acct, band) {
          written down. Null and never a nought-filled shape, because "not stopped" is not "stopped
          having spent nothing". */
       stopped_today: stopBy[id] || null,
+      band: adPeakBandOf(parsed.ranges || []), rule: strikeOf(id, adPeakBandOf(parsed.ranges || [])),
       periods: per || adPeakPeriodsEmpty(),
       /* AND THE 7-DAY SPEND IS NOW ONE NUMBER, not two. The column and the table’s own 7-day row
          are both the sum of adtool_listing_day.spend over the same seven finished days, so the
@@ -17029,6 +17036,10 @@ async function adtoolPeakCompute(env, acct, band) {
     manual: manual,
     all_day: band === 'allday' ? allDay.slice(0, 800) : undefined, all_day_total: band === 'allday' ? allDay.length : undefined, band: band,
     all_day_best: band === 'allday' ? allDay.filter(r => r.best).length : undefined, all_day_best_units: band === 'allday' ? ADTOOL_ALLDAY_BEST_UNITS : undefined,
+    /* the Rerun box: every listing this answer knows that waits for Management, with its stops */
+    rerun_box: manual.filter(m => m.rule && m.rule.boxed).map(m => ({ item_id: m.item_id, account: m.account, title: m.title, image: m.image, band: m.band, hours: m.hours, rule: m.rule, stopped_today: m.stopped_today }))
+      .concat(allDay.filter(r => r.rule && r.rule.boxed).map(r => ({ item_id: r.item_id, account: r.account, title: r.title, image: r.image, band: 'allday', hours: '', rule: r.rule, stopped_today: r.stopped_today }))),
+    band_limits: planR.stoploss_bands, band_limits_text: planR.stoploss_bands_text, strikes_max: planR.strikes_max,
     counts: { suggested: suggested.length, manual: manual.length, both: manual.filter(m => m.already_suggested).length,
       switching: manual.filter(m => m.auto && m.hours_parsed && m.switchable).length,
       switching_live: manual.filter(m => m.auto && m.hours_parsed && m.switchable && m.live_switch_on).length,
@@ -17313,6 +17324,33 @@ const ADTOOL_ACTIONS_P15 = {
         sent_to_ebay: false,
         note_to_reader: (sw[a] ? 'this account’s live switch is on, so the system will switch this listing at these hours' : 'this account’s live switch is off, so the change will be written down and nothing sent to eBay') +
           (cid ? ', and only its ad in ' + (cname || cid) + ' is switched: its ads in other campaigns are left as they are' : ', across every pay-per-click campaign it is in') };
+    },
+  },
+  adtoolPeakRerun: {
+    auth: 'any', fn: async (p, ctx) => {
+      /* 27 Nov (owner): "after the third day those listings are put under the Rerun box, where
+         Management only can decide to run that listing again on the next day". A write, never cached,
+         Management's alone; it names tomorrow as the run day and the strikes start again from it. */
+      await adtGate(ctx, null);
+      await ensureAdtoolPhase15Register(ctx.env);
+      await adtGate(ctx, 'adtool_page_peak');
+      await ensureAdtoolPhase16Schema(ctx.env);
+      const u = ctx.user || {};
+      if (MGMT_ROLES.indexOf(String(u.role || '')) < 0 && !u.super) throw new Error('SAY: only Management can decide a listing in the Rerun box runs again');
+      const env = ctx.env, iid = String((p && p.item_id) || '').replace(/\D/g, '');
+      if (!iid) throw new Error('SAY: give a listing number');
+      const today = ukDate(''), runDay = adtAddDays(today, 1);
+      const by = String(u.email || '');
+      const it = await env.DB.prepare('SELECT account FROM items_api WHERE item_id = ?1').bind(iid).first();
+      const a = it ? String(it.account || '') : '';
+      const rl = await adtPeakPlanRulesFor(env);
+      const S = (await adtPeakStrikesRead(env, [iid], today, rl.strikes_max))[iid] || null;
+      await env.DB.prepare("INSERT INTO adtool_peak_rerun (account, item_id, band, decided_by, decided_at, run_day, strikes, note) VALUES (?1, ?2, ?3, ?4, datetime('now'), ?5, ?6, ?7)")
+        .bind(a, iid, String((p && p.band) || ''), by, runDay, S ? Number(S.strikes) || 0 : 0, String((p && p.note) || '').slice(0, 300)).run();
+      try { await env.DB.prepare("INSERT INTO audit (actor, action, target, old, new, at) VALUES (?1, 'ADTOOL_PEAK_RERUN_DECIDE', ?2, ?3, ?4, datetime('now'))").bind(by, iid, S ? String(S.strikes) + ' strikes' : '', 'run again on ' + runDay).run(); } catch (e) { /* the trail must never block the decision */ }
+      await adtPeakCacheClear(env, a);
+      return { ok: true, item_id: iid, account: a, run_day: runDay, decided_by: by,
+        note_to_reader: 'It stays off today and runs again on ' + runDay + ': a listing on the list goes on at the start of its hours, an all-day one is put back on by the rule, and its stops are counted from that day' };
     },
   },
   adtoolPeakRemove: {
@@ -18677,12 +18715,18 @@ function adPeakReconcile(input) {
    and this is only its fallback: every sentence about the rule reads it back out of adPeakPlanRules, so
    changing it in Management changes the words beside it. 'off' leaves the peak list switching on its
    hours alone and stops nothing. */
-const ADTOOL_PEAK_PLAN_DEFAULTS = { lookback_days: 28, min_days: 14, dead_min_clicks: 5, proven_share: 60, proven_min_orders: 5, min_block_h: 2, plan_time: '23:30', pattern_apply: 'on', stoploss: 'on', stoploss_gbp: 3 };
+/* 27 Nov (owner): the spend rule's limit is now PER BAND — £2 for a morning-hours listing, £3 for an
+   evening one, £5 for a listing advertised all day (not on the list) — and a listing stopped on three
+   days goes into the Rerun box, where only Management can say it runs again. */
+const ADTOOL_PEAK_PLAN_DEFAULTS = { lookback_days: 28, min_days: 14, dead_min_clicks: 5, proven_share: 60, proven_min_orders: 5, min_block_h: 2, plan_time: '23:30', pattern_apply: 'on', stoploss: 'on', stoploss_gbp: 3,
+  stoploss_gbp_morning: 2, stoploss_gbp_evening: 3, stoploss_gbp_allday: 5, strikes_max: 3 };
 const ADTOOL_PEAK_PLAN_CONFIG_KEYS = {
   lookback_days: 'adtool_peak_lookback_days', min_days: 'adtool_peak_min_days', dead_min_clicks: 'adtool_peak_dead_min_clicks',
   proven_share: 'adtool_peak_proven_share', proven_min_orders: 'adtool_peak_proven_min_orders',
   min_block_h: 'adtool_peak_min_block_h', plan_time: 'adtool_peak_plan_time', pattern_apply: 'adtool_peak_pattern_apply',
   stoploss: 'adtool_peak_stoploss', stoploss_gbp: 'adtool_peak_stoploss_gbp',
+  stoploss_gbp_morning: 'adtool_peak_stoploss_gbp_morning', stoploss_gbp_evening: 'adtool_peak_stoploss_gbp_evening', stoploss_gbp_allday: 'adtool_peak_stoploss_gbp_allday',
+  strikes_max: 'adtool_peak_strikes_max',
 };
 /* the three cuts between the four parts of the day, which are adtSlot's own cuts and not a second set:
    the re-evaluation happens where the shape of the day changes. */
@@ -18715,11 +18759,16 @@ function adPeakPlanRules(cfg) {
   const stopOn = String(c[K.stoploss] == null ? D.stoploss : c[K.stoploss]).trim().toLowerCase() === 'off' ? 'off' : 'on';
   const stopGv = Number(c[K.stoploss_gbp]);
   const stopG = Math.round(Math.min(1000, Math.max(0.01, (c[K.stoploss_gbp] === undefined || c[K.stoploss_gbp] === null || c[K.stoploss_gbp] === '' || isNaN(stopGv) || stopGv <= 0) ? D.stoploss_gbp : stopGv)) * 100) / 100;
+  const gbpOf = (k, d) => { const v = Number(c[K[k]]); return Math.round(Math.min(1000, Math.max(0.01, (c[K[k]] === undefined || c[K[k]] === null || c[K[k]] === '' || isNaN(v) || v <= 0) ? D[k] : v)) * 100) / 100; };
+  const bands = { morning: gbpOf('stoploss_gbp_morning', 2), evening: gbpOf('stoploss_gbp_evening', 3), allday: gbpOf('stoploss_gbp_allday', 5), mixed: stopG, none: stopG };
+  const strikesMax = Math.min(10, Math.max(1, Math.round(num(c[K.strikes_max], D.strikes_max))));
   return {
     pattern_apply: patternApply,
     stoploss: stopOn, stoploss_gbp: stopG,
     /* the limit in the words a page prints, so no sentence anywhere types it */
     stoploss_text: '\u00a3' + stopG.toFixed(2),
+    stoploss_bands: bands, strikes_max: strikesMax,
+    stoploss_bands_text: 'morning \u00a3' + bands.morning.toFixed(2) + ' \u00b7 evening \u00a3' + bands.evening.toFixed(2) + ' \u00b7 all day \u00a3' + bands.allday.toFixed(2),
     lookback_days: Math.min(120, Math.max(1, Math.round(num(c[K.lookback_days], D.lookback_days)))),
     min_days: Math.max(1, Math.round(num(c[K.min_days], D.min_days))),
     dead_min_clicks: Math.max(0, Math.round(c[K.dead_min_clicks] === undefined || c[K.dead_min_clicks] === null || c[K.dead_min_clicks] === '' || isNaN(Number(c[K.dead_min_clicks])) ? D.dead_min_clicks : Number(c[K.dead_min_clicks]))),
@@ -18732,6 +18781,47 @@ function adPeakPlanRules(cfg) {
     plan_time: /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(pt) ? pt : D.plan_time,
     recent_days: 7,
   };
+}
+function adPeakBandLimit(rules, band) {
+  const R = rules || {}, B = R.stoploss_bands || {};
+  const v = Number(B[String(band || '')]);
+  return isFinite(v) && v > 0 ? v : (Number(R.stoploss_gbp) || 3);
+}
+/* 27 Nov (owner): "same listing is rerun the second and third day, each time paused after it crosses
+   the limit without sales; after the third day it goes under the Rerun box, where Management alone can
+   decide to run it again on the next day." The stops of the last seven UK days are the strikes; a
+   Management decision names a run day, holds the listing off until that day, and starts the count
+   again from it. Pure, so the page and the job read one listing the same way. */
+function adPeakStrikes(stopDays, decision, today, maxStrikes) {
+  const max = Math.min(10, Math.max(1, Math.round(Number(maxStrikes) || 3)));
+  const floor = adtAddDays(today, -7);
+  const all = Array.from(new Set((stopDays || []).map(d => String(d || '')))).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= floor && d <= today).sort();
+  const run = decision && /^\d{4}-\d{2}-\d{2}$/.test(String(decision.run_day || '')) ? String(decision.run_day) : '';
+  const last = all.length ? all[all.length - 1] : '';
+  if (run && today < run) {
+    return { strikes: all.filter(d => d < run).length, max: max, boxed: true, days: all, all_days: all, run_day: run, waiting: true, rerun_due: false,
+      why: 'Management has said run again on ' + run + '; held off until then' };
+  }
+  const counted = run ? all.filter(d => d >= run) : all;
+  const boxed = counted.length >= max;
+  return { strikes: counted.length, max: max, boxed: boxed, days: counted, all_days: all, run_day: run, waiting: false,
+    /* a listing stopped on an earlier day and not boxed is owed its rerun today */
+    rerun_due: !boxed && !!last && last < today,
+    why: boxed ? counted.length + ' stops, so it waits in the Rerun box for Management' : counted.length ? counted.length + ' of ' + max + ' stops' + (last === today ? ', stopped today' : ', runs again today') : 'no stop in the last seven days' };
+}
+async function adtPeakStrikesRead(env, ids, today, maxStrikes) {
+  /* every listing's strikes in one pass: the week's stop rows and every decision, both small tables */
+  const out = {}, list = Array.from(new Set((ids || []).map(x => String(x || '')).filter(Boolean)));
+  if (!list.length) return out;
+  const floor = adtAddDays(today, -7), stops = {}, dec = {};
+  try { for (const r of ((await env.DB.prepare('SELECT item_id, day FROM adtool_peak_stops WHERE day >= ?1 AND day <= ?2 LIMIT 20000').bind(floor, today).all()).results || [])) (stops[String(r.item_id)] = stops[String(r.item_id)] || []).push(String(r.day)); } catch (e) { /* no stops table: no strikes */ }
+  try { for (const r of ((await env.DB.prepare('SELECT item_id, run_day, decided_by, decided_at FROM adtool_peak_rerun ORDER BY decided_at ASC LIMIT 20000').all()).results || [])) dec[String(r.item_id)] = r; } catch (e) { /* no decisions yet */ }
+  for (const id of list) {
+    const s = adPeakStrikes(stops[id] || [], dec[id] || null, today, maxStrikes);
+    if (dec[id]) { s.decided_by = String(dec[id].decided_by || ''); s.decided_at = String(dec[id].decided_at || ''); }
+    out[id] = s;
+  }
+  return out;
 }
 function adPeakProfile(rows, opts) {
   /* ONE LISTING'S 24-HOUR SPAN, as the lookback saw it.
@@ -19130,6 +19220,7 @@ function adPeakWantFor(input) {
      It is a DAY stop and nothing longer: tomorrow there is no row for tomorrow, so tomorrow runs on the
      schedule and the hours exactly as it would have. */
   if (i.day_stop) return { want_override: 'PAUSED', want_source: 'stopped today by the spend rule', from: 'day_stop', schedule_source: '', reason: 'stopped today by the spend rule' };
+  if (i.rerun_box) return { want_override: 'PAUSED', want_source: 'waiting in the Rerun box for Management', from: 'rerun_box', schedule_source: '', reason: 'stopped on three days; waiting in the Rerun box for Management' };
   const s = i.schedule || null;
   const states = s && s.states;
   const h = Math.round(Number(i.hour));
@@ -19863,7 +19954,12 @@ async function ensureAdtoolPhase16Schema(env) {
     'CREATE INDEX IF NOT EXISTS idx_adtpksch_day ON adtool_peak_schedule(day, item_id)',
     "CREATE TABLE IF NOT EXISTS adtool_peak_stops (account TEXT NOT NULL, item_id TEXT NOT NULL, day TEXT NOT NULL, at TEXT, spend REAL, orders INTEGER, threshold REAL, sent INTEGER DEFAULT 0, http_status INTEGER DEFAULT 0, mode TEXT DEFAULT '', campaign_id TEXT DEFAULT '', reason TEXT DEFAULT '', PRIMARY KEY (account, item_id, day))",
     'CREATE INDEX IF NOT EXISTS idx_adtpkstop_day ON adtool_peak_stops(day, item_id)',
+    /* 27 Nov (owner): the Rerun box. A decision names the day a boxed listing runs again and who said
+       so; a rerun sent is the day the rule put an all-day listing back on the air after a stop. */
+    "CREATE TABLE IF NOT EXISTS adtool_peak_rerun (account TEXT DEFAULT '', item_id TEXT NOT NULL, band TEXT DEFAULT '', decided_by TEXT DEFAULT '', decided_at TEXT NOT NULL, run_day TEXT DEFAULT '', strikes INTEGER DEFAULT 0, note TEXT DEFAULT '', PRIMARY KEY (item_id, decided_at))",
+    'CREATE TABLE IF NOT EXISTS adtool_peak_rerun_sent (item_id TEXT NOT NULL, day TEXT NOT NULL, at TEXT, mode TEXT DEFAULT \'\', http_status INTEGER DEFAULT 0, PRIMARY KEY (item_id, day))',
   ]);
+  await adtDdlOne(env, "ALTER TABLE adtool_peak_stops ADD COLUMN band TEXT DEFAULT ''");
   ADTOOL_P16_SCHEMA_OK = true;
 }
 let ADTOOL_PEAK_CFG_OK = false;
@@ -20723,6 +20819,10 @@ async function adtoolPeakSwitch(env) {
     try {
       for (const r of ((await env.DB.prepare('SELECT item_id FROM adtool_peak_stops WHERE day = ?1 LIMIT 2000').bind(today).all()).results || [])) stoppedToday[String(r.item_id)] = 1;
     } catch (e) { /* no table yet: no stop has ever been recorded */ }
+    /* 27 Nov (owner): a listing stopped on three days waits in the Rerun box: held off, whatever its
+       hours or its schedule say, until Management names the day it runs again */
+    let boxedBy = {};
+    try { const rl = await adtPeakPlanRulesFor(env); const sb = await adtPeakStrikesRead(env, ids, today, rl.strikes_max); for (const k of Object.keys(sb)) if (sb[k].boxed) boxedBy[k] = 1; } catch (e) { boxedBy = {}; }
     const doneToday = {};
     for (const r of ((await env.DB.prepare("SELECT account, COUNT(*) AS n FROM adtool_apply_log WHERE decision_id = 'peak' AND mode = 'live' AND day = ?1 GROUP BY account").bind(today).all()).results || [])) doneToday[String(r.account)] = Number(r.n) || 0;
     /* the listing-and-campaign pairs already written down as blocked today. The mismatch below is a
@@ -20749,7 +20849,7 @@ async function adtoolPeakSwitch(env) {
          neither is the common case and the safe one, because it leaves the typed hours deciding exactly
          as they did yesterday. Worked out once per listing, because a hold and a schedule are about the
          listing and not about one of its campaigns. */
-      const wantFor = adPeakWantFor({ hold: row.hold, schedule: schedToday[id + '|' + today] || null, hour: uk.hour, day_stop: !!stoppedToday[id] });
+      const wantFor = adPeakWantFor({ hold: row.hold, schedule: schedToday[id + '|' + today] || null, hour: uk.hour, day_stop: !!stoppedToday[id], rerun_box: !!boxedBy[id] });
       const rows = switchable[id] || [];
       if (!rows.length) { idle++; continue; }               // no pay-per-click ad on it to switch
       /* counted only once there is an ad this row could act on, so the note says how many listings the
@@ -20944,17 +21044,33 @@ async function adtPeakStopLossRun(env, opts) {
   /* THE ROWS THIS HOUR CAN ACT ON: armed, readable hours, and this UK hour inside them. Narrowed first
      so the money and the orders are read for those listings and no others. */
   const inHours = [];
+  const onList = {};
   for (const r of (rows || [])) {
     if (!r) continue;
+    onList[String(r.item_id)] = 1;
     if (!Number(r.auto == null ? 0 : r.auto)) continue;
     const parsed = adPeakHoursParse(r.hours);
     if (!parsed.ranges) continue;
     if (!adInPeakRanges(uk.hour, parsed.ranges)) continue;
-    inHours.push({ row: r, ranges: parsed.ranges });
+    /* 27 Nov (owner): the limit is the band's — morning £2, evening £3, mixed hours the general one */
+    const band = adPeakBandOf(parsed.ranges);
+    inHours.push({ row: r, ranges: parsed.ranges, band: band, limit: adPeakBandLimit(rules, band), allday: false });
   }
-  const base = { ran: true, threshold: rules.stoploss_gbp, considered: inHours.length, stops: 0, sent: 0, written: 0 };
-  if (!inHours.length) return Object.assign({}, base, { why: 'nothing on the list is inside its own hours this hour' });
+  /* 27 Nov (owner): "for All day Peak time listings a £5.00 wastage limit is allowed" — every listing
+     with a live ad that is NOT on the list is judged the same way, all day, against the all-day limit.
+     Its ad runs all day, so there are no hours to be outside of. */
+  let allDayEntries = [];
+  try { allDayEntries = (await adAllDayCohortRead(env, '')).entries || []; } catch (e) { allDayEntries = []; }
+  for (const e of allDayEntries) {
+    if (!e || !e.item_id || onList[e.item_id]) continue;
+    inHours.push({ row: { item_id: e.item_id, account: e.account, hours: '', auto: 1, campaign_id: '', hold: 'auto' }, ranges: [[0, 0]], band: 'allday', limit: adPeakBandLimit(rules, 'allday'), allday: true });
+  }
+  const base = { ran: true, threshold: rules.stoploss_gbp, limits: rules.stoploss_bands, strikes_max: rules.strikes_max, considered: inHours.length, stops: 0, sent: 0, written: 0, reruns: 0 };
+  if (!inHours.length) return Object.assign({}, base, { why: 'nothing on the list is inside its own hours this hour, and nothing is advertised off the list' });
   const ids = inHours.map(x => String(x.row.item_id));
+  /* the strikes of every listing judged here: a boxed one is held off and judged no further */
+  let strikesBy = {};
+  try { strikesBy = await adtPeakStrikesRead(env, ids, today, rules.strikes_max); } catch (e) { strikesBy = {}; }
   /* TODAY'S SPEND PER LISTING, pay-per-click only and today's report day only. A row left behind from
      another day is not a reading of today, so it answers nothing rather than nought: the rule's own
      first refusal is "there is no reading of what it has spent today". */
@@ -20994,25 +21110,39 @@ async function adtPeakStopLossRun(env, opts) {
   const owed = [];
   for (const x of inHours) {
     const row = x.row, id = String(row.item_id);
+    const S = strikesBy[id] || null;
+    if (S && S.boxed) continue;                                   /* in the Rerun box: held off, nothing more to judge */
     const verdict = adPeakStopLoss({
       spend_today: spendBy[id] === undefined ? null : spendBy[id],
       /* nought here is a real answer and not an unknown: a read that failed has already turned this
          whole run back above, so reaching this line means both books were looked in and one of them
          said none. Null would be the honest answer to "nobody could look", and the rule refuses on it. */
       orders_today: ordersBy[id] === undefined ? 0 : ordersBy[id],
-      threshold: rules.stoploss_gbp,
+      threshold: x.limit,
       already_stopped_today: !!already[id],
-      inside_hours: adInPeakRanges(uk.hour, x.ranges),
+      inside_hours: x.allday ? true : adInPeakRanges(uk.hour, x.ranges),
       hold: adtPeakHoldOf(row),
     });
-    if (verdict.stop) owed.push({ row: row, ranges: x.ranges, verdict: verdict });
+    if (verdict.stop) owed.push({ row: row, ranges: x.ranges, verdict: verdict, band: x.band, allday: x.allday });
   }
-  if (!owed.length) {
-    const quiet = inHours.length + ' inside their hours at ' + adPeakPad(uk.hour) + ':' + adPeakPad(uk.minute) + ', limit ' + rules.stoploss_text + ': none has earned a stop';
+  /* 27 Nov (owner): THE RERUNS. An all-day listing the rule stopped on an earlier day, not boxed and
+     not stopped today, is put back on the air today (the second and third day), once a day at most.
+     A listing on the list needs none of this: the switch puts it on at the start of its hours. */
+  const rerunOwed = [];
+  const rerunSentToday = {};
+  try { for (const r of ((await env.DB.prepare('SELECT item_id FROM adtool_peak_rerun_sent WHERE day = ?1 LIMIT 5000').bind(today).all()).results || [])) rerunSentToday[String(r.item_id)] = 1; } catch (e) { /* no table yet */ }
+  for (const x of inHours) {
+    if (!x.allday) continue;
+    const id = String(x.row.item_id), S = strikesBy[id];
+    if (!S || !S.rerun_due || already[id] || rerunSentToday[id]) continue;
+    rerunOwed.push(x);
+  }
+  if (!owed.length && !rerunOwed.length) {
+    const quiet = inHours.length + ' judged at ' + adPeakPad(uk.hour) + ':' + adPeakPad(uk.minute) + ' (' + inHours.filter(x => !x.allday).length + ' on the list inside their hours, ' + inHours.filter(x => x.allday).length + ' all day), limits ' + rules.stoploss_bands_text + ': none has earned a stop, none is owed a rerun';
     try { await ctx_setSync(env, 'adtoolPeakStopLoss', '', quiet + ' @' + new Date().toISOString()); } catch (e) {}
     return Object.assign({}, base, { why: quiet, note: quiet });
   }
-  const owedIds = owed.map(x => String(x.row.item_id));
+  const owedIds = owed.map(x => String(x.row.item_id)).concat(rerunOwed.map(x => String(x.row.item_id)));
   const switchable = await adtPeakSwitchable(env, owedIds);
   const switches = await adtPeakLiveSwitches(env);
   /* the SAME ceiling the switch job counts, over the same rows, so the two senders share one allowance
@@ -21043,7 +21173,7 @@ async function adtPeakStopLossRun(env, opts) {
       const out = await adPeakSendStatus(env, {
         day: today, account: macct, item_id: id, campaign_id: cid, to: 'PAUSED',
         mode: switches[macct] ? 'live' : 'would-send',
-        hours: adPeakHoursText(x.ranges), why: 'peak spend rule: ' + verdict.why,
+        hours: x.allday ? 'all day' : adPeakHoursText(x.ranges), why: 'peak spend rule (' + x.band + ', limit \u00a3' + Number(verdict.threshold).toFixed(2) + '): ' + verdict.why,
         believed: '', done: doneToday, audit: 'ADTOOL_PEAK_STOPLOSS', actor: 'adtool (peak spend rule)',
       });
       campsSent.push(cid);
@@ -21058,18 +21188,51 @@ async function adtPeakStopLossRun(env, opts) {
        switch job reads this table on its next tick to know the listing is held off, so a change that has
        already gone to eBay must never be waiting in a batch for that. DO NOTHING on conflict, because a
        stop already on the record for today is the record and must not be written over. */
-    await env.DB.prepare(
-      'INSERT INTO adtool_peak_stops (account, item_id, day, at, spend, orders, threshold, sent, http_status, mode, campaign_id, reason) ' +
-      "VALUES (?1, ?2, ?3, datetime('now'), ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) ON CONFLICT(account, item_id, day) DO NOTHING"
-    ).bind(acct, id, today, verdict.spend, verdict.orders, verdict.threshold, ok ? 1 : 0, status, mode, campsSent.join(','), String(verdict.why).slice(0, 300)).run().catch(() => {});
+    const stopWhy = String(verdict.why).slice(0, 300);
+    const stopIns = await env.DB.prepare(
+      'INSERT INTO adtool_peak_stops (account, item_id, day, at, spend, orders, threshold, sent, http_status, mode, campaign_id, reason, band) ' +
+      "VALUES (?1, ?2, ?3, datetime('now'), ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ON CONFLICT(account, item_id, day) DO NOTHING"
+    ).bind(acct, id, today, verdict.spend, verdict.orders, verdict.threshold, ok ? 1 : 0, status, mode, campsSent.join(','), stopWhy, String(x.band || '')).run().then(() => true).catch(() => false);
+    if (!stopIns) {
+      await env.DB.prepare(
+        'INSERT INTO adtool_peak_stops (account, item_id, day, at, spend, orders, threshold, sent, http_status, mode, campaign_id, reason) ' +
+        "VALUES (?1, ?2, ?3, datetime('now'), ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) ON CONFLICT(account, item_id, day) DO NOTHING"
+      ).bind(acct, id, today, verdict.spend, verdict.orders, verdict.threshold, ok ? 1 : 0, status, mode, campsSent.join(','), stopWhy).run().catch(() => {});
+    }
     already[id] = 1;
-    details.push(id + ' ' + mode + (status ? ' (' + status + ')' : ''));
+    details.push(id + ' ' + x.band + ' ' + mode + (status ? ' (' + status + ')' : ''));
   }
+  /* the reruns: every paused cost-per-click ad of an all-day listing owed its next day goes back ACTIVE */
+  let reruns = 0;
+  for (const x of rerunOwed) {
+    const id = String(x.row.item_id), acct = String(x.row.account || ''), S = strikesBy[id] || { strikes: 0, max: rules.strikes_max };
+    const rowsP = (switchable[id] || []).filter(m => String(m.ad_status || '') === 'PAUSED' && String(m.account || '') === acct);
+    if (!rowsP.length) { continue; }
+    const byCampR = {};
+    for (const m of rowsP) byCampR[String(m.campaign_id || '')] = 1;
+    let modeR = '', statusR = 0;
+    for (const cid of Object.keys(byCampR)) {
+      const out = await adPeakSendStatus(env, {
+        day: today, account: acct, item_id: id, campaign_id: cid, to: 'ACTIVE',
+        mode: switches[acct] ? 'live' : 'would-send',
+        hours: 'all day', why: 'peak rerun: stopped on ' + (S.all_days || []).length + ' of the last 7 days (' + S.strikes + ' of ' + S.max + ' strikes), running again today',
+        believed: 'PAUSED', done: doneToday, audit: 'ADTOOL_PEAK_RERUN', actor: 'adtool (peak rerun)',
+      });
+      if (!modeR || out.mode === 'live') modeR = out.mode;
+      if (out.http_status) statusR = out.http_status;
+      if (out.sent) sentN++;
+      if (out.statement) stmts.push(out.statement); else written++;
+    }
+    reruns++;
+    await env.DB.prepare("INSERT INTO adtool_peak_rerun_sent (item_id, day, at, mode, http_status) VALUES (?1, ?2, datetime('now'), ?3, ?4) ON CONFLICT(item_id, day) DO NOTHING").bind(id, today, modeR, statusR).run().catch(() => {});
+    details.push(id + ' rerun ' + modeR + (statusR ? ' (' + statusR + ')' : ''));
+  }
+  base.reruns = reruns;
   await adtBatch(env, stmts); written += stmts.length;
   /* the trail, and only where the rule really judged something: through the peak this is one row every
      couple of minutes and outside it nothing at all, which is what the sampler's own gate already is. */
-  const note = inHours.length + ' inside their hours at ' + adPeakPad(uk.hour) + ':' + adPeakPad(uk.minute) +
-    ', limit ' + rules.stoploss_text + ': ' + stops + ' stopped' + (sentN ? ', ' + sentN + ' sent to eBay' : '') +
+  const note = inHours.length + ' judged at ' + adPeakPad(uk.hour) + ':' + adPeakPad(uk.minute) +
+    ', limits ' + rules.stoploss_bands_text + ': ' + stops + ' stopped' + (reruns ? ', ' + reruns + ' put back on for the day' : '') + (sentN ? ', ' + sentN + ' sent to eBay' : '') +
     (nothingToSwitch ? ', ' + nothingToSwitch + ' with no pay-per-click ad to stop' : '') +
     (mismatched ? ', ' + mismatched + ' where the list and the ad name different accounts' : '') +
     (details.length ? ' · ' + details.slice(0, 8).join(', ') : '');
@@ -22190,7 +22353,9 @@ async function adsIntraday(env) {
      sender, under that account's live-apply switch and daily ceiling. Behind its own try, because a rule
      that throws must never cost the fleet its reading of today: the error is written down and the next
      turn tries again. */
-  if (inEnvelope && inEnvelope.inside) {
+  /* 27 Nov (owner): every tick, not only inside the envelope — the all-day listings off the list are
+     judged against their own limit all day, and a listing owed its rerun is put back on */
+  {
     try { await adtPeakStopLossRun(env, { uk: adtUkParts(Date.now()), rows: peakRows, envelope: envelope }); }
     catch (e) { try { await ctx_setSync(env, 'adtoolPeakStopLossErr', '', String(e && e.message || e).slice(0, 300) + ' @' + new Date().toISOString()); } catch (e2) {} }
   }

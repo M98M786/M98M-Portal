@@ -149,6 +149,10 @@ VIEW_CSS.push(
     '.acc-tbl > tbody > tr.ac-sub.ac-subn > td{background:rgba(242,176,53,.06)}' +
     '.acc-tbl > tbody > tr.ac-sub.ac-subn > td:first-child{border-left:3px solid var(--warn)}' +
     '.acc-tbl > tbody > tr.ac-sub.ac-subn:hover > td{background:rgba(242,176,53,.06)}' +
+    /* 27 Nov (owner): the three Peak pages draw their listings in these rows, plainly: no red */
+    '.acc-tbl > tbody > tr.ac-sub.ac-subp > td{background:rgba(255,255,255,.025)}' +
+    '.acc-tbl > tbody > tr.ac-sub.ac-subp > td:first-child{border-left:3px solid var(--gold-line)}' +
+    '.acc-tbl > tbody > tr.ac-sub.ac-subp:hover > td{background:rgba(255,255,255,.025)}' +
     '.ac-nacts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0 8px}' +
     '.ac-nacts .minibtn{padding:4px 9px;font-size:10.5px}' +
     '.ac-nackb{margin-left:auto;border-color:var(--gold-line-hi)}' +
@@ -326,8 +330,60 @@ VIEW_CSS.push(
       AC.items.forEach(function (x) { if (String(x.item_id) === id) { r = x; } });
       return r ? acLowIntro(r) : null;
     }
+    /* a box another page mounted carries its own opening line */
+    if (el && el.getAttribute && el.getAttribute('data-ac-intro') != null) { return { intro: esc(String(el.getAttribute('data-ac-intro') || '')), acts: '' }; }
     return null;
   }
+  /* ── 27 Nov (owner): THE CENTRE'S ROWS FOR OTHER PAGES. The three Peak pages show their listings
+     "with the presentation of the Ads command centre": the same columns, the same Product history
+     box under every row, read from the same board and the same listing answer, without the red.
+     opts: { ids, account, days, meta: {id: {account,title,image}}, line(id,row) -> html under the
+     title, intro(id,row) -> the box's opening sentence, extra(id,row) -> html after the box,
+     empty, after(host, rows) }. A listing with no ad activity in the window still gets its row. ── */
+  window.ADS_CENTRE_ROWS = { mount: function (host, opts) {
+    if (!host) { return; }
+    opts = opts || {};
+    var ids = (opts.ids || []).map(String), want = {}; ids.forEach(function (i) { want[i] = 1; });
+    host.innerHTML = '<div class="ac-split-note">Reading the board\u2026</div>';
+    var days = Math.min(60, Math.max(3, Number(opts.days) || 14));
+    var pay = { days: days }; if (opts.account) { pay.account = opts.account; }
+    api('adsBoard', pay).then(function (d) {
+      if (!document.body.contains(host)) { return; }
+      var so = acSpendOnly(d), by = {}, meta = opts.meta || {};
+      ((d && d.items) || []).forEach(function (r) { if (r && want[String(r.item_id)]) { by[String(r.item_id)] = r; } });
+      var rows = ids.map(function (id) {
+        if (by[id]) { return by[id]; }
+        var m = meta[id] || {};
+        return { item_id: id, account: m.account || '', title: m.title || '', image: m.image || null, spend_today: 0, clicks_today: 0, cpc_today: 0, sold_today: 0, spend_14d: 0, clicks_14d: 0, sold_14d: 0, roas_today: null, roas_14d: null, rev_today: 0, rev_14d: 0, quiet: true };
+      });
+      rows.sort(function (a, b) { return ((acNum(b.spend_today) || 0) - (acNum(a.spend_today) || 0)) || ((acNum(b.spend_14d) || 0) - (acNum(a.spend_14d) || 0)); });
+      var saveWin = AC.win, saveLast = AC.lastDays; AC.win = days + 'd'; AC.lastDays = days;
+      var cols = AC_COLS.filter(function (c) { return !(c.money && so); });
+      var head = '<thead><tr>' + cols.map(function (c) { return '<th>' + esc(acLabel(c)) + '</th>'; }).join('') + '</tr></thead>';
+      var h = '';
+      if (!rows.length) {
+        h = '<div class="ac-split-note">' + esc(opts.empty || 'Nothing to show.') + '</div>';
+      } else {
+        h = '<div class="scroll"><table class="acc-tbl">' + head + '<tbody>';
+        rows.forEach(function (r) {
+          var id = String(r.item_id);
+          var line = typeof opts.line === 'function' ? (opts.line(id, r) || '') : '';
+          h += '<tr>' + cols.map(function (c, i) { return '<td>' + (i === 0 ? acItemCell(r, line) : c.cell(r)) + '</td>'; }).join('') + '</tr>';
+          if (/^\d{9,13}$/.test(id)) {
+            var intro = typeof opts.intro === 'function' ? String(opts.intro(id, r) || '') : 'Its Product history, in the page\u2019s own order:';
+            h += '<tr class="ac-sub ac-subp"><td colspan="' + cols.length + '"><div class="ac-d" data-ac-det="' + esc(id) + '" data-ac-intro="' + esc(intro) + '">' + acDetailHtml(id, { intro: esc(intro) }) + '</div>' +
+              (typeof opts.extra === 'function' ? (opts.extra(id, r) || '') : '') + '</td></tr>';
+          }
+        });
+        h += '</tbody></table></div>';
+      }
+      AC.win = saveWin; AC.lastDays = saveLast;
+      host.innerHTML = (d && d.ads_landing ? '<div class="ac-split-note">' + esc(String(d.landing_note || '')) + '</div>' : '') + h;
+      Array.prototype.forEach.call(host.querySelectorAll('[data-ac-det]'), function (el) { acDailyMount(el, el.getAttribute('data-ac-det')); });
+      acDetailsLoad(host);
+      if (typeof opts.after === 'function') { try { opts.after(host, rows); } catch (e) {} }
+    })['catch'](function (e) { host.innerHTML = '<div class="ac-split-note">The board did not answer \u2014 ' + esc((e && e.message) || 'no answer') + '</div>'; });
+  } };
   /* ── 27 Nov (owner): "build and present this graph on the Advertising overview and the Ads command
      centre after Today by account: ad spend red, the order earning from the advertised sales green,
      and a third bar, the difference, blue; numbers on every bar; updated through the API every five

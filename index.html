@@ -1076,7 +1076,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261127-1937';
+var BUILD = '20261127-2015';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -3031,6 +3031,10 @@ VIEW_CSS.push(
     '.acc-tbl > tbody > tr.ac-sub.ac-subn > td{background:rgba(242,176,53,.06)}' +
     '.acc-tbl > tbody > tr.ac-sub.ac-subn > td:first-child{border-left:3px solid var(--warn)}' +
     '.acc-tbl > tbody > tr.ac-sub.ac-subn:hover > td{background:rgba(242,176,53,.06)}' +
+    /* 27 Nov (owner): the three Peak pages draw their listings in these rows, plainly: no red */
+    '.acc-tbl > tbody > tr.ac-sub.ac-subp > td{background:rgba(255,255,255,.025)}' +
+    '.acc-tbl > tbody > tr.ac-sub.ac-subp > td:first-child{border-left:3px solid var(--gold-line)}' +
+    '.acc-tbl > tbody > tr.ac-sub.ac-subp:hover > td{background:rgba(255,255,255,.025)}' +
     '.ac-nacts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0 8px}' +
     '.ac-nacts .minibtn{padding:4px 9px;font-size:10.5px}' +
     '.ac-nackb{margin-left:auto;border-color:var(--gold-line-hi)}' +
@@ -3208,8 +3212,60 @@ VIEW_CSS.push(
       AC.items.forEach(function (x) { if (String(x.item_id) === id) { r = x; } });
       return r ? acLowIntro(r) : null;
     }
+    /* a box another page mounted carries its own opening line */
+    if (el && el.getAttribute && el.getAttribute('data-ac-intro') != null) { return { intro: esc(String(el.getAttribute('data-ac-intro') || '')), acts: '' }; }
     return null;
   }
+  /* ── 27 Nov (owner): THE CENTRE'S ROWS FOR OTHER PAGES. The three Peak pages show their listings
+     "with the presentation of the Ads command centre": the same columns, the same Product history
+     box under every row, read from the same board and the same listing answer, without the red.
+     opts: { ids, account, days, meta: {id: {account,title,image}}, line(id,row) -> html under the
+     title, intro(id,row) -> the box's opening sentence, extra(id,row) -> html after the box,
+     empty, after(host, rows) }. A listing with no ad activity in the window still gets its row. ── */
+  window.ADS_CENTRE_ROWS = { mount: function (host, opts) {
+    if (!host) { return; }
+    opts = opts || {};
+    var ids = (opts.ids || []).map(String), want = {}; ids.forEach(function (i) { want[i] = 1; });
+    host.innerHTML = '<div class="ac-split-note">Reading the board\u2026</div>';
+    var days = Math.min(60, Math.max(3, Number(opts.days) || 14));
+    var pay = { days: days }; if (opts.account) { pay.account = opts.account; }
+    api('adsBoard', pay).then(function (d) {
+      if (!document.body.contains(host)) { return; }
+      var so = acSpendOnly(d), by = {}, meta = opts.meta || {};
+      ((d && d.items) || []).forEach(function (r) { if (r && want[String(r.item_id)]) { by[String(r.item_id)] = r; } });
+      var rows = ids.map(function (id) {
+        if (by[id]) { return by[id]; }
+        var m = meta[id] || {};
+        return { item_id: id, account: m.account || '', title: m.title || '', image: m.image || null, spend_today: 0, clicks_today: 0, cpc_today: 0, sold_today: 0, spend_14d: 0, clicks_14d: 0, sold_14d: 0, roas_today: null, roas_14d: null, rev_today: 0, rev_14d: 0, quiet: true };
+      });
+      rows.sort(function (a, b) { return ((acNum(b.spend_today) || 0) - (acNum(a.spend_today) || 0)) || ((acNum(b.spend_14d) || 0) - (acNum(a.spend_14d) || 0)); });
+      var saveWin = AC.win, saveLast = AC.lastDays; AC.win = days + 'd'; AC.lastDays = days;
+      var cols = AC_COLS.filter(function (c) { return !(c.money && so); });
+      var head = '<thead><tr>' + cols.map(function (c) { return '<th>' + esc(acLabel(c)) + '</th>'; }).join('') + '</tr></thead>';
+      var h = '';
+      if (!rows.length) {
+        h = '<div class="ac-split-note">' + esc(opts.empty || 'Nothing to show.') + '</div>';
+      } else {
+        h = '<div class="scroll"><table class="acc-tbl">' + head + '<tbody>';
+        rows.forEach(function (r) {
+          var id = String(r.item_id);
+          var line = typeof opts.line === 'function' ? (opts.line(id, r) || '') : '';
+          h += '<tr>' + cols.map(function (c, i) { return '<td>' + (i === 0 ? acItemCell(r, line) : c.cell(r)) + '</td>'; }).join('') + '</tr>';
+          if (/^\d{9,13}$/.test(id)) {
+            var intro = typeof opts.intro === 'function' ? String(opts.intro(id, r) || '') : 'Its Product history, in the page\u2019s own order:';
+            h += '<tr class="ac-sub ac-subp"><td colspan="' + cols.length + '"><div class="ac-d" data-ac-det="' + esc(id) + '" data-ac-intro="' + esc(intro) + '">' + acDetailHtml(id, { intro: esc(intro) }) + '</div>' +
+              (typeof opts.extra === 'function' ? (opts.extra(id, r) || '') : '') + '</td></tr>';
+          }
+        });
+        h += '</tbody></table></div>';
+      }
+      AC.win = saveWin; AC.lastDays = saveLast;
+      host.innerHTML = (d && d.ads_landing ? '<div class="ac-split-note">' + esc(String(d.landing_note || '')) + '</div>' : '') + h;
+      Array.prototype.forEach.call(host.querySelectorAll('[data-ac-det]'), function (el) { acDailyMount(el, el.getAttribute('data-ac-det')); });
+      acDetailsLoad(host);
+      if (typeof opts.after === 'function') { try { opts.after(host, rows); } catch (e) {} }
+    })['catch'](function (e) { host.innerHTML = '<div class="ac-split-note">The board did not answer \u2014 ' + esc((e && e.message) || 'no answer') + '</div>'; });
+  } };
   /* ── 27 Nov (owner): "build and present this graph on the Advertising overview and the Ads command
      centre after Today by account: ad spend red, the order earning from the advertised sales green,
      and a third bar, the difference, blue; numbers on every bar; updated through the API every five
@@ -9015,7 +9071,7 @@ VIEW_CSS.push(
     if (rs.every(function (r) { return r[0] >= 15; })) return 'evening';
     return 'mixed';
   }
-  var PK = { band: '', nocamp: null, nocampErr: '', allMode: 'best', tab: 'suggested', account: '', data: null, busy: false, edit: null, ranges: [],
+  var PK = { band: '', nocamp: null, nocampErr: '', allMode: 'best', h24: {}, h24Busy: false, tab: 'suggested', account: '', data: null, busy: false, edit: null, ranges: [],
     item: '', note: '', pick: '', pickName: '', camps: null, campFor: '', campNote: '', campErr: '', campBusy: false,
     /* CHANGING THE CAMPAIGN FROM THE ROW (owner, 2 Nov): the listing whose campaign is open for
        changing, which is not `edit` (the hours) and never both at once. It is the row's own control,
@@ -9073,6 +9129,20 @@ VIEW_CSS.push(
     '.pkt-acts{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}.pkt-mark{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.04em;border:1px solid var(--gold-line-hi);color:var(--gold-a);white-space:nowrap}',
     '.pkt-neg{color:' + LOSS + ';font-weight:800}.pkt-pos{color:var(--gold-a);font-weight:700}',
     '.pkt-btn{background:var(--gold-b);color:var(--gold-ink);border:0;border-radius:8px;padding:6px 13px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap}',
+    /* 27 Nov (owner): the 24-hour box under every listing on the three band pages */
+    '.pk-h24{margin:10px 0 2px;padding:10px 12px;border:1px solid var(--gold-line);border-radius:10px;background:var(--panel)}',
+    '.pk-h24 .t{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px}',
+    '.pk-h24 .g{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;align-items:end;height:64px}',
+    '.pk-h24 .g .b{position:relative;height:100%;display:flex;align-items:flex-end;gap:1px;border-radius:3px}',
+    '.pk-h24 .g .b.in{background:rgba(242,176,53,.12)}',
+    '.pk-h24 .g .b.now{outline:1px solid var(--gold-a)}',
+    '.pk-h24 .g .b i{display:block;flex:1;border-radius:2px 2px 0 0;min-height:1px}',
+    '.pk-h24 .g .b i.u{background:#2fb170}.pk-h24 .g .b i.s{background:#e0563f}',
+    '.pk-h24 .l{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;font-size:9px;color:var(--text-3);margin-top:3px;text-align:center}',
+    '.pk-h24 .k{font-size:10.5px;color:var(--text-3);margin-top:5px}',
+    '.pk-rline{font-size:10.5px;color:var(--text-2);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}',
+    '.pk-rline .minibtn{padding:2px 8px;font-size:10px}',
+    '.pk-box{border-color:rgba(242,176,53,.45)}',
     '.pkt-btn.ghost{background:transparent;color:var(--text-2);border:1px solid var(--gold-line)}',
     '.pkt-btn[disabled]{opacity:.5;cursor:default}',
     '.pkt-form{border:1px solid var(--gold-line);border-radius:12px;padding:12px 14px;margin-bottom:12px;background:var(--panel-2)}',
@@ -9285,7 +9355,9 @@ VIEW_CSS.push(
     /* NOT hidden. Every other advertising-tool page is hidden here and lives only in the /ads/
        portal, but the owner asked for this one "on portal" as well, so it is carried by both builds
        and appears in both sidebars. */
-    hidden: false, order: 93, roles: ROLES,
+    /* 27 Nov (owner): "remove Peak time listings first shown on the top" — hidden from the sidebar;
+       the three band pages carry the list now, and this route still answers a copied link */
+    hidden: true, order: 93, roles: ROLES,
     icon: PK_ICON,
     render: function () { PK.band = ''; return pkRender('Peak time listings', 'The hours each listing should advertise in, and who switches it'); },
     init: function () { pkInit(''); }
@@ -10743,6 +10815,160 @@ VIEW_CSS.push(
     for (i = 0; i < cs.length; i++) cs[i].onclick = function () { PK.pkoList = ''; pkoPaintExtras(); };
   }
 
+  /* ══ 27 Nov (owner): THE RULE ON EACH BAND PAGE, THE RERUN BOX, THE CENTRE-STYLE ROWS ═══════
+     "In the Morning Peak time any listing that goes over £2.00 without generating a sale is paused;
+     the same listing is rerun the second and third day, each time paused after it crosses £2.00
+     without sales; after the third day those listings are put under the Rerun box, where Management
+     only can decide to run them again the next day." Evening £3.00, All day £5.00. The engine judges
+     and pauses (adtPeakStopLossRun); these blocks print what it did and carry Management's one
+     decision (adtoolPeakRerun). ══ */
+  function mayDecide() { var r = role(); return r === 'Management' || r === 'Ops Head' || !!(STATE.user && STATE.user.super); }
+  function bandLimit(b) { var L = (PK.data && PK.data.band_limits) || {}; var v = num(L[b]); return v == null ? null : v; }
+  function bandRuleLine(B) {
+    var lim = bandLimit(PK.band), mx = num(PK.data && PK.data.strikes_max) || 3;
+    var R = stopRules();
+    var on = !R || String(R.on) === 'on';
+    return '<div class="pkt-rules"><b>' + esc(B.label) + ' rule.</b> ' +
+      (on ? 'A listing here that spends ' + (lim == null ? 'its limit' : '<b>\u00a3' + lim.toFixed(2) + '</b>') + ' on ads in a day without a sale is paused by the system' +
+        (PK.band === 'allday' ? ' and put back on the next day' : ' and goes on again at the start of its hours the next day') +
+        '. It is run again the second and third day the same way. On its ' + cnt(mx) + (mx === 3 ? 'rd' : 'th') + ' stop it goes into the <b>Rerun box</b> below, held off, where Management alone decides that it runs again on the next day.' +
+        ' The pause and the rerun go to eBay only on an account whose live-apply switch is on; elsewhere they are written down.'
+        : 'The spend rule is switched off in Management, so nothing here is paused for spending.') +
+      (PK.data && PK.data.band_limits_text ? ' <span class="pkt-sm">Limits in force: ' + esc(PK.data.band_limits_text) + '.</span>' : '') + '</div>';
+  }
+  function rerunBoxPanel(B) {
+    var all = ((PK.data && PK.data.rerun_box) || []).filter(function (r) { return r && String(r.band || '') === PK.band; });
+    var h = '<div class="pkt-panel pk-box"><h3>Rerun box \u00b7 ' + esc(B.label) + '<span class="pkt-sm" style="margin-left:8px">' + cnt(all.length) + '</span></h3>' +
+      '<div class="pkt-sub">Listings the rule has stopped on ' + cnt(num(PK.data && PK.data.strikes_max) || 3) + ' days. They stay off until Management says they run again on the next day; then their stops are counted afresh.' +
+      (mayDecide() ? '' : ' Only Management can decide here.') + '</div>';
+    if (!PK.data) return h + '<div class="pkt-empty">Loading\u2026</div></div>';
+    if (!all.length) return h + '<div class="pkt-empty">Nothing is waiting in the Rerun box' + (PK.account ? ' for ' + esc(PK.account) : '') + '.</div></div>';
+    h += '<div class="pkt-scroll"><table class="pkt-tbl"><thead><tr><th>Listing</th><th>Stopped on</th><th class="r">Strikes</th><th>State</th><th></th></tr></thead><tbody>' +
+      all.map(function (r) {
+        var S = r.rule || {}, days = (S.all_days || S.days || []);
+        return '<tr><td>' + adtProductCell(r) + (r.hours ? '<div class="pkt-sm2">hours ' + esc(r.hours) + ' UK</div>' : '<div class="pkt-sm2">advertised all day</div>') + '</td>' +
+          '<td>' + (days.length ? days.map(function (d) { return esc(String(d).slice(5)); }).join(', ') : '\u2014') + '</td>' +
+          '<td class="r"><b>' + cnt(S.strikes) + '</b> of ' + cnt(S.max) + '</td>' +
+          '<td>' + (S.waiting ? '<span class="pkt-mark">runs again on ' + esc(S.run_day) + '</span>' + (S.decided_by ? '<div class="pkt-sm2">decided by ' + esc(S.decided_by) + '</div>' : '') : '<span class="pkt-badge amber">held off \u00b7 waiting for Management</span>') + '</td>' +
+          '<td>' + (mayDecide() && !S.waiting ? '<button class="pkt-btn" data-pkrerun="' + esc(String(r.item_id)) + '" title="run this listing again tomorrow; its stops are counted again from then">Run again tomorrow</button>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    return h + '</div>';
+  }
+  /* the page's listings: the morning or evening rows of the list, or the all-day ones */
+  function bandRows() {
+    if (PK.band === 'allday') {
+      var D = PK.data || {}, all = (D.all_day || []).filter(function (r) { return r && typeof r === 'object'; });
+      return PK.allMode === 'best' ? all.filter(function (r) { return r.best; }) : all;
+    }
+    return manual();
+  }
+  function bandRowsPanel(B) {
+    var D = PK.data || {}, rows = bandRows();
+    var h = '<div class="pkt-panel"><h3>' + esc(B.label) + ' \u00b7 the listings</h3>' +
+      '<div class="pkt-sub">' + (PK.band === 'allday'
+        ? 'Every listing with a live ad that nobody has put on the peak list, so its ad runs all day. <b>The best performing ones</b> \u2014 ' + cnt(num(D.all_day_best_units) == null ? 50 : num(D.all_day_best_units)) + ' or more units sold through a cost-per-click campaign, with a CPC ad still live \u2014 are what this page shows by default.'
+        : 'The listings on the list whose hours fall in the ' + PK.band + '. Each row is drawn as the Ads command centre draws it: today and the window side by side, its Product history underneath, and its 24-hour box.') + '</div>';
+    if (PK.band === 'allday' && PK.data) {
+      var all = (D.all_day || []), best = all.filter(function (r) { return r && r.best; });
+      h += '<div class="pkt-chips" style="margin:0 0 10px">' +
+        '<button class="pkt-chip' + (PK.allMode === 'best' ? ' on' : '') + '" data-pkall="best">Best performing<span class="n" style="margin-left:6px">' + cnt(best.length) + '</span></button>' +
+        '<button class="pkt-chip' + (PK.allMode === 'all' ? ' on' : '') + '" data-pkall="all">Every all-day listing<span class="n" style="margin-left:6px">' + cnt(all.length) + '</span></button></div>';
+    }
+    if (!PK.data) return h + '<div class="pkt-empty">Loading\u2026</div></div>';
+    h += '<div class="pkt-sub2">' + cnt(rows.length) + ' ' + plural(rows.length, 'listing', 'listings') + (PK.account ? ' \u00b7 ' + esc(PK.account) : ' \u00b7 all accounts') + '</div>';
+    return h + '<div id="pktRows"><div class="pkt-empty">Reading the board\u2026</div></div></div>';
+  }
+  /* the line under a listing's title: its hours, its limit, its strikes, what happened today, and the controls */
+  function bandRowLine(m) {
+    var S = m.rule || {}, lim = num(S.limit_gbp), parts = [];
+    parts.push(PK.band === 'allday' ? 'advertised all day' : 'hours <b>' + esc(String(m.hours || '')) + '</b> UK');
+    if (lim != null) parts.push('limit \u00a3' + lim.toFixed(2) + ' without a sale');
+    if (m.stopped_today) { var st = m.stopped_today; parts.push('<b style="color:var(--bad)">stopped today</b>' + (num(st.spend) != null ? ' at \u00a3' + Number(st.spend).toFixed(2) : '') + (st.mode === 'live' ? ' \u00b7 sent to eBay' : st.mode ? ' \u00b7 ' + esc(st.mode) : '')); }
+    if (S.why) parts.push((S.boxed ? '<b style="color:var(--warn)">Rerun box</b> \u00b7 ' : '') + esc(S.why));
+    if (m.best) parts.push('<span class="pkt-mark">best performing \u00b7 ' + cnt(m.cpc_units) + ' sold via CPC</span>');
+    var acts = '';
+    if (PK.band !== 'allday') acts += '<button class="minibtn" data-pkrm="' + esc(String(m.item_id)) + '">Remove</button>';
+    else acts += '<button class="minibtn" data-pkadd="' + esc(String(m.item_id)) + '" title="put this listing on the peak list; the hours are picked on the list">Add to the list</button>';
+    if (S.boxed && !S.waiting && mayDecide()) acts += '<button class="minibtn" data-pkrerun="' + esc(String(m.item_id)) + '">Run again tomorrow</button>';
+    return '<div class="pk-rline">' + parts.join(' \u00b7 ') + acts + '</div>';
+  }
+  function bandRowsMount(B) {
+    var host = $('pktRows'); if (!host) return;
+    if (!window.ADS_CENTRE_ROWS) { host.innerHTML = '<div class="pkt-empty">The Ads command centre\u2019s rows are not loaded on this build.</div>'; return; }
+    var rows = bandRows(), byId = {}, meta = {};
+    rows.forEach(function (m) { var id = String(m.item_id); byId[id] = m; meta[id] = { account: m.account, title: m.title, image: m.image }; });
+    window.ADS_CENTRE_ROWS.mount(host, {
+      ids: rows.map(function (m) { return String(m.item_id); }), account: PK.account || '', days: 14, meta: meta,
+      line: function (id) { return byId[id] ? bandRowLine(byId[id]) : ''; },
+      intro: function (id) { var m = byId[id] || {}; return 'Its Product history, in the page\u2019s own order' + (m.rule && m.rule.boxed ? ' \u2014 this listing waits in the Rerun box' : '') + ':'; },
+      extra: function (id) { return '<div class="pk-h24" data-pk24="' + esc(id) + '"><div class="t">24 hours \u00b7 the last 7 days</div><div class="k">Reading the hours\u2026</div></div>'; },
+      empty: PK.band === 'allday' ? 'No all-day listing matches.' : 'Nothing on the list with ' + PK.band + ' hours' + (PK.account ? ' for ' + PK.account : '') + '.',
+      after: function (h2) { wireBandRows(h2); h24Load(h2); }
+    });
+  }
+  function wireBandRows(box) {
+    var i, rs = box.querySelectorAll('[data-pkrm]');
+    for (i = 0; i < rs.length; i++) rs[i].onclick = function () { var id = this.getAttribute('data-pkrm'); if (confirm('Take this listing off the peak list? The row stays as a record.')) remove(id, this); };
+    var ad = box.querySelectorAll('[data-pkadd]');
+    for (i = 0; i < ad.length; i++) ad[i].onclick = function () { add({ item_id: this.getAttribute('data-pkadd') }, this); };
+    var rr = box.querySelectorAll('[data-pkrerun]');
+    for (i = 0; i < rr.length; i++) rr[i].onclick = function () { decideRerun(this.getAttribute('data-pkrerun'), this); };
+  }
+  function decideRerun(id, el) {
+    if (!id) return;
+    if (!confirm('Run this listing again tomorrow? It stays off today; from tomorrow its stops are counted afresh.')) return;
+    if (el) { el.disabled = true; el.textContent = '\u2026'; }
+    api('adtoolPeakRerun', { item_id: id, band: PK.band }).then(function (R) {
+      toast((R && R.note_to_reader) || 'Decided: it runs again tomorrow.');
+      return load(true);
+    }).catch(function (e) { if (el) { el.disabled = false; el.textContent = 'Run again tomorrow'; } toast((e && e.message) || 'The decision did not go through.'); });
+  }
+  /* THE 24-HOUR BOX: the listing's own hours over the last seven days, units sold (green) and ad spend
+     (red) by UK hour, from the same profile read the Peak page already makes; the page's own hours are
+     shaded. One listing after another, kept while the page is open. */
+  function h24Html(id, P, m) {
+    var hours = (P && P.profile && P.profile.hours) || null;
+    if (!Array.isArray(hours) || hours.length !== 24) return '<div class="t">24 hours \u00b7 the last 7 days</div><div class="k">No hour-by-hour reading for this listing yet.</div>';
+    var inH = {}, rs = m && m.hours ? String(m.hours).split(',') : [];
+    rs.forEach(function (p) { var mm = /^(\d{1,2})\s*-\s*(\d{1,2})$/.exec(p.trim()); if (!mm) return; var a = Number(mm[1]), b = Number(mm[2]), x = a; var guard = 0; while (x !== b && guard++ < 24) { inH[x] = 1; x = (x + 1) % 24; } });
+    var maxU = 0, maxS = 0, i;
+    for (i = 0; i < 24; i++) { var hh0 = hours[i] || {}; maxU = Math.max(maxU, num(hh0.units_raw) || 0); maxS = Math.max(maxS, num(hh0.spend_raw) || 0); }
+    var nowH = ukHourNow(), tu = 0, ts = 0;
+    var g = '';
+    for (i = 0; i < 24; i++) {
+      var hx = hours[i] || {}, u = num(hx.units_raw) || 0, s = num(hx.spend_raw) || 0; tu += u; ts += s;
+      g += '<div class="b' + (inH[i] ? ' in' : '') + (nowH === i ? ' now' : '') + '" title="' + esc(clock(i) + ' UK \u00b7 ' + cnt(u) + ' units \u00b7 ' + gbp(s) + ' ad spend' + (inH[i] ? ' \u00b7 inside its hours' : '')) + '">' +
+        '<i class="u" style="height:' + (maxU > 0 ? Math.max(u > 0 ? 4 : 0, Math.round(u / maxU * 100)) : 0) + '%"></i>' +
+        '<i class="s" style="height:' + (maxS > 0 ? Math.max(s > 0 ? 4 : 0, Math.round(s / maxS * 100)) : 0) + '%"></i></div>';
+    }
+    var l = ''; for (i = 0; i < 24; i++) l += '<div>' + (i % 3 === 0 ? i : '') + '</div>';
+    return '<div class="t">24 hours \u00b7 the last 7 days \u00b7 <span style="color:#5fd49a">units</span> and <span style="color:#ff8a73">ad spend</span> by UK hour' + (rs.length ? ' \u00b7 its hours shaded' : '') + '</div>' +
+      '<div class="g">' + g + '</div><div class="l">' + l + '</div>' +
+      '<div class="k">' + cnt(tu) + ' units and ' + gbp(ts) + ' of ad spend over the seven days' + (P && P.profile && P.profile.days != null ? ' \u00b7 ' + cnt(P.profile.days) + ' days read' : '') + '</div>';
+  }
+  function h24Load(box) {
+    var els = box.querySelectorAll('[data-pk24]'), ids = [], i;
+    for (i = 0; i < els.length && ids.length < 60; i++) {
+      var id = els[i].getAttribute('data-pk24');
+      if (PK.h24[id] && PK.h24[id].data) { els[i].innerHTML = h24Html(id, PK.h24[id].data, manualAll().concat(((PK.data || {}).all_day) || []).filter(function (m) { return String(m.item_id) === id; })[0]); continue; }
+      ids.push(id);
+    }
+    var next = function () {
+      var id = ids.shift(); if (!id) return;
+      api('adtoolPeakProfile', { item_id: id, days: 7 }).then(function (P) { PK.h24[id] = { data: P || {} }; })
+        .catch(function (e) { PK.h24[id] = { data: null, err: (e && e.message) || 'no answer' }; })
+        .then(function () {
+          var el2 = box.querySelector('[data-pk24="' + id + '"]');
+          if (el2) {
+            var m = manualAll().concat(((PK.data || {}).all_day) || []).filter(function (x) { return String(x.item_id) === id; })[0];
+            el2.innerHTML = PK.h24[id].data ? h24Html(id, PK.h24[id].data, m) : '<div class="t">24 hours</div><div class="k">The hours could not be read: ' + esc(PK.h24[id].err || '') + '</div>';
+          }
+          next();
+        });
+    };
+    next();
+  }
+
   /* ── draw and wire ────────────────────────────────────────────────────────────────────────── */
   function draw() {
     var box = $('pktBody'); if (!box) return;
@@ -10751,16 +10977,25 @@ VIEW_CSS.push(
       '<span>' + esc(PK.account || 'all accounts') + '</span><span>·</span>' +
       '<span>' + (PK.band === 'allday' ? cnt(((D.all_day || [])).length) + ' advertised all day' : B ? cnt(manual().length) + ' on the list with ' + PK.band + ' hours' : cnt(C.suggested) + ' suggested · ' + cnt(C.manual) + ' on the list') + '</span>' +
       (D.computed_at ? '<span>·</span><span>worked out at ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC</span>' : '') + '</div>';
-    if (PK.band === 'allday') {
-      h += allDayPanel();
-    } else {
-      h += banner();
-      h += rulesLine();
-      h += patternLine();
-      if (!B) h += tabs(C);
-      h += (B || PK.tab === 'manual') ? manualPanel() : suggestedPanel();
+    if (B) {
+      /* 27 Nov (owner): a band page is the rule in force, the Rerun box, the add form, and the page's
+         listings drawn as the Ads command centre draws its rows, each with its Product history and
+         its 24-hour box; nothing red */
+      h += bandRuleLine(B);
+      h += rerunBoxPanel(B);
+      if (PK.band !== 'allday') { h += (PK.edit === '' || PK.edit == null) && !PK.campEdit ? pickerHtml('Add a listing to the ' + B.label + ' list', 'pktAdd', true, true) : ''; }
+      h += bandRowsPanel(B);
       if (PK.band === 'morning') h += noCampPanel();
+      box.innerHTML = h;
+      wire();
+      bandRowsMount(B);
+      return;
     }
+    h += banner();
+    h += rulesLine();
+    h += patternLine();
+    h += tabs(C);
+    h += PK.tab === 'manual' ? manualPanel() : suggestedPanel();
     box.innerHTML = h;
     wire();
   }
@@ -10773,6 +11008,8 @@ VIEW_CSS.push(
 
     var am = box.querySelectorAll('[data-pkall]');
     for (i = 0; i < am.length; i++) am[i].onclick = function () { PK.allMode = this.getAttribute('data-pkall') === 'all' ? 'all' : 'best'; draw(); };
+    var rb = box.querySelectorAll('.pk-box [data-pkrerun]');
+    for (i = 0; i < rb.length; i++) rb[i].onclick = function () { decideRerun(this.getAttribute('data-pkrerun'), this); };
     var ab = box.querySelectorAll('[data-pkaddband]');
     for (i = 0; i < ab.length; i++) ab[i].onclick = function () {
       var id = this.getAttribute('data-pkaddband'), B = PK_BANDS[PK.band] || PK_BANDS.morning;
