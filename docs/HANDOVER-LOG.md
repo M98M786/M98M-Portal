@@ -1024,3 +1024,30 @@ deadline, pushes hunt mirror + task + full task push. Grace = existing TASK_GRAC
 project is at the 200-version cap; the bulk-delete confirmation for versions 1-25 is staged in the owner's Chrome
 and needs his click (the auto-mode classifier refuses the destructive confirm). After it: Manage deployments ->
 Edit -> New version -> Deploy, then verify the three actions answer.
+
+## 2026-11-27 12:55 UTC · MAC · Engine: campaign /end on the REST route; three SQR desk items revised + manual campaigns; two empty Smart campaigns ended
+
+**Change.** `ebayRestCall` allow-list gains ONE path, `/sell/marketing/v1/ad_campaign/{id}/end` (POST), commit
+`71bc7bf`, deployed 12:53 UTC, bindings and office gate verified. Reason: once a listing's keyword campaign has taken
+over, its old per-item Smart campaign is a shell holding an archived ad; Hasib asked for those shells ended. There is
+still no campaign pause path.
+
+**SQR desk today (all on owner "go for it … + campaign").** Electric hot water bottle (AZHAR ABRT) — title, description
+(eBay-hosted gallery, khaki, package list, 30-day returns), manual campaign SQR 336897918029 id 167954172015, 45 keywords,
+101 negatives. TWS earbuds (Azhar Bhai) — title, description (lister's "please confirm" drafting notes removed from the
+buyer-facing notes box, gallery off Google Drive/AliExpress), manual campaign id 170002259016, 58 keywords, 110 negatives.
+Ribbed NATO strap (Sir Hasib) — title no longer promises 16/19/21/24mm the listing does not stock (411 clicks, £54.79 for
+one unit in the report), dead AliExpress gallery replaced, manual campaign id 166320595019, 168 keywords, 127 negatives;
+its Smart ad archived. Logs: `M98M-SQR-Agent/logs/sqr-revisions.csv`, `logs/sqr-campaigns.csv`; backups per account.
+
+**Ended (12:54 UTC, on owner instruction "end the empty smart campaigns").** Sir Hasib `165068325019` Premium NATO Watch
+Strap and AZHAR ABRT `167737615015` (the hot water bottle's own; its paused ad archived first). Both read ENDED.
+NOT ended: Azhar Bhai `168338844016` Wireless Earbuds — it still holds a second listing's paused ad (407222043299), so
+it is not empty; asked Hasib. The 25 Nov CPC→Dynamic leftovers (14 per-item campaigns with archived ads) also not
+touched; offered.
+
+**Open.** Hot water bottle 336897918029: pictures say USB powered, description says mains, supplier file says EU-plug
+charging water bag — revised on owner instruction with the mains text as it was; owner to confirm what ships. Two manual
+campaigns read PAUSED at campaign level this morning (radio 166308147019, shaver 166203577019) — not by the Mac.
+
+**State.** MAC PRIMARY. Hasib sends SQRs to the Mac again today (three runs); Windows standby.
