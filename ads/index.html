@@ -776,7 +776,10 @@ var ENGINE_URL_DEFAULT = 'https://m98m-engine.m98m786.workers.dev/';
    dark is unpinned and the default tried again. The hostname is attached to the Worker in the
    Cloudflare dashboard (Workers & Pages → m98m-engine → Settings → Domains & Routes → Custom
    domain); until that is done this address does not resolve and the try fails fast and quietly. */
-var ENGINE_URL_ALT = 'https://engine.m98mltd.co.uk/';
+/* 27 Nov: the second door is a pass-through worker under a DIFFERENT workers.dev name (engine/door.js),
+   for networks that block the engine's own name by hostname. engine.m98mltd.co.uk never existed —
+   the domain's DNS is not on Cloudflare, so a Workers custom domain could not be made there. */
+var ENGINE_URL_ALT = 'https://m98m-door.m98m786.workers.dev/';
 var ENGINE_HOST_KEY = 'm98m:engineHost';
 function engineBase(){
   try{ if(localStorage.getItem(ENGINE_HOST_KEY) === ENGINE_URL_ALT){ return ENGINE_URL_ALT; } }catch(e){}
@@ -850,7 +853,8 @@ var ENGINE_DARK = false;
 var ENGINE_AS_CAN = { whoami:1, getPublicConfig:1, register:1, ping:1 };
 var ENGINE_DARK_MSG = 'This network is blocking the portal\u2019s data service, so it cannot open here. ' +
   'Your account is fine \u2014 switch this device to <b>mobile data / a hotspot</b> and it will work at once, ' +
-  'or ask whoever runs the office internet to allow <b>m98m-engine.m98m786.workers.dev</b>.';
+  'or ask whoever runs the office internet to allow <b>m98m-engine.m98m786.workers.dev</b>. ' +
+  '<button class="minibtn" style="margin-top:8px" onclick="engineNetTest(document.getElementById(\'loginNetOut\'))">Test this network</button><div id="loginNetOut"></div>';
 function engineDarkSet(on){
   on = !!on;
   if(on === ENGINE_DARK){ return; }
@@ -863,10 +867,39 @@ function engineDarkSet(on){
       document.body.appendChild(el);
     }
     el.innerHTML = 'This network is blocking the portal\u2019s data service, so pages cannot load. ' +
-      'Your account is fine \u2014 switch this device to <b>mobile data / a hotspot</b>, or ask whoever runs the office internet to allow <b>m98m-engine.m98m786.workers.dev</b>.';
+      'Your account is fine \u2014 switch this device to <b>mobile data / a hotspot</b>, or ask whoever runs the office internet to allow <b>m98m-engine.m98m786.workers.dev</b>. ' +
+      '<button id="engineNetBtn" class="minibtn" style="margin-left:8px;border-color:#ffb3a7;color:#fff">Test this network</button><div id="engineNetOut"></div>';
+    var b = el.querySelector('#engineNetBtn'); if(b){ b.onclick = function(){ engineNetTest(el.querySelector('#engineNetOut')); }; }
   } else if(el){ el.remove(); }
 }
 function engineDark(){ return ENGINE_DARK; }
+/* "Test this network": one click from the person who is stuck, and the result names which host their
+   network drops — the page itself (GitHub), the engine, the second door, a sibling worker, Google's
+   script host — so the next screenshot is a diagnosis, not a warning. Every host is in the CSP already. */
+function engineNetTest(host){
+  var box = host || $('engineNetOut'); if(!box){ return; }
+  box.innerHTML = '<div style="margin-top:8px;font-size:12px;font-weight:700">Testing\u2026</div>';
+  var probes = [
+    ['this page (GitHub)', function(){ return fetch('version.txt?cb=' + Date.now(), { cache:'no-store' }); }],
+    ['engine · main door', function(){ return fetch(ENGINE_URL_DEFAULT, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ action:'getPublicConfig', payload:{} }) }); }],
+    ['engine · second door', function(){ return fetch(ENGINE_URL_ALT, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ action:'getPublicConfig', payload:{} }) }); }],
+    ['another workers.dev host', function(){ return fetch('https://m98m-calculator.m98m786.workers.dev/', { mode:'no-cors', cache:'no-store' }); }],
+    ['Google script host', function(){ return fetch(BACKEND, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify({ action:'ping', payload:{} }), redirect:'follow' }); }]
+  ];
+  var rows = [];
+  var one = function(i){
+    if(i >= probes.length){
+      box.innerHTML = '<table style="margin-top:8px;font-size:12px;border-collapse:collapse;text-align:left">' + rows.join('') + '</table>' +
+        '<div style="font-size:11px;margin-top:6px;opacity:.85">Send a screenshot of this to Management. Green = this network lets it through; red = it does not.</div>';
+      return;
+    }
+    var t0 = Date.now(), ac = new AbortController(), t = setTimeout(function(){ ac.abort(); }, 8000);
+    probes[i][1]().then(function(r){ clearTimeout(t); rows.push('<tr><td style="padding:2px 10px 2px 0">' + esc(probes[i][0]) + '</td><td style="color:#7CFC9A;font-weight:800">OK \u00b7 ' + (Date.now() - t0) + ' ms' + (r && r.status ? ' \u00b7 ' + r.status : '') + '</td></tr>'); },
+      function(e){ clearTimeout(t); rows.push('<tr><td style="padding:2px 10px 2px 0">' + esc(probes[i][0]) + '</td><td style="color:#ff8a80;font-weight:800">FAILED \u00b7 ' + esc(e && e.name === 'AbortError' ? 'no answer in 8 s' : String((e && e.message) || e)) + '</td></tr>'); })
+      .then(function(){ one(i + 1); });
+  };
+  one(0);
+}
 function engineCall(action, payload, timeoutMs){
   var url = engineBase();
   var canRetry = ENGINE_WRITE_ACTIONS.indexOf(action) < 0;
@@ -1043,7 +1076,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261126-2059';
+var BUILD = '20261127-1404';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
