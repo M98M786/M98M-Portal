@@ -1076,7 +1076,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261127-1924';
+var BUILD = '20261127-1928';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -43350,11 +43350,17 @@ function saveSchedule() {
     }
 
     /* the three suppliers */
-    var sups = d.suppliers || [];
-    h += '<div class="sd-blk"><h3>Suppliers <span class="n">from the Main Sheet, the portal, the go-live record and the hunt — first link found per slot</span></h3><div class="sd-sups">';
+    var sups = d.suppliers || [], w = d.working_supplier;
+    h += '<div class="sd-blk"><h3>Suppliers <span class="n">the one the orders were actually bought from, then the three on file</span></h3><div class="sd-sups">';
+    if (w) {
+      h += '<div class="sd-sup main"><div class="t"><span>Working supplier · from the orders</span><span>' + (w.on_file ? 'on file as supplier ' + w.on_file : '<span class="sd-pill warn" style="margin:0">not in the three on file</span>') + '</span></div>' +
+        '<div>' + sdLink(w.url, sdHost(w.url) + (w.ali_item ? ' · ' + w.ali_item : '')) + '</div>' +
+        '<div class="cost">' + (w.paid ? sdM(w.paid) : '—') + '<small>paid a unit, average</small></div>' +
+        '<div class="f">Bought on <b>' + w.orders + '</b> of the last ' + (d.orders || []).length + ' orders' + (w.last_used ? ' · last ' + esc(w.last_used) : '') + '</div></div>';
+    }
     for (var i = 0; i < 3; i++) {
       var s = sups[i];
-      h += '<div class="sd-sup' + (i === 0 && s ? ' main' : '') + '"><div class="t"><span>' + (i === 0 ? 'Main supplier' : 'Supplier ' + (i + 1)) + '</span>' + (s ? '<span>' + esc(sdS(s.src)) + '</span>' : '') + '</div>';
+      h += '<div class="sd-sup"><div class="t"><span>' + (i === 0 ? 'Supplier 1 · on file' : 'Supplier ' + (i + 1) + ' · on file') + '</span>' + (s ? '<span>' + esc(sdS(s.src)) + '</span>' : '') + '</div>';
       if (!s) { h += '<div class="sd-mute" style="font-size:12.5px">none on file</div></div>'; continue; }
       h += '<div>' + sdLink(s.url, sdHost(s.url) + (s.ali_item ? ' · ' + s.ali_item : '')) + '</div>' +
         '<div class="cost">' + (s.cost_now ? sdM(s.cost_now) : '—') + (s.cost_now_source ? '<small>' + esc(s.cost_now_source) + '</small>' : '') + '</div>' +
@@ -43375,19 +43381,20 @@ function saveSchedule() {
         (spend ? '' : '<th class="r">Actual / unit</th><th class="r">Target</th><th class="r">Gap</th><th>Verdict</th><th class="r">Would set <span class="sd-pill gold" style="margin:0">shadow</span></th>') + '</tr></thead><tbody>';
       rows.forEach(function (r, i) {
         var j = r.judge || {}, sel = SD.open === i;
-        var would = j.n_required, dir = would === null || would === undefined || !r.paid ? '' : (would > r.paid + 0.005 ? 'raise' : (would < r.paid - 0.005 ? 'lower' : 'hold'));
+        var srow = (sh.rows || []).filter(function (x) { return x.variation === r.variation; })[0] || null;
+        var dir = srow ? srow.direction : '', would = srow ? srow.would_set : null;
         h += '<tr class="v' + (sel ? ' sel' : '') + '" data-sd-var="' + i + '"><td>' + esc(sdS(r.label).slice(0, 70)) + '</td><td class="r">' + r.units_30d + '</td><td class="r">' + (r.paid ? sdM(r.paid) : '—') + '</td>' +
           '<td class="r">' + (j.ali ? sdM(j.ali) : '—') + '</td><td class="sd-sub">' + esc(sdS(j.ali_source) || 'none') + (r.last_cost_at ? ' · last paid ' + esc(r.last_cost_at) : '') + '</td>';
         if (!spend) {
           h += '<td class="r ' + sdTone(j.n_actual) + '">' + (j.n_actual === null || j.n_actual === undefined ? '—' : sdM(j.n_actual)) + '</td><td class="r">' + (j.target ? sdM(j.target) : '—') + '</td>' +
             '<td class="r ' + sdTone(j.n_gap) + '">' + (j.n_gap === null || j.n_gap === undefined ? '—' : sdM(j.n_gap)) + '</td><td><span class="sd-pill ' + (j.n_segment === 'raise' ? 'bad' : j.n_segment === 'on_target' ? 'ok' : j.n_segment === 'reduce' ? 'gold' : '') + '">' + esc(SD_SEG[j.n_segment] || sdS(j.n_segment)) + '</span>' + (j.n_loss ? ' <span class="sd-pill bad">losing</span>' : '') + '</td>' +
-            '<td class="r">' + (would ? '<span class="' + (dir === 'raise' ? 'sd-up' : dir === 'lower' ? 'sd-down' : '') + '">' + sdM(would) + '</span>' + (fl.locked_in_sale ? ' <span class="sd-pill bad" style="margin:0">locked</span>' : '') : '—') + '</td>';
+            '<td class="r">' + (dir === 'raise' ? '<span class="sd-up">↑ ' + sdM(would) + '</span>' : dir === 'lower' ? '<span class="sd-down">↓ ' + sdM(would) + '</span>' : (srow ? '<span class="sd-mute">hold</span>' : '—')) + (dir && dir !== 'hold' && fl.locked_in_sale ? ' <span class="sd-pill bad" style="margin:0">locked</span>' : '') + '</td>';
         }
         h += '</tr>';
         if (sel && !spend) { h += '<tr><td colspan="10"><div class="sd-chain">' + sdChainBox('Neutral · no ads', r.chain_neutral, j, 'n_') + sdChainBox('With ads · last 14 days', r.chain_ads, j, 'a_') + '</div></td></tr>'; }
       });
       h += '</tbody></table></div>' +
-        '<div class="sd-sub" style="margin-top:6px">' + esc(sdS(v.note)) + (sh.rows && sh.rows.length ? ' · <b>shadow</b>: ' + sh.rows.filter(function (x) { return x.direction === 'raise'; }).length + ' would raise, ' + sh.rows.filter(function (x) { return x.direction === 'lower'; }).length + ' would lower — ' + esc(sdS(sh.note)) : '') + '</div></div>';
+        '<div class="sd-sub" style="margin-top:6px">' + esc(sdS(v.note)) + (sh.rows && sh.rows.length ? ' · <b>shadow</b>: ' + sh.rows.filter(function (x) { return x.direction === 'raise'; }).length + ' would raise · ' + sh.rows.filter(function (x) { return x.direction === 'lower'; }).length + ' would lower · ' + sh.rows.filter(function (x) { return x.direction === 'hold'; }).length + ' hold — ' + esc(sdS(sh.note)) : '') + '</div></div>';
     }
 
     /* previous orders */
@@ -43405,7 +43412,7 @@ function saveSchedule() {
     var mv = d.moves || [];
     h += '<div class="sd-blk"><h3>Cost moves <span class="n">from the Main Sheet, compared every hour · 30p+ in a day is serious</span></h3>';
     h += mv.length ? '<div class="sd-wrap"><table class="sd-tbl"><thead><tr><th>Day</th><th class="r">From</th><th class="r">To</th><th class="r">Move</th><th>Tier</th><th>Supplier</th></tr></thead><tbody>' +
-      mv.slice(0, 20).map(function (m) { return '<tr><td class="sd-sub">' + esc(m.day) + '</td><td class="r">' + sdM(m.old_cost) + '</td><td class="r">' + sdM(m.new_cost) + '</td><td class="r ' + (m.delta > 0 ? 'sd-up' : 'sd-down') + '">' + (m.delta > 0 ? '+' : '') + sdM(m.delta) + '</td><td>' + sdTier(m.tier) + '</td><td>' + (m.supplier ? sdLink(m.supplier, sdHost(m.supplier)) : '') + '</td></tr>'; }).join('') +
+      mv.slice(0, 20).map(function (m) { return '<tr' + (m.flip ? ' style="opacity:.6"' : '') + '><td class="sd-sub">' + esc(m.day) + '</td><td class="r">' + sdM(m.old_cost) + '</td><td class="r">' + sdM(m.new_cost) + '</td><td class="r ' + (m.delta > 0 ? 'sd-up' : 'sd-down') + '">' + (m.delta > 0 ? '+' : '') + sdM(m.delta) + '</td><td>' + (m.flip ? '<span class="sd-pill" title="the Main Sheet\'s one cost cell moved from one variation\'s cost to another\'s — not a supplier change">variation flip</span>' : sdTier(m.tier)) + '</td><td>' + (m.supplier ? sdLink(m.supplier, sdHost(m.supplier)) : '') + '</td></tr>'; }).join('') +
       '</tbody></table></div>' : '<div class="sd-sub">no cost move recorded for this item yet</div>';
     h += '</div>';
 
@@ -43446,7 +43453,7 @@ function saveSchedule() {
     var h = '<div class="sd-tiles">' +
       tile('missing', 'Live listings · no supplier anywhere', sdN(c.no_supplier), c.no_supplier ? 'sd-up' : '') +
       tile('selling', 'Of those, sold in 30 days', sdN(c.no_supplier_selling), c.no_supplier_selling ? 'sd-up' : 'sd-down') +
-      tile('moves', 'Cost moves 30p+ · since yesterday', sdN(c.moves_serious), c.moves_serious ? 'sd-up' : 'sd-down') +
+      tile('moves', 'Real cost moves 30p+ · since yesterday', sdN(c.moves_serious) + (c.moves_flips ? '<small style="font-size:11px;color:var(--text-3);font-weight:600"> + ' + sdN(c.moves_flips) + ' variation flips</small>' : ''), c.moves_serious ? 'sd-up' : 'sd-down') +
       tile('feeds', 'Accounts with no cost feed', sdN(c.accounts_no_book), c.accounts_no_book ? 'sd-up' : 'sd-down') + '</div>';
 
     if (SD.tab === 'missing' || SD.tab === 'selling') {
@@ -43467,7 +43474,7 @@ function saveSchedule() {
       var mv = d.moves || [];
       h += '<div class="sd-blk"><h3>Cost moves since yesterday <span class="n">from every Main Sheet · the engine compares costs hourly</span></h3>' +
         (mv.length ? '<div class="sd-wrap"><table class="sd-tbl"><thead><tr><th>Item</th><th>Account</th><th class="r">From</th><th class="r">To</th><th class="r">Move</th><th>Tier</th><th>When</th></tr></thead><tbody>' +
-          mv.map(function (m) { return '<tr><td>' + sdItemLink(m.item_id, m.item_id) + ' · ' + esc(sdS(m.title).slice(0, 56)) + '</td><td>' + esc(m.account) + '</td><td class="r">' + sdM(m.old_cost) + '</td><td class="r">' + sdM(m.new_cost) + '</td><td class="r ' + (m.delta > 0 ? 'sd-up' : 'sd-down') + '">' + (m.delta > 0 ? '+' : '') + sdM(m.delta) + '</td><td>' + sdTier(m.tier) + '</td><td class="sd-sub">' + esc((typeof fmtPkt === 'function' ? fmtPkt(m.at, true) : '') || sdS(m.at).slice(0, 16)) + '</td></tr>'; }).join('') +
+          mv.slice().sort(function (a, b) { return (a.flip ? 1 : 0) - (b.flip ? 1 : 0); }).map(function (m) { return '<tr' + (m.flip ? ' style="opacity:.6"' : '') + '><td>' + sdItemLink(m.item_id, m.item_id) + ' · ' + esc(sdS(m.title).slice(0, 56)) + '</td><td>' + esc(m.account) + '</td><td class="r">' + sdM(m.old_cost) + '</td><td class="r">' + sdM(m.new_cost) + '</td><td class="r ' + (m.delta > 0 ? 'sd-up' : 'sd-down') + '">' + (m.delta > 0 ? '+' : '') + sdM(m.delta) + '</td><td>' + (m.flip ? '<span class="sd-pill">variation flip</span>' : sdTier(m.tier)) + '</td><td class="sd-sub">' + esc((typeof fmtPkt === 'function' ? fmtPkt(m.at, true) : '') || sdS(m.at).slice(0, 16)) + '</td></tr>'; }).join('') +
           '</tbody></table></div>' : '<div class="sd-empty">no cost moved since yesterday</div>') + '</div>';
     }
     if (SD.tab === 'feeds') {

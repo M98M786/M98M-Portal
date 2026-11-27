@@ -23593,18 +23593,37 @@ async function supplierDeskCore(p, ctx) {
     });
     for (const s of slots) { s.paid_via = s.cost_units_via > 0 ? round2(s.cost_via / s.cost_units_via) : 0; s.cost_now = s.slot === 1 && n(base.cost && base.cost.sheet) > 0 ? n(base.cost.sheet) : (s.paid_via || s.link_price || 0); s.cost_now_source = s.slot === 1 && n(base.cost && base.cost.sheet) > 0 ? 'Main Sheet' : (s.paid_via ? 'paid on orders' : (s.link_price ? 'price in the link' : '')); }
     const untracked = Object.keys(other).map((k) => Object.assign(other[k], { paid: other[k].cost_units > 0 ? round2(other[k].cost / other[k].cost_units) : 0 })).sort((x, y) => y.orders - x.orders);
-    const moves = (base.history || []).map((h) => ({ day: h.seen_day || String(h.seen_at || '').slice(0, 10), old_cost: n(h.old_cost), new_cost: n(h.new_cost), delta: round2(n(h.delta_p) / 100), tier: h.tier || '', supplier: h.supplier || '' }));
+    /* the supplier actually bought from: the three on file are what someone wrote down; the orders say
+       where the money went. The most-used link in 180 days leads the page even when it is not on file. */
+    const cands = slots.map((x) => ({ ali_item: x.ali_item, url: x.url, orders: x.orders_via, paid: x.paid_via, last_used: x.last_used, on_file: x.slot }))
+      .concat(untracked.map((u) => ({ ali_item: u.ali_item, url: u.url, orders: u.orders, paid: u.paid, last_used: u.last_used, on_file: 0 })));
+    const working = cands.filter((c) => c.orders > 0).sort((x, y) => (y.orders - x.orders) || (y.last_used > x.last_used ? 1 : -1))[0] || null;
     const vrows = ((base.variations || {}).rows || []);
+    /* a cost move whose old AND new values are both real costs of two different variations is the Main
+       Sheet's single cell flipping between variations (the latest order wins there), not a supplier move */
+    const vcosts = vrows.map((r) => (r.judge && r.judge.ali) || 0).filter((c) => c > 0);
+    const near = (c) => vcosts.some((x) => Math.abs(x - c) <= 0.15);
+    const seenMv = {};
+    const moves = (base.history || []).map((h) => ({ day: h.seen_day || String(h.seen_at || '').slice(0, 10), old_cost: n(h.old_cost), new_cost: n(h.new_cost), delta: round2(n(h.delta_p) / 100), tier: h.tier || '', supplier: h.supplier || '' }))
+      .filter((m) => { const k = m.day + '|' + m.old_cost + '|' + m.new_cost; if (seenMv[k]) return false; seenMv[k] = 1; return true; })
+      .map((m) => Object.assign(m, { flip: vcosts.length > 1 && near(m.old_cost) && near(m.new_cost) && Math.abs(m.old_cost - m.new_cost) > 0.15 }));
     const locked = !!base.sale;
+    /* SHADOW auto-reprice, the owner's rule: a cost RISE that breaks the target → raise to the price that
+       restores it; a cost DROP that has held a week → pass the drop on; room above target alone is never a
+       reason to lower. A variation flip is not a cost move. Nothing here is sent to eBay. */
+    const lastReal = moves.find((m) => !m.flip) || null;
+    const heldDrop = !!(lastReal && lastReal.delta <= -0.10 && lastReal.day <= day(7));
     const shadow = vrows.filter((r) => r.judge && r.judge.ali > 0 && r.paid > 0).map((r) => {
-      const j = r.judge, would = j.n_required, gap = j.n_gap;
-      const dir = would === null || would === undefined ? '' : (would > r.paid + 0.005 ? 'raise' : (would < r.paid - 0.005 ? 'lower' : 'hold'));
-      return { variation: r.variation, label: r.label, paid: r.paid, ali: j.ali, ali_source: j.ali_source, actual: j.n_actual, target: j.target, gap, would_set: would, direction: dir, locked, units_30d: r.units_30d };
+      const j = r.judge, gap = j.n_gap;
+      let dir = 'hold', would = r.paid;
+      if (gap !== null && gap !== undefined && gap < -0.05 && j.n_required) { dir = 'raise'; would = j.n_required; }
+      else if (heldDrop) { dir = 'lower'; would = round2(Math.max(j.n_required || 0, r.paid + lastReal.delta)); }
+      return { variation: r.variation, label: r.label, paid: r.paid, ali: j.ali, ali_source: j.ali_source, actual: j.n_actual, target: j.target, gap, floor: j.n_required, would_set: would, direction: dir, locked, units_30d: r.units_30d };
     });
     const nolink = orders.filter((o) => !o.has_link).length;
     return Object.assign({}, base, {
-      suppliers: slots, untracked, orders, moves,
-      shadow: { mode: 'shadow', note: 'nothing is sent to eBay from this page; this is what the auto-reprice would do', rows: shadow, locked_in_sale: locked },
+      suppliers: slots, untracked, orders, moves, working_supplier: working,
+      shadow: { mode: 'shadow', note: 'nothing is sent to eBay from this page; raise = a cost rise broke the target, lower = a cost drop has held a week, hold = leave it', rows: shadow, locked_in_sale: locked, held_drop: heldDrop },
       flags: { no_supplier: !slots.length, locked_in_sale: locked, orders_without_link_180d: nolink, bought_elsewhere: untracked.reduce((t, u) => t + u.orders, 0) },
       locked_reason: locked ? 'inside a running sale event — eBay refuses a price revision until the item is removed from the event in Seller Hub' : '',
       seller_hub_url: 'https://www.ebay.co.uk/sh/mkt/promotionmanager',
@@ -23626,9 +23645,22 @@ async function supplierDeskCore(p, ctx) {
     'ORDER BY sold_30d DESC, orders_14d DESC LIMIT 500'
   ).bind(d14).all().catch(() => ({ results: [] }))).results || [];
   const movesToday = (await DB.prepare(
-    'SELECT h.item_id, h.account, h.old_cost, h.new_cost, h.delta_p, h.tier, h.supplier, h.seen_at, i.title ' +
-    'FROM cost_history h LEFT JOIN items_api i ON i.item_id = h.item_id WHERE h.seen_day >= ?1 ORDER BY h.delta_p DESC LIMIT 200'
+    'SELECT h.item_id, h.account, h.old_cost, h.new_cost, MAX(h.delta_p) AS delta_p, MAX(h.tier) AS tier, MAX(h.supplier) AS supplier, MAX(h.seen_at) AS seen_at, MAX(i.title) AS title ' +
+    'FROM cost_history h LEFT JOIN items_api i ON i.item_id = h.item_id WHERE h.seen_day >= ?1 ' +
+    'GROUP BY h.item_id, h.old_cost, h.new_cost, h.seen_day ORDER BY delta_p DESC LIMIT 200'
   ).bind(day(1)).all().catch(() => ({ results: [] }))).results || [];
+  /* which of those are the Main Sheet's one cost cell flipping between two variations' real costs */
+  const mvIds = Array.from(new Set(movesToday.map((h) => String(h.item_id))));
+  const paidBy = {};
+  for (let i = 0; i < mvIds.length; i += 80) {
+    const chunk = mvIds.slice(i, i + 80);
+    const rs = await DB.prepare(
+      'SELECT item_id, ROUND(cost / MAX(qty, 1), 2) AS c FROM orders WHERE item_id IN (' + chunk.map(() => '?').join(',') + ") AND cost > 0 AND created_at >= datetime('now', '-60 day') GROUP BY item_id, c"
+    ).bind(...chunk).all().catch(() => ({ results: [] }));
+    for (const r of (rs.results || [])) (paidBy[String(r.item_id)] = paidBy[String(r.item_id)] || []).push(n(r.c));
+  }
+  const isFlip = (h) => { const cs = paidBy[String(h.item_id)] || []; if (cs.length < 2) return false; const nr = (c) => cs.some((x) => Math.abs(x - c) <= 0.15); return nr(n(h.old_cost)) && nr(n(h.new_cost)) && Math.abs(n(h.old_cost) - n(h.new_cost)) > 0.15; };
+  for (const h of movesToday) h.flip = isFlip(h);
   const feeds = (await DB.prepare(
     "SELECT account, COUNT(*) AS n, SUM(CASE WHEN cost > 0 THEN 1 ELSE 0 END) AS with_cost, SUM(CASE WHEN COALESCE(ali_link,'') != '' THEN 1 ELSE 0 END) AS with_link " +
     "FROM orders WHERE created_at >= ?1 AND status NOT IN ('CANCELLED','NOT_FOUND') GROUP BY account ORDER BY account"
@@ -23639,9 +23671,10 @@ async function supplierDeskCore(p, ctx) {
     board: true, as_of: new Date().toISOString(),
     no_supplier: miss.map((r) => ({ item_id: r.item_id, account: r.account, title: r.title, image: r.image || '', sold_30d: n(r.sold_30d), price: n(r.price), orders_14d: n(r.orders_14d), orders_with_link: n(r.orders_with_link), hunt_id: r.hunt_id, hunter: r.hunter })),
     no_supplier_by_account: byAcct,
-    moves: movesToday.map((h) => ({ item_id: h.item_id, account: h.account, title: h.title || '', old_cost: n(h.old_cost), new_cost: n(h.new_cost), delta: round2(n(h.delta_p) / 100), tier: h.tier || '', supplier: h.supplier || '', at: h.seen_at })),
+    moves: movesToday.map((h) => ({ item_id: h.item_id, account: h.account, title: h.title || '', old_cost: n(h.old_cost), new_cost: n(h.new_cost), delta: round2(n(h.delta_p) / 100), tier: h.tier || '', supplier: h.supplier || '', at: h.seen_at, flip: !!h.flip })),
     feeds: feeds.map((f) => ({ account: f.account, orders_14d: n(f.n), with_cost: n(f.with_cost), with_link: n(f.with_link), no_book: n(f.n) > 0 && n(f.with_cost) === 0 && n(f.with_link) === 0 })),
-    counts: { no_supplier: miss.length, no_supplier_selling: miss.filter((r) => n(r.sold_30d) > 0).length, moves_serious: movesToday.filter((h) => n(h.delta_p) >= 30).length, moves_all: movesToday.length,
+    counts: { no_supplier: miss.length, no_supplier_selling: miss.filter((r) => n(r.sold_30d) > 0).length,
+      moves_serious: movesToday.filter((h) => n(h.delta_p) >= 30 && !h.flip).length, moves_flips: movesToday.filter((h) => h.flip).length, moves_all: movesToday.length,
       accounts_no_book: feeds.filter((f) => n(f.n) > 0 && n(f.with_cost) === 0 && n(f.with_link) === 0).length },
     today,
   };
