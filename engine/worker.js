@@ -26114,6 +26114,22 @@ const ROUTES = {
          own tiles have always used for today, here for every day the books trail. */
       const od = (await ctx.env.DB.prepare('SELECT ' + dayExpr + " AS d, COUNT(*) AS n, ROUND(COALESCE(SUM(o.sold), 0), 2) AS rev, ROUND(COALESCE(SUM(o.cost), 0), 2) AS cost, ROUND(COALESCE(SUM(CASE WHEN o.ebay_fees > 0 THEN o.sold - o.ebay_fees ELSE 0 END), 0), 2) AS oe_known FROM orders o WHERE o.created_at >= ?1 AND o.status NOT IN ('CANCELLED', 'NOT_FOUND')" + (acctF ? ' AND o.account = ?2' : '') + ' GROUP BY d')
         .bind(...(acctF ? [ukDayStartIsoFor(from), acctF] : [ukDayStartIsoFor(from)])).all().catch(() => ({ results: [] }))).results || [];
+      /* 27 Nov (owner): organic against promoted, the promoted half split by ad family — CPC
+         (Advanced) and Dynamic/General — from eBay's own daily report; today and an unpublished
+         yesterday from the five-minute readings per family. Organic is what is left of the day's
+         sold after both. */
+      const adsRs = (await ctx.env.DB.prepare('SELECT date, account, ROUND(SUM(cpc_sale_amount), 2) AS cpc, ROUND(SUM(sale_amount), 2) AS dyn FROM ads_daily WHERE date >= ?1 AND date <= ?2' + (acctF ? ' AND account = ?3' : '') + ' GROUP BY date, account')
+        .bind(...(acctF ? [from, today, acctF] : [from, today])).all().catch(() => ({ results: [] }))).results || [];
+      const adsBy = {}; const adsAcct = {};
+      for (const r of adsRs) { const d = String(r.date); const a = (adsBy[d] = adsBy[d] || { cpc: 0, dyn: 0 }); a.cpc += Number(r.cpc) || 0; a.dyn += Number(r.dyn) || 0; const k = String(r.account || ''); const q = (adsAcct[k] = adsAcct[k] || { cpc: 0, dyn: 0 }); q.cpc += Number(r.cpc) || 0; q.dyn += Number(r.dyn) || 0; }
+      const isCpcFam = (f) => /CLICK|CPC/i.test(String(f || ''));
+      for (const d of [todayUk, adtAddDays(todayUk, -1)]) {
+        if (d < from || d > today || adsBy[d]) continue;
+        const rr = (await ctx.env.DB.prepare('SELECT account, family, ROUND(SUM(cum_revenue), 2) AS rev FROM adtool_intraday_latest WHERE report_day = ?1' + (acctF ? ' AND account = ?2' : '') + ' GROUP BY account, family').bind(...(acctF ? [d, acctF] : [d])).all().catch(() => ({ results: [] }))).results || [];
+        if (!rr.length) continue;
+        const a = (adsBy[d] = { cpc: 0, dyn: 0, live: true });
+        for (const r of rr) { const v = Number(r.rev) || 0; const k = String(r.account || ''); const q = (adsAcct[k] = adsAcct[k] || { cpc: 0, dyn: 0 }); if (isCpcFam(r.family)) { a.cpc += v; q.cpc += v; } else { a.dyn += v; q.dyn += v; } }
+      }
       const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const keyOf = (d) => grain === 'day' ? d : grain === 'month' ? d.slice(0, 7) : adtIsoWeek(d);
       const buckets = {}; const order = [];
@@ -26121,7 +26137,7 @@ const ROUTES = {
         const k = keyOf(d);
         if (!buckets[k]) {
           const dd = Number(d.slice(8, 10)), mm = Number(d.slice(5, 7)) - 1, yy = d.slice(2, 4);
-          buckets[k] = { key: k, from: d, to: d, sold: 0, orders: 0, oe: 0, cost: 0, actual: 0, ads: 0,
+          buckets[k] = { key: k, from: d, to: d, sold: 0, orders: 0, oe: 0, cost: 0, actual: 0, ads: 0, cpc_rev: 0, dyn_rev: 0, organic: 0,
             label: grain === 'day' ? dd + ' ' + MON[mm] : grain === 'month' ? MON[mm] + ' ' + yy : 'W' + String(k).slice(-2) + ' · ' + dd + ' ' + MON[mm],
             tip: grain === 'day' ? d : grain === 'month' ? MON[mm] + ' 20' + yy : 'week from ' + d };
           order.push(k);
@@ -26137,16 +26153,35 @@ const ROUTES = {
         const bk = books[d] || {}, lg = ledger[d] || {};
         const soldB = Number(bk.sold) || 0, soldL = Number(lg.rev) || 0;
         if (soldL > soldB + 0.005) liveDays++;
-        b.sold += Math.max(soldB, soldL);
+        const soldD = Math.max(soldB, soldL);
+        b.sold += soldD;
+        const ad = adsBy[d] || { cpc: 0, dyn: 0 };
+        const cpcD = Math.min(soldD, ad.cpc), dynD = Math.min(Math.max(0, soldD - cpcD), ad.dyn);
+        b.cpc_rev += cpcD; b.dyn_rev += dynD; b.organic += Math.max(0, soldD - cpcD - dynD);
         b.cost += Math.max(Number(bk.cost) || 0, Number(lg.cost) || 0);
         b.oe += Math.max(Number(bk.oe) || 0, Number(lg.oe_known) || 0);
         b.actual += Number(bk.actual) || 0; b.ads += Number(bk.ads) || 0;
         b.orders += Number(lg.n) || 0;
       }
-      const rows = order.map((k) => { const b = buckets[k]; b.sold = round2(b.sold); b.oe = round2(b.oe); b.cost = round2(b.cost); b.actual = round2(b.actual); b.ads = round2(b.ads); if (grain !== 'day') b.tip += ' to ' + b.to; return b; });
+      const rows = order.map((k) => { const b = buckets[k]; b.sold = round2(b.sold); b.oe = round2(b.oe); b.cost = round2(b.cost); b.actual = round2(b.actual); b.ads = round2(b.ads); b.cpc_rev = round2(b.cpc_rev); b.dyn_rev = round2(b.dyn_rev); b.organic = round2(b.organic); if (grain !== 'day') b.tip += ' to ' + b.to; return b; });
       const sum = (f) => round2(rows.reduce((s, r) => s + (Number(r[f]) || 0), 0));
-      return { grain, account: acctF, from, to: today, books_from: bf && bf.d ? String(bf.d) : null, rows,
-        totals: { sold: sum('sold'), orders: rows.reduce((s, r) => s + r.orders, 0), oe: sum('oe'), cost: sum('cost'), actual: sum('actual'), ads: sum('ads') },
+      /* the same split per account over the window — books and ledger per account and day, the larger of the two */
+      let by_account = [];
+      if (!acctF) {
+        try {
+          const sbA = (await ctx.env.DB.prepare('SELECT account, date, ROUND(SUM(sold), 2) AS sold FROM sales_daily WHERE date >= ?1 AND date <= ?2 GROUP BY account, date').bind(from, today).all()).results || [];
+          const lgA = (await ctx.env.DB.prepare('SELECT ' + dayExpr + " AS d, o.account, ROUND(COALESCE(SUM(o.sold), 0), 2) AS rev FROM orders o WHERE o.created_at >= ?1 AND o.status NOT IN ('CANCELLED', 'NOT_FOUND') GROUP BY d, o.account").bind(ukDayStartIsoFor(from)).all()).results || [];
+          const perAD = {};
+          for (const r of sbA) perAD[String(r.account) + '|' + String(r.date)] = { b: Number(r.sold) || 0, l: 0 };
+          for (const r of lgA) { const d = String(r.d || ''); if (d < from || d > today) continue; const k = String(r.account) + '|' + d; (perAD[k] = perAD[k] || { b: 0, l: 0 }).l = Number(r.rev) || 0; }
+          const soldA = {};
+          for (const k of Object.keys(perAD)) { const a = k.split('|')[0]; soldA[a] = (soldA[a] || 0) + Math.max(perAD[k].b, perAD[k].l); }
+          by_account = Object.keys(soldA).map((a) => { const s = soldA[a], ad = adsAcct[a] || { cpc: 0, dyn: 0 }; const cpc = Math.min(s, ad.cpc), dyn = Math.min(Math.max(0, s - cpc), ad.dyn); const org = Math.max(0, s - cpc - dyn);
+            return { account: a, sold: round2(s), cpc_rev: round2(cpc), dyn_rev: round2(dyn), organic: round2(org), promoted_pct: s > 0 ? Math.round((cpc + dyn) / s * 1000) / 10 : 0 }; }).sort((x, y) => y.sold - x.sold);
+        } catch (e) { by_account = []; }
+      }
+      return { grain, account: acctF, from, to: today, books_from: bf && bf.d ? String(bf.d) : null, rows, by_account,
+        totals: { sold: sum('sold'), orders: rows.reduce((s, r) => s + r.orders, 0), oe: sum('oe'), cost: sum('cost'), actual: sum('actual'), ads: sum('ads'), cpc_rev: sum('cpc_rev'), dyn_rev: sum('dyn_rev'), organic: sum('organic') },
         live_days: liveDays,
         note: 'sold, cost and order earning = the larger of the daily books and the order ledger per UK day (the ledger stands in where the books have not been written yet; ' + liveDays + ' such day' + (liveDays === 1 ? '' : 's') + ' in this window); orders = the order ledger on the UK trading day, cancelled and not-found orders left out; actual profit = the books alone' };
     },

@@ -815,34 +815,8 @@ VIEW_CSS.push(
                 : ' · <b>' + acGBP(PS.spend_since) + '</b> spent since')) +
           (PS.problem ? ' · ' + esc(String(PS.problem)) : '') + '.</div>';
       }
-      /* R7-8 (Hasib): "organic vs promoted sales stats everywhere". Promoted = eBay-attributed
-         ad revenue; organic = the rest. Combined bar + per-account split over the window. */
-      var sp = d.split_total || {}, spl = d.split || [];
-      if (acSpendOnly(d)) { sp = {}; spl = []; }   // the split is sale revenue end to end
-      if (d.split_incomplete) {
-        h += '<div class="ac-split"><div class="ac-split-h">Organic vs promoted sales · ' + esc(acWin(d)) + '</div>' +
-          '<div class="ac-split-note">The day\u2019s sales total has not been rolled up yet, so the split cannot be drawn honestly; the ads alone are credited with ' + acGBP((d.series && d.series[0] && Number(d.series[0].rev)) || sp.promoted_rev) + ' of revenue so far. It fills in once the sales roll-up and eBay\u2019s published report land.</div></div>';
-      } else if (Number(sp.total_rev)) {
-        var promoPct = Number(sp.promoted_pct) || 0, orgPct = Number(sp.organic_pct);
-        if (!isFinite(orgPct)) { orgPct = 100 - promoPct; }
-        var rangeLabel = acWin(d);
-        h += '<div class="ac-split"><div class="ac-split-h">Organic vs promoted sales · ' + esc(rangeLabel) + '</div>' +
-          '<div class="ac-bar"><span class="ac-bar-p" style="width:' + Math.max(0, Math.min(100, promoPct)) + '%"></span></div>' +
-          '<div class="ac-bar-lg"><span class="ac-lg-p"><b>Promoted</b> ' + acGBP(sp.promoted_rev) + ' · ' + promoPct.toFixed(1) + '%</span>' +
-          '<span class="ac-lg-o"><b>Organic</b> ' + acGBP(sp.organic_rev) + ' · ' + orgPct.toFixed(1) + '%</span>' +
-          '<span class="ac-bar-tot">Total ' + acGBP(sp.total_rev) + '</span></div>';
-        if (spl.length > 1 && !AC.acct) {
-          h += '<div class="scroll" style="max-height:220px;margin-top:8px"><table class="acc-tbl" style="min-width:480px"><thead><tr>' +
-            '<th style="text-align:left">Account</th><th>Total</th><th>Promoted</th><th>Organic</th><th>Promoted %</th></tr></thead><tbody>';
-          spl.forEach(function (r) {
-            h += '<tr><td style="text-align:left;font-weight:800">' + esc(String(r.account)) + '</td>' +
-              '<td>' + acGBP(r.total_rev) + '</td><td>' + acGBP(r.promoted_rev) + '</td><td>' + acGBP(r.organic_rev) + '</td>' +
-              '<td style="font-weight:800;color:' + (Number(r.promoted_pct) > 60 ? 'var(--warn)' : 'var(--text)') + '">' + (Number(r.promoted_pct) || 0).toFixed(1) + '%</td></tr>';
-          });
-          h += '</tbody></table></div>';
-        }
-        h += '<div class="ac-split-note">Promoted is what eBay credits to the ads; organic is the rest of the sale revenue. From the finance feed, over the window above.</div></div>';
-      }
+      /* 27 Nov (owner): the organic-versus-promoted block moved to the Business overview, before
+         This month at a glance, where it carries the sales chart's own controls */
       /* the history — every previous day's spend, clicks and ad-attributed sales in the window */
       var ser = d.series || [];
       if (ser.length) {

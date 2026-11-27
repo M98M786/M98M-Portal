@@ -1076,7 +1076,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261127-1537';
+var BUILD = '20261127-1619';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -3685,34 +3685,8 @@ VIEW_CSS.push(
                 : ' · <b>' + acGBP(PS.spend_since) + '</b> spent since')) +
           (PS.problem ? ' · ' + esc(String(PS.problem)) : '') + '.</div>';
       }
-      /* R7-8 (Hasib): "organic vs promoted sales stats everywhere". Promoted = eBay-attributed
-         ad revenue; organic = the rest. Combined bar + per-account split over the window. */
-      var sp = d.split_total || {}, spl = d.split || [];
-      if (acSpendOnly(d)) { sp = {}; spl = []; }   // the split is sale revenue end to end
-      if (d.split_incomplete) {
-        h += '<div class="ac-split"><div class="ac-split-h">Organic vs promoted sales · ' + esc(acWin(d)) + '</div>' +
-          '<div class="ac-split-note">The day\u2019s sales total has not been rolled up yet, so the split cannot be drawn honestly; the ads alone are credited with ' + acGBP((d.series && d.series[0] && Number(d.series[0].rev)) || sp.promoted_rev) + ' of revenue so far. It fills in once the sales roll-up and eBay\u2019s published report land.</div></div>';
-      } else if (Number(sp.total_rev)) {
-        var promoPct = Number(sp.promoted_pct) || 0, orgPct = Number(sp.organic_pct);
-        if (!isFinite(orgPct)) { orgPct = 100 - promoPct; }
-        var rangeLabel = acWin(d);
-        h += '<div class="ac-split"><div class="ac-split-h">Organic vs promoted sales · ' + esc(rangeLabel) + '</div>' +
-          '<div class="ac-bar"><span class="ac-bar-p" style="width:' + Math.max(0, Math.min(100, promoPct)) + '%"></span></div>' +
-          '<div class="ac-bar-lg"><span class="ac-lg-p"><b>Promoted</b> ' + acGBP(sp.promoted_rev) + ' · ' + promoPct.toFixed(1) + '%</span>' +
-          '<span class="ac-lg-o"><b>Organic</b> ' + acGBP(sp.organic_rev) + ' · ' + orgPct.toFixed(1) + '%</span>' +
-          '<span class="ac-bar-tot">Total ' + acGBP(sp.total_rev) + '</span></div>';
-        if (spl.length > 1 && !AC.acct) {
-          h += '<div class="scroll" style="max-height:220px;margin-top:8px"><table class="acc-tbl" style="min-width:480px"><thead><tr>' +
-            '<th style="text-align:left">Account</th><th>Total</th><th>Promoted</th><th>Organic</th><th>Promoted %</th></tr></thead><tbody>';
-          spl.forEach(function (r) {
-            h += '<tr><td style="text-align:left;font-weight:800">' + esc(String(r.account)) + '</td>' +
-              '<td>' + acGBP(r.total_rev) + '</td><td>' + acGBP(r.promoted_rev) + '</td><td>' + acGBP(r.organic_rev) + '</td>' +
-              '<td style="font-weight:800;color:' + (Number(r.promoted_pct) > 60 ? 'var(--warn)' : 'var(--text)') + '">' + (Number(r.promoted_pct) || 0).toFixed(1) + '%</td></tr>';
-          });
-          h += '</tbody></table></div>';
-        }
-        h += '<div class="ac-split-note">Promoted is what eBay credits to the ads; organic is the rest of the sale revenue. From the finance feed, over the window above.</div></div>';
-      }
+      /* 27 Nov (owner): the organic-versus-promoted block moved to the Business overview, before
+         This month at a glance, where it carries the sales chart's own controls */
       /* the history — every previous day's spend, clicks and ad-attributed sales in the window */
       var ser = d.series || [];
       if (ser.length) {
@@ -32151,6 +32125,11 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<select class="alx-sel" id="o2SsPick" autocomplete="off" style="min-width:170px;display:none" title="pick one week or one month to see it day by day"></select></div></div>' +
           '<div class="o-card"><div id="o2Sales" style="width:100%;height:340px"><div class="empty">Loading…</div></div></div></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Right now — everything combined</h2><span class="hint">live today, whatever the date range · one pulse across every board · click a tile to open its board</span></div><div id="o2Pulse"><div class="empty">Loading…</div></div></div>' +
+        /* 27 Nov (owner): the organic-versus-promoted block, moved here from the Ads command centre
+           and given the sales chart's controls; promoted split into CPC (red) and Dynamic (yellow),
+           organic green, and the per-account table under the bars */
+        '<div class="sec enter d1"><div class="sec-h"><h2>Organic vs promoted sales</h2><span class="hint">CPC sales red · Dynamic sales yellow · organic green · what eBay credits to each ad family, the rest of the day\u2019s sold is organic</span></div>' +
+          '<div id="o2Split"></div><div id="o2SplitTbl"></div></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>This month at a glance</h2><span class="hint">the plain headline numbers — traffic, adverts, customer service and returns · click a tile to open its board</span></div><div id="o2Extras"><div class="empty">Loading…</div></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2 id="o2CollH">Collective — all accounts</h2><span class="hint">recomputed for the chosen range · deltas vs the prior window</span></div><div class="kpis" id="o2Kpis"></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Account ratings</h2><span class="hint">eBay\u2019s own seller standards · defect rate · late shipment · cases without seller resolution</span></div><div class="tiles-mini" id="o2Ratings" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"><div class="empty">Loading…</div></div></div>' +
@@ -32260,7 +32239,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           /* drop everything cached for the previous scope so no all-accounts number lingers
              (truthPage's own cache is keyed by {from,to,account}, so it never crosses accounts) */
           O.days = null; O.ov = null; O.listings = null; O.cs = null; O.funds = null; O.truth = null; O.truthY = null; O.extras = null; O.truthRangeKey = '';
-          oFetchAll(); oPulse(); oDispatchLoad(); oSalesSync(); oK2Mount();
+          oFetchAll(); oPulse(); oDispatchLoad(); oSalesSync(); oSplitMount(); oK2Mount();
           toast(O.acct ? 'Loading every section for ' + O.acct + ' only' : 'Loading every section for all accounts');
         };
       }
@@ -32268,6 +32247,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       oFetchAll();
       oPulse();
       oSalesInit();
+      oSplitMount();
       oK2Mount();
     }
   };
@@ -32502,6 +32482,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       };
       var A = window.ADT_DAILY;
       if (A && A.ensure) { A.ensure().then(draw)['catch'](function () { el.innerHTML = '<div class="empty">The chart library did not load.</div>'; }); } else { draw(); }
+      if (typeof cfg.onData === 'function') { try { cfg.onData(d, st); } catch (e) {} }
     };
     var load = function () {
       var el = $$('C'); if (!el) { return; }
@@ -32519,6 +32500,27 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     pickFill(); load();
     return { reload: load, state: st };
   } };
+  function oSplitTable(d) {
+    var box = $('o2SplitTbl'); if (!box) { return; }
+    var rows = (d && d.by_account) || [], T = (d && d.totals) || {};
+    var tot = Number(T.sold) || 0, prom = (Number(T.cpc_rev) || 0) + (Number(T.dyn_rev) || 0);
+    var pct = function (p, w) { return w > 0 ? (p / w * 100).toFixed(1) + '%' : '\u2014'; };
+    var bar = tot > 0 ? '<div class="ac-split" style="margin:10px 0 0"><div class="ac-split-h">The split \u00b7 ' + esc((d.from || '') + ' \u2192 ' + (d.to || '')) + '</div>' +
+      '<div class="ac-bar" style="background:var(--ok,#2fb170)"><span style="display:block;height:100%;background:#e0563f;width:' + (Number(T.cpc_rev) / tot * 100).toFixed(2) + '%;float:left"></span><span style="display:block;height:100%;background:#f2b035;width:' + (Number(T.dyn_rev) / tot * 100).toFixed(2) + '%;float:left"></span></div>' +
+      '<div class="ac-bar-lg"><span><b style="color:#ff8a73">CPC</b> ' + oGBPs(T.cpc_rev) + ' \u00b7 ' + pct(Number(T.cpc_rev), tot) + '</span><span><b style="color:#f2b035">Dynamic</b> ' + oGBPs(T.dyn_rev) + ' \u00b7 ' + pct(Number(T.dyn_rev), tot) + '</span><span><b style="color:var(--ok,#2fb170)">Organic</b> ' + oGBPs(T.organic) + ' \u00b7 ' + pct(Number(T.organic), tot) + '</span><span class="ac-bar-tot">Total ' + oGBPs(tot) + ' \u00b7 promoted ' + pct(prom, tot) + '</span></div>' : '';
+    if (!rows.length) { box.innerHTML = bar; return; }
+    box.innerHTML = bar + '<div class="o-dt-wrap" style="margin-top:10px"><table class="o-dt"><thead><tr><th>Account</th><th>Total</th><th>CPC sales</th><th>Dynamic sales</th><th>Organic</th><th>Promoted %</th></tr></thead><tbody>' +
+      rows.map(function (r) { return '<tr><td>' + esc(r.account) + '</td><td>' + oGBPs(r.sold) + '</td><td style="color:#ff8a73">' + oGBPs(r.cpc_rev) + '</td><td style="color:#f2b035">' + oGBPs(r.dyn_rev) + '</td><td style="color:var(--ok,#2fb170)">' + oGBPs(r.organic) + '</td><td style="font-weight:800;color:' + (Number(r.promoted_pct) > 60 ? 'var(--warn)' : 'var(--text)') + '">' + (Number(r.promoted_pct) || 0).toFixed(1) + '%</td></tr>'; }).join('') +
+      '</tbody></table></div><div class="kpi-s" style="margin-top:8px">Promoted is what eBay credits to each ad family in its own report (today from the five-minute readings); organic is the rest of the day\u2019s sold, the larger of the books and the order ledger. A sale credited to an ad can never exceed the day\u2019s sold.</div>';
+  }
+  function oSplitMount() {
+    var h = $('o2Split'); if (!h || !window.M98M_BARS) { return; }
+    window.M98M_BARS.mount(h, { acct: O.acct, series: [
+      { key: 'cpc_rev', name: 'CPC sales', color: '#e0563f', label: '#ff8a73' },
+      { key: 'dyn_rev', name: 'Dynamic sales', color: '#f2b035', label: '#f7c96a' },
+      { key: 'organic', name: 'Organic sales', color: '#2fb170', label: '#5fd49a' }
+    ], note: 'organic = the day\u2019s sold less what eBay credits to the ads', onData: oSplitTable });
+  }
   function oK2Mount() { var t = $('o2K2Tools'); if (t && typeof window.K2_MOUNT === 'function') { window.K2_MOUNT(t, { acct: O.acct }); } }
 
   function oPulse() {
