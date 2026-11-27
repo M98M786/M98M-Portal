@@ -643,18 +643,19 @@
     if (vr.length && (vr.length > 1 || (d.variations || {}).multi)) {
       var pfxV = prPfx();
       h += '<div class="pr-blk" style="grid-column:1/-1"><h3>By variation <span class="pr-sub">· ' + ((d.variations || {}).variations_n || vr.length) + ' sold · each on the cost paid for that variation · ' + esc(prModeLabel(true)) + '</span></h3>' +
-        '<div style="overflow-x:auto"><table class="pr-tbl" style="width:100%"><thead><tr><th>Variation</th><th class="r">Sold 30d</th><th class="r">Buyers pay</th><th class="r">Ali cost</th><th>Source</th>' +
-        (d.spend_only ? '' : '<th class="r">Actual</th><th class="r">Target</th><th class="r">Gap</th><th>Verdict</th><th class="r">Must sell at</th>') + '</tr></thead><tbody>';
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr>' +
+        ['Variation', 'Sold 30d', 'Buyers pay', 'Ali cost', 'Source'].concat(d.spend_only ? [] : ['Actual', 'Target', 'Gap', 'Verdict', 'Must sell at']).map(function (t, k) { return '<th style="text-align:' + (k === 0 || k === 4 || k === 8 ? 'left' : 'right') + ';font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:800;padding:6px 8px;border-bottom:1px solid var(--gold-line);white-space:nowrap">' + t + '</th>'; }).join('') + '</tr></thead><tbody>';
       vr.forEach(function (r, i) {
         var jv = r.judge || {}, on = PR.varOpen === i;
-        h += '<tr class="pr-var' + (on ? ' on' : '') + '" data-pr-var="' + i + '" style="cursor:pointer"><td>' + esc(prS(r.label).slice(0, 64)) + '</td><td class="r">' + r.units_30d + '</td><td class="r">' + (r.paid ? prM(r.paid) : '—') + '</td><td class="r">' + (jv.ali ? prM(jv.ali) : '—') + '</td><td class="pr-sub">' + esc(prS(jv.ali_source) || 'none') + '</td>';
+        var tdL = 'padding:5px 8px;border-bottom:1px solid var(--gold-line);vertical-align:top', tdR = tdL + ';text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap';
+        h += '<tr data-pr-var="' + i + '" style="cursor:pointer' + (on ? ';background:rgba(233,169,60,.10)' : '') + '"><td style="' + tdL + '">' + esc(prS(r.label).slice(0, 64)) + '</td><td style="' + tdR + '">' + r.units_30d + '</td><td style="' + tdR + '">' + (r.paid ? prM(r.paid) : '—') + '</td><td style="' + tdR + '">' + (jv.ali ? prM(jv.ali) : '—') + '</td><td style="' + tdL + '" class="pr-sub">' + esc(prS(jv.ali_source) || 'none') + '</td>';
         if (!d.spend_only) {
-          h += '<td class="r"><span class="' + prTone(jv[pfxV + 'actual']) + '">' + (jv[pfxV + 'actual'] === null || jv[pfxV + 'actual'] === undefined ? '—' : prM(jv[pfxV + 'actual'])) + '</span></td><td class="r">' + (jv.target ? prM(jv.target) : '—') + '</td>' +
-            '<td class="r"><span class="' + prTone(jv[pfxV + 'gap']) + '">' + (jv[pfxV + 'gap'] === null || jv[pfxV + 'gap'] === undefined ? '—' : prM(jv[pfxV + 'gap'])) + '</span></td><td>' + prTag(PR_SEG, jv[pfxV + 'segment']) + (jv[pfxV + 'loss'] ? '<span class="pr-tag bad">LOSS</span>' : '') + '</td><td class="r">' + (jv[pfxV + 'required'] ? prM(jv[pfxV + 'required']) : '—') + '</td>';
+          h += '<td style="' + tdR + '"><span class="' + prTone(jv[pfxV + 'actual']) + '">' + (jv[pfxV + 'actual'] === null || jv[pfxV + 'actual'] === undefined ? '—' : prM(jv[pfxV + 'actual'])) + '</span></td><td style="' + tdR + '">' + (jv.target ? prM(jv.target) : '—') + '</td>' +
+            '<td style="' + tdR + '"><span class="' + prTone(jv[pfxV + 'gap']) + '">' + (jv[pfxV + 'gap'] === null || jv[pfxV + 'gap'] === undefined ? '—' : prM(jv[pfxV + 'gap'])) + '</span></td><td style="' + tdL + '">' + prTag(PR_SEG, jv[pfxV + 'segment']) + (jv[pfxV + 'loss'] ? '<span class="pr-tag bad">LOSS</span>' : '') + '</td><td style="' + tdR + '">' + (jv[pfxV + 'required'] ? prM(jv[pfxV + 'required']) : '—') + '</td>';
         }
         h += '</tr>';
         if (on && !d.spend_only) {
-          h += '<tr><td colspan="10"><div class="pr-grid" style="margin:6px 0">' + prChainBlock('Neutral · no ads · ' + prS(r.label).slice(0, 40), r.chain_neutral, jv, 'n_', PR.mode === 'neutral') + prChainBlock('With ads · last 14 days · ' + prS(r.label).slice(0, 40), r.chain_ads, jv, 'a_', PR.mode === 'ads') + '</div></td></tr>';
+          h += '<tr><td colspan="10" style="padding:0 0 8px"><div class="pr-grid" style="margin:6px 0">' + prChainBlock('Neutral · no ads · ' + prS(r.label).slice(0, 40), r.chain_neutral, jv, 'n_', PR.mode === 'neutral') + prChainBlock('With ads · last 14 days · ' + prS(r.label).slice(0, 40), r.chain_ads, jv, 'a_', PR.mode === 'ads') + '</div></td></tr>';
         }
       });
       h += '</tbody></table></div><div class="pr-sub" style="margin-top:4px">' + esc(prS((d.variations || {}).note)) + '</div></div>';
