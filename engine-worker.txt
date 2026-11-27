@@ -27733,6 +27733,28 @@ const ROUTES = {
           const a = byItem[r.item_id];
           if (a) { r.ad_spend_14d = a.ad_spend_14d; r.ad_units_14d = a.ad_units_14d; }
         }
+        /* 27 Nov (owner): "show ROAS today also in All Account Listings" — today's spend from the
+           same-day report table and the sales eBay credits to the ad from the five-minute readings
+           of its running total, the same figures the Ads command centre's ROAS today column reads.
+           The revenue keys are earnings and leave with stripEarnings for the roles that may not see
+           money made; the spend stays. */
+        {
+          const dayT = ukDate('');
+          const spT = await ctx.env.DB.prepare('SELECT item_id, account, ROUND(spend + cpc_spend, 2) AS sp, (sales + cpc_sales) AS un FROM ads_today WHERE day = ?1' + (account ? ' AND account = ?2' : '')).bind(...(account ? [dayT, account] : [dayT])).all().catch(() => ({ results: [] }));
+          const spBy = {};
+          for (const r of (spT.results || [])) spBy[r.account + '|' + r.item_id] = r;
+          const rvBy = {};
+          if (utcDate() === dayT) {
+            const rvT = await ctx.env.DB.prepare('SELECT account, item_id, ROUND(SUM(cum_revenue), 2) AS rev FROM adtool_intraday_latest WHERE report_day = ?1' + (account ? ' AND account = ?2' : '') + ' GROUP BY account, item_id').bind(...(account ? [dayT, account] : [dayT])).all().catch(() => ({ results: [] }));
+            for (const r of (rvT.results || [])) rvBy[r.account + '|' + r.item_id] = Number(r.rev) || 0;
+          }
+          for (const r of rows) {
+            const k = String(r.account) + '|' + String(r.item_id), s = spBy[k];
+            const sp = s ? Number(s.sp) || 0 : 0, rv = rvBy[k] || 0;
+            r.ad_spend_today = round2(sp); r.ad_units_today = s ? Number(s.un) || 0 : 0;
+            r.ad_rev_today = round2(rv); r.roas_today = sp > 0.005 ? round2(rv / sp) : null;
+          }
+        }
         /* 31 Oct (owner): "which product is live in CPC right now, which in Dynamic, which in
            General — and the active campaign's name and link". Live membership by the portal's own
            rule (liveMembershipRow, the same one the split and the dup feed use); the kind: CPC =

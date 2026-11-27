@@ -1076,7 +1076,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261127-1730';
+var BUILD = '20261127-1749';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -2403,6 +2403,13 @@ VIEWS.home = {
      Sold column shows; the Suppliers and Source columns are gone (the supplier links ride on the
      listing cell now) */
   var ALX = { account: '', rows: [], q: '', tab: 'all', kind: '', win: 7 };
+  /* today's ROAS in its colour, the spend and credited sales underneath; a dash where nothing was spent today */
+  function alxRoasCell(r) {
+    var sp = Number(r.ad_spend_today) || 0;
+    if (!(sp > 0.005) || r.roas_today == null) { return '<span style="color:var(--text-3)" title="no ad spend today">\u2014</span>' + (sp > 0.005 ? '' : ''); }
+    var n = Number(r.roas_today) || 0, col = n >= 5 ? 'var(--ok)' : n >= 3 ? 'var(--warn)' : 'var(--bad)';
+    return '<b style="color:' + col + '">' + n.toFixed(1) + '\u00d7</b><div style="font-size:10px;color:var(--text-3);white-space:nowrap">' + axGBP(sp) + ' spent \u00b7 ' + axGBP(r.ad_rev_today) + ' back</div>';
+  }
   function alxSoldWin(r) { return ALX.win === 14 ? (Number(r.sold_14d) || 0) : ALX.win === 30 ? (r.sold_30d_live !== undefined ? Number(r.sold_30d_live) : (Number(r.sold_30d) || 0)) : (Number(r.sold_7d) || 0); }
 
   /* 31 Oct (owner, showing the ad tool's row): "I need these kind of listings page" — every row is the
@@ -2580,12 +2587,16 @@ VIEWS.home = {
     var hasCampaign = ALX.rows.some(function (r) { return r.campaign_type !== undefined || r.live_kind !== undefined; });
     var hasOE = ALX.rows.some(function (r) { return r.oe !== undefined && Number(r.oe) !== 0; });
     var hasAds = ALX.rows.some(function (r) { return r.ad_spend_14d !== undefined; });
+    /* 27 Nov (owner): "show ROAS today also in All Account Listings" — present only when the engine
+       sent the revenue for this role; the same live figure as the Ads command centre's column */
+    var hasRoas = ALX.rows.some(function (r) { return r.roas_today !== undefined; });
     var canHistory = alxCanHistory();
     var h = '<div class="scroll"><table class="alx-tbl"><thead><tr>' +
       '<th>Listing</th><th>Listed</th><th>Price</th><th>Qty</th><th>Sold yet</th><th title="Average units per week across every week the listing has been live in our order history">Avg / week</th><th title="units sold in the window picked above">Sold · ' + ALX.win + 'd</th>' +
       (hasOE ? '<th>Order earning</th>' : '') +
       (hasProfit ? '<th>Profit</th>' : '') +
       (hasAds ? '<th>Ads 14d</th>' : '') +
+      (hasRoas ? '<th title="today\u2019s sales eBay credits to the ad, over today\u2019s ad spend \u00b7 live \u00b7 green at the 5\u00d7 target, amber under it, red under 3\u00d7">ROAS today</th>' : '') +
       (hasCampaign ? '<th>Campaign</th>' : '') +
       '</tr></thead><tbody>';
     all.forEach(function (r) {
@@ -2607,6 +2618,7 @@ VIEWS.home = {
         (hasOE ? '<td class="alx-num">' + axGBP(r.oe) + '</td>' : '') +
         (hasProfit ? '<td class="alx-num ' + (Number(r.profit) < 0 ? 'alx-neg' : 'alx-pos') + '">' + axGBP(r.profit) + '</td>' : '') +
         (hasAds ? '<td class="alx-num">' + (r.ad_spend_14d !== undefined ? axGBP(r.ad_spend_14d) + (Number(r.ad_units_14d) ? '<div style="font-size:10px;color:var(--text-3)">' + Number(r.ad_units_14d) + ' sold via ads</div>' : '') : '—') + '</td>' : '') +
+        (hasRoas ? '<td class="alx-num">' + alxRoasCell(r) + '</td>' : '') +
         (hasCampaign ? '<td>' + alxCampaignCell(r) + '</td>' : '') +
 
       '</tr>';
@@ -2688,7 +2700,7 @@ VIEWS.home = {
           // export exactly what the server sent this role — the strip law rides along
           var rows = ALX.rows || [];
           if (!rows.length) { toast('Nothing to export for this filter.'); return; }
-          var cols = ['item_id', 'account', 'title', 'born', 'price', 'qty', 'sold_qty', 'avg_week', 'weeks_covered', 'sold_all', 'sold_7d', 'sold_14d', 'sold_30d_live', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'live_kind', 'live_campaign_names', 'campaign_type', 'campaign_name', 'current_sup', 'sup1_link', 'sup2_link', 'sup3_link', 'category', 'source'];
+          var cols = ['item_id', 'account', 'title', 'born', 'price', 'qty', 'sold_qty', 'avg_week', 'weeks_covered', 'sold_all', 'sold_7d', 'sold_14d', 'sold_30d_live', 'oe', 'ali_cost', 'profit', 'ad_spend_14d', 'ad_spend_today', 'ad_rev_today', 'roas_today', 'live_kind', 'live_campaign_names', 'campaign_type', 'campaign_name', 'current_sup', 'sup1_link', 'sup2_link', 'sup3_link', 'category', 'source'];
           cols = cols.filter(function (c) { return rows.some(function (r) { return r[c] !== undefined; }); });
           var esc1 = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
           var out = cols.join(',') + '\n';
