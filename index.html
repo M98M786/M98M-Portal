@@ -1076,7 +1076,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261127-1805';
+var BUILD = '20261127-1807';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -6544,7 +6544,7 @@ VIEW_CSS.push(
        the five states the engine carves the list by; the `gap` slot holds that state's own read */
     filter: '' };
   var WLA_FILTERS = [
-    ['none',       'New listing', 'in_none',    'New listings \u2014 in no campaign at all',          'Active listings in no campaign at all, so nothing is advertising them. The ones that have sold recently are the ones worth putting somewhere.'],
+    ['none',       'No campaign', 'in_none',    'No campaign \u2014 active listings in no campaign at all',          'Active listings in no campaign at all, so nothing is advertising them. The ones that have sold recently are the ones worth putting somewhere.'],
     ['cpc_live',   'CPC live',    'cpc_live',   'CPC live \u2014 and not in Dynamic',                 'Listings whose cost-per-click ad is live right now and that are not live in a Dynamic campaign.'],
     ['cpc_paused', 'CPC paused',  'cpc_paused', 'CPC paused',                                           'Listings whose cost-per-click ad is paused (and not live in another CPC campaign), whatever else they are in.'],
     ['dyn_live',   'Dynamic',     'dyn_live',   'Dynamic live \u2014 and not in CPC',                 'Listings live in a Dynamic campaign and not live in any cost-per-click one.'],
@@ -7153,7 +7153,7 @@ VIEW_CSS.push(
 
   /* ── section 3 · Gaps ─────────────────────────────────────────────────────────────────────── */
   function gapSection() {
-    var h = '<div class="wla-panel" id="wlaGaps"><h3>New listings \u2014 in no campaign at all</h3>' +
+    var h = '<div class="wla-panel" id="wlaGaps"><h3>No campaign \u2014 active listings in no campaign at all</h3>' +
       '<div class="wla-sub">Active listings in no campaign at all, so nothing is advertising them. ' +
       'The ones that have sold recently are the ones worth putting somewhere.</div>';
     if (WL.err.gap) return h + '<div class="wla-empty">' + esc(WL.err.gap) + '</div></div>';

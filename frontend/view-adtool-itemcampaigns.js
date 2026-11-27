@@ -38,7 +38,7 @@
        the five states the engine carves the list by; the `gap` slot holds that state's own read */
     filter: '' };
   var WLA_FILTERS = [
-    ['none',       'New listing', 'in_none',    'New listings \u2014 in no campaign at all',          'Active listings in no campaign at all, so nothing is advertising them. The ones that have sold recently are the ones worth putting somewhere.'],
+    ['none',       'No campaign', 'in_none',    'No campaign \u2014 active listings in no campaign at all',          'Active listings in no campaign at all, so nothing is advertising them. The ones that have sold recently are the ones worth putting somewhere.'],
     ['cpc_live',   'CPC live',    'cpc_live',   'CPC live \u2014 and not in Dynamic',                 'Listings whose cost-per-click ad is live right now and that are not live in a Dynamic campaign.'],
     ['cpc_paused', 'CPC paused',  'cpc_paused', 'CPC paused',                                           'Listings whose cost-per-click ad is paused (and not live in another CPC campaign), whatever else they are in.'],
     ['dyn_live',   'Dynamic',     'dyn_live',   'Dynamic live \u2014 and not in CPC',                 'Listings live in a Dynamic campaign and not live in any cost-per-click one.'],
@@ -647,7 +647,7 @@
 
   /* ── section 3 · Gaps ─────────────────────────────────────────────────────────────────────── */
   function gapSection() {
-    var h = '<div class="wla-panel" id="wlaGaps"><h3>New listings \u2014 in no campaign at all</h3>' +
+    var h = '<div class="wla-panel" id="wlaGaps"><h3>No campaign \u2014 active listings in no campaign at all</h3>' +
       '<div class="wla-sub">Active listings in no campaign at all, so nothing is advertising them. ' +
       'The ones that have sold recently are the ones worth putting somewhere.</div>';
     if (WL.err.gap) return h + '<div class="wla-empty">' + esc(WL.err.gap) + '</div></div>';
