@@ -10868,7 +10868,7 @@ const ADTOOL_ACTIONS_P5 = {
          answered for everything, which is the one failure nobody would see. */
       const cohort = String((p && p.cohort) || '').trim().toLowerCase();
       if (cohort && ADTOOL_COHORTS.indexOf(cohort) < 0) throw new Error('SAY: the cohorts this answer knows are ' + ADTOOL_COHORT_WORDS);
-      const CO = cohort === 'peak' ? await adPeakCohortRead(env, acct) : cohort === 'video' ? await adVideoCohortRead(env, acct) : null;
+      const CO = cohort ? await adCohortRead(env, cohort, acct) : null;
       const coJoin = (itemCol, dayCol) => CO ? adPeakCohortJoin(CO.sql, itemCol, dayCol) : '';
       /* the today grain and the order read have no day column to judge: they ARE today, and today's
          part-day figures hold the listings on the list now. An empty list gives an IN list that can
@@ -10995,7 +10995,7 @@ const ADTOOL_ACTIONS_P5 = {
            asking for them would print four figures that mean nothing under a heading that implies
            they do. The check below it IS about any cohort (a tile against the sum of its own
            listings) and is worked out for all of them. */
-        if (cohort === 'peak') peakExtras = await adPeakOverviewExtras(env, { account: acct, cohort: CO, today: today, fresh: fresh });
+        if (cohort === 'peak' || cohort === 'peak_morning' || cohort === 'peak_evening') peakExtras = await adPeakOverviewExtras(env, { account: acct, cohort: CO, today: today, fresh: fresh });
         /* the period half of the check: the SAME per-listing day rows the 30-day tile is summed from,
            read back one listing at a time and added up here. Both sides sum the raw column and round
            once at the end, so a penny of rounding cannot be mistaken for a cohort filter that was
@@ -12499,7 +12499,7 @@ const ADTOOL_ACTIONS_P9 = {
          it). An unknown cohort is refused rather than quietly answered for the whole fleet. */
       const cohort = String((p && p.cohort) || '').trim().toLowerCase();
       if (cohort && ADTOOL_COHORTS.indexOf(cohort) < 0) throw new Error('SAY: the cohorts this answer knows are ' + ADTOOL_COHORT_WORDS);
-      const CO = cohort === 'peak' ? await adPeakCohortRead(env, acct) : cohort === 'video' ? await adVideoCohortRead(env, acct) : null;
+      const CO = cohort ? await adCohortRead(env, cohort, acct) : null;
       const coJoin = (itemCol, dayCol) => CO ? adPeakCohortJoin(CO.sql, itemCol, dayCol) : '';
       const coSet = CO ? (function () { const m = {}; for (const id of adPeakCohortIds(CO.entries, today)) m[String(id)] = 1; return m; })() : null;
       /* the last 7 full days to yesterday ride the same aggregate as the window (a listing losing over the window
@@ -16388,7 +16388,7 @@ const ADTOOL_PEAK_SUGGEST_CAP = 200;
    Section 2 of the owner's 31 Oct brief. The Overview's own figures, computed by the Overview's own
    code over one cohort, plus four figures that only mean anything for that cohort. Nothing here
    sends anything to eBay and nothing here writes. */
-async function adPeakCohortRead(env, acct) {
+async function adPeakCohortRead(env, acct, band) {
   /* THE COHORT, read once per answer and handed to every query that narrows itself by it. The whole
      list and not only the open rows: a listing taken off last week still owns the days it was on,
      and the membership rule decides day by day which of its days count.
@@ -16406,11 +16406,44 @@ async function adPeakCohortRead(env, acct) {
     try { rows = ((await env.DB.prepare(sql(', COALESCE(p.auto, 0) AS auto')).bind(...ab).all()).results || []).map(r => Object.assign({ campaign_id: '' }, r)); }
     catch (e2) { rows = ((await env.DB.prepare(sql('')).bind(...ab).all()).results || []).map(r => Object.assign({ auto: null, campaign_id: '' }, r)); }
   }
-  const entries = adPeakCohortEntries(rows);
+  const all = adPeakCohortEntries(rows);
+  /* 27 Nov: one band of the list — the rows whose hours fall in the morning or in the evening */
+  const entries = band ? all.filter(e => adPeakBandOf(e.ranges) === band) : all;
   return {
-    entries: entries, sql: adPeakCohortSql(entries), rows_read: rows.length, cap: ADTOOL_PEAK_COHORT_CAP,
-    held_back: Math.max(0, rows.length - entries.length), account: acct || '', as_of: new Date().toISOString(),
+    entries: entries, sql: adPeakCohortSql(entries), rows_read: rows.length, cap: ADTOOL_PEAK_COHORT_CAP, band: band || '',
+    held_back: Math.max(0, rows.length - all.length), account: acct || '', as_of: new Date().toISOString(),
   };
+}
+/* 27 Nov (owner): THE ALL-DAY COHORT — every listing with a live ad that is NOT on the open peak list,
+   so nothing switches it and its ad runs all day. Membership runs from the day the engine's history
+   begins, so every day in any window counts. The join is the live-ad rule itself with the open peak
+   rows taken out, written without binds (the account as a checked literal) so it can sit inside the
+   Overview's own statements beside their binds. */
+async function adAllDayCohortRead(env, acct) {
+  await ensureAdtoolPhase16Schema(env);
+  const a = String(acct || '');
+  const acctLit = a ? " AND c.account = '" + a.replace(/[^A-Za-z0-9 _.\-]/g, '').replace(/'/g, "''") + "'" : '';
+  const live = (await env.DB.prepare(ADTOOL_LIVE_AD_SQL + (a ? ' AND c.account = ?1' : '')).bind(...(a ? [a] : [])).all().catch(() => ({ results: [] }))).results || [];
+  const onList = {};
+  for (const r of ((await env.DB.prepare("SELECT item_id FROM adtool_peak_items WHERE COALESCE(removed_at, '') = ''").all().catch(() => ({ results: [] }))).results || [])) onList[String(r.item_id)] = 1;
+  const seen = {}, entries = [];
+  for (const r of live) {
+    const id = String(r.item_id || '').replace(/[^0-9]/g, '');
+    if (!id || seen[id] || onList[id]) continue;
+    seen[id] = 1;
+    entries.push({ item_id: id, account: String(r.account || ''), hours: '', ranges: [], hours_problem: '', auto: null, campaign_id: null, added_by: '', added_at: '', removed_at: '', added_day: ADTOOL_VIDEO_DATA_START, removed_day: '', open: true });
+  }
+  const sql = '(SELECT DISTINCT lv.item_id AS pk_item, \'' + ADTOOL_VIDEO_DATA_START + '\' AS pk_from, \'\' AS pk_to FROM (' + ADTOOL_LIVE_AD_SQL + acctLit + ") lv WHERE lv.item_id NOT IN (SELECT item_id FROM adtool_peak_items WHERE COALESCE(removed_at, '') = ''))";
+  return { entries: entries, sql: sql, rows_read: live.length, cap: null, band: 'allday', held_back: 0, account: a, as_of: new Date().toISOString() };
+}
+/* one door for every cohort the two Overview actions take */
+async function adCohortRead(env, cohort, acct) {
+  if (cohort === 'peak') return adPeakCohortRead(env, acct);
+  if (cohort === 'peak_morning') return adPeakCohortRead(env, acct, 'morning');
+  if (cohort === 'peak_evening') return adPeakCohortRead(env, acct, 'evening');
+  if (cohort === 'all_day') return adAllDayCohortRead(env, acct);
+  if (cohort === 'video') return adVideoCohortRead(env, acct);
+  return null;
 }
 async function adPeakOverviewExtras(env, opts) {
   /* The four figures the owner asked for beside the Overview's own: how many listings are on peak
@@ -16668,7 +16701,7 @@ async function adtPeriodsForItems(env, ids, cap, today, todayUtc) {
      anybody having to guess at it. */
   return { by_item: periodsBy, note: ADTOOL_PERIODS_NOTE, problem: periodsProblem, listings: askedFor, chunks: chunks.length, reads: chunks.length * 2 };
 }
-async function adtoolPeakCompute(env, acct) {
+async function adtoolPeakCompute(env, acct, band) {
   await ensureAdtoolPhase16Schema(env);   // P15's tables plus the by-hand list's own switch column
   const cfg = {};
   for (const r of ((await env.DB.prepare("SELECT key, value FROM portal_config WHERE key LIKE 'adtool_peak_%'").all()).results || [])) cfg[String(r.key)] = r.value;
@@ -16724,7 +16757,9 @@ async function adtoolPeakCompute(env, acct) {
   /* the hour bands Running today prints, over the same hours, and the money outside them */
   const bandIds = picked.map(x => x.item_id);
   const bl = await adtBandsAndLevers(env, bandIds, today, acct);
-  const moneyIds = Array.from(new Set(bandIds.concat(Object.keys(manualSet))));
+  /* 27 Nov: the all-day listings — live ad, not on the list — when the All day page asks */
+  const allDayIds = band === 'allday' ? Object.keys(liveBy).filter(id => !manualSet[id]) : [];
+  const moneyIds = Array.from(new Set(bandIds.concat(Object.keys(manualSet)).concat(allDayIds)));
   const mStmts = [], mKinds = [];
   for (const ch of adtChunks(moneyIds)) {
     /* the SAME hours the bands beside them were judged on, excluded the same way: a row rolled before
@@ -16757,7 +16792,7 @@ async function adtoolPeakCompute(env, acct) {
      left them with no title and no image at all, because the only other thing in `meta` is the
      account off the membership rows, and a product cell with no name reads as a listing nobody can
      place. One query, chunked, over all of them. */
-  const titleIds = bandIds;
+  const titleIds = bandIds.concat(allDayIds);
   for (const ch of adtChunks(titleIds)) {
     for (const r of ((await env.DB.prepare('SELECT item_id, account, title, image FROM items_api WHERE item_id IN ' + adtInList(ch, 0)).bind(...ch).all()).results || [])) {
       meta[String(r.item_id)] = { account: String(r.account || ''), title: String(r.title || ''), image: r.image ? String(r.image) : null };
@@ -16786,6 +16821,25 @@ async function adtoolPeakCompute(env, acct) {
       why: v.why, already_manual: !!manualSet[id],
     };
   });
+  /* 27 Nov (owner): the All day Peak Time page's own list — every advertised listing not on the peak
+     list, the biggest spend over the last seven days first, with its units over the window */
+  /* "all best performing listings will be in the All day campaign: 50 plus sold in the CPC campaign,
+     still active, are considered amongst them" (owner, 27 Nov) — the units eBay credits to the
+     listing's cost-per-click ads over its whole recorded history, and whether a CPC ad is live now */
+  const cpcUnits = {};
+  if (allDayIds.length) {
+    const cStmts = adtChunks(allDayIds).map(ch => env.DB.prepare('SELECT item_id, SUM(cpc_sales) AS u FROM ads_daily WHERE item_id IN ' + adtInList(ch, 0) + ' GROUP BY item_id').bind(...ch));
+    for (const rows of await adtBatchRead(env, cStmts)) for (const r of rows) cpcUnits[String(r.item_id)] = Number(r.u) || 0;
+  }
+  const allDay = allDayIds.map(id => {
+    const m = meta[id] || {}, c = camp(id), u = slots[id] || [0, 0, 0, 0];
+    const cpcLive = (liveBy[id] || []).some(r => String(r.funding_model || '') === 'COST_PER_CLICK');
+    const cu = cpcUnits[id] || 0;
+    return { item_id: id, account: String(m.account || ''), title: String(m.title || ''), image: m.image === undefined ? null : m.image,
+      live_now: true, campaign_id: c.campaign_id, campaign_name: c.campaign_name, campaigns: c.campaigns,
+      spend_7d: spend7[id] === undefined ? 0 : spend7[id], units_28d: u.reduce((t, x) => t + (Number(x) || 0), 0),
+      cpc_live: cpcLive, cpc_units: cu, best: cpcLive && cu >= ADTOOL_ALLDAY_BEST_UNITS };
+  }).sort((a, b) => ((b.best ? 1 : 0) - (a.best ? 1 : 0)) || (b.cpc_units - a.cpc_units) || (b.spend_7d - a.spend_7d) || String(a.title).localeCompare(String(b.title)));
   const sugSet = {};
   for (const s of suggested) sugSet[s.item_id] = 1;
   /* 28 Oct: the page has to be able to show the truth about the switching, not a promise about it:
@@ -16973,6 +17027,8 @@ async function adtoolPeakCompute(env, acct) {
     accounts: allAccounts,
     suggested: suggested, suggested_total: first.length, suggested_held_back: Math.max(0, first.length - suggested.length),
     manual: manual,
+    all_day: band === 'allday' ? allDay.slice(0, 800) : undefined, all_day_total: band === 'allday' ? allDay.length : undefined, band: band,
+    all_day_best: band === 'allday' ? allDay.filter(r => r.best).length : undefined, all_day_best_units: band === 'allday' ? ADTOOL_ALLDAY_BEST_UNITS : undefined,
     counts: { suggested: suggested.length, manual: manual.length, both: manual.filter(m => m.already_suggested).length,
       switching: manual.filter(m => m.auto && m.hours_parsed && m.switchable).length,
       switching_live: manual.filter(m => m.auto && m.hours_parsed && m.switchable && m.live_switch_on).length,
@@ -17155,8 +17211,11 @@ const ADTOOL_ACTIONS_P15 = {
       await ensureAdtoolPhase15Register(ctx.env);
       await adtGate(ctx, 'adtool_page_peak');                      // then the page flag, which the seed above put there
       const acct = String((p && p.account) || '').trim();
-      return adtKvMemo(ctx.env, 'adtoolPeak', adtProfitClass(ctx.user), { account: acct }, ADTOOL_KV_TTL_MS.adtoolPeak,
-        () => adtoolPeakCompute(ctx.env, acct),
+      /* 27 Nov (owner): the All day Peak Time page asks with band 'allday' and gets, beside the two
+         lists, every advertised listing that is not on the peak list */
+      const band = String((p && p.band) || '') === 'allday' ? 'allday' : '';
+      return adtKvMemo(ctx.env, 'adtoolPeak', adtProfitClass(ctx.user), { account: acct, band: band }, ADTOOL_KV_TTL_MS.adtoolPeak,
+        () => adtoolPeakCompute(ctx.env, acct, band),
         (ctx && typeof ctx.waitUntil === 'function') ? (pr => ctx.waitUntil(pr)) : null, adtMemoOpts(ctx));
     },
   },
@@ -17510,6 +17569,17 @@ function adPeakHoursParse(text) {
     ranges.push([h, end]);
   }
   return { ranges: ranges, hours: hours, reason: '' };
+}
+/* 27 Nov (owner): which part of the day a listing's hours belong to. Morning = every stretch starts
+   before 15:00 and stops by 15:00 (07-13, 09-13, 10-14); evening = every stretch starts at 15:00 or
+   later (17-22, 22-02); anything else is mixed, and no hours at all is none. The same rule is in the
+   page, so a row sits on the same page the cohort counts it in. */
+function adPeakBandOf(ranges) {
+  const rs = (ranges || []).filter(r => Array.isArray(r) && r.length >= 2);
+  if (!rs.length) return 'none';
+  if (rs.every(r => Number(r[0]) < 15 && Number(r[1]) > Number(r[0]) && Number(r[1]) <= 15)) return 'morning';
+  if (rs.every(r => Number(r[0]) >= 15)) return 'evening';
+  return 'mixed';
 }
 function adPeakHoursText(ranges) {
   const pad = h => String(Number(h)).padStart(2, '0');
@@ -17960,6 +18030,9 @@ function adPeakReadingDisagree(input) {
    the tests assert the same functions, so the cohort cannot come to mean two different things on
    two screens. */
 const ADTOOL_PEAK_COHORT_CAP = 500;
+/* 27 Nov (owner): a best-performing all-day listing has sold this many units through its cost-per-click
+   ads, over its recorded history, with a CPC ad still live */
+const ADTOOL_ALLDAY_BEST_UNITS = 50;
 /* ---- pure: THE ONE FRESHNESS LAW (owner's brief, 31 Oct, §5) --------------------------------
    How old an "as of" stamp may be before the tile beside it says so, in minutes. Amber is a badge on
    a page and nothing more; red is the point at which a person is told, through the alert rule A23.
@@ -19338,8 +19411,10 @@ function adPeakListingProfile(row, inp) {
 /* THE COHORTS adtoolPlan and adtoolCommand will answer for. Named in one place, so a third one
    cannot be added to one of those two actions and forgotten in the other, and so the refusal
    sentence a reader sees is written once. */
-const ADTOOL_COHORTS = ['peak', 'video'];
-const ADTOOL_COHORT_WORDS = 'the peak list and the listings that carry a video';
+/* 27 Nov (owner): three more — the peak list's morning-hour listings, its evening-hour listings, and
+   every advertised listing NOT on the list (its ad runs all day). The three new Peak pages ask for them. */
+const ADTOOL_COHORTS = ['peak', 'peak_morning', 'peak_evening', 'all_day', 'video'];
+const ADTOOL_COHORT_WORDS = 'the peak list, its morning and evening listings, the all-day listings off the list, and the listings that carry a video';
 const ADTOOL_VIDEO_WINDOW_CAP = 30;         /* the 18 Oct study's own ceiling on an equal window */
 const ADTOOL_VIDEO_WINDOWS = [14, 28];      /* the two the Decision page's department asks for */
 const ADTOOL_VIDEO_DATA_START = '2026-05-16';  /* the day the engine's order history begins */

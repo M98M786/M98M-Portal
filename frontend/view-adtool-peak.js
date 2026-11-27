@@ -52,7 +52,27 @@
      because every control on the hours picker redraws the whole form, and a form rebuilt from the
      DOM loses the item number somebody typed a moment ago. `camps` is the campaign list for
      `campFor`, and nothing else: a list read for one listing is never shown against another. */
-  var PK = { tab: 'suggested', account: '', data: null, busy: false, edit: null, ranges: [],
+  /* 27 Nov (owner): THREE MORE PAGES on this same code — Morning Peak time (the list's morning-hour
+     rows, plus the new listings in no campaign waiting to join them), Evening Peak time (the evening
+     rows) and All day Peak Time (every advertised listing NOT on the list). `band` says which page
+     this is; '' is Peak time listings as it was. Each page asks the Overview actions for its own
+     cohort, so the tiles at the top count that page's listings and nothing else. */
+  var PK_BANDS = {
+    morning: { key: 'adtoolPeakMorning', label: 'Morning Peak time', sub: 'The listings whose peak hours are in the morning, and the new listings in no campaign picked to join them', order: 93.1, cohort: 'peak_morning', ranges: [{ from: 9, to: 13 }], hours: '09-13' },
+    evening: { key: 'adtoolPeakEvening', label: 'Evening Peak time', sub: 'The listings whose peak hours are in the evening', order: 93.2, cohort: 'peak_evening', ranges: [{ from: 17, to: 22 }], hours: '17-22' },
+    allday:  { key: 'adtoolPeakAllDay',  label: 'All day Peak Time',  sub: 'Every advertised listing that is not on the peak list, so its ad runs all day', order: 93.3, cohort: 'all_day', ranges: [{ from: 17, to: 22 }], hours: '' }
+  };
+  /* which part of the day a row's hours belong to — the engine's adPeakBandOf, rule for rule */
+  function pkBandOf(hours) {
+    var parts = String(hours == null ? '' : hours).split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    if (!parts.length) return 'none';
+    var rs = parts.map(function (p) { var m = /^(\d{1,2})\s*-\s*(\d{1,2})$/.exec(p); return m ? [Number(m[1]), Number(m[2])] : null; });
+    if (rs.some(function (r) { return !r; })) return 'mixed';
+    if (rs.every(function (r) { return r[0] < 15 && r[1] > r[0] && r[1] <= 15; })) return 'morning';
+    if (rs.every(function (r) { return r[0] >= 15; })) return 'evening';
+    return 'mixed';
+  }
+  var PK = { band: '', nocamp: null, nocampErr: '', allMode: 'best', tab: 'suggested', account: '', data: null, busy: false, edit: null, ranges: [],
     item: '', note: '', pick: '', pickName: '', camps: null, campFor: '', campNote: '', campErr: '', campBusy: false,
     /* CHANGING THE CAMPAIGN FROM THE ROW (owner, 2 Nov): the listing whose campaign is open for
        changing, which is not `edit` (the hours) and never both at once. It is the row's own control,
@@ -304,36 +324,51 @@
     ['Lunch and evening', [{ from: 11, to: 14 }, { from: 18, to: 22 }]]
   ];
 
+  var PK_ICON = '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/><path d="M4 4l2 2M20 4l-2 2"/>';
+  function pkRender(title, sub) {
+    /* the account chips come first and drive BOTH halves of the page. Then the Peak-time overview,
+       then the page as it was. */
+    return '<div class="pkt-wrap">' +
+      adtHgroup(title, sub, 'pktFresh') +
+      '<div id="pktAcct" class="pkt-chips"></div>' +
+      pkoHead() +
+      '<div id="pkoHero"><div class="pkt-empty">Loading…</div></div>' +
+      '<div id="pkoToday"><div class="pkt-empty">Loading…</div></div>' +
+      '<div id="pkoExtra"></div>' +
+      '<div id="pktBody"><div class="pkt-empty">Loading…</div></div></div>';
+  }
   VIEWS.adtoolPeak = {
     label: 'Peak time listings',
     /* NOT hidden. Every other advertising-tool page is hidden here and lives only in the /ads/
        portal, but the owner asked for this one "on portal" as well, so it is carried by both builds
        and appears in both sidebars. */
     hidden: false, order: 93, roles: ROLES,
-    icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/><path d="M4 4l2 2M20 4l-2 2"/>',
-    render: function () {
-      /* the account chips come first and drive BOTH halves of the page. Then the Peak-time overview,
-         then the page as it was. */
-      return '<div class="pkt-wrap">' +
-        adtHgroup('Peak time listings', 'The hours each listing should advertise in, and who switches it', 'pktFresh') +
-        '<div id="pktAcct" class="pkt-chips"></div>' +
-        pkoHead() +
-        '<div id="pkoHero"><div class="pkt-empty">Loading…</div></div>' +
-        '<div id="pkoToday"><div class="pkt-empty">Loading…</div></div>' +
-        '<div id="pkoExtra"></div>' +
-        '<div id="pktBody"><div class="pkt-empty">Loading…</div></div></div>';
-    },
-    init: function () {
-      PK.data = null; PK.edit = null; PK.ranges = [{ from: 17, to: 22 }];
+    icon: PK_ICON,
+    render: function () { PK.band = ''; return pkRender('Peak time listings', 'The hours each listing should advertise in, and who switches it'); },
+    init: function () { pkInit(''); }
+  };
+  Object.keys(PK_BANDS).forEach(function (b) {
+    var B = PK_BANDS[b];
+    VIEWS[B.key] = {
+      label: B.label, hidden: false, order: B.order, roles: ROLES, icon: PK_ICON,
+      render: function () { PK.band = b; return pkRender(B.label, B.sub); },
+      init: function () { pkInit(b); }
+    };
+  });
+  function pkInit(band) {
+      PK.band = band || ''; PK.nocamp = null; PK.nocampErr = '';
+      PK.data = null; PK.edit = null; PK.ranges = PK.band && PK_BANDS[PK.band] ? PK_BANDS[PK.band].ranges.slice() : [{ from: 17, to: 22 }];
       PK.item = ''; PK.note = ''; PK.pick = ''; PK.pickName = '';
       PK.camps = null; PK.campFor = ''; PK.campNote = ''; PK.campErr = ''; PK.campBusy = false;
       PK.cell = ''; PK.dataFor = ''; PK.holdBy = {}; PK.holdBusy = '';
       /* #adtoolPeak?tab=manual opens on the hand-kept list, so a link can point at either tab and a
-         second tab of the browser keeps its own */
+         second tab of the browser keeps its own. A band page has the hand-kept list and nothing else. */
       var q = (window.adtRoute ? (adtRoute().query || {}) : {}).tab;
       if (q === 'manual' || q === 'suggested') PK.tab = q;
+      if (PK.band) PK.tab = 'manual';
       acctChips();
       load(false).catch(function () {});
+      if (PK.band === 'morning') loadNoCamp();
       /* the Peak-time overview. Its own remembered window, under its own page key, so changing it
          here does not move the Overview's and the other way round. */
       PK.pkoPlan = null; PK.pkoCmd = null; PK.pkoList = '';
@@ -343,11 +378,69 @@
       /* today moves every 5 minutes. adtPoll skips hidden tabs and stops for good on an 'auth'
          refusal, which is the session-expiry law every live page in this portal follows. */
       adtPoll('pkoToday', 300000, function () { return loadPkoCmd(true); });
-    }
-  };
+  }
+
+  /* 27 Nov (owner): "all new listings not in any campaign will be selected for the morning peak time"
+     — the Morning page reads them from Where each listing advertises' own state (in no campaign) and
+     offers each one a one-click add at the morning hours. Nothing is added by itself: a listing with
+     no campaign has no ad for the hours to switch yet, so the team puts it on the list and into a
+     campaign knowingly. */
+  function loadNoCamp() {
+    var p = { state: 'none' }; if (PK.account) p.account = PK.account;
+    return api('adtoolItemCampaigns', p).then(function (D) {
+      PK.nocamp = ((D && D.items) || []).filter(function (r) { return r && typeof r === 'object'; }); PK.nocampErr = '';
+      if ($('pktBody')) draw();
+    }).catch(function (e) { PK.nocamp = []; PK.nocampErr = (e && e.message) || 'could not be read'; if ($('pktBody')) draw(); });
+  }
+  function noCampPanel() {
+    var B = PK_BANDS.morning;
+    var h = '<div class="pkt-panel"><h3>New listings in no campaign \u00b7 picked for the morning peak</h3>' +
+      '<div class="pkt-sub">Every active listing that is in no campaign at all, from Where each listing advertises. ' +
+      'Each one can be put on the list at ' + esc(B.hours) + ' with one click; it starts switching once it has a pay-per-click ad in a running campaign.</div>';
+    if (PK.nocamp == null) return h + '<div class="pkt-empty">Reading the listings in no campaign\u2026</div></div>';
+    if (PK.nocampErr) return h + '<div class="pkt-empty">' + esc(PK.nocampErr) + '</div></div>';
+    var on = {}; manualAll().forEach(function (r) { on[String(r.item_id)] = 1; });
+    var rows = PK.nocamp.filter(function (r) { return !on[String(r.item_id)]; });
+    if (!rows.length) return h + '<div class="pkt-empty">Every listing in no campaign is already on the list' + (PK.account ? ' for ' + esc(PK.account) : '') + '.</div></div>';
+    h += '<div class="pkt-sub2">' + cnt(rows.length) + ' ' + plural(rows.length, 'listing', 'listings') + ' not yet on the list' + (PK.account ? ' \u00b7 ' + esc(PK.account) : '') + '</div>';
+    h += '<div class="pkt-scroll"><table class="pkt-tbl"><thead><tr><th>Listing</th><th class="r">Price</th><th class="r">Sold 30 d</th><th class="r">Spend 7 d</th><th></th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr><td>' + adtProductCell(r) + '</td><td class="r">' + gbp(r.price) + '</td><td class="r">' + cnt(r.sold_30d) + '</td><td class="r">' + gbp(r.spend_7d) + '</td>' +
+          '<td><button class="pkt-btn" data-pkaddband="' + esc(String(r.item_id)) + '" title="put this listing on the list at ' + esc(B.hours) + '">Add at ' + esc(B.hours) + '</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    return h + '</div>';
+  }
+  /* 27 Nov (owner): the All day page's list — every advertised listing that is not on the peak list */
+  function allDayPanel() {
+    var D = PK.data || {}, all = (D.all_day || []).filter(function (r) { return r && typeof r === 'object'; });
+    var minU = num(D.all_day_best_units) == null ? 50 : num(D.all_day_best_units);
+    var best = all.filter(function (r) { return r.best; });
+    var rows = PK.allMode === 'best' ? best : all;
+    var h = '<div class="pkt-panel"><h3>Advertised all day \u00b7 not on the peak list</h3>' +
+      '<div class="pkt-sub">Every listing with a live ad right now that nobody has put on the peak list, so nothing switches it and its ad runs all day. ' +
+      '<b>The best performing ones</b> \u2014 ' + cnt(minU) + ' or more units sold through a cost-per-click campaign, with a CPC ad still live \u2014 come first and are what this page shows by default. Add one to the list to give it hours.</div>';
+    if (!PK.data) return h + '<div class="pkt-empty">Loading\u2026</div></div>';
+    h += '<div class="pkt-chips" style="margin:0 0 10px">' +
+      '<button class="pkt-chip' + (PK.allMode === 'best' ? ' on' : '') + '" data-pkall="best">Best performing \u00b7 ' + cnt(minU) + '+ sold in CPC<span class="n" style="margin-left:6px">' + cnt(best.length) + '</span></button>' +
+      '<button class="pkt-chip' + (PK.allMode === 'all' ? ' on' : '') + '" data-pkall="all">Every all-day listing<span class="n" style="margin-left:6px">' + cnt(all.length) + '</span></button></div>';
+    if (!all.length) return h + '<div class="pkt-empty">Every advertised listing' + (PK.account ? ' on ' + esc(PK.account) : '') + ' is on the peak list.</div></div>';
+    if (!rows.length) return h + '<div class="pkt-empty">No all-day listing has sold ' + cnt(minU) + ' or more units through a live cost-per-click campaign' + (PK.account ? ' on ' + esc(PK.account) : '') + '.</div></div>';
+    var tot = num(D.all_day_total);
+    h += '<div class="pkt-sub2">' + cnt(rows.length) + (PK.allMode === 'all' && tot != null && tot > rows.length ? ' of ' + cnt(tot) : '') + ' ' + plural(rows.length, 'listing', 'listings') + (PK.account ? ' \u00b7 ' + esc(PK.account) : ' \u00b7 all accounts') + '</div>';
+    h += '<div class="pkt-scroll"><table class="pkt-tbl"><thead><tr><th>Listing</th><th>Campaign</th><th class="r">Sold via CPC</th><th class="r">Spend 7 d</th><th class="r">Units 28 d</th><th></th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr' + (r.best ? ' class="pkt-best"' : '') + '><td>' + adtProductCell(r) + (r.best ? '<div style="margin-top:4px"><span class="pkt-mark" title="' + esc(cnt(r.cpc_units) + ' units sold through a cost-per-click campaign, CPC ad live') + '">best performing</span></div>' : '') + '</td>' +
+          '<td>' + (r.campaign_name ? esc(String(r.campaign_name)) + (num(r.campaigns) > 1 ? ' <span class="pkt-sm">+ ' + cnt(r.campaigns - 1) + ' more</span>' : '') : '<span class="pkt-sm">\u2014</span>') + '</td>' +
+          '<td class="r"' + (r.best ? ' style="font-weight:800;color:var(--ok)"' : '') + '>' + cnt(r.cpc_units) + (r.cpc_live ? '' : ' <span class="pkt-sm" title="no cost-per-click ad live now">no CPC live</span>') + '</td>' +
+          '<td class="r">' + gbp(r.spend_7d) + '</td><td class="r">' + cnt(r.units_28d) + '</td>' +
+          '<td><button class="pkt-btn" data-pkadd="' + esc(String(r.item_id)) + '" title="put this listing on the peak list; the hours are picked on the list">Add to the list</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    return h + '</div>';
+  }
 
   function load(quiet) {
-    return api('adtoolPeak', PK.account ? { account: PK.account } : {}).then(function (D) {
+    var pay = {}; if (PK.account) pay.account = PK.account; if (PK.band === 'allday') pay.band = 'allday';
+    return api('adtoolPeak', pay).then(function (D) {
       PK.data = D || {};
       if (!$('pktBody')) return;
       acctChips();
@@ -363,7 +456,12 @@
   }
 
   function suggested() { return ((PK.data && PK.data.suggested) || []).filter(function (r) { return r && typeof r === 'object'; }); }
-  function manual() { return ((PK.data && PK.data.manual) || []).filter(function (r) { return r && typeof r === 'object'; }); }
+  function manualAll() { return ((PK.data && PK.data.manual) || []).filter(function (r) { return r && typeof r === 'object'; }); }
+  function manual() {
+    var all = manualAll();
+    if (PK.band === 'morning' || PK.band === 'evening') { return all.filter(function (r) { return pkBandOf(r.hours) === PK.band; }); }
+    return all;
+  }
 
   function accountNames() {
     var A = ((PK.data && PK.data.accounts) || []).map(function (a) { return typeof a === 'string' ? a : (a && a.account); }).filter(Boolean);
@@ -1521,8 +1619,9 @@
      better than a page that throws. */
   function OVB() { return (window.adtOverviewBlocks && typeof window.adtOverviewBlocks.hero === 'function') ? window.adtOverviewBlocks : null; }
   function pkoHead() {
+    var who = PK.band === 'allday' ? 'the advertised listings that are NOT on the peak list' : PK.band === 'morning' ? 'the peak list\u2019s morning-hour listings' : PK.band === 'evening' ? 'the peak list\u2019s evening-hour listings' : 'the listings on the peak list';
     return '<div class="pkt-panel"><h3>Peak-time overview' + reg('listings on peak', 'how') + '</h3>' +
-      '<div class="pkt-sub">The same figures as the Overview, over the listings on the peak list and nothing else. ' +
+      '<div class="pkt-sub">The same figures as the Overview, over ' + who + ' and nothing else. ' +
       'A listing counts from the day somebody put it on the list and stops counting on the day it was taken off, ' +
       'so its history before that stays. The account chips above choose the account for this section and for the ' +
       'lists further down.</div>' +
@@ -1556,7 +1655,7 @@
 
   function pkoParams() {
     var q = adtPeriodParams(PK.pkoPeriod);
-    q.cohort = 'peak';
+    q.cohort = PK.band && PK_BANDS[PK.band] ? PK_BANDS[PK.band].cohort : 'peak';
     if (PK.account) q.account = PK.account;
     return q;
   }
@@ -1573,7 +1672,8 @@
     });
   }
   function loadPkoCmd(quiet) {
-    return api('adtoolCommand', PK.account ? { account: PK.account, cohort: 'peak' } : { cohort: 'peak' }).then(function (D) {
+    var co = PK.band && PK_BANDS[PK.band] ? PK_BANDS[PK.band].cohort : 'peak';
+    return api('adtoolCommand', PK.account ? { account: PK.account, cohort: co } : { cohort: co }).then(function (D) {
       PK.pkoCmd = D || {};
       var B = OVB();
       if ($('pkoToday')) {
@@ -1589,6 +1689,8 @@
   }
   function pkoPaintExtras() {
     var el = $('pkoExtra'); if (!el) return;
+    /* the four peak-list figures are about typed hours and a switch; the all-day listings have neither */
+    if (PK.band === 'allday') { el.innerHTML = ''; return; }
     el.innerHTML = pkoExtras(PK.pkoCmd || {});
     pkoWire();
   }
@@ -1701,16 +1803,21 @@
   /* ── draw and wire ────────────────────────────────────────────────────────────────────────── */
   function draw() {
     var box = $('pktBody'); if (!box) return;
-    var D = PK.data || {}, C = counts();
-    var h = '<div class="pkt-top"><span><b>Peak time listings</b></span><span>·</span>' +
+    var D = PK.data || {}, C = counts(), B = PK.band && PK_BANDS[PK.band] ? PK_BANDS[PK.band] : null;
+    var h = '<div class="pkt-top"><span><b>' + esc(B ? B.label : 'Peak time listings') + '</b></span><span>·</span>' +
       '<span>' + esc(PK.account || 'all accounts') + '</span><span>·</span>' +
-      '<span>' + cnt(C.suggested) + ' suggested · ' + cnt(C.manual) + ' on the list</span>' +
+      '<span>' + (PK.band === 'allday' ? cnt(((D.all_day || [])).length) + ' advertised all day' : B ? cnt(manual().length) + ' on the list with ' + PK.band + ' hours' : cnt(C.suggested) + ' suggested · ' + cnt(C.manual) + ' on the list') + '</span>' +
       (D.computed_at ? '<span>·</span><span>worked out at ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC</span>' : '') + '</div>';
-    h += banner();
-    h += rulesLine();
-    h += patternLine();
-    h += tabs(C);
-    h += PK.tab === 'manual' ? manualPanel() : suggestedPanel();
+    if (PK.band === 'allday') {
+      h += allDayPanel();
+    } else {
+      h += banner();
+      h += rulesLine();
+      h += patternLine();
+      if (!B) h += tabs(C);
+      h += (B || PK.tab === 'manual') ? manualPanel() : suggestedPanel();
+      if (PK.band === 'morning') h += noCampPanel();
+    }
     box.innerHTML = h;
     wire();
   }
@@ -1721,6 +1828,14 @@
     var ts = box.querySelectorAll('[data-pkt]');
     for (i = 0; i < ts.length; i++) ts[i].onclick = function () { PK.tab = this.getAttribute('data-pkt'); PK.edit = null; PK.campEdit = null; draw(); };
 
+    var am = box.querySelectorAll('[data-pkall]');
+    for (i = 0; i < am.length; i++) am[i].onclick = function () { PK.allMode = this.getAttribute('data-pkall') === 'all' ? 'all' : 'best'; draw(); };
+    var ab = box.querySelectorAll('[data-pkaddband]');
+    for (i = 0; i < ab.length; i++) ab[i].onclick = function () {
+      var id = this.getAttribute('data-pkaddband'), B = PK_BANDS[PK.band] || PK_BANDS.morning;
+      if (!id) { toast('This row has no item number.'); return; }
+      add({ item_id: id, hours: B.hours, note: 'new listing in no campaign \u00b7 picked for the morning peak' }, this);
+    };
     var as = box.querySelectorAll('[data-pkadd]');
     for (i = 0; i < as.length; i++) as[i].onclick = function () {
       var id = this.getAttribute('data-pkadd');

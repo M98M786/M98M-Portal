@@ -1879,7 +1879,7 @@ function enterApp(user){
       keys: ['traffic', 'overview', 'adtoolOverview', 'dashboard', 'adsCentre', 'activeListings',
              /* Price automation (22 Nov): the owner asked for the new page in the ads portal AND
                 pinned here, the same second-link road the three hidden tool pages already ride */
-             'adtoolProduct', 'adtoolItemCampaigns', 'adtoolPeak', 'adtoolPulse', 'adtoolStopped', 'potentialCpc', 'goLive', 'huntQueue'] },
+             'adtoolProduct', 'adtoolItemCampaigns', 'adtoolPeak', 'adtoolPeakMorning', 'adtoolPeakEvening', 'adtoolPeakAllDay', 'adtoolPulse', 'adtoolStopped', 'potentialCpc', 'goLive', 'huntQueue'] },
     /* Husnain Naeem. Price revision and Product history are new to this role and open with every
        earning stripped by the engine (the owner: "go with the privacy of calculation breakdown in
        profit in his portal"); Ads command centre was already in his sidebar but the engine refused
@@ -1931,7 +1931,7 @@ function enterApp(user){
         /* less important — kept in a line at the end */
         'rota','reports','reportsGrid','staffReports','perf','team','meetings','agenda'] },
     /* 28 Oct: Activated today merged into Activated and stopped (adtoolStopped), so its key left. */
-    { name:'Advertising', keys:['tasksAds','adSignals','adsCentre','adtoolStopped','adtoolPeak','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
+    { name:'Advertising', keys:['tasksAds','adSignals','adsCentre','adtoolStopped','adtoolPeak', 'adtoolPeakMorning', 'adtoolPeakEvening', 'adtoolPeakAllDay','marketing','campaignWatch','traffic','liveSplit','wrongAds','advertising','cpc','potentialCpc','keywordApprovals'] },
     { name:'Orders',      keys:['tasksOrders','ordersBoard','orders','replacements','dispatch','sourcing','recheck','wrongOrders'] },
     { name:'Listings',    keys:['tasksListing','listDesk','listingCorrections','goLive','revisionDesk','rev72','rev20','revApproval','videoRev','activeListings','listingDecisions','listing','listingArchive','pipeline','calculator'] },
     { name:'Hunting',     keys:['tasksHunting','huntDesk','hunting','huntQueue','approvedArchive','huntRevised','huntRevisions','huntRecords','ideaBox'] },
@@ -1982,7 +1982,7 @@ function enterApp(user){
        labels come from the view files. */
     NAV_DEPTS = [
       /* owner, 31 Oct: Ads command centre joins the main Advertising pages */
-      { name: 'Advertising', keys: ['adtoolOverview', 'traffic', 'adtoolRunToday', 'adtoolProduct', 'adtoolCpc', 'adtoolPeak', 'adtoolPulse', 'adtoolItemCampaigns', 'adtoolSales', 'marketing', 'adtoolStopped', 'adsCentre'] },
+      { name: 'Advertising', keys: ['adtoolOverview', 'traffic', 'adtoolRunToday', 'adtoolProduct', 'adtoolCpc', 'adtoolPeak', 'adtoolPeakMorning', 'adtoolPeakEvening', 'adtoolPeakAllDay', 'adtoolPulse', 'adtoolItemCampaigns', 'adtoolSales', 'marketing', 'adtoolStopped', 'adsCentre'] },
       { name: 'Management',  keys: ['advertising', 'adtoolAccounts', 'adtoolStop', 'adtoolHealth'] },
       { name: 'More',        keys: ['adtoolReport', 'potentialCpc', 'adtoolSpendingToday', 'adtoolCampaignBoard', 'adtoolCampaigns', 'adtoolCategories', 'adtoolCases', 'adtoolSlots', 'adtoolNewListings', 'adtoolAlerts', 'adtoolDepts'] }
     ];
