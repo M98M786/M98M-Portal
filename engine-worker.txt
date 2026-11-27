@@ -15600,13 +15600,15 @@ async function adtoolItemCampaignsCompute(env, p) {
   const acct = String((p && p.account) || '').trim();
   const q = String((p && p.q) || '').trim().slice(0, 60);
   const state = String((p && p.state) || '').trim();
-  if (state && ['in', 'none', 'multi'].indexOf(state) < 0) throw new Error('SAY: the filter is in a campaign, in none, in more than one, or left blank');
+  /* 27 Nov (owner): four more states — CPC live only, CPC paused, Dynamic live only, and live in
+     both CPC and Dynamic at once — the chips that replaced "Where each item stands" and "Gaps" */
+  if (state && ['in', 'none', 'multi', 'cpc_live', 'cpc_paused', 'dyn_live', 'both'].indexOf(state) < 0) throw new Error('SAY: the filter is in a campaign, in none, in more than one, CPC live, CPC paused, Dynamic live, both, or left blank');
   const like = '%' + q.replace(/[%_]/g, ' ') + '%';
   const B = await env.DB.batch([
     env.DB.prepare("SELECT i.item_id, i.account, i.title, i.image, i.price FROM items_api i WHERE i.status = 'ACTIVE'" + (acct ? ' AND i.account = ?1' : '') + (q ? ' AND (i.title LIKE ?' + (acct ? 2 : 1) + ' OR i.item_id LIKE ?' + (acct ? 2 : 1) + ')' : '') + ' ORDER BY i.account, i.title LIMIT 3000').bind(...(acct ? [acct] : []).concat(q ? [like] : [])),
     /* every ad still in a campaign on an active listing, with the campaign it belongs to, and the
        two read stamps so each card can say when its status was taken (fix 6) */
-    env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id, ca.ad_status, ca.bid_pct AS ad_bid, ca.ad_records, ca.synced_at AS ad_synced_at, c.ads_synced_at, c.name, c.status, c.funding_model, c.budget, c.bid_pct AS c_bid FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id JOIN items_api ia ON ia.item_id = ca.listing_id AND ia.status = 'ACTIVE' WHERE COALESCE(ca.ad_status, '') <> 'ARCHIVED'" + (acct ? ' AND ca.account = ?1' : '') + ' LIMIT 20000').bind(...(acct ? [acct] : [])),
+    env.DB.prepare("SELECT ca.account, ca.campaign_id, ca.listing_id AS item_id, ca.ad_status, ca.bid_pct AS ad_bid, ca.ad_records, ca.synced_at AS ad_synced_at, c.ads_synced_at, c.name, c.status, c.funding_model, c.budget, c.bid_pct AS c_bid, COALESCE(c.ad_rate_strategy, '') AS strategy FROM campaign_ads ca JOIN campaigns c ON c.account = ca.account AND c.campaign_id = ca.campaign_id JOIN items_api ia ON ia.item_id = ca.listing_id AND ia.status = 'ACTIVE' WHERE COALESCE(ca.ad_status, '') <> 'ARCHIVED'" + (acct ? ' AND ca.account = ?1' : '') + ' LIMIT 20000').bind(...(acct ? [acct] : [])),
     /* 16 Nov: THE SECOND MEMBERSHIP READ IS GONE. This page used to ask the shared live-ad query as
        well, fleet wide, on every one of the three reads it makes, purely to learn which of the rows
        above were live. The rows above already carry everything the rule needs, so the verdict is
@@ -15644,6 +15646,9 @@ async function adtoolItemCampaignsCompute(env, p) {
     (camps[id] = camps[id] || []).push({
       campaign_id: String(r.campaign_id || ''), name: String(r.name || ''), status: String(r.status || ''), status_key: adtCampStatusKey(r.status),
       funding_model: String(r.funding_model || ''), budget_day: b === null ? null : round2(b),
+      /* 27 Nov: the family, by the same rule All Account Listings uses — CPC = cost-per-click;
+         Dynamic = cost-per-sale with eBay's DYNAMIC rate or the owner's "dynamic" naming; General = the rest */
+      kind: String(r.funding_model || '') === 'COST_PER_CLICK' ? 'CPC' : (String(r.strategy || '').toUpperCase() === 'DYNAMIC' || /dynamic/i.test(String(r.name || ''))) ? 'Dynamic' : 'General',
       bid_pct: adtMoneyNum(rate) === null ? null : round2(adtMoneyNum(rate)),
       ad_status: st.state, live: !!(live[id] && live[id][key]),
       /* fix 6: a card prints its ad status mid-sentence, so the date of the reading joins that same
@@ -15706,10 +15711,20 @@ async function adtoolItemCampaignsCompute(env, p) {
       live_why: (verdict[id] || { why: '' }).why, campaign_count: cs.length,
       spend_7d: round2(d.spend_7d), spend_3d: round2(d.spend_3d),
       peak: peakNow[id] || null,
+      /* 27 Nov (owner): live in a CPC campaign, live in a Dynamic one, a CPC ad paused — the facts
+         the five chips are carved by (a General campaign counts for none of them) */
+      cpc_live: cs.some(c => c.kind === 'CPC' && c.live), dyn_live: cs.some(c => c.kind === 'Dynamic' && c.live),
+      cpc_paused: cs.some(c => c.kind === 'CPC' && String(c.ad_status) === 'PAUSED'),
     };
   });
-  const counts = { active: rows.length, in_one: rows.filter(r => r.live_count === 1).length, in_many: rows.filter(r => r.live_count > 1).length, in_none: rows.filter(r => r.live_count === 0).length };
-  const keep = rows.filter(r => state === '' || (state === 'in' ? r.live_count > 0 : state === 'none' ? r.live_count === 0 : r.live_count > 1))
+  const STATE_PICK = {
+    in: r => r.live_count > 0, none: r => r.live_count === 0, multi: r => r.live_count > 1,
+    cpc_live: r => r.cpc_live && !r.dyn_live, dyn_live: r => r.dyn_live && !r.cpc_live, both: r => r.cpc_live && r.dyn_live,
+    cpc_paused: r => r.cpc_paused && !r.cpc_live,
+  };
+  const counts = { active: rows.length, in_one: rows.filter(r => r.live_count === 1).length, in_many: rows.filter(r => r.live_count > 1).length, in_none: rows.filter(r => r.live_count === 0).length,
+    cpc_live: rows.filter(STATE_PICK.cpc_live).length, cpc_paused: rows.filter(STATE_PICK.cpc_paused).length, dyn_live: rows.filter(STATE_PICK.dyn_live).length, both: rows.filter(STATE_PICK.both).length };
+  const keep = rows.filter(r => state === '' || STATE_PICK[state](r))
     .sort((a, b) => (b.live_count - a.live_count) || (b.spend_7d - a.spend_7d) || String(a.title).localeCompare(String(b.title)));
   /* ── EVERY ROW'S OWN BY PERIOD FIGURES (owner, 16 Nov 2026) ──────────────────────────────────
      "That page needs the product-history block the Peak rows carry." The SAME table, through the

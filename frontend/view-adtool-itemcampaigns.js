@@ -33,7 +33,18 @@
      the engine's: every figure a reader sees on this page is read back from the answer, never typed
      here, so a cap or a cadence that changes changes this page with it. */
   var POLL_MS = 60000;
-  var WL = { account: '', q: '', accounts: [], main: null, dup: null, gap: null, err: {}, busy: false, acting: false, rereading: false, jump: '' };
+  var WL = { account: '', q: '', accounts: [], main: null, dup: null, gap: null, err: {}, busy: false, acting: false, rereading: false, jump: '',
+    /* 27 Nov (owner): the chip chosen under Duplication — '' is every active listing, else one of
+       the five states the engine carves the list by; the `gap` slot holds that state's own read */
+    filter: '' };
+  var WLA_FILTERS = [
+    ['none',       'New listing', 'in_none',    'New listings \u2014 in no campaign at all',          'Active listings in no campaign at all, so nothing is advertising them. The ones that have sold recently are the ones worth putting somewhere.'],
+    ['cpc_live',   'CPC live',    'cpc_live',   'CPC live \u2014 and not in Dynamic',                 'Listings whose cost-per-click ad is live right now and that are not live in a Dynamic campaign.'],
+    ['cpc_paused', 'CPC paused',  'cpc_paused', 'CPC paused',                                           'Listings whose cost-per-click ad is paused (and not live in another CPC campaign), whatever else they are in.'],
+    ['dyn_live',   'Dynamic',     'dyn_live',   'Dynamic live \u2014 and not in CPC',                 'Listings live in a Dynamic campaign and not live in any cost-per-click one.'],
+    ['both',       '2 Campaign',  'both',       'In both CPC and Dynamic at the same time',             'Listings live in a cost-per-click campaign and a Dynamic one at once, so two campaigns charge for the same listing.']
+  ];
+  function wlaFilterDef(k) { for (var i = 0; i < WLA_FILTERS.length; i++) { if (WLA_FILTERS[i][0] === k) return WLA_FILTERS[i]; } return null; }
 
   VIEW_CSS.push([
     '.wla-wrap{max-width:1420px}',
@@ -50,6 +61,7 @@
     '.wla-jump a:hover{color:var(--gold-a);border-color:var(--gold-line-hi)}',
     '.wla-jump a .n{opacity:.75;margin-left:6px;font-variant-numeric:tabular-nums}',
     '.wla-jump a.dup{border-color:rgba(224,86,63,.55);color:' + LOSS + '}',
+    '.wla-jump a.on{background:var(--gold-b);border-color:var(--gold-b);color:var(--gold-ink)}.wla-jump a.on .n{opacity:1}'
     '.wla-panel{background:var(--panel);border:1px solid var(--gold-line);border-radius:14px;padding:14px 16px;margin-bottom:12px}',
     '.wla-panel h3{margin:0 0 4px;font-size:15px;font-weight:800;color:var(--text)}',
     '.wla-panel.dup{border-color:rgba(224,86,63,.45)}',
@@ -315,7 +327,7 @@
        narrow lists follow and fill their own sections */
     return ask('', 'main').then(function () {
       if ($('wlaBody')) { draw(); freshShow(); }
-      return Promise.all([ask('multi', 'dup'), ask('none', 'gap')]);
+      return Promise.all([ask('multi', 'dup'), WL.filter ? ask(WL.filter, 'gap') : Promise.resolve()]);
     }).then(function () {
       WL.busy = false;
       if ($('wlaBody')) { draw(); freshShow(); }
@@ -595,18 +607,21 @@
     return h + '</div>';
   }
 
-  /* ── section 2 · Where each item stands ───────────────────────────────────────────────────── */
+  /* ── section 2 · the list: every active listing, or, with a chip pressed, that state's own read
+     (27 Nov, owner: the "Where each item stands" and "Gaps" chips became New listing / CPC live /
+     CPC paused / Dynamic / 2 Campaign, each narrowing this one section to exactly those listings) ── */
   function standsSection() {
-    var h = '<div class="wla-panel" id="wlaStands"><h3>Where each item stands</h3>' +
-      '<div class="wla-sub">Every active listing and the campaigns it was in when those campaigns were last read, ' +
-      'with what it has spent over the last 3 and 7 days and what it has sold over 30.</div>';
-    if (WL.err.main) return h + '<div class="wla-empty">' + esc(WL.err.main) + '</div></div>';
-    if (!WL.main) return h + '<div class="wla-empty">Loading…</div></div>';
-    var rows = itemsOf('main');
+    var F = WL.filter ? wlaFilterDef(WL.filter) : null, slot = F ? 'gap' : 'main';
+    if (F && F[0] === 'none') return gapSection();
+    var h = '<div class="wla-panel" id="wlaStands"><h3>' + (F ? esc(F[3]) : 'Where each item stands') + '</h3>' +
+      '<div class="wla-sub">' + (F ? esc(F[4]) : 'Every active listing and the campaigns it was in when those campaigns were last read, ' +
+      'with what it has spent over the last 3 and 7 days and what it has sold over 30.') + '</div>';
+    if (WL.err[slot]) return h + '<div class="wla-empty">' + esc(WL.err[slot]) + '</div></div>';
+    if (!WL[slot]) return h + '<div class="wla-empty">Loading…</div></div>';
+    var rows = itemsOf(slot);
     if (!rows.length) {
-      return h + '<div class="wla-empty">' + (WL.q || WL.account
-        ? 'No active listing matches. Try a different search or account.'
-        : 'No active listing came back.') + '</div></div>';
+      return h + '<div class="wla-empty">' + (F ? 'No active listing is in this state' + (WL.account ? ' on ' + esc(WL.account) : '') + (WL.q ? ' for "' + esc(WL.q) + '"' : '') + '.'
+        : (WL.q || WL.account ? 'No active listing matches. Try a different search or account.' : 'No active listing came back.')) + '</div></div>';
     }
     h += '<div class="wla-scroll"><table class="wla-tbl"><thead><tr>' +
       '<th>Listing</th><th>At the last reading</th><th class="r">Price</th><th class="r">Sold 30 d</th>' +
@@ -622,7 +637,7 @@
           '<td class="r">' + gbp(it.spend_7d) + '</td>' +
           '<td>' + campaignsCell(it, false) + '</td></tr>' + periodsRow(it, 7);
       }).join('') + '</tbody></table></div>';
-    var held = num(WL.main.items_held_back), total = num(WL.main.items_total);
+    var held = num(WL[slot].items_held_back), total = num(WL[slot].items_total);
     if (held != null && held > 0) {
       h += '<div class="wla-sub2" style="margin-top:8px">' + cnt(held) + ' more ' + plural(held, 'listing is', 'listings are') +
         ' not on the page, of ' + cnt(total) + ' that match. Narrow it with the search box or an account to reach them.</div>';
@@ -632,7 +647,7 @@
 
   /* ── section 3 · Gaps ─────────────────────────────────────────────────────────────────────── */
   function gapSection() {
-    var h = '<div class="wla-panel" id="wlaGaps"><h3>Gaps</h3>' +
+    var h = '<div class="wla-panel" id="wlaGaps"><h3>New listings \u2014 in no campaign at all</h3>' +
       '<div class="wla-sub">Active listings in no campaign at all, so nothing is advertising them. ' +
       'The ones that have sold recently are the ones worth putting somewhere.</div>';
     if (WL.err.gap) return h + '<div class="wla-empty">' + esc(WL.err.gap) + '</div></div>';
@@ -674,15 +689,24 @@
   var SECTIONS = ['wlaDup', 'wlaStands', 'wlaGaps'];
   function jumpBar() {
     var C = counts();
-    var bits = [
-      ['wlaDup', 'Duplication', num(C.in_many), 'dup'],
-      ['wlaStands', 'Where each item stands', num(C.active), ''],
-      ['wlaGaps', 'Gaps', num(C.in_none), '']
-    ];
-    return '<div class="wla-jump">' + bits.map(function (b) {
-      return '<a href="#adtoolItemCampaigns/' + b[0] + '" data-wlajump="' + b[0] + '" class="' + b[3] + '">' + esc(b[1]) +
-        (b[2] == null ? '' : '<span class="n">' + cnt(b[2]) + '</span>') + '</a>';
-    }).join('') + '</div>';
+    var h = '<div class="wla-jump"><a href="#adtoolItemCampaigns/wlaDup" data-wlajump="wlaDup" class="dup">Duplication' +
+      (num(C.in_many) == null ? '' : '<span class="n">' + cnt(C.in_many) + '</span>') + '</a>';
+    /* 27 Nov (owner): the five states. One pressed narrows the list below to exactly those
+       listings; pressed again it lets go and the list is every active listing once more. */
+    WLA_FILTERS.forEach(function (f) {
+      var n = num(C[f[2]]);
+      h += '<a href="#adtoolItemCampaigns" data-wlafilter="' + f[0] + '" class="' + (WL.filter === f[0] ? 'on' : '') + '" title="' + esc(f[4]) + '">' + esc(f[1]) +
+        (n == null ? '' : '<span class="n">' + cnt(n) + '</span>') + '</a>';
+    });
+    return h + '</div>';
+  }
+  function setFilter(k) {
+    WL.filter = WL.filter === k ? '' : (wlaFilterDef(k) ? k : '');
+    WL.gap = null; delete WL.err.gap;
+    draw();
+    if (!WL.filter) return;
+    var want = WL.filter;
+    ask(want, 'gap').then(function () { if (WL.filter === want && $('wlaBody')) { draw(); jumpTo('wlaStands', false); jumpTo('wlaGaps', false); } });
   }
   /* scroll a section into view and leave a brief mark on it. Guarded: a section that is not on the
      page yet (its own read has not landed) is simply not jumped to, and nothing throws. */
@@ -741,7 +765,7 @@
   /* ── draw and wire ────────────────────────────────────────────────────────────────────────── */
   function draw() {
     var box = $('wlaBody'); if (!box) return;
-    box.innerHTML = jumpBar() + note() + periodsNote() + dupSection() + standsSection() + gapSection();
+    box.innerHTML = jumpBar() + note() + periodsNote() + dupSection() + standsSection();
     wire(box);
     /* a reload that named a section lands on it, once. The hash is already right, so it is not
        written again. */
@@ -763,6 +787,11 @@
       if (ev && (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button === 1)) return;
       if (ev && ev.preventDefault) ev.preventDefault();
       jumpTo(this.getAttribute('data-wlajump'), true);
+    };
+    var fs = box.querySelectorAll('[data-wlafilter]');
+    for (var q = 0; q < fs.length; q++) fs[q].onclick = function (ev) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      setFilter(this.getAttribute('data-wlafilter'));
     };
   }
 
