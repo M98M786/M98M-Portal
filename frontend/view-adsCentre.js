@@ -368,8 +368,8 @@ VIEW_CSS.push(
           grid: { left: 64, right: 56, top: 54, bottom: up ? 60 : 30 },
           xAxis: { type: 'category', data: rows.map(function (r) { return r.label; }), axisLabel: { color: '#66707c', fontSize: 10, interval: 0, rotate: up ? 45 : 0 }, axisTick: { show: false }, axisLine: { lineStyle: { color: 'rgba(255,255,255,.15)' } } },
           yAxis: [
-            { type: 'value', axisLabel: { color: '#66707c', fontSize: 10, formatter: function (v) { return kfmt(v); } }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } }, max: function (v) { return Math.ceil(v.max * 1.3) || 1; }, min: function (v) { return v.min < 0 ? Math.floor(v.min * 1.25) : 0; } },
-            { type: 'value', min: 0, max: roasMax, axisLabel: { color: '#f2b035', fontSize: 10, formatter: '{value}\u00d7' }, splitLine: { show: false } }
+            { type: 'value', axisLabel: { color: '#66707c', fontSize: 10, formatter: function (v) { return v < 0 ? '' : kfmt(v); } }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.06)' } }, max: function (v) { return Math.ceil(v.max * 1.95) || 1; }, min: function (v) { return v.min < 0 ? Math.floor(v.min * 1.25) : 0; } },
+            { type: 'value', min: -roasMax * 1.25, max: roasMax, axisLabel: { color: '#f2b035', fontSize: 10, formatter: function (v) { return v < 0 ? '' : v + '\u00d7'; } }, splitLine: { show: false } }
           ],
           series: [
             { name: 'Ad spend incl VAT', type: 'bar', data: rows.map(function (r) { return r.spend; }), itemStyle: { color: '#e0563f', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 22, barGap: '12%', label: lab('#ff8a73') },
