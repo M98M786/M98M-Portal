@@ -16839,7 +16839,7 @@ async function adtoolPeakCompute(env, acct, band) {
       live_now: true, campaign_id: c.campaign_id, campaign_name: c.campaign_name, campaigns: c.campaigns,
       spend_7d: spend7[id] === undefined ? 0 : spend7[id], units_28d: u.reduce((t, x) => t + (Number(x) || 0), 0),
       cpc_live: cpcLive, cpc_units: cu, best: cpcLive && cu >= ADTOOL_ALLDAY_BEST_UNITS,
-      band: 'allday', rule: strikeOf(id, 'allday'), stopped_today: stopBy[id] || null };
+      band: 'allday', rule: null, stopped_today: null };
   }).sort((a, b) => ((b.best ? 1 : 0) - (a.best ? 1 : 0)) || (b.cpc_units - a.cpc_units) || (b.spend_7d - a.spend_7d) || String(a.title).localeCompare(String(b.title)));
   const sugSet = {};
   for (const s of suggested) sugSet[s.item_id] = 1;
@@ -17034,7 +17034,8 @@ async function adtoolPeakCompute(env, acct, band) {
     accounts: allAccounts,
     suggested: suggested, suggested_total: first.length, suggested_held_back: Math.max(0, first.length - suggested.length),
     manual: manual,
-    all_day: band === 'allday' ? allDay.slice(0, 800) : undefined, all_day_total: band === 'allday' ? allDay.length : undefined, band: band,
+    /* the strikes and today's stop join each all-day row here, after both have been read */
+    all_day: band === 'allday' ? allDay.map(r => Object.assign(r, { rule: strikeOf(r.item_id, 'allday'), stopped_today: stopBy[r.item_id] || null })).slice(0, 800) : undefined, all_day_total: band === 'allday' ? allDay.length : undefined, band: band,
     all_day_best: band === 'allday' ? allDay.filter(r => r.best).length : undefined, all_day_best_units: band === 'allday' ? ADTOOL_ALLDAY_BEST_UNITS : undefined,
     /* the Rerun box: every listing this answer knows that waits for Management, with its stops */
     rerun_box: manual.filter(m => m.rule && m.rule.boxed).map(m => ({ item_id: m.item_id, account: m.account, title: m.title, image: m.image, band: m.band, hours: m.hours, rule: m.rule, stopped_today: m.stopped_today }))
