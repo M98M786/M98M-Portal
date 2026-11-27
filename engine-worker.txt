@@ -23563,6 +23563,89 @@ function prRequiredPrice(band, adRate, ali, cpc, T, pct) {
   }
   return round2(S);
 }
+async function supplierDeskCore(p, ctx) {
+  await ensurePriceSchema(ctx.env);
+  const DB = ctx.env.DB;
+  const n = (v) => Number(v) || 0;
+  const aliId = (u) => { const m = String(u || '').match(/\/item\/(\d{6,20})/); return m ? m[1] : ''; };
+  const id = String(p.item_id || '').replace(/\D/g, '');
+  const day = (back) => ukDate(new Date(Date.now() - back * 86400000).toISOString());
+  const today = ukDate(''), d14 = day(13), d30 = day(29), d180 = day(179);
+  if (id) {
+    if (!/^\d{9,14}$/.test(id)) throw new Error('SAY: type the 12-digit eBay item ID');
+    const base = await ROUTES.priceItemDetail.fn({ item_id: id }, ctx);
+    const slots = (base.links || []).map((l, i) => ({ slot: i + 1, url: l.url, src: l.src, ali_item: aliId(l.url), link_price: n(l.price), name: String(l.supplier || ''),
+      orders_via: 0, units_via: 0, cost_via: 0, cost_units_via: 0, last_used: '', paid_via: 0 }));
+    const rs = (await DB.prepare(
+      'SELECT order_id, created_at, qty, sold, cost, variation, ali_link, ali_order, status FROM orders ' +
+      "WHERE item_id = ?1 AND created_at >= ?2 AND status NOT IN ('NOT_FOUND','CANCELLED') ORDER BY created_at DESC LIMIT 400"
+    ).bind(id, d180).all().catch(() => ({ results: [] }))).results || [];
+    const other = {};
+    const orders = rs.map((r) => {
+      const oid = aliId(r.ali_link);
+      let via = '';
+      if (oid) {
+        const s = slots.find((x) => x.ali_item && x.ali_item === oid);
+        if (s) { via = s.slot; s.orders_via++; s.units_via += Math.max(1, n(r.qty)); if (n(r.cost) > 0) { s.cost_via += n(r.cost); s.cost_units_via += Math.max(1, n(r.qty)); } if (!s.last_used) s.last_used = String(r.created_at || '').slice(0, 10); }
+        else { via = 'other'; const o = other[oid] || (other[oid] = { ali_item: oid, url: String(r.ali_link || ''), orders: 0, cost: 0, cost_units: 0, last_used: '' }); o.orders++; if (n(r.cost) > 0) { o.cost += n(r.cost); o.cost_units += Math.max(1, n(r.qty)); } if (!o.last_used) o.last_used = String(r.created_at || '').slice(0, 10); }
+      }
+      return { order_id: r.order_id, date: String(r.created_at || '').slice(0, 10), variation: String(r.variation || ''), qty: n(r.qty), sold: n(r.sold), cost: n(r.cost), unit_cost: n(r.cost) > 0 ? round2(n(r.cost) / Math.max(1, n(r.qty))) : 0, via, ali_item: oid, has_link: !!String(r.ali_link || '').trim(), status: r.status };
+    });
+    for (const s of slots) { s.paid_via = s.cost_units_via > 0 ? round2(s.cost_via / s.cost_units_via) : 0; s.cost_now = s.slot === 1 && n(base.cost && base.cost.sheet) > 0 ? n(base.cost.sheet) : (s.paid_via || s.link_price || 0); s.cost_now_source = s.slot === 1 && n(base.cost && base.cost.sheet) > 0 ? 'Main Sheet' : (s.paid_via ? 'paid on orders' : (s.link_price ? 'price in the link' : '')); }
+    const untracked = Object.keys(other).map((k) => Object.assign(other[k], { paid: other[k].cost_units > 0 ? round2(other[k].cost / other[k].cost_units) : 0 })).sort((x, y) => y.orders - x.orders);
+    const moves = (base.history || []).map((h) => ({ day: h.seen_day || String(h.seen_at || '').slice(0, 10), old_cost: n(h.old_cost), new_cost: n(h.new_cost), delta: round2(n(h.delta_p) / 100), tier: h.tier || '', supplier: h.supplier || '' }));
+    const vrows = ((base.variations || {}).rows || []);
+    const locked = !!base.sale;
+    const shadow = vrows.filter((r) => r.judge && r.judge.ali > 0 && r.paid > 0).map((r) => {
+      const j = r.judge, would = j.n_required, gap = j.n_gap;
+      const dir = would === null || would === undefined ? '' : (would > r.paid + 0.005 ? 'raise' : (would < r.paid - 0.005 ? 'lower' : 'hold'));
+      return { variation: r.variation, label: r.label, paid: r.paid, ali: j.ali, ali_source: j.ali_source, actual: j.n_actual, target: j.target, gap, would_set: would, direction: dir, locked, units_30d: r.units_30d };
+    });
+    const nolink = orders.filter((o) => !o.has_link).length;
+    return Object.assign({}, base, {
+      suppliers: slots, untracked, orders, moves,
+      shadow: { mode: 'shadow', note: 'nothing is sent to eBay from this page; this is what the auto-reprice would do', rows: shadow, locked_in_sale: locked },
+      flags: { no_supplier: !slots.length, locked_in_sale: locked, orders_without_link_180d: nolink, bought_elsewhere: untracked.reduce((t, u) => t + u.orders, 0) },
+      locked_reason: locked ? 'inside a running sale event — eBay refuses a price revision until the item is removed from the event in Seller Hub' : '',
+      seller_hub_url: 'https://www.ebay.co.uk/sh/mkt/promotionmanager',
+    });
+  }
+  /* ---- the board ---- */
+  const miss = (await DB.prepare(
+    "SELECT i.item_id, i.account, i.title, i.image, COALESCE(i.sold_30d,0) AS sold_30d, COALESCE(i.price,0) AS price, " +
+    "  (SELECT COUNT(*) FROM orders o WHERE o.item_id = i.item_id AND o.created_at >= ?1 AND o.status NOT IN ('CANCELLED','NOT_FOUND')) AS orders_14d, " +
+    "  (SELECT COUNT(*) FROM orders o WHERE o.item_id = i.item_id AND COALESCE(o.ali_link,'') != '') AS orders_with_link, " +
+    "  COALESCE(pv.hunt_id,'') AS hunt_id, COALESCE(pv.hunter_email,'') AS hunter " +
+    'FROM items_api i LEFT JOIN provenance pv ON pv.item_id = i.item_id ' +
+    "WHERE i.status = 'ACTIVE' " +
+    "AND NOT EXISTS (SELECT 1 FROM sourcing s WHERE s.item_id = i.item_id AND (COALESCE(s.s1,'') != '' OR COALESCE(s.s2,'') != '' OR COALESCE(s.s3,'') != '')) " +
+    "AND NOT EXISTS (SELECT 1 FROM items_facts f WHERE f.item_id = i.item_id AND (COALESCE(f.sup1_link,'') != '' OR COALESCE(f.sup2_link,'') != '' OR COALESCE(f.sup3_link,'') != '' OR COALESCE(f.current_sup,'') LIKE 'http%')) " +
+    "AND NOT EXISTS (SELECT 1 FROM golive g WHERE g.item_id = i.item_id AND COALESCE(g.ali_link,'') != '') " +
+    "AND NOT EXISTS (SELECT 1 FROM item_links il WHERE il.item_id = i.item_id AND COALESCE(il.ali_link,'') != '') " +
+    "AND NOT EXISTS (SELECT 1 FROM provenance p2 JOIN hunt_rows h ON h.hunt_id = p2.hunt_id WHERE p2.item_id = i.item_id AND COALESCE(json_extract(h.vals, '$.\"Product Link 1 Main supplier\"'),'') != '') " +
+    'ORDER BY sold_30d DESC, orders_14d DESC LIMIT 500'
+  ).bind(d14).all().catch(() => ({ results: [] }))).results || [];
+  const movesToday = (await DB.prepare(
+    'SELECT h.item_id, h.account, h.old_cost, h.new_cost, h.delta_p, h.tier, h.supplier, h.seen_at, i.title ' +
+    'FROM cost_history h LEFT JOIN items_api i ON i.item_id = h.item_id WHERE h.seen_day >= ?1 ORDER BY h.delta_p DESC LIMIT 200'
+  ).bind(day(1)).all().catch(() => ({ results: [] }))).results || [];
+  const feeds = (await DB.prepare(
+    "SELECT account, COUNT(*) AS n, SUM(CASE WHEN cost > 0 THEN 1 ELSE 0 END) AS with_cost, SUM(CASE WHEN COALESCE(ali_link,'') != '' THEN 1 ELSE 0 END) AS with_link " +
+    "FROM orders WHERE created_at >= ?1 AND status NOT IN ('CANCELLED','NOT_FOUND') GROUP BY account ORDER BY account"
+  ).bind(d14).all().catch(() => ({ results: [] }))).results || [];
+  const byAcct = {};
+  for (const r of miss) byAcct[r.account] = (byAcct[r.account] || 0) + 1;
+  return {
+    board: true, as_of: new Date().toISOString(),
+    no_supplier: miss.map((r) => ({ item_id: r.item_id, account: r.account, title: r.title, image: r.image || '', sold_30d: n(r.sold_30d), price: n(r.price), orders_14d: n(r.orders_14d), orders_with_link: n(r.orders_with_link), hunt_id: r.hunt_id, hunter: r.hunter })),
+    no_supplier_by_account: byAcct,
+    moves: movesToday.map((h) => ({ item_id: h.item_id, account: h.account, title: h.title || '', old_cost: n(h.old_cost), new_cost: n(h.new_cost), delta: round2(n(h.delta_p) / 100), tier: h.tier || '', supplier: h.supplier || '', at: h.seen_at })),
+    feeds: feeds.map((f) => ({ account: f.account, orders_14d: n(f.n), with_cost: n(f.with_cost), with_link: n(f.with_link), no_book: n(f.n) > 0 && n(f.with_cost) === 0 && n(f.with_link) === 0 })),
+    counts: { no_supplier: miss.length, no_supplier_selling: miss.filter((r) => n(r.sold_30d) > 0).length, moves_serious: movesToday.filter((h) => n(h.delta_p) >= 30).length, moves_all: movesToday.length,
+      accounts_no_book: feeds.filter((f) => n(f.n) > 0 && n(f.with_cost) === 0 && n(f.with_link) === 0).length },
+    today,
+  };
+}
 const PR_TIER_RANK = { '': 0, low: 1, moderate: 2, serious: 3, red: 4, critical: 5 };
 const PR_TIER_LABEL = { '': 'Under 10p', low: 'Low risk', moderate: 'Moderate risk', serious: 'Serious risk', red: 'Red alert', critical: 'Critical alert' };
 function prTier(delta) {
@@ -23647,6 +23730,59 @@ function prJudge(x) {
     fee_share_observed: feeShare, band: band.name, band_rate: band.tiers[0][1], band_source: band.source || '',
     target, target_tier: tierT, target_pct: pctT, is_cpc: !!(x.campaign && x.campaign.is_cpc) },
     judge(0, 0, 'n_', 'neutral'), judge(cpcU14, adRate14, 'a_', 'ads'));
+}
+/* ---- Per-variation truth (27 Nov, owner): "never compare the 120cm light's cost with the 80cm".
+   The listing's orders, split by the eBay variation each one was for (orders.variation, filled from
+   eBay since 27 Nov), give every variation its own paid price, its own paid cost and its own
+   calculator verdict. The Main Sheet keeps ONE cost cell per item, so this is the only place a
+   variation's real cost exists. The item's 14/30-day ad spend is shared out by units sold, so a
+   variation carries its share of the ads and not the whole listing's. Used by priceItemDetail (the
+   item card every price page opens) and by supplierDesk. */
+function prVariationRows(orders, it, band, a, campaign, d30, d14, d7, huntCost, linkCost) {
+  const n = (v) => Number(v) || 0;
+  const by = {};
+  let u30 = 0, u14 = 0;
+  for (const r of orders) {
+    const v = String(r.variation || '').trim();
+    const g = by[v] || (by[v] = { variation: v, orders: 0, units: 0, revenue: 0, cost: 0, cost_units: 0, units14: 0, revenue14: 0, units7: 0,
+      cost180: 0, cost_units180: 0, orders180: 0, last_cost: 0, last_cost_at: '', costs: {}, fees: 0, fee_rev: 0, refunded: 0 });
+    const dd = String(r.created_at || '').slice(0, 10), q = Math.max(1, n(r.qty));
+    g.orders180++;
+    if (n(r.cost) > 0) { g.cost180 += n(r.cost); g.cost_units180 += q; if (!g.last_cost_at || dd >= g.last_cost_at) { g.last_cost = round2(n(r.cost) / q); g.last_cost_at = dd; } }
+    if (dd < d30) continue;
+    g.orders++; g.units += q; g.revenue += n(r.sold); u30 += q;
+    if (n(r.cost) > 0) { g.cost += n(r.cost); g.cost_units += q; const c = round2(n(r.cost) / q); g.costs[c] = (g.costs[c] || 0) + 1; }
+    if (n(r.ebay_fees) > 0) { g.fees += n(r.ebay_fees); g.fee_rev += n(r.sold); }
+    if (n(r.refunded) > 0) g.refunded += n(r.refunded);
+    if (dd >= d14) { g.units14 += q; g.revenue14 += n(r.sold); u14 += q; }
+    if (dd >= d7) g.units7 += q;
+  }
+  const keys = Object.keys(by);
+  const named = keys.filter((k) => k);
+  const multi = named.length > 1 || (named.length === 1 && keys.length > 1);
+  const sheetAli = n(it.ali_cost);
+  const rows = keys.map((k) => {
+    const g = by[k];
+    const paid = g.units > 0 ? round2(g.revenue / g.units) : 0;
+    const sh30 = u30 > 0 ? g.units / u30 : 0, sh14 = u14 > 0 ? g.units14 / u14 : 0;
+    /* this variation's own paid cost first; the Main Sheet's single cell only when it never paid one */
+    const ownCost = g.cost_units > 0 || g.cost_units180 > 0;
+    const j = prJudge({ price: paid || n(it.price), ali: ownCost ? 0 : sheetAli, units30: g.units, units14: g.units14, orders30: g.orders, revenue30: g.revenue, revenue14: g.revenue14,
+      cost30: g.cost, cost_units30: g.cost_units, cost180: g.cost180, cost_units180: g.cost_units180, hunt_cost: huntCost, link_cost: linkCost,
+      fees30: g.fees, fee_rev30: g.fee_rev, refunded30: g.refunded, units7: g.units7,
+      cpc30: n(a.cpc) * sh30, gen30: n(a.gen) * sh30, clicks30: Math.round(n(a.clicks) * sh30), cpc14: n(a.cpc14) * sh14, gen14: n(a.gen14) * sh14, clicks14: Math.round(n(a.clicks14) * sh14),
+      campaign, band });
+    const cn = j.n_chain, ca = j.a_chain; delete j.n_chain; delete j.a_chain;
+    const label = k ? k : (named.length ? 'variation not recorded (orders before 27 Nov)' : 'single listing · no variations');
+    return { variation: k, label, orders_30d: g.orders, units_30d: g.units, units_14d: g.units14, orders_180d: g.orders180, paid,
+      last_cost: g.last_cost, last_cost_at: g.last_cost_at,
+      costs_seen: Object.keys(g.costs).map((c) => ({ cost: Number(c), orders: g.costs[c] })).sort((x, y) => y.orders - x.orders).slice(0, 4),
+      judge: j, chain_neutral: cn, chain_ads: ca };
+  }).sort((x, y) => (y.units_30d - x.units_30d) || (y.orders_180d - x.orders_180d));
+  const costs = rows.filter((r) => r.judge.ali > 0).map((r) => r.judge.ali);
+  return { multi, rows: rows.slice(0, 60), variations_n: named.length,
+    cost_low: costs.length ? Math.min(...costs) : 0, cost_high: costs.length ? Math.max(...costs) : 0,
+    note: 'each variation is judged on the cost paid for THAT variation; the Main Sheet\'s single cost is used only when a variation never had a cost typed' };
 }
 function prDaysBetween(a, b) { return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000); }
 /* The formal supplier assessment Zaid asked for: every cost move in 90 days grouped by the supplier
@@ -29763,7 +29899,7 @@ const ROUTES = {
         }
       }
       const orders = (await DB.prepare(
-        'SELECT order_id, created_at, qty, sold, cost, ebay_fees, refunded, status FROM orders WHERE item_id = ?1 AND date(created_at) >= ?2 AND status NOT IN (\'NOT_FOUND\', \'CANCELLED\') ORDER BY created_at DESC LIMIT 400'
+        'SELECT order_id, created_at, qty, sold, cost, ebay_fees, refunded, status, variation FROM orders WHERE item_id = ?1 AND date(created_at) >= ?2 AND status NOT IN (\'NOT_FOUND\', \'CANCELLED\') ORDER BY created_at DESC LIMIT 400'
       ).bind(id, d180).all().catch(() => ({ results: [] }))).results || [];
       const o = { orders_n: 0, units: 0, revenue: 0, cost: 0, cost_units: 0, fees: 0, fee_rev: 0, refunded: 0, units_7d: 0, units_14d: 0, revenue_14d: 0, cost180: 0, cost_units180: 0 };
       const paidCosts = {};
@@ -29827,6 +29963,7 @@ const ROUTES = {
         fluctuation: { changes_30d: h30.length, changes_all: history.length, rises_30d: h30.filter((h) => n(h.delta_p) > 0).length, drops_30d: h30.filter((h) => n(h.delta_p) < 0).length,
           drift_30d: round2(h30.reduce((t, h) => t + n(h.delta_p), 0) / 100), changed_yesterday: history.some((h) => h.seen_day === yday), changed_today: history.some((h) => h.seen_day === today),
           worst_tier_30d: h30.reduce((w, h) => ((PR_TIER_RANK[h.tier] || 0) > (PR_TIER_RANK[w] || 0) ? h.tier : w), '') },
+        variations: prVariationRows(orders, it, band, a, campaign, d30, d14, d7, hunt ? prHuntCost(hunt.source_price) : 0, linkCost),
         recent_orders: orders.slice(0, 20).map((r) => ({ order_id: r.order_id, date: String(r.created_at || '').slice(0, 10), qty: n(r.qty), sold: n(r.sold), cost: n(r.cost), fees: n(r.ebay_fees), refunded: n(r.refunded) })),
         can_act: MGMT_ROLES.indexOf(ctx.user.role) >= 0 || !!ctx.user.super,
       };
@@ -29837,6 +29974,24 @@ const ROUTES = {
      end → the Team Lead) is raised by Apps Script's decisionAct exactly as Listing decisions does;
      this row remembers the verdict, the price it was taken at and the price it aimed for, and it
      settles the item's open supplier alert in the same stroke — one decision, one record. */
+  /* ---- Supplier Sourcing desk (27 Nov, owner): one item ID → its three suppliers, what each costs
+     today, which one every past order was actually bought from and at what cost, the cost moves,
+     and each variation's own cost and verdict. Without an item ID it is the board: live listings
+     with no supplier anywhere, today's 30p+ moves, and the accounts whose order book feeds no costs.
+     The auto-reprice is SHADOW here: every variation shows the price that would restore its target
+     and nothing is sent to eBay; a listing inside a running sale event is marked locked, because
+     eBay refuses a price revision on it until a person takes it out of the event in Seller Hub. */
+  supplierDesk: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (!prCanSee(ctx.user)) throw new AuthError('auth');
+      const out = await supplierDeskCore(p, ctx);
+      return canSeeEarnings(ctx.user) ? out : stripEarnings(out);
+    },
+  },
+  /* the same read behind the sync key, for checks from the Mac — the key already reads every table */
+  supplierDeskKey: {
+    auth: 'sync', fn: async (p, ctx) => supplierDeskCore(p, Object.assign({}, ctx, { user: { role: 'Management', email: 'sync-key', super: true } })),
+  },
   priceDecide: {
     auth: 'any', fn: async (p, ctx) => {
       if (!prCanDecide(ctx.user)) throw new AuthError('auth');   // 10 Nov: reading the desk never granted deciding on it

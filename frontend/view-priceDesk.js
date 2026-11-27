@@ -20,7 +20,7 @@
      page reads as a complete page rather than one full of dashes. */
   var PR_ROLES = ['Management', 'Ops Head', 'Pricing', 'Team Lead'];
   function prSpendOnly() { return !!(PR.data && PR.data.spend_only); }
-  var PR = { data: null, acct: '', tab: 'revise', q: '', seg: 'all', sort: 'gap', dir: 1, supSort: 'verdict', supDir: 1, decSort: 'at', decDir: -1, showKept: false, onlySold: true, detail: null, mode: prLoadMode() };
+  var PR = { varOpen: null, data: null, acct: '', tab: 'revise', q: '', seg: 'all', sort: 'gap', dir: 1, supSort: 'verdict', supDir: 1, decSort: 'at', decDir: -1, showKept: false, onlySold: true, detail: null, mode: prLoadMode() };
   var PR_SEG = {
     raise: ['Raise price', 'bad'], ads_high: ['Ads too high', 'warn'], reduce: ['Room to reduce', 'gold'], on_target: ['On target', 'ok'],
     dormant: ['No sales · 14d', 'mute'], spending_no_sales: ['Spending, no sales', 'bad'], cost_missing: ['Cost missing', 'warn']
@@ -636,6 +636,29 @@
       h += prChainBlock('Neutral · no ads', d.chain_neutral, j, 'n_', PR.mode === 'neutral');
       h += prChainBlock('With ads · last 14 days', d.chain_ads, j, 'a_', PR.mode === 'ads');
     }
+    /* 27 Nov (owner): "never compare the 120cm light's cost with the 80cm" — the listing the way
+       eBay shows it: the item, then each variation on its OWN paid price and its OWN paid cost,
+       judged by the same calculator. Click a variation to open its chain. */
+    var vr = (d.variations || {}).rows || [];
+    if (vr.length && (vr.length > 1 || (d.variations || {}).multi)) {
+      var pfxV = prPfx();
+      h += '<div class="pr-blk" style="grid-column:1/-1"><h3>By variation <span class="pr-sub">· ' + ((d.variations || {}).variations_n || vr.length) + ' sold · each on the cost paid for that variation · ' + esc(prModeLabel(true)) + '</span></h3>' +
+        '<div style="overflow-x:auto"><table class="pr-tbl" style="width:100%"><thead><tr><th>Variation</th><th class="r">Sold 30d</th><th class="r">Buyers pay</th><th class="r">Ali cost</th><th>Source</th>' +
+        (d.spend_only ? '' : '<th class="r">Actual</th><th class="r">Target</th><th class="r">Gap</th><th>Verdict</th><th class="r">Must sell at</th>') + '</tr></thead><tbody>';
+      vr.forEach(function (r, i) {
+        var jv = r.judge || {}, on = PR.varOpen === i;
+        h += '<tr class="pr-var' + (on ? ' on' : '') + '" data-pr-var="' + i + '" style="cursor:pointer"><td>' + esc(prS(r.label).slice(0, 64)) + '</td><td class="r">' + r.units_30d + '</td><td class="r">' + (r.paid ? prM(r.paid) : '—') + '</td><td class="r">' + (jv.ali ? prM(jv.ali) : '—') + '</td><td class="pr-sub">' + esc(prS(jv.ali_source) || 'none') + '</td>';
+        if (!d.spend_only) {
+          h += '<td class="r"><span class="' + prTone(jv[pfxV + 'actual']) + '">' + (jv[pfxV + 'actual'] === null || jv[pfxV + 'actual'] === undefined ? '—' : prM(jv[pfxV + 'actual'])) + '</span></td><td class="r">' + (jv.target ? prM(jv.target) : '—') + '</td>' +
+            '<td class="r"><span class="' + prTone(jv[pfxV + 'gap']) + '">' + (jv[pfxV + 'gap'] === null || jv[pfxV + 'gap'] === undefined ? '—' : prM(jv[pfxV + 'gap'])) + '</span></td><td>' + prTag(PR_SEG, jv[pfxV + 'segment']) + (jv[pfxV + 'loss'] ? '<span class="pr-tag bad">LOSS</span>' : '') + '</td><td class="r">' + (jv[pfxV + 'required'] ? prM(jv[pfxV + 'required']) : '—') + '</td>';
+        }
+        h += '</tr>';
+        if (on && !d.spend_only) {
+          h += '<tr><td colspan="10"><div class="pr-grid" style="margin:6px 0">' + prChainBlock('Neutral · no ads · ' + prS(r.label).slice(0, 40), r.chain_neutral, jv, 'n_', PR.mode === 'neutral') + prChainBlock('With ads · last 14 days · ' + prS(r.label).slice(0, 40), r.chain_ads, jv, 'a_', PR.mode === 'ads') + '</div></td></tr>';
+        }
+      });
+      h += '</tbody></table></div><div class="pr-sub" style="margin-top:4px">' + esc(prS((d.variations || {}).note)) + '</div></div>';
+    }
     h += '<div class="pr-blk"><h3>Supplier cost history</h3>' +
       '<div class="pr-sub" style="margin-bottom:5px">30 days: ' + prN(fl.changes_30d) + ' moves (' + prN(fl.rises_30d) + ' up, ' + prN(fl.drops_30d) + ' down), drift ' + prM(fl.drift_30d) + (fl.worst_tier_30d ? ', worst ' + esc((PR_TIER[fl.worst_tier_30d] || [''])[0].toLowerCase()) : '') + '</div>' +
       ((d.history || []).length ? (d.history || []).slice(0, 15).map(function (x) {
@@ -651,6 +674,8 @@
     h += '</div></div>';
     box.innerHTML = h;
     $('prDetClose').onclick = function () { PR.detail = null; box.innerHTML = ''; };
+    var vrs = box.querySelectorAll('tr[data-pr-var]');
+    for (var vi = 0; vi < vrs.length; vi++) { vrs[vi].onclick = function () { var k = Number(this.getAttribute('data-pr-var')); PR.varOpen = PR.varOpen === k ? null : k; prPaintDetail(); }; }
     prWire(box);
   }
 
