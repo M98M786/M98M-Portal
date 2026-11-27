@@ -390,6 +390,44 @@ VIEW_CSS.push(
     if (st.tick) { clearInterval(st.tick); }
     st.tick = setInterval(function () { if (!document.body.contains(host)) { clearInterval(st.tick); st.tick = null; return; } if (!document.hidden) { clearInterval(st.tick); st.tick = null; remount(); } }, 300000);
   } };
+  /* ── 27 Nov (owner): the account-to-account spend / revenue / ROAS table, at the end of the
+     Advertising overview. The same table the command centre carried, from the same board read. ── */
+  window.ADS_ACCT_ROAS = { mount: function (host, opts) {
+    if (!host) { return; }
+    opts = opts || {};
+    var days = Math.min(60, Math.max(3, Number(opts.days) || 14));
+    host.innerHTML = '<h3 style="margin:0 0 4px;font-size:15px;font-weight:800">Account to account \u00b7 spend / revenue / ROAS per day \u00b7 last ' + days + ' days</h3><div class="ac-split-note" style="margin:0 0 8px">Loading\u2026</div>';
+    var payload = { days: days }; if (opts.account) { payload.account = opts.account; }
+    api('adsBoard', payload).then(function (d) {
+      if (!document.body.contains(host)) { return; }
+      var sba = (d && d.series_by_account) || [];
+      if (!sba.length) { host.querySelector('.ac-split-note').textContent = 'Nothing recorded for this window.'; return; }
+      var byA = {};
+      sba.forEach(function (r) { (byA[r.account] = byA[r.account] || []).push(r); });
+      var h = '<div class="scroll" style="max-height:320px"><table class="acc-tbl" style="min-width:560px"><thead><tr>' +
+        '<th style="text-align:left">Account</th><th>Days</th><th>Spend</th><th>Ad revenue</th><th>ROAS</th><th>Worst day</th><th>Best day</th></tr></thead><tbody>';
+      Object.keys(byA).sort(function (x, y) { var sx = byA[x].reduce(function (s, r) { return s + (Number(r.spend) || 0); }, 0), sy = byA[y].reduce(function (s, r) { return s + (Number(r.spend) || 0); }, 0); return sy - sx; }).forEach(function (a2) {
+        var list = byA[a2];
+        var sp = 0, rv = 0, worst = null, best = null;
+        list.forEach(function (r) {
+          sp += Number(r.spend) || 0; rv += Number(r.rev) || 0;
+          var ro = Number(r.spend) > 0.005 ? Number(r.rev) / Number(r.spend) : null;
+          if (ro !== null) {
+            if (!worst || ro < worst.ro) { worst = { d: r.date, ro: ro }; }
+            if (!best || ro > best.ro) { best = { d: r.date, ro: ro }; }
+          }
+        });
+        h += '<tr><td style="text-align:left;font-weight:800">' + esc(a2) + '</td><td>' + list.length + '</td>' +
+          '<td>' + acGBP(sp) + '</td><td>' + acGBP(rv) + '</td>' +
+          '<td style="font-weight:800;color:' + (sp > 0.005 && rv / sp < 5 ? 'var(--warn)' : 'var(--ok)') + '">' + acROAS(rv, sp) + '</td>' +
+          '<td>' + (worst ? esc(String(worst.d).slice(5)) + ' \u00b7 ' + worst.ro.toFixed(1) + '\u00d7' : '\u2014') + '</td>' +
+          '<td>' + (best ? esc(String(best.d).slice(5)) + ' \u00b7 ' + best.ro.toFixed(1) + '\u00d7' : '\u2014') + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+      host.querySelector('.ac-split-note').textContent = 'eBay\u2019s own report figures, ex VAT \u00b7 ' + esc(String((d && d.from) || '') + ' \u2192 ' + String((d && d.to) || '')) + ' \u00b7 ROAS under 5\u00d7 in amber';
+      host.insertAdjacentHTML('beforeend', h);
+    })['catch'](function (e) { var n = host.querySelector('.ac-split-note'); if (n) { n.textContent = 'This table did not answer \u2014 ' + ((e && e.message) || 'no answer'); } });
+  } };
   /* the Product history answers, per listing, for the red rows' boxes; {data, err, at} */
   var AC_DET = {}, AC_DET_TTL = 10 * 60 * 1000, AC_DET_MAX = 80;
   function dNum(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
@@ -817,51 +855,8 @@ VIEW_CSS.push(
       }
       /* 27 Nov (owner): the organic-versus-promoted block moved to the Business overview, before
          This month at a glance, where it carries the sales chart's own controls */
-      /* the history — every previous day's spend, clicks and ad-attributed sales in the window */
-      var ser = d.series || [];
-      if (ser.length) {
-        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:4px 0 4px">Day by day · ' + esc(acWin(d)) + '</div>' +
-          '<div class="scroll" style="max-height:220px;margin-bottom:14px"><table class="acc-tbl" style="min-width:520px"><thead><tr>' +
-          '<th>Date</th><th>Spend</th>' + (acSpendOnly(d) ? '' : '<th>Ad revenue</th><th>ROAS</th>') + '<th>Clicks</th><th>Avg CPC</th><th>Sold via ads</th></tr></thead><tbody>';
-        ser.forEach(function (r) {
-          h += '<tr><td style="text-align:left">' + esc(String(r.date)) + '</td>' +
-            '<td>' + acGBP(r.spend) + '</td>' +
-            (acSpendOnly(d) ? '' : '<td>' + (Number(r.rev) ? acGBP(r.rev) : '\u2014') + '</td>' +
-            '<td>' + acROAS(r.rev, r.spend) + '</td>') +
-            '<td>' + (r.clicks || 0) + '</td>' +
-            '<td>' + (Number(r.clicks) ? acGBP(Number(r.spend) / Number(r.clicks)) : '\u2014') + '</td>' +
-            '<td>' + (r.sold || 0) + '</td></tr>';
-        });
-        h += '</tbody></table></div>';
-      }
-      /* account-to-account, day by day (review 3): every account's spend, revenue and ROAS
-         per day inside the chosen window */
-      var sba = d.series_by_account || [];
-      if (sba.length && !AC.acct) {
-        var byA = {};
-        sba.forEach(function (r) { (byA[r.account] = byA[r.account] || []).push(r); });
-        h += '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin:4px 0 4px">Account to account \u00b7 spend / revenue / ROAS per day</div>' +
-          '<div class="scroll" style="max-height:260px;margin-bottom:14px"><table class="acc-tbl" style="min-width:560px"><thead><tr>' +
-          '<th style="text-align:left">Account</th><th>Days</th><th>Spend</th><th>Ad revenue</th><th>ROAS</th><th>Worst day</th><th>Best day</th></tr></thead><tbody>';
-        Object.keys(byA).forEach(function (a) {
-          var list = byA[a];
-          var sp = 0, rv = 0, worst = null, best = null;
-          list.forEach(function (r) {
-            sp += Number(r.spend) || 0; rv += Number(r.rev) || 0;
-            var ro = Number(r.spend) > 0.005 ? Number(r.rev) / Number(r.spend) : null;
-            if (ro !== null) {
-              if (!worst || ro < worst.ro) { worst = { d: r.date, ro: ro }; }
-              if (!best || ro > best.ro) { best = { d: r.date, ro: ro }; }
-            }
-          });
-          h += '<tr><td style="text-align:left;font-weight:800">' + esc(a) + '</td><td>' + list.length + '</td>' +
-            '<td>' + acGBP(sp) + '</td><td>' + acGBP(rv) + '</td>' +
-            '<td style="font-weight:800;color:' + (sp > 0.005 && rv / sp < 5 ? 'var(--warn)' : 'var(--ok)') + '">' + acROAS(rv, sp) + '</td>' +
-            '<td>' + (worst ? esc(String(worst.d).slice(5)) + ' \u00b7 ' + worst.ro.toFixed(1) + '\u00d7' : '\u2014') + '</td>' +
-            '<td>' + (best ? esc(String(best.d).slice(5)) + ' \u00b7 ' + best.ro.toFixed(1) + '\u00d7' : '\u2014') + '</td></tr>';
-        });
-        h += '</tbody></table></div>';
-      }
+      /* 27 Nov (owner): the Day-by-day table is gone; the account-to-account spend / revenue / ROAS
+         table moved to the end of the Advertising overview (ADS_ACCT_ROAS below) */
       h += '<div class="ac-accs">' + (d.accounts || []).map(function (a) {
         return '<div class="ac-acc">' + esc(String(a.account)) + '<b>' + acGBP(a.spend) + ' today</b>' +
           a.clicks + ' clicks · ' + a.sold + ' sold' + (a.waste_n ? '<div class="w">' + a.waste_n + ' wasting</div>' : '') + '</div>';

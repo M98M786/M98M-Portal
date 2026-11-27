@@ -213,8 +213,10 @@
     /* 27 Nov (owner): the ad-spend-against-earning chart sits after Today by account; drawToday runs
        with every five-minute poll, so the chart is refreshed with it */
     /* 27 Nov (owner): "move Today so far by slot to the end of the page" */
-    $('ovToday').innerHTML = B.today(D) + B.byAccount(D) + '<div class="ov-panel" id="ovEarn"></div>' + B.hourly(D, { picker: true }) + B.foot(D) + B.slots(D);
+    $('ovToday').innerHTML = B.today(D) + B.byAccount(D) + '<div class="ov-panel" id="ovEarn"></div>' + B.hourly(D, { picker: true }) + B.foot(D) + B.slots(D) + '<div class="ov-panel" id="ovAcctRoas"></div>';
     if (window.ADS_EARN && $('ovEarn')) { window.ADS_EARN.mount($('ovEarn'), { account: OV.account || '', days: 14 }); }
+    /* 27 Nov (owner): the account-to-account spend / revenue / ROAS table, moved here from the command centre, last on the page */
+    if (window.ADS_ACCT_ROAS && $('ovAcctRoas')) { window.ADS_ACCT_ROAS.mount($('ovAcctRoas'), { days: 14 }); }
     wireHour();    /* 6 Nov: the hour panel's own period bar and account chips */
   }
 
