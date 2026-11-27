@@ -1076,7 +1076,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261127-1718';
+var BUILD = '20261127-1730';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -3456,6 +3456,8 @@ VIEW_CSS.push(
 
   function acGBP(v) { var n = Number(v) || 0; return '£' + n.toFixed(2); }
   function acROAS(rev, sp) { return Number(sp) > 0.005 ? (Number(rev) / Number(sp)).toFixed(1) + '\u00d7' : '\u2014'; }
+  /* a ROAS figure in its colour: green at the 5\u00d7 target or better, amber under it, red under 3\u00d7 */
+  function acRoasColor(ro) { var n = Number(ro); return ro == null || isNaN(n) ? 'var(--text-3)' : n >= 5 ? 'var(--ok)' : n >= 3 ? 'var(--warn)' : 'var(--bad)'; }
   function acNum(v) { return v == null || v === '' || isNaN(Number(v)) ? null : Number(v); }
 
   /* \u2500\u2500 the per-item board, sortable on every column (owner, 22 Oct: "add sort option on data in ad
@@ -3728,8 +3730,17 @@ VIEW_CSS.push(
           '<div class="go">' + (AC.focus === key ? 'SHOWING BELOW \u00b7 CLICK TO SHOW ALL' : 'SHOW THESE \u2193') + '</div></div>';
       };
       var lowN = acSpendOnly(d) ? -1 : (d.items || []).filter(function (r) { return r && acLowRoas(r); }).length;
+      /* 27 Nov (owner): "a box with the overall ROAS of all accounts" — today's live figure, the
+         sales eBay credits to every ad over every ad's spend; a figure, so no narrowing behind it */
+      var roasTile = '';
+      if (!acSpendOnly(d) && c.roas_today !== undefined) {
+        var roT = c.roas_today == null ? null : Number(c.roas_today);
+        roasTile = '<div class="ac-tile" title="today\u2019s sales eBay credits to the ads, over today\u2019s ad spend, all accounts">' +
+          '<div class="k">ROAS today · all accounts</div><div class="v" style="color:' + acRoasColor(roT) + '">' + (roT == null ? '\u2014' : roT.toFixed(1) + '\u00d7') + '</div>' +
+          '<div class="s">' + acGBP(c.rev_today) + ' credited sales \u00b7 target 5\u00d7 \u00b7 live</div></div>';
+      }
       var h = '<div class="ac-tiles">' +
-        tile('spend', 'gold', 'Spend today · all accounts', acGBP(c.spend_today), '') +
+        tile('spend', 'gold', 'Spend today · all accounts', acGBP(c.spend_today), '') + roasTile +
         tile('clicks', '', 'Clicks today', (c.clicks_today || 0), '') +
         tile('sold', '', 'Sold via ads today', (c.sold_today || 0), '') +
         tile('waste', c.waste_n ? 'bad' : '', 'Wasting £3+ · no order', (c.waste_n || 0), '') +
@@ -3767,8 +3778,11 @@ VIEW_CSS.push(
       /* 27 Nov (owner): the Day-by-day table is gone; the account-to-account spend / revenue / ROAS
          table moved to the end of the Advertising overview (ADS_ACCT_ROAS below) */
       h += '<div class="ac-accs">' + (d.accounts || []).map(function (a) {
+        var aro = a.roas === undefined ? undefined : (a.roas == null ? null : Number(a.roas));
         return '<div class="ac-acc">' + esc(String(a.account)) + '<b>' + acGBP(a.spend) + ' today</b>' +
-          a.clicks + ' clicks · ' + a.sold + ' sold' + (a.waste_n ? '<div class="w">' + a.waste_n + ' wasting</div>' : '') + '</div>';
+          a.clicks + ' clicks · ' + a.sold + ' sold' +
+          (aro === undefined ? '' : '<div title="' + esc('today\u2019s sales eBay credits to this account\u2019s ads: ' + acGBP(a.rev)) + '">ROAS <b style="display:inline;font-size:12px;color:' + acRoasColor(aro) + '">' + (aro == null ? '\u2014' : aro.toFixed(1) + '\u00d7') + '</b></div>') +
+          (a.waste_n ? '<div class="w">' + a.waste_n + ' wasting</div>' : '') + '</div>';
       }).join('') + '</div>';
       /* the per-item board is painted on its own so a sort can redraw it without asking the engine again */
       AC.items = (d.items || []).filter(function (r) { return r && typeof r === 'object'; });

@@ -26400,8 +26400,8 @@ const ROUTES = {
           waste: (t.spend_t || 0) >= 3 && !(t.sold_t || 0),
         };
         items.push(row);
-        const a = (accounts[t.account] = accounts[t.account] || { account: t.account, spend: 0, clicks: 0, sold: 0, waste_n: 0 });
-        a.spend = round2(a.spend + row.spend_today); a.clicks += row.clicks_today; a.sold += row.sold_today;
+        const a = (accounts[t.account] = accounts[t.account] || { account: t.account, spend: 0, clicks: 0, sold: 0, waste_n: 0, rev: 0 });
+        a.spend = round2(a.spend + row.spend_today); a.clicks += row.clicks_today; a.sold += row.sold_today; a.rev = round2(a.rev + (revT[hk] || 0));
         if (row.waste) a.waste_n++;
       }
       // an item spending over 14d but silent today still belongs on the board
@@ -26421,7 +26421,11 @@ const ROUTES = {
         sold_today: items.reduce((s, i) => s + i.sold_today, 0),
         waste_n: items.filter(i => i.waste).length,
         spend_14d: round2(items.reduce((s, i) => s + i.spend_14d, 0)),
+        /* 27 Nov (owner): "a box with the overall ROAS of all accounts; each account box showing today's live ROAS" */
+        rev_today: round2(items.reduce((s, i) => s + (Number(i.rev_today) || 0), 0)),
       };
+      combined.roas_today = roasOf(combined.rev_today, combined.spend_today);
+      for (const a of Object.values(accounts)) a.roas = roasOf(a.rev, a.spend);
       /* R7-8 (Hasib): "organic vs promoted sales stats". The split is PRECISE — sales_daily.sold
          is total revenue and ads_rev is eBay's own attributed (promoted) revenue, so organic is
          the remainder. Per account and combined, over the same window as the rest of the board. */

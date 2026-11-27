@@ -3,6 +3,7 @@
 ## 27 Nov 2026 — Ads command centre: every listing's ROAS; tables moved
 
 - **Ads command centre**: two new columns, *ROAS today* and *ROAS · window*, on every listing row (green at 5× or better, amber under, red where the ad brought nothing, a dash where nothing was spent; the credited revenue in the tooltip). The item column now takes a fixed share of the width, so the figures sit closer to the listing. The *Day by day* and *Account to account* tables are gone from the centre.
+- **Ads command centre**: a *ROAS today · all accounts* tile (today's credited sales over today's spend, live, coloured against the 5× target) beside Spend today, and each account card now carries its own live ROAS today. Engine: `adsBoard` `combined.rev_today/roas_today`, `accounts[].rev/roas`.
 - **Ads command centre**: a seventh tile, *ROAS under 3× · window*, counts the listings bringing back under £3 for each £1 of ad spend (on £3 or more spent over the window). Clicked, it narrows the board to them, worst ROAS first, each row red with its Product history box underneath, exactly as the Wasting £3+ tile does.
 - **Advertising overview**: the *Account to account · spend / revenue / ROAS per day* table now ends the page.
 - **Business overview**: the *Profitability* section is gone.
