@@ -265,7 +265,23 @@
     }
 
     h += '</div>';
-    box.innerHTML = h;
+    /* 27 Nov (owner): the listing the way eBay sells it — each variation on its own paid price and
+       its own paid cost, from the same engine read as the Price revision card */
+    var vr = (d.variations || {}).rows || [];
+    if (vr.length > 1 || ((d.variations || {}).multi && vr.length)) {
+      var spTd = function (v, right) { return '<td style="padding:5px 8px;border-bottom:1px solid var(--gold-line);' + (right ? 'text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap' : '') + '">' + v + '</td>'; };
+      var spMm = function (v) { return v === null || v === undefined || v === '' ? '—' : '£' + Number(v).toFixed(2); };
+      var spTone = function (v) { return 'color:' + (Number(v) < 0 ? 'var(--bad)' : 'var(--ok)'); };
+      h += '<div style="margin-top:14px"><h3 style="font-size:13px;margin:0 0 6px">By variation <span style="font-size:11px;color:var(--text-3);font-weight:600">· ' + ((d.variations || {}).variations_n || vr.length) + ' sold · each on the cost paid for that variation</span></h3>' +
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr>' +
+        ['Variation', 'Sold 30d', 'Buyers pay', 'Ali cost', 'Source'].concat(d.spend_only ? [] : ['Actual / unit', 'Target', 'Gap', 'Verdict', 'Must sell at']).map(function (t, k) { return '<th style="text-align:' + (k === 0 || k === 4 || k === 8 ? 'left' : 'right') + ';font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);padding:6px 8px;border-bottom:1px solid var(--gold-line);white-space:nowrap">' + t + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        vr.map(function (r) {
+          var jv = r.judge || {};
+          return '<tr>' + spTd(esc(spS(r.label).slice(0, 64))) + spTd(r.units_30d, 1) + spTd(r.paid ? spMm(r.paid) : '—', 1) + spTd(jv.ali ? spMm(jv.ali) : '—', 1) + spTd('<span style="color:var(--text-3)">' + esc(spS(jv.ali_source) || 'none') + '</span>') +
+            (d.spend_only ? '' : spTd('<span style="' + spTone(jv.n_actual) + '">' + spMm(jv.n_actual) + '</span>', 1) + spTd(jv.target ? spMm(jv.target) : '—', 1) + spTd('<span style="' + spTone(jv.n_gap) + '">' + spMm(jv.n_gap) + '</span>', 1) + spTd(esc(spS(jv.n_segment).replace(/_/g, ' '))) + spTd(jv.n_required ? spMm(jv.n_required) : '—', 1)) + '</tr>';
+        }).join('') + '</tbody></table></div><div style="font-size:11px;color:var(--text-3);margin-top:4px">' + esc(spS((d.variations || {}).note)) + '</div></div>';
+    }
+        box.innerHTML = h;
   }
 
   /* a hash change to another item while the page is open re-reads it */
