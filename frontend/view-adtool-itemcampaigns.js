@@ -689,7 +689,11 @@
   var SECTIONS = ['wlaDup', 'wlaStands', 'wlaGaps'];
   function jumpBar() {
     var C = counts();
-    var h = '<div class="wla-jump"><a href="#adtoolItemCampaigns/wlaDup" data-wlajump="wlaDup" class="dup">Duplication' +
+    /* 27 Nov (owner): "an ALL box at the start where all listings are shown together" — on while
+       no state chip is pressed; pressing it lets any pressed chip go */
+    var h = '<div class="wla-jump"><a href="#adtoolItemCampaigns" data-wlafilter="" class="' + (WL.filter ? '' : 'on') + '" title="every active listing, whatever it is in">All' +
+      (num(C.active) == null ? '' : '<span class="n">' + cnt(C.active) + '</span>') + '</a>' +
+      '<a href="#adtoolItemCampaigns/wlaDup" data-wlajump="wlaDup" class="dup">Duplication' +
       (num(C.in_many) == null ? '' : '<span class="n">' + cnt(C.in_many) + '</span>') + '</a>';
     /* 27 Nov (owner): the five states. One pressed narrows the list below to exactly those
        listings; pressed again it lets go and the list is every active listing once more. */
@@ -701,7 +705,8 @@
     return h + '</div>';
   }
   function setFilter(k) {
-    WL.filter = WL.filter === k ? '' : (wlaFilterDef(k) ? k : '');
+    k = String(k || '');
+    WL.filter = (!k || WL.filter === k) ? '' : (wlaFilterDef(k) ? k : '');
     WL.gap = null; delete WL.err.gap;
     draw();
     if (!WL.filter) return;
