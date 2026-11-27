@@ -34596,6 +34596,10 @@ const ROUTES = {
         /^\/sell\/marketing\/v1\/bulk_create_negative_keyword$/,
         /^\/sell\/marketing\/v1\/negative_keyword(\?|$)/,
         /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/bulk_update_ads_status_by_listing_id$/,
+        /* 27 Nov (owner, SQR desk: "end the empty smart campaigns"): once a listing's keyword campaign has
+           taken over and its old per-item Smart campaign holds nothing but an archived ad, that shell is
+           ended. POST only, the campaign's own /end; it ends one of OUR campaigns and touches nothing else. */
+        /^\/sell\/marketing\/v1\/ad_campaign\/\d+\/end$/,
         /* 3 Nov (owner): "move them to dynamic with 15% cap" — the campaign-level settings updates
            (update_ad_rate_strategy sets dynamicAdRatePreferences.adRateCapPercent). Config only;
            an update_* subpath can change a campaign's own settings, never another seller's data. */
