@@ -105,9 +105,9 @@
   /* today's ROAS in its colour, the spend and credited sales underneath; a dash where nothing was spent today */
   function alxRoasCell(r) {
     var sp = Number(r.ad_spend_today) || 0;
-    if (!(sp > 0.005) || r.roas_today == null) { return '<span style="color:var(--text-3)" title="no ad spend today">\u2014</span>' + (sp > 0.005 ? '' : ''); }
+    if (!(sp > 0.005) || r.roas_today == null) { return '<span style="color:var(--text-3)" title="no ad spend today">\u2014</span>'; }
     var n = Number(r.roas_today) || 0, col = n >= 5 ? 'var(--ok)' : n >= 3 ? 'var(--warn)' : 'var(--bad)';
-    return '<b style="color:' + col + '">' + n.toFixed(1) + '\u00d7</b><div style="font-size:10px;color:var(--text-3);white-space:nowrap">' + axGBP(sp) + ' spent \u00b7 ' + axGBP(r.ad_rev_today) + ' back</div>';
+    return '<b style="color:' + col + '">' + n.toFixed(1) + '\u00d7</b><div style="font-size:10px;color:var(--text-3);white-space:nowrap">' + axGBP(sp) + ' spent \u00b7 ' + (Number(r.ad_rev_today) ? axGBP(r.ad_rev_today) : '\u00a30.00') + ' back</div>';
   }
   function alxSoldWin(r) { return ALX.win === 14 ? (Number(r.sold_14d) || 0) : ALX.win === 30 ? (r.sold_30d_live !== undefined ? Number(r.sold_30d_live) : (Number(r.sold_30d) || 0)) : (Number(r.sold_7d) || 0); }
 
