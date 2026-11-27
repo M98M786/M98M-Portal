@@ -1076,7 +1076,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261127-1810';
+var BUILD = '20261127-1827';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -6547,8 +6547,7 @@ VIEW_CSS.push(
     ['none',       'No campaign', 'in_none',    'No campaign \u2014 active listings in no campaign at all',          'Active listings in no campaign at all, so nothing is advertising them. The ones that have sold recently are the ones worth putting somewhere.'],
     ['cpc_live',   'CPC live',    'cpc_live',   'CPC live \u2014 and not in Dynamic',                 'Listings whose cost-per-click ad is live right now and that are not live in a Dynamic campaign.'],
     ['cpc_paused', 'CPC paused',  'cpc_paused', 'CPC paused',                                           'Listings whose cost-per-click ad is paused (and not live in another CPC campaign), whatever else they are in.'],
-    ['dyn_live',   'Dynamic',     'dyn_live',   'Dynamic live \u2014 and not in CPC',                 'Listings live in a Dynamic campaign and not live in any cost-per-click one.'],
-    ['both',       '2 Campaign',  'both',       'In both CPC and Dynamic at the same time',             'Listings live in a cost-per-click campaign and a Dynamic one at once, so two campaigns charge for the same listing.']
+    ['dyn_live',   'Dynamic',     'dyn_live',   'Dynamic live \u2014 and not in CPC',                 'Listings live in a Dynamic campaign and not live in any cost-per-click one.']
   ];
   function wlaFilterDef(k) { for (var i = 0; i < WLA_FILTERS.length; i++) { if (WLA_FILTERS[i][0] === k) return WLA_FILTERS[i]; } return null; }
 
@@ -6733,7 +6732,7 @@ VIEW_CSS.push(
     icon: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v6M8 11h6"/>',
     render: function () {
       return '<div class="wla-wrap">' +
-        adtHgroup('Where each listing advertises', 'Duplication first, then every listing, then the ones advertising nowhere', 'wlaFresh') +
+        adtHgroup('Where each listing advertises', 'one chip, one list: every listing, the duplicated ones, or one campaign state', 'wlaFresh') +
         '<div class="wla-search">' +
           '<input id="wlaQ" type="search" placeholder="Search an item number or a title" autocomplete="off">' +
           '<button class="wla-btn" id="wlaGo">Search</button>' +
@@ -6750,6 +6749,7 @@ VIEW_CSS.push(
          consumed by the first draw and then forgotten, so a later poll does not keep re-scrolling
          the page under somebody who has since scrolled somewhere else. */
       WL.jump = String((window.adtRoute ? adtRoute().param : '') || '').trim();
+      if (WL.jump === 'wlaDup') { WL.filter = 'dup'; WL.jump = ''; }
       var q = $('wlaQ'), go = $('wlaGo'), clear = $('wlaClear');
       go.onclick = function () { WL.q = q.value.trim(); loadAll(); };
       clear.onclick = function () { q.value = ''; WL.q = ''; loadAll(); };
@@ -6833,7 +6833,9 @@ VIEW_CSS.push(
        narrow lists follow and fill their own sections */
     return ask('', 'main').then(function () {
       if ($('wlaBody')) { draw(); freshShow(); }
-      return Promise.all([ask('multi', 'dup'), WL.filter ? ask(WL.filter, 'gap') : Promise.resolve()]);
+      /* 27 Nov (owner): the page shows ONLY the pressed chip's listings, so only that chip's read is
+         made — the duplicated ones behind Duplication, a state's own read behind the others */
+      return Promise.all([WL.filter === 'dup' ? ask('multi', 'dup') : Promise.resolve(), WL.filter && WL.filter !== 'dup' ? ask(WL.filter, 'gap') : Promise.resolve()]);
     }).then(function () {
       WL.busy = false;
       if ($('wlaBody')) { draw(); freshShow(); }
@@ -7035,8 +7037,8 @@ VIEW_CSS.push(
   /* WHERE THOSE FIGURES COME FROM, said ONCE above the first section and not under each of six
      hundred rows. The sentence is the engine's, shared with the two other pages that draw this
      table, so it cannot drift from what the engine actually read. */
-  function periodsNote() {
-    var D = WL.main || {};
+  function periodsNote(D) {
+    D = D || WL.main || {};
     var t = String(D.periods_note || '').trim(), bad = String(D.periods_problem || '').trim();
     if (!t && !bad) return '';
     return '<div class="wla-rules"><b>The figures by period under every row.</b> ' + (t ? esc(t) + '.' : '') +
@@ -7199,7 +7201,7 @@ VIEW_CSS.push(
        no state chip is pressed; pressing it lets any pressed chip go */
     var h = '<div class="wla-jump"><a href="#adtoolItemCampaigns" data-wlafilter="" class="' + (WL.filter ? '' : 'on') + '" title="every active listing, whatever it is in">All' +
       (num(C.active) == null ? '' : '<span class="n">' + cnt(C.active) + '</span>') + '</a>' +
-      '<a href="#adtoolItemCampaigns/wlaDup" data-wlajump="wlaDup" class="dup">Duplication' +
+      '<a href="#adtoolItemCampaigns/wlaDup" data-wlafilter="dup" class="dup' + (WL.filter === 'dup' ? ' on' : '') + '" title="the listings live in two or more campaigns at once">Duplication' +
       (num(C.in_many) == null ? '' : '<span class="n">' + cnt(C.in_many) + '</span>') + '</a>';
     /* 27 Nov (owner): the five states. One pressed narrows the list below to exactly those
        listings; pressed again it lets go and the list is every active listing once more. */
@@ -7212,12 +7214,13 @@ VIEW_CSS.push(
   }
   function setFilter(k) {
     k = String(k || '');
-    WL.filter = (!k || WL.filter === k) ? '' : (wlaFilterDef(k) ? k : '');
-    WL.gap = null; delete WL.err.gap;
+    WL.filter = (!k || WL.filter === k) ? '' : ((k === 'dup' || wlaFilterDef(k)) ? k : '');
+    WL.gap = null; delete WL.err.gap; WL.dup = null; delete WL.err.dup;
     draw();
     if (!WL.filter) return;
     var want = WL.filter;
-    ask(want, 'gap').then(function () { if (WL.filter === want && $('wlaBody')) { draw(); jumpTo('wlaStands', false); jumpTo('wlaGaps', false); } });
+    if (want === 'dup') { ask('multi', 'dup').then(function () { if (WL.filter === want && $('wlaBody')) draw(); }); return; }
+    ask(want, 'gap').then(function () { if (WL.filter === want && $('wlaBody')) draw(); });
   }
   /* scroll a section into view and leave a brief mark on it. Guarded: a section that is not on the
      page yet (its own read has not landed) is simply not jumped to, and nothing throws. */
@@ -7231,14 +7234,17 @@ VIEW_CSS.push(
        three chips clicked in turn must not become three steps of the back button. */
     if (push !== false) { try { history.replaceState(null, '', location.pathname + location.search + '#adtoolItemCampaigns/' + id); } catch (e) { /* the scroll already happened */ } }
   }
-  function note() {
-    var D = WL.main || {}, C = counts();
+  /* 27 Nov (owner): the two notes moved to the Extras page, printed there from a read of their own
+     (WLA_NOTES below); `D` is that read, and the q / account words are the read's, never this page's */
+  function note(D, q, acct) {
+    D = D || WL.main || {}; q = q == null ? WL.q : q; acct = acct == null ? WL.account : acct;
+    var C = D.counts || {};
     var all = [];
-    itemsOf('main').forEach(function (i) { (i.campaigns || []).forEach(function (c) { all.push(c); }); });
+    ((D.items || [])).forEach(function (i) { if (i && typeof i === 'object') { (i.campaigns || []).forEach(function (c) { all.push(c); }); } });
     var readNote = adPanelNote(all);
     var h = '<div class="wla-note">' +
-      'Active listings only' + (WL.q ? ', matching "' + esc(WL.q) + '"' : '') +
-      (WL.account ? ', on ' + esc(WL.account) : ', across all accounts') + '. ' +
+      'Active listings only' + (q ? ', matching "' + esc(q) + '"' : '') +
+      (acct ? ', on ' + esc(acct) : ', across all accounts') + '. ' +
       'A campaign membership and its ad status are readings taken when that campaign\'s ads were last read, ' +
       'which can be hours or weeks ago, so each card carries the date of its own reading.' +
       (readNote ? ' ' + esc(readNote) : '');
@@ -7246,7 +7252,7 @@ VIEW_CSS.push(
        straight from the listing table. If the two ever disagree the page says so rather than
        quietly showing a short list as though it were the whole shop. */
     var a = num(C.active), real = num(D.active_counted);
-    if (!WL.q && a != null && real != null && a !== real) {
+    if (!q && a != null && real != null && a !== real) {
       h += ' <b>The counts cover ' + cnt(a) + ' listings and there are ' + cnt(real) + ' active, so ' +
         cnt(Math.abs(real - a)) + ' did not come back in this read.</b>';
     }
@@ -7272,11 +7278,22 @@ VIEW_CSS.push(
     if (D.computed_at) h += ' Worked out at ' + esc(String(D.computed_at).slice(11, 16)) + ' UTC.';
     return h + '</div>';
   }
+  /* the Extras page's mount: one read of the whole list, the two notes from it */
+  window.WLA_NOTES = { mount: function (host) {
+    if (!host) return;
+    host.innerHTML = '<div class="wla-note">Reading\u2026</div>';
+    api('adtoolItemCampaigns', {}).then(function (d) {
+      if (!document.body.contains(host)) return;
+      host.innerHTML = note(d || {}, '', '') + periodsNote(d || {});
+    })['catch'](function (e) { host.innerHTML = '<div class="wla-note">The notes could not be read \u2014 ' + esc((e && e.message) || 'no answer') + '</div>'; });
+  } };
 
   /* ── draw and wire ────────────────────────────────────────────────────────────────────────── */
   function draw() {
     var box = $('wlaBody'); if (!box) return;
-    box.innerHTML = jumpBar() + note() + periodsNote() + dupSection() + standsSection();
+    /* 27 Nov (owner): "the entire page shows only those listings that are clicked, nothing else" —
+       the chips, then one list; the two notes live on the Extras page */
+    box.innerHTML = jumpBar() + (WL.filter === 'dup' ? dupSection() : standsSection());
     wire(box);
     /* a reload that named a section lands on it, once. The hash is already right, so it is not
        written again. */
@@ -32375,6 +32392,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
           '<button class="minibtn" id="o2XRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL\'S PRIMARY PURPOSE</span><span class="hint">profit · price · AliExpress cost · per-item ads — role-scoped server-side</span></div><div id="o2LL"><div class="empty">Loading…</div></div></div>' +
         /* 27 Nov (owner): the settled-days organic-versus-promoted card, moved here from the Business overview */
+        /* 27 Nov (owner): the two notes from Where each listing advertises, moved here */
+        '<div class="sec enter d2"><div class="sec-h"><h2>Where each listing advertises — the notes</h2><span class="hint">what counts as being in a campaign, what is live on that page, and the figures by period under its rows</span></div><div id="o2XWla" class="wla-wrap" style="max-width:none"></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Organic vs promoted sales — settled days</h2><span class="hint">all accounts · the nightly books only, today lands after tonight\u2019s rollup</span></div><div id="o2XSplit"><div class="o-card"><div class="empty">Loading…</div></div></div></div>' +
         '</div>';
     },
@@ -32391,6 +32410,7 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         O.listings = null; oPaintListings();
         oFeed('activeListings', {}, 0).then(function (d) { O.listings = (d && d.rows) || []; oPaintListings(); })
           .catch(function (e) { var b = $('o2LL'); if (b) { b.innerHTML = '<div class="o-card"><div class="empty">Could not load the live listings. <span style="color:var(--text-3);font-size:12px">' + esc((e && e.message) || 'no answer') + '</span></div></div>'; } });
+        if (window.WLA_NOTES && $('o2XWla')) { window.WLA_NOTES.mount($('o2XWla')); }
         oFeed('mgmtOverview', {}, 0).then(function (d) { var b = $('o2XSplit'); if (b) { b.innerHTML = oSplitCardHtml(d && d.split_7d); } })
           .catch(function (e) { var b = $('o2XSplit'); if (b) { b.innerHTML = '<div class="o-card"><div class="empty">Could not load the split. <span style="color:var(--text-3);font-size:12px">' + esc((e && e.message) || 'no answer') + '</span></div></div>'; } });
       };

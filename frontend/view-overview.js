@@ -1483,6 +1483,8 @@
           '<button class="minibtn" id="o2XRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL\'S PRIMARY PURPOSE</span><span class="hint">profit · price · AliExpress cost · per-item ads — role-scoped server-side</span></div><div id="o2LL"><div class="empty">Loading…</div></div></div>' +
         /* 27 Nov (owner): the settled-days organic-versus-promoted card, moved here from the Business overview */
+        /* 27 Nov (owner): the two notes from Where each listing advertises, moved here */
+        '<div class="sec enter d2"><div class="sec-h"><h2>Where each listing advertises — the notes</h2><span class="hint">what counts as being in a campaign, what is live on that page, and the figures by period under its rows</span></div><div id="o2XWla" class="wla-wrap" style="max-width:none"></div></div>' +
         '<div class="sec enter d2"><div class="sec-h"><h2>Organic vs promoted sales — settled days</h2><span class="hint">all accounts · the nightly books only, today lands after tonight\u2019s rollup</span></div><div id="o2XSplit"><div class="o-card"><div class="empty">Loading…</div></div></div></div>' +
         '</div>';
     },
@@ -1499,6 +1501,7 @@
         O.listings = null; oPaintListings();
         oFeed('activeListings', {}, 0).then(function (d) { O.listings = (d && d.rows) || []; oPaintListings(); })
           .catch(function (e) { var b = $('o2LL'); if (b) { b.innerHTML = '<div class="o-card"><div class="empty">Could not load the live listings. <span style="color:var(--text-3);font-size:12px">' + esc((e && e.message) || 'no answer') + '</span></div></div>'; } });
+        if (window.WLA_NOTES && $('o2XWla')) { window.WLA_NOTES.mount($('o2XWla')); }
         oFeed('mgmtOverview', {}, 0).then(function (d) { var b = $('o2XSplit'); if (b) { b.innerHTML = oSplitCardHtml(d && d.split_7d); } })
           .catch(function (e) { var b = $('o2XSplit'); if (b) { b.innerHTML = '<div class="o-card"><div class="empty">Could not load the split. <span style="color:var(--text-3);font-size:12px">' + esc((e && e.message) || 'no answer') + '</span></div></div>'; } });
       };
