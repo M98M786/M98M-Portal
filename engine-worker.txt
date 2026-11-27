@@ -225,7 +225,7 @@ function cronMap() {
        the Cloudflare side as well as written here, and a slot nobody registered never fires.
        adsItemsNet is one D1 read on a normal tick and runs the job only if no account has had a
        tick for 40 minutes. */
-    '*/15 * * * *': [reportsRelayToSheet, adsItemsNet, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval, ladderWatch, trackingInboxRetry],
+    '*/15 * * * *': [reportsRelayToSheet, adsItemsNet, adsReportPoll, statusRefresh, markEndedListings, violationsSync, sleepWatch, trackingBackfill, truthTier1, signalReeval, ladderWatch, trackingInboxRetry, goliveCentralFill],
     /* adtoolPeakSwitch has an INVOCATION OF ITS OWN, at :01 :16 :31 :46. It is one of the two jobs
        in this file that can write to eBay, and riding first in the twelve-job quarter-hour slot
        above was not enough: every job in a slot shares one invocation's subrequest budget, this one
@@ -1142,6 +1142,62 @@ async function supplierLinkFill(env) {
     (guarded ? ', ' + onSheet + ' written to the sheet' + (kept ? ', ' + kept + ' left alone (a person had filled it)' : '') +
       (missed ? ', ' + missed + ' sheet write(s) missed' : '')
       : ' — sheet writes held back: the Apps Script blank-cell guard is not deployed yet');
+}
+
+/* ---- Go-live → Central Main Sheet (owner, 27 Nov): "as soon as an item goes live … 5 to 10 minutes
+   later a trigger moves the hunting department's AliExpress supplier links into the central sheet".
+   Every 15 minutes: items that went live in the last 14 days whose Central row has not been filled
+   yet → the hunt's Product Link 1/2/3 and the upper end of its Source Price go to Apps Script
+   engineCentralFill, which writes blank cells only on every row of the item. The Central bot's
+   hourly listingSync creates the row, so a fresh go-live is retried each quarter hour until the
+   row exists (up to 13 days). central_fill remembers each item's state so nothing is sent twice. */
+let CENTRAL_FILL_SCHEMA_OK = false;
+async function goliveCentralFill(env) {
+  if (!CENTRAL_FILL_SCHEMA_OK) {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS central_fill (item_id TEXT PRIMARY KEY, account TEXT DEFAULT '', hunt_id TEXT DEFAULT '', status TEXT DEFAULT '', rows TEXT DEFAULT '', written INTEGER DEFAULT 0, kept INTEGER DEFAULT 0, tries INTEGER DEFAULT 0, last_at TEXT, note TEXT DEFAULT '')").run().catch(() => {});
+    CENTRAL_FILL_SCHEMA_OK = true;
+  }
+  const key = await secret(env, 'SYNC_KEY');
+  const rs = await env.DB.prepare(
+    "SELECT g.item_id, g.account, g.live_at, p.hunt_id, h.vals, COALESCE(cf.status, '') AS status, COALESCE(cf.tries, 0) AS tries " +
+    'FROM golive g JOIN provenance p ON p.item_id = g.item_id JOIN hunt_rows h ON h.hunt_id = p.hunt_id ' +
+    'LEFT JOIN central_fill cf ON cf.item_id = g.item_id ' +
+    "WHERE g.live_at >= datetime('now', '-14 day') AND COALESCE(cf.status, '') NOT IN ('done', 'gave_up', 'no_sheet') " +
+    "AND (cf.last_at IS NULL OR cf.last_at <= datetime('now', '-50 minute')) " +
+    'ORDER BY g.live_at DESC LIMIT 8'
+  ).all().catch(() => ({ results: [] }));
+  let done = 0, waiting = 0, failed = 0;
+  const upsert = (r, status, rows, written, kept, note) => env.DB.prepare(
+    "INSERT INTO central_fill (item_id, account, hunt_id, status, rows, written, kept, tries, last_at, note) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, datetime('now'), ?8) " +
+    "ON CONFLICT(item_id) DO UPDATE SET status = ?4, rows = ?5, written = ?6, kept = ?7, tries = tries + 1, last_at = datetime('now'), note = ?8"
+  ).bind(String(r.item_id), String(r.account || ''), String(r.hunt_id || ''), status, rows, written, kept, String(note || '').slice(0, 200)).run().catch(() => {});
+  for (const r of (rs.results || [])) {
+    let v = {};
+    try { v = JSON.parse(r.vals || '{}') || {}; } catch (e) { v = {}; }
+    const link = (k) => { const s = String(v[k] || '').trim(); return /^https?:\/\//i.test(s) ? s : ''; };
+    const cost = prHuntCost(v['Source Price']);
+    const values = { link1: link('Product Link 1 Main supplier'), link2: link('Product Link 2'), link3: link('Product Link 3') };
+    if (cost > 0) values.cost = cost;
+    if (!values.link1 && !values.link2 && !values.link3 && !values.cost) { await upsert(r, 'gave_up', '', 0, 0, 'hunt record carries no links'); failed++; continue; }
+    try {
+      const resp = await fetch(env.AS_URL, {
+        method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'engineCentralFill', payload: { key, account: r.account, item_id: String(r.item_id), values } }),
+        signal: AbortSignal.timeout(25000),
+      });
+      const body = await resp.json().catch(() => ({}));
+      const d = (body && body.data) || {};
+      if (d.guard !== 'central_fill') { await upsert(r, 'waiting', '', 0, 0, 'Apps Script does not carry engineCentralFill yet (deploy pending)'); waiting++; break; }
+      const reason = String(d.reason || '');
+      if (d.ok && !d.shadow && (d.rows || []).length) { await upsert(r, 'done', (d.rows || []).join(','), (d.written || []).length, (d.kept || []).length, (d.missing_headers || []).length ? 'no column for ' + d.missing_headers.join(',') : ''); done++; }
+      else if (d.ok && d.shadow) { await upsert(r, 'shadow', (d.rows || []).join(','), 0, 0, 'sheet writes are in shadow'); waiting++; }
+      else if (/row not found/.test(reason)) { const old = Date.parse(String(r.live_at || '').replace(' ', 'T')) < Date.now() - 13 * 86400000; await upsert(r, old ? 'gave_up' : 'waiting', '', 0, 0, old ? 'no Main Sheet row after 13 days' : 'Main Sheet row not there yet'); waiting++; }
+      else if (/no central sheet/.test(reason)) { await upsert(r, 'no_sheet', '', 0, 0, reason); failed++; }
+      else { await upsert(r, 'waiting', '', 0, 0, (reason || String(body.error || 'no answer')).slice(0, 120)); failed++; }
+    } catch (e) { await upsert(r, 'waiting', '', 0, 0, 'error ' + String((e && e.message) || e).slice(0, 100)); failed++; }
+  }
+  await ctx_setSync(env, 'goliveCentralFill', '', ukDate(''));
+  return 'goliveCentralFill: ' + done + ' filled, ' + waiting + ' waiting, ' + failed + ' failed';
 }
 
 /* ---------------- Item policy violations — the email archive (owner, 25 Sept) ----------------
@@ -30190,6 +30246,14 @@ const ROUTES = {
   /* the same read behind the sync key, for checks from the Mac — the key already reads every table */
   supplierDeskKey: {
     auth: 'sync', fn: async (p, ctx) => supplierDeskCore(p, Object.assign({}, ctx, { user: { role: 'Management', email: 'sync-key', super: true } })),
+  },
+  /* run the go-live → Central fill now and read its ledger (sync key) */
+  centralFillRun: {
+    auth: 'sync', fn: async (p, ctx) => {
+      const out = p.run === false ? 'not run' : await goliveCentralFill(ctx.env);
+      const rows = (await ctx.env.DB.prepare('SELECT item_id, account, status, rows, written, kept, tries, last_at, note FROM central_fill ORDER BY last_at DESC LIMIT 40').all().catch(() => ({ results: [] }))).results || [];
+      return { result: out, ledger: rows };
+    },
   },
   priceDecide: {
     auth: 'any', fn: async (p, ctx) => {

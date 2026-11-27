@@ -25214,6 +25214,78 @@ function actionEngineSheetWrite_(payload) {
     written: res.written || [], kept: res.kept || [], guard: onlyIfEmpty ? 'only_if_empty' : '' };
 }
 
+/* ---- Go-live → Central Main Sheet (owner, 27 Nov): "as soon as an item goes live … the AliExpress
+   supplier links that came from hunting move into the central sheet". The engine resolves the
+   hunt's three product links and Source Price and asks here; this writes them into EVERY row that
+   carries the eBay Item No (a variation listing has a main row and a "↳" sub-row), BLANK CELLS ONLY —
+   a person's or the Central bot's own value is never overwritten. Header spellings differ per
+   account ('Ali Express Link 1' / 'Supplier Link 1 ' / 'Supplier 1', 'Suuplier 2', …), so the caller
+   sends logical names and the account's own headers are found with the aliases enrichEngineFacts_
+   already reads by. Key-gated on ENGINE_SYNC_KEY like engineSheetWrite. */
+const CENTRAL_FILL_ALIASES = {
+  link1: ['Ali Express Link 1', 'AliExpress Link 1', 'Supplier Link 1', 'Ali Express Link', 'Supplier 1', 'Suuplier 1'],
+  link2: ['Suuplier 2', 'Supplier 2', 'Supplier Link 2'],
+  link3: ['Supplier 3', 'Suuplier 3', 'Supplier Link 3'],
+  cost: ['Aliexpress Cost', 'AliExpress Cost', 'Ali Express Cost', 'Ali Cost', 'AliExpress Cost Price', 'Ali Cost (range jahan variations)'],
+};
+function actionEngineCentralFill_(payload) {
+  const key = PropertiesService.getScriptProperties().getProperty('ENGINE_SYNC_KEY');
+  if (!key || String(payload.key || '') !== key) throw new Error('auth');
+  const account = String(payload.account || '').trim(), itemId = String(payload.item_id || '').replace(/\D/g, '');
+  const values = payload.values || {};
+  if (!account || !/^\d{9,14}$/.test(itemId)) throw new Error('SAY: account and item_id are needed');
+  const id = bridgeResolveSheetId_('account', account, 'central');
+  if (!id) return { ok: false, reason: 'no central sheet connected for ' + account, guard: 'central_fill' };
+  const open = bridgeOpenTab_(id, ['Main Sheet'], ['eBay Item No', 'Listing Title']);
+  if (!open) return { ok: false, reason: 'Main Sheet not readable', guard: 'central_fill' };
+  bridgeAssertWritableTab_(open.sheet.getName());
+  const idAliases = ['eBay Item No', 'eBay Item Number', 'Item No'];
+  let idCol = 0;
+  for (let i = 0; i < idAliases.length && !idCol; i++) { const c = bridgeColumnFor_(open, idAliases[i]); if (c > 0) idCol = c; }
+  if (!idCol) return { ok: false, reason: 'no eBay Item No column', guard: 'central_fill' };
+  const colFor = function (logical) {
+    const al = CENTRAL_FILL_ALIASES[logical] || [];
+    for (let i = 0; i < al.length; i++) { const c = bridgeColumnFor_(open, al[i]); if (c > 0) return { col: c, header: al[i] }; }
+    return null;
+  };
+  const plan = [], missing = [];
+  Object.keys(values).forEach(function (k) {
+    if (!CENTRAL_FILL_ALIASES[k]) return;
+    const v = values[k];
+    if (v === null || v === undefined || String(v).trim() === '') return;
+    const c = colFor(k);
+    if (!c) { missing.push(k); return; }
+    plan.push({ logical: k, col: c.col, header: c.header, value: bridgeCellIn_(v) });
+  });
+  if (!plan.length) return { ok: true, rows: [], written: [], kept: [], missing_headers: missing, reason: 'nothing to write', guard: 'central_fill' };
+  const first = open.headerRowIndex + 1, lastRow = open.sheet.getLastRow();
+  if (lastRow < first) return { ok: false, reason: 'row not found', rows: [], guard: 'central_fill' };
+  const wantKey = bridgeMatchKey_(itemId);
+  const colVals = open.sheet.getRange(first, idCol, lastRow - first + 1, 1).getValues();
+  const rows = [];
+  colVals.forEach(function (r, i) { if (bridgeMatchKey_(r[0]) === wantKey) rows.push(first + i); });
+  if (!rows.length) return { ok: false, reason: 'row not found', rows: [], guard: 'central_fill' };
+  if (!bridgeWriteEnabled_()) return { ok: true, shadow: true, rows: rows, written: [], kept: [], missing_headers: missing, guard: 'central_fill' };
+  const lock = LockService.getScriptLock();
+  const written = [], kept = [];
+  try {
+    lock.waitLock(10000);
+    rows.forEach(function (row) {
+      plan.forEach(function (c) {
+        const cell = open.sheet.getRange(row, c.col);
+        const old = cell.getValue();
+        if (String(old === null || old === undefined ? '' : old).trim() !== '') { kept.push(c.header + '@' + row); return; }
+        cell.setValue(c.value);
+        written.push(c.header + '@' + row);
+      });
+    });
+    SpreadsheetApp.flush();
+  } finally { lock.releaseLock(); }
+  logActivity_('engine@worker', 'ENGINE_CENTRAL_FILL', id + '!Main Sheet!' + itemId, '', JSON.stringify(values).slice(0, 180),
+    'rows ' + rows.join(',') + ' · written ' + written.length + ' · kept ' + kept.length);
+  return { ok: true, shadow: false, rows: rows, written: written, kept: kept, missing_headers: missing, guard: 'central_fill' };
+}
+
 /* Run one background job on demand, key-gated (19 Aug). Apps Script's Run button and its trigger
  * dialog cannot be driven reliably from an automated pane — the function picker silently reverts
  * and neither clicks nor arrow keys reach its listbox — so a newly written maintenance job could
@@ -25398,6 +25470,7 @@ function actionEngineRunJob_(payload) {
 const ACTIONS_ENGINE = {
   engineNotify: [actionEngineNotify_, 'public'],       // key-checked inside — the Worker has no Google token
   engineSheetWrite: [actionEngineSheetWrite_, 'public'], // key-checked inside; whitelist tag picks the columns
+  engineCentralFill: [actionEngineCentralFill_, 'public'], // key-checked inside; hunt links → Central Main Sheet, blank cells only
   engineRunJob: [actionEngineRunJob_, 'public'],       // key-checked inside; closed whitelist of sync jobs
 };
 
