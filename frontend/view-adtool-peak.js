@@ -1823,7 +1823,7 @@
      only can decide to run them again the next day." Evening £3.00, All day £5.00. The engine judges
      and pauses (adtPeakStopLossRun); these blocks print what it did and carry Management's one
      decision (adtoolPeakRerun). ══ */
-  function mayDecide() { var r = role(); return r === 'Management' || r === 'Ops Head' || !!(STATE.user && STATE.user.super); }
+  function mayDecide() { var u = (typeof STATE !== 'undefined' && STATE && STATE.user) || {}; var r = String(u.role || ''); return r === 'Management' || r === 'Ops Head' || !!u.super; }
   function bandLimit(b) { var L = (PK.data && PK.data.band_limits) || {}; var v = num(L[b]); return v == null ? null : v; }
   function bandRuleLine(B) {
     var lim = bandLimit(PK.band), mx = num(PK.data && PK.data.strikes_max) || 3;

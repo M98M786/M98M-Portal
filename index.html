@@ -1076,7 +1076,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261127-2018';
+var BUILD = '20261127-2019';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -10822,7 +10822,7 @@ VIEW_CSS.push(
      only can decide to run them again the next day." Evening £3.00, All day £5.00. The engine judges
      and pauses (adtPeakStopLossRun); these blocks print what it did and carry Management's one
      decision (adtoolPeakRerun). ══ */
-  function mayDecide() { var r = role(); return r === 'Management' || r === 'Ops Head' || !!(STATE.user && STATE.user.super); }
+  function mayDecide() { var u = (typeof STATE !== 'undefined' && STATE && STATE.user) || {}; var r = String(u.role || ''); return r === 'Management' || r === 'Ops Head' || !!u.super; }
   function bandLimit(b) { var L = (PK.data && PK.data.band_limits) || {}; var v = num(L[b]); return v == null ? null : v; }
   function bandRuleLine(B) {
     var lim = bandLimit(PK.band), mx = num(PK.data && PK.data.strikes_max) || 3;
