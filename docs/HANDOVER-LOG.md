@@ -1051,3 +1051,13 @@ charging water bag — revised on owner instruction with the mains text as it wa
 campaigns read PAUSED at campaign level this morning (radio 166308147019, shaver 166203577019) — not by the Mac.
 
 **State.** MAC PRIMARY. Hasib sends SQRs to the Mac again today (three runs); Windows standby.
+
+## 2026-11-27 13:05 UTC · MAC · The 13 empty shells from the 25 Nov CPC→Dynamic move ended (owner: "end the 13")
+
+Each re-read first: every ad ARCHIVED, nothing live. Then POST /end, each answered 204 and reads ENDED. Saif Bhai
+`167882820015`, `167882819015`, `166348789015`; HAFIZA BHAJI `166234175019`, `166074023019`, `166015559019`,
+`165452904019` (manual), `165032666019`; Sir Hasib `166234191019`, `166028794019`, `166028713019` (manual),
+`165418045019`; Azhar Bhai `169829225016`. Left alone, not shells: Saif Bhai Sand Paper Campaign `162090560015`
+(£100/day, 4 live ads) and Amna Baji Testing Campaign `166743121016` (£85/day, 17 live ads). Log:
+`M98M-SQR-Agent/logs/sqr-campaigns.csv`. Still open: Azhar Bhai Wireless Earbuds `168338844016` holds a second
+listing's paused ad, awaiting Hasib's word.
