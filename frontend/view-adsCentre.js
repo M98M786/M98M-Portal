@@ -59,15 +59,20 @@ VIEW_CSS.push(
     '.ac-acc{border:1px solid var(--gold-line);border-radius:11px;padding:10px 14px;background:var(--panel);font-size:12px;font-weight:700}' +
     '.ac-acc b{display:block;font-size:15px;font-variant-numeric:tabular-nums}' +
     '.ac-acc .w{color:var(--bad);font-size:10.5px;font-weight:800}' +
-    '.acc-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:900px}' +
+    /* 27 Nov (owner): "the gap between listing details and the rest of the data should be lessened"
+       — the item column takes a fixed share of the width instead of every spare pixel, so the
+       figures sit closer to it and there is room for the two ROAS columns */
+    '.acc-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:960px;table-layout:auto}' +
+    '.acc-tbl th:first-child,.acc-tbl > tbody > tr > td:first-child{width:31%;max-width:420px}' +
     '.acc-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);text-align:right;padding:8px 10px;border-bottom:1px solid var(--gold-line);font-weight:800;white-space:nowrap}' +
     '.acc-tbl th:first-child{text-align:left}' +
     /* every heading of the per-item board sorts it (owner, 22 Oct) */
     '.acc-tbl th.acc-s{cursor:pointer;user-select:none}' +
     '.acc-tbl th.acc-s:hover{color:var(--gold-a)}' +
     '.acc-tbl th .acc-ar{color:var(--gold-a);margin-left:3px}' +
-    '.acc-tbl td{padding:7px 10px;border-bottom:1px solid var(--gold-line);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}' +
+    '.acc-tbl td{padding:7px 8px;border-bottom:1px solid var(--gold-line);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}' +
     '.acc-tbl td:first-child{text-align:left;white-space:normal;min-width:240px}' +
+    '.ac-roas{font-weight:800}.ac-roas.ok{color:var(--ok)}.ac-roas.warn{color:var(--warn)}.ac-roas.bad{color:var(--bad)}.ac-roas.none{color:var(--text-3);font-weight:600}' +
     '.ac-waste td{background:var(--bad-soft,rgba(255,80,80,.08))}' +
     '.ac-waste td:first-child{border-left:3px solid var(--bad)}' +
     /* the two links under an item: eBay, and this listing\'s own Product history in a new tab */
@@ -588,13 +593,27 @@ VIEW_CSS.push(
       val: function (r) { return acNum(r.cpc_today); }, cell: function (r) { return r.cpc_today ? acGBP(r.cpc_today) : '\u2014'; } },
     { key: 'sold_today', label: 'Sold via ads', sorts: 'units eBay credits to the ad today',
       val: function (r) { return acNum(r.sold_today); }, cell: function (r) { return r.sold_today || 0; } },
+    /* 27 Nov (owner): "all listings should show their respective ROAS" — today's from the live
+       readings of eBay's running total, the window's from eBay's published report; money, so a
+       spend-only reader never gets the column */
+    { key: 'roas_today', label: 'ROAS today', money: true, sorts: 'today\u2019s sales credited to the ad for each \u00a31 spent',
+      val: function (r) { return r.roas_today == null ? -1 : acNum(r.roas_today); }, cell: function (r) { return acRoasCell(r.roas_today, r.rev_today, r.spend_today); } },
     { key: 'spend_14d', label: function () { return 'Spend ' + AC.win; }, sorts: 'ad spend over the window',
       val: function (r) { return acNum(r.spend_14d); }, cell: function (r) { return acGBP(r.spend_14d); } },
     { key: 'clicks_14d', label: function () { return 'Clicks ' + AC.win; }, sorts: 'clicks over the window',
       val: function (r) { return acNum(r.clicks_14d); }, cell: function (r) { return r.clicks_14d || 0; } },
     { key: 'sold_14d', label: function () { return 'Sold ' + AC.win; }, sorts: 'units from ads over the window',
-      val: function (r) { return acNum(r.sold_14d); }, cell: function (r) { return r.sold_14d || 0; } }
+      val: function (r) { return acNum(r.sold_14d); }, cell: function (r) { return r.sold_14d || 0; } },
+    { key: 'roas_14d', label: function () { return 'ROAS ' + AC.win; }, money: true, sorts: 'the window\u2019s sales credited to the ad for each \u00a31 spent',
+      val: function (r) { return r.roas_14d == null ? -1 : acNum(r.roas_14d); }, cell: function (r) { return acRoasCell(r.roas_14d, r.rev_14d, r.spend_14d); } }
   ];
+  /* a listing's ROAS: green at the 5\u00d7 target or better, amber under it, red where the ad
+     brought nothing back, a dash where it spent nothing; the credited revenue sits in the tooltip */
+  function acRoasCell(ro, rev, sp) {
+    if (ro == null || !(Number(sp) > 0.005)) { return '<span class="ac-roas none" title="no ad spend, so no ROAS">\u2014</span>'; }
+    var n = Number(ro) || 0, cls = n >= 5 ? 'ok' : n > 0 ? 'warn' : 'bad';
+    return '<span class="ac-roas ' + cls + '" title="' + esc('eBay credits ' + acGBP(rev) + ' of sales to this ad against ' + acGBP(sp) + ' spent') + '">' + n.toFixed(1) + '\u00d7</span>';
+  }
 
   /* the Item cell: the product's picture (20 Nov, owner), the title opening its Product history, the
      number, the account, the two links, the waste verdict, and, on a went-negative row, the signal's line */
@@ -726,7 +745,8 @@ VIEW_CSS.push(
     }
     /* with Today chosen the window IS today, so the three window columns would repeat the three
        beside them; they are left out rather than printed twice */
-    var cols = AC.win === 'today' ? AC_COLS.filter(function (c) { return !/_14d$/.test(c.key); }) : AC_COLS;
+    var cols = (AC.win === 'today' ? AC_COLS.filter(function (c) { return !/_14d$/.test(c.key); }) : AC_COLS)
+      .filter(function (c) { return !(c.money && AC.spendOnly); });
     var head = '<thead><tr>' + cols.map(function (c) {
       var on = AC.sort.key === c.key;
       return '<th class="acc-s" data-ac-k="' + esc(c.key) + '" title="' + esc('Sort by ' + c.sorts) + '">' +
@@ -867,6 +887,7 @@ VIEW_CSS.push(
       /* the sentence travels with the board so the per-item table, which is painted on its own when
          a sort redraws it, says the same thing as the line above it */
       AC.landNote = d.ads_landing ? String(d.landing_note || '') : '';
+      AC.spendOnly = acSpendOnly(d);
       AC.win = d.period === 'today' ? 'today' : d.period === 'yesterday' ? 'yesterday' : AC.lastDays + 'd';
       h += '<div id="acItems"></div>';
       h += '<p style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:8px">Snapshot ' +

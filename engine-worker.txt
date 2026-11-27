@@ -26308,7 +26308,7 @@ const ROUTES = {
       ).bind(...bindR).all().catch(() => ({ results: [] }));
       const hist = await ctx.env.DB.prepare(
         "SELECT a.item_id, a.account, ROUND(SUM(a.spend + a.cpc_spend), 2) AS spend_14, SUM(a.clicks + a.cpc_clicks) AS clicks_14, " +
-        "SUM(a.sales + a.cpc_sales) AS sold_14 FROM ads_daily a WHERE a.date >= ?1 AND a.date <= ?2" + (acctF ? ' AND a.account = ?3' : '') + " GROUP BY a.item_id, a.account"
+        "SUM(a.sales + a.cpc_sales) AS sold_14, ROUND(SUM(a.sale_amount + a.cpc_sale_amount), 2) AS rev_14 FROM ads_daily a WHERE a.date >= ?1 AND a.date <= ?2" + (acctF ? ' AND a.account = ?3' : '') + " GROUP BY a.item_id, a.account"
       ).bind(...bindR).all();
       const hBy = {};
       for (const h of (hist.results || [])) hBy[h.account + '|' + h.item_id] = h;
@@ -26330,7 +26330,7 @@ const ROUTES = {
         const byA = {}; let tS = 0, tC = 0, tU = 0, tR = 0;
         for (const t of (today.results || [])) {
           const k = t.account + '|' + t.item_id, r = rev[k] || 0;
-          hBy[k] = { item_id: t.item_id, account: t.account, spend_14: Number(t.spend_t) || 0, clicks_14: Number(t.clicks_t) || 0, sold_14: Number(t.sold_t) || 0 };
+          hBy[k] = { item_id: t.item_id, account: t.account, spend_14: Number(t.spend_t) || 0, clicks_14: Number(t.clicks_t) || 0, sold_14: Number(t.sold_t) || 0, rev_14: r };
           const a = (byA[t.account] = byA[t.account] || { account: t.account, date: day, spend: 0, rev: 0 });
           a.spend += Number(t.spend_t) || 0; a.rev += r; tS += Number(t.spend_t) || 0; tC += Number(t.clicks_t) || 0; tU += Number(t.sold_t) || 0; tR += r;
         }
@@ -26350,9 +26350,9 @@ const ROUTES = {
         const byA = {}; let tS = 0, tC = 0, tU = 0, tR = 0;
         for (const r of (rr.results || [])) {
           const k = r.account + '|' + r.item_id;
-          const h = (hBy[k] = hBy[k] || { item_id: r.item_id, account: r.account, spend_14: 0, clicks_14: 0, sold_14: 0 });
+          const h = (hBy[k] = hBy[k] || { item_id: r.item_id, account: r.account, spend_14: 0, clicks_14: 0, sold_14: 0, rev_14: 0 });
           const sp = Number(r.cum_spend) || 0, cl = Number(r.cum_clicks) || 0, un = Number(r.cum_units) || 0, rv = Number(r.cum_revenue) || 0;
-          h.spend_14 = round2(h.spend_14 + sp); h.clicks_14 += cl; h.sold_14 += un;
+          h.spend_14 = round2(h.spend_14 + sp); h.clicks_14 += cl; h.sold_14 += un; h.rev_14 = round2((h.rev_14 || 0) + rv);
           const a = (byA[r.account] = byA[r.account] || { account: r.account, date: yd, spend: 0, rev: 0 });
           a.spend += sp; a.rev += rv; tS += sp; tC += cl; tU += un; tR += rv;
         }
@@ -26367,11 +26367,25 @@ const ROUTES = {
       } else if (period === 'yesterday') {
         windowSource = 'eBay\u2019s published report for yesterday';
       }
+      /* 27 Nov (owner): "all listings in the Ads command centre should show their respective ROAS".
+         Today's ROAS is the live revenue eBay credits to the listing (the five-minute readings of
+         its running total) over today's spend; the window's is eBay's published revenue over the
+         window's spend, both ex VAT as the money page counts it. A listing that spent nothing has
+         no ROAS, and says so rather than printing a nought. */
+      const revT = {};
+      if (utcDate() === day) {
+        const rrT = await ctx.env.DB.prepare(
+          'SELECT account, item_id, ROUND(SUM(cum_revenue), 2) AS rev FROM adtool_intraday_latest WHERE report_day = ?1' + (acctF ? ' AND account = ?2' : '') + ' GROUP BY account, item_id'
+        ).bind(...(acctF ? [day, acctF] : [day])).all().catch(() => ({ results: [] }));
+        for (const r of (rrT.results || [])) revT[r.account + '|' + r.item_id] = Number(r.rev) || 0;
+      }
+      const roasOf = (rv, sp) => Number(sp) > 0.005 ? round2(Number(rv) / Number(sp)) : null;
       const items = [];
       const accounts = {};
       let updated = '';
       for (const t of (today.results || [])) {
-        const h = hBy[t.account + '|' + t.item_id] || {};
+        const hk = t.account + '|' + t.item_id;
+        const h = hBy[hk] || {};
         if (String(t.updated_at || '') > updated) updated = String(t.updated_at || '');
         const row = {
           account: t.account, item_id: t.item_id, title: t.title || '', price: t.price,
@@ -26381,6 +26395,8 @@ const ROUTES = {
           spend_today: t.spend_t || 0, clicks_today: t.clicks_t || 0, sold_today: t.sold_t || 0,
           cpc_today: t.clicks_t ? round2(t.spend_t / t.clicks_t) : 0,
           spend_14d: h.spend_14 || 0, clicks_14d: h.clicks_14 || 0, sold_14d: h.sold_14 || 0,
+          rev_today: round2(revT[hk] || 0), roas_today: roasOf(revT[hk] || 0, t.spend_t || 0),
+          rev_14d: round2(h.rev_14 || 0), roas_14d: roasOf(h.rev_14 || 0, h.spend_14 || 0),
           waste: (t.spend_t || 0) >= 3 && !(t.sold_t || 0),
         };
         items.push(row);
@@ -26395,7 +26411,8 @@ const ROUTES = {
         if (!(h.spend_14 > 0)) continue;
         items.push({ account: h.account, item_id: h.item_id, title: '', price: null, listing_status: '',
           spend_today: 0, clicks_today: 0, sold_today: 0, cpc_today: 0,
-          spend_14d: h.spend_14, clicks_14d: h.clicks_14 || 0, sold_14d: h.sold_14 || 0, waste: false });
+          spend_14d: h.spend_14, clicks_14d: h.clicks_14 || 0, sold_14d: h.sold_14 || 0,
+          rev_today: 0, roas_today: null, rev_14d: round2(h.rev_14 || 0), roas_14d: roasOf(h.rev_14 || 0, h.spend_14), waste: false });
       }
       items.sort((a, b) => (b.waste - a.waste) || (b.spend_today - a.spend_today) || (b.spend_14d - a.spend_14d));
       const combined = {
