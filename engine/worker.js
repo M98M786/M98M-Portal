@@ -26169,6 +26169,66 @@ const ROUTES = {
     },
   },
 
+  /* 27 Nov (owner): the ads-against-earning chart on the Advertising overview and the Ads command
+     centre — per UK day: ad spend incl VAT (red), the ORDER EARNING of the sales eBay credits to
+     the ads (green) and the difference (blue). eBay credits revenue to an ad, never an earning, so
+     the earning is that revenue through the day's own order-earning ratio from the order ledger
+     (fee-landed orders: sold minus eBay fees, over sold), per account where one is asked for; the
+     window's ratio stands in for a day without a landed fee. Published days come from eBay's daily
+     table; today is the live readings, as on the command centre. */
+  adsEarnSeries: {
+    auth: 'any', fn: async (p, ctx) => {
+      if (['Advertising Manager', 'Management', 'Ops Head', 'Team Lead'].indexOf(ctx.user.role) < 0 && !ctx.user.super) throw new AuthError('auth');
+      const day = ukDate('');
+      const okDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+      const nDays = Math.min(92, Math.max(3, Number(p.days) || 14));
+      let from = okDate(p.from) ? String(p.from) : adtAddDays(day, -(nDays - 1));
+      let to = okDate(p.to) ? String(p.to) : day;
+      if (to > day) to = day; if (from > to) from = to;
+      const acctF = String(p.account || '');
+      const AF = acctF ? ' AND account = ?3' : '';
+      const bindR = acctF ? [from, to, acctF] : [from, to];
+      const pub = (await ctx.env.DB.prepare('SELECT date, ROUND(SUM(spend + cpc_spend), 2) AS spend, ROUND(SUM(sale_amount + cpc_sale_amount), 2) AS rev, SUM(sales + cpc_sales) AS units FROM ads_daily WHERE date >= ?1 AND date <= ?2' + AF + ' GROUP BY date').bind(...bindR).all().catch(() => ({ results: [] }))).results || [];
+      const byDay = {};
+      for (const r of pub) byDay[String(r.date)] = { spend: Number(r.spend) || 0, rev: Number(r.rev) || 0, units: Number(r.units) || 0, live: false };
+      /* today, and yesterday before eBay has published it, from the live readings */
+      const liveDay = async (d) => {
+        if (d === day) {
+          const t = await ctx.env.DB.prepare('SELECT ROUND(SUM(spend + cpc_spend), 2) AS spend, SUM(sales + cpc_sales) AS units FROM ads_today WHERE day = ?1' + (acctF ? ' AND account = ?2' : '')).bind(...(acctF ? [d, acctF] : [d])).first().catch(() => null);
+          let rev = 0;
+          if (utcDate() === day) { const rr = await ctx.env.DB.prepare('SELECT ROUND(SUM(cum_revenue), 2) AS rev FROM adtool_intraday_latest WHERE report_day = ?1' + (acctF ? ' AND account = ?2' : '')).bind(...(acctF ? [d, acctF] : [d])).first().catch(() => null); rev = Number(rr && rr.rev) || 0; }
+          if (t && (Number(t.spend) || 0) > 0) return { spend: Number(t.spend) || 0, rev, units: Number(t.units) || 0, live: true };
+          return null;
+        }
+        const rr = await ctx.env.DB.prepare('SELECT account, item_id, family, MAX(sampled_at) AS at, cum_spend, cum_revenue, cum_units FROM adtool_ads_intraday WHERE report_day = ?1' + (acctF ? ' AND account = ?2' : '') + ' GROUP BY account, item_id, family').bind(...(acctF ? [d, acctF] : [d])).all().catch(() => ({ results: [] }));
+        let sp = 0, rv = 0, un = 0; for (const r of (rr.results || [])) { sp += Number(r.cum_spend) || 0; rv += Number(r.cum_revenue) || 0; un += Number(r.cum_units) || 0; }
+        return sp > 0 ? { spend: round2(sp), rev: round2(rv), units: un, live: true } : null;
+      };
+      if (to === day && !byDay[day]) { const l = await liveDay(day); if (l) byDay[day] = l; }
+      const yd = adtAddDays(day, -1);
+      if (yd >= from && yd <= to && !byDay[yd]) { const l = await liveDay(yd); if (l) byDay[yd] = l; }
+      /* the order-earning ratio per UK day from the ledger: fee-landed orders only */
+      const _lonH = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', hour12: false }).formatToParts(new Date()).find((x) => x.type === 'hour').value);
+      const ukOffH = ((_lonH - new Date().getUTCHours()) + 24) % 24;
+      const dayExpr = "substr(datetime(o.created_at, '+" + ukOffH + " hours'),1,10)";
+      const lr = (await ctx.env.DB.prepare('SELECT ' + dayExpr + " AS d, ROUND(SUM(CASE WHEN o.ebay_fees > 0 THEN o.sold ELSE 0 END), 2) AS sold_f, ROUND(SUM(CASE WHEN o.ebay_fees > 0 THEN o.sold - o.ebay_fees ELSE 0 END), 2) AS oe_f FROM orders o WHERE o.created_at >= ?1 AND o.status NOT IN ('CANCELLED', 'NOT_FOUND')" + (acctF ? ' AND o.account = ?2' : '') + ' GROUP BY d').bind(...(acctF ? [ukDayStartIsoFor(from), acctF] : [ukDayStartIsoFor(from)])).all().catch(() => ({ results: [] }))).results || [];
+      const ratioBy = {}; let sF = 0, oF = 0;
+      for (const r of lr) { const s = Number(r.sold_f) || 0, o = Number(r.oe_f) || 0; if (s > 0) { ratioBy[String(r.d)] = o / s; sF += s; oF += o; } }
+      const ratioAll = sF > 0 ? oF / sF : 0.86;
+      const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const rows = [];
+      for (let d = from; d <= to; d = adtAddDays(d, 1)) {
+        const b = byDay[d] || { spend: 0, rev: 0, units: 0, live: false, missing: true };
+        const ratio = ratioBy[d] != null ? ratioBy[d] : ratioAll;
+        const spendV = round2(b.spend * 1.2), oe = round2(b.rev * ratio);
+        rows.push({ day: d, label: Number(d.slice(8, 10)) + ' ' + MON[Number(d.slice(5, 7)) - 1], spend: spendV, spend_ex_vat: round2(b.spend), ad_rev: round2(b.rev), units: b.units, ratio: Math.round(ratio * 1000) / 1000, ratio_own: ratioBy[d] != null, ad_oe: oe, diff: round2(oe - spendV), live: !!b.live, missing: !!b.missing });
+      }
+      const sum = (f) => round2(rows.reduce((s, r) => s + (Number(r[f]) || 0), 0));
+      return { from, to, account: acctF, rows, totals: { spend: sum('spend'), ad_rev: sum('ad_rev'), ad_oe: sum('ad_oe'), diff: sum('diff'), units: rows.reduce((s, r) => s + (r.units || 0), 0) }, ratio_window: Math.round(ratioAll * 1000) / 1000,
+        note: 'ad spend = eBay\u2019s report incl VAT; ad order earning = the revenue eBay credits to the ads through the day\u2019s own order-earning ratio (sold minus eBay fees, over sold, on the orders whose fees have landed; the window\u2019s ratio where a day has none); difference = earning minus spend; today and an unpublished yesterday are the live readings' };
+    },
+  },
+
   adsBoard: {
     auth: 'any', fn: async (p, ctx) => {
       /* Account-level ad-spend totals are a money read: the gate mirrors the screen's own

@@ -210,7 +210,10 @@
     /* THROUGH THE SHARED BLOCKS, not past them. The Peak-time overview draws the same five in the
        same order from a cohort answer, so neither screen can quietly grow a tile the other has not. */
     var B = window.adtOverviewBlocks;
-    $('ovToday').innerHTML = B.today(D) + B.byAccount(D) + B.slots(D) + B.hourly(D, { picker: true }) + B.foot(D);
+    /* 27 Nov (owner): the ad-spend-against-earning chart sits after Today by account; drawToday runs
+       with every five-minute poll, so the chart is refreshed with it */
+    $('ovToday').innerHTML = B.today(D) + B.byAccount(D) + '<div class="ov-panel" id="ovEarn"></div>' + B.slots(D) + B.hourly(D, { picker: true }) + B.foot(D);
+    if (window.ADS_EARN && $('ovEarn')) { window.ADS_EARN.mount($('ovEarn'), { account: OV.account || '', days: 14 }); }
     wireHour();    /* 6 Nov: the hour panel's own period bar and account chips */
   }
 
