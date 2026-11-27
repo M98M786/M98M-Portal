@@ -46,7 +46,17 @@
     '.alx-finder .row{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--gold-line)}.alx-finder .row:first-of-type{border-top:0}' +
     '.alx-finder .camps{flex:1 1 320px;font-size:12.5px;font-weight:700;line-height:1.7}' +
     '.alx-finder .camps .adt-camplink{color:var(--gold-a);font-weight:800}' +
-    '.alx-finder .hint{font-size:10.5px;color:var(--text-3);font-weight:600;margin-top:6px;line-height:1.5}'
+    '.alx-finder .hint{font-size:10.5px;color:var(--text-3);font-weight:600;margin-top:6px;line-height:1.5}' +
+    /* 18 Nov (owner): "a new box that will show all account names" — one chip per account above the
+       lenses; press one and every lens count, the table, the count line and the export answer for
+       that account alone. All accounts is the gold chip until another is pressed. */
+    '.alx-accbox{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border:1px solid var(--gold-line-hi);border-radius:14px;padding:10px 12px;margin-bottom:12px;background:var(--panel-2)}' +
+    '.alx-acclbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:800;margin-right:4px}' +
+    '.alx-acc{background:var(--panel);border:1px solid var(--gold-line);border-radius:99px;padding:6px 14px;font:inherit;font-size:12px;color:var(--text-2);font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s}' +
+    '.alx-acc:hover{border-color:var(--gold-line-hi);color:var(--text)}' +
+    '.alx-acc.on{color:var(--gold-ink);background:var(--gold-b);border-color:var(--gold-b);font-weight:800}' +
+    '.alx-acc .n{opacity:.75;margin-left:6px;font-variant-numeric:tabular-nums}' +
+    '.alx-accnote{width:100%;font-size:11px;color:var(--text-3);font-weight:600;margin-top:2px}'
   );
 
   /* The campaign cell: eBay's own answer (live membership, every 15 minutes) first, the sheet's
@@ -101,8 +111,44 @@
   /* 26 Nov (owner): "7, 14, 30 — make it a dropdown selection" — `win` is the sold window the one
      Sold column shows; the Suppliers and Source columns are gone (the supplier links ride on the
      listing cell now) */
-  var ALX = { account: '', rows: [], q: '', tab: 'all', kind: '', win: 7 };
+  var ALX = { account: '', rows: [], q: '', tab: 'all', kind: '', win: 7, accounts: [], accCounts: null };
   function alxSoldWin(r) { return ALX.win === 14 ? (Number(r.sold_14d) || 0) : ALX.win === 30 ? (r.sold_30d_live !== undefined ? Number(r.sold_30d_live) : (Number(r.sold_30d) || 0)) : (Number(r.sold_7d) || 0); }
+
+  /* The account box. Its names come from accountList (every account this role may see) with any
+     account the rows themselves name added, so a chip exists for an account the list has not caught
+     up with. The count on each chip is the listing count from the last fleet-wide load (an
+     account's own load only carries that account's rows, so the other chips keep the fleet figures
+     until the next All accounts load); no fleet load yet means no counts, not zeros. */
+  function alxAccountNames() {
+    var seen = {}, out = [];
+    ALX.accounts.concat(ALX.rows.map(function (r) { return axStr(r.account); })).forEach(function (n) {
+      if (n && !seen[n]) { seen[n] = true; out.push(n); }
+    });
+    return out;
+  }
+  function alxAccChips() {
+    var box = $('alxAccBox');
+    if (!box) { return; }
+    var names = alxAccountNames(), counts = ALX.accCounts || {};
+    var total = 0;
+    names.forEach(function (n) { total += counts[n] || 0; });
+    var chip = function (value, label) {
+      var n = value ? counts[value] : (ALX.accCounts ? total : undefined);
+      return '<button class="alx-acc' + (ALX.account === value ? ' on' : '') + '" data-alx-acc="' + esc(value) + '">' + esc(label) +
+        (n === undefined ? '' : '<span class="n">' + n + '</span>') + '</button>';
+    };
+    box.innerHTML = '<span class="alx-acclbl">Account</span>' + chip('', 'All accounts') + names.map(function (n) { return chip(n, n); }).join('') +
+      (ALX.account ? '<div class="alx-accnote">Every lens, count and the export below answer for <b>' + esc(ALX.account) + '</b> alone. Press All accounts to go back to the fleet.</div>' : '');
+    Array.prototype.forEach.call(box.querySelectorAll('[data-alx-acc]'), function (b) {
+      b.onclick = function () {
+        var a = this.getAttribute('data-alx-acc');
+        if (a === ALX.account) { return; }
+        ALX.account = a;
+        alxAccChips();
+        alxLoad();
+      };
+    });
+  }
 
   /* 31 Oct (owner, showing the ad tool's row): "I need these kind of listings page" — every row is the
      portal's standard listing cell (image, title → Product history, item number, account, eBay ↗,
@@ -236,7 +282,14 @@
       ALX.rows.forEach(function (r) {
         if (r.live_campaigns) { r.live_campaign_names = r.live_campaigns.map(function (c) { return c.kind + ': ' + c.name + (c.live ? '' : ' (' + (axStr(c.ad_status).toLowerCase() || 'not live') + ')'); }).join(' | '); }
       });
+      // a fleet-wide, unsearched load is the one that knows how many listings each account has
+      if (!ALX.account && !axStr(ALX.q)) {
+        var by = {};
+        ALX.rows.forEach(function (r) { var a = axStr(r.account); if (a) { by[a] = (by[a] || 0) + 1; } });
+        ALX.accCounts = by;
+      }
     }
+    alxAccChips();
     var hasLive = ALX.rows.some(function (r) { return r.live_kind !== undefined; });
     var chips = $('alxTabs');
     if (chips) {
@@ -265,12 +318,12 @@
       });
     }
     var cnt = $('alxCount');
-    if (cnt) { cnt.textContent = all.length + (q || ALX.tab !== 'all' || ALX.kind ? ' of ' + ALX.rows.length : '') + ' listing(s)'; }
+    if (cnt) { cnt.textContent = all.length + (q || ALX.tab !== 'all' || ALX.kind ? ' of ' + ALX.rows.length : '') + ' listing(s)' + (ALX.account ? ' · ' + ALX.account : ''); }
     var finder = (/^\d{9,14}$/.test(axStr(ALX.q)) && all.length && all.length <= 5) ? alxFinder(all) : '';
     if (!all.length) {
       box.innerHTML = q
         ? '<div class="alx-empty">No listing matches “' + esc(ALX.q) + '”.<span>Item numbers, titles and campaign names are all searched, across every account you can see.</span></div>'
-        : '<div class="alx-empty">Nothing here yet for this filter.' +
+        : '<div class="alx-empty">Nothing here yet for this filter' + (ALX.account ? ' in ' + esc(ALX.account) : '') + '.' +
           '<span>The Engine refreshes listings on a rolling 15-minute cycle — a freshly connected account fills up over the first hour.</span></div>';
       return;
     }
@@ -339,8 +392,9 @@
       return '<div class="hgroup enter d1"><h1>All Account <span class="goldtext">Listings</span></h1>' +
           '<span class="sub">Live from eBay every 15 minutes · joined with the sheet facts · what you may see is decided server-side</span></div>' +
         '<div class="card enter d2"><div class="bd">' +
+          '<div class="alx-accbox" id="alxAccBox"><span class="alx-acclbl">Account</span><button class="alx-acc on" data-alx-acc="">All accounts</button></div>' +
           '<div class="alx-bar" id="alxTabs" style="margin-bottom:8px"></div>' +
-          '<div class="alx-bar"><select class="alx-sel" id="alxAcc"><option value="">All accounts</option></select>' +
+          '<div class="alx-bar">' +
           '<select class="alx-sel" id="alxWin" title="the window the Sold column counts">' + [7, 14, 30].map(function (n) { return '<option value="' + n + '"' + (ALX.win === n ? ' selected' : '') + '>Sold \u00b7 ' + n + ' days</option>'; }).join('') + '</select>' +
           '<input class="alx-sel alx-q" id="alxQ" type="search" autocomplete="off" placeholder="Item ID → its campaign · or search title / campaign…">' +
           '<button class="minibtn" id="alxRefresh">Refresh</button>' +
@@ -350,19 +404,13 @@
         '</div></div>';
     },
     init: function () {
+      alxAccChips();
       var sw = $('alxWin');
       if (sw) { sw.onchange = function () { ALX.win = Number(sw.value) || 7; alxPaint(); }; }
       cachedCall('accountList', {}, function (d) {
-        var sel = $('alxAcc');
-        if (!sel) { return; }
-        var keep = sel.value;
-        sel.innerHTML = '<option value="">All accounts</option>' + ((d && d.accounts) || []).map(function (a) {
-          var n = axStr(a.account);
-          return n ? '<option' + (n === keep ? ' selected' : '') + '>' + esc(n) + '</option>' : '';
-        }).join('');
+        ALX.accounts = ((d && d.accounts) || []).map(function (a) { return axStr(a.account); }).filter(Boolean);
+        alxAccChips();
       });
-      var sel = $('alxAcc');
-      if (sel) { sel.onchange = function () { ALX.account = axStr(this.value); alxLoad(); }; }
       /* The search reaches the server, so an item number finds its listing wherever it sits in the
          fleet rather than only within the rows already on screen. Typing is debounced so a full
          item number is one query, not twelve. */
@@ -394,7 +442,7 @@
           rows.forEach(function (r) { out += cols.map(function (c) { return esc1(r[c]); }).join(',') + '\n'; });
           var a = document.createElement('a');
           a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(out);
-          a.download = 'active-listings-' + new Date().toISOString().slice(0, 10) + '.csv';
+          a.download = 'active-listings-' + (ALX.account ? ALX.account.replace(/[^\w-]+/g, '_') + '-' : '') + new Date().toISOString().slice(0, 10) + '.csv';
           document.body.appendChild(a); a.click(); a.remove();
           toast(rows.length + ' listing(s) exported.');
         };
