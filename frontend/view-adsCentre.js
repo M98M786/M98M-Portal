@@ -23,10 +23,19 @@
     clicks: { pick: function (r) { return (acNum(r.clicks_today) || 0) > 0; }, sortKey: 'clicks_today', what: 'were clicked today' },
     sold:   { pick: function (r) { return (acNum(r.sold_today) || 0) > 0; },   sortKey: 'sold_today',   what: 'sold through their ads today' },
     waste:  { pick: function (r) { return !!r.waste; },                        sortKey: 'spend_today',  what: 'have spent \u00a33 or more today without a single order' },
-    window: { pick: function (r) { return (acNum(r.spend_14d) || 0) > 0; },    sortKey: 'spend_14d',    what: function () { return 'spent on ads over ' + (AC.win === 'today' ? 'today' : AC.win === 'yesterday' ? 'yesterday' : 'the last ' + AC.lastDays + ' days'); } },
+    /* 27 Nov (owner): "a box showing ROAS, the listings giving under 3 in red, the same as the
+       \u00a33 waste box" — the window's ROAS under 3\u00d7 on \u00a33 or more of spend, worst first */
+    roas:   { pick: function (r) { return !!r.low_roas; },                     sortKey: 'roas_14d', asc: true, what: function () { return 'bring back under 3\u00d7 what they spent on ads over ' + acWinWords() + ' (\u00a33 or more spent)'; } },
+    window: { pick: function (r) { return (acNum(r.spend_14d) || 0) > 0; },    sortKey: 'spend_14d',    what: function () { return 'spent on ads over ' + acWinWords(); } },
     neg:    { pick: function () { return false; },                             sortKey: '',             what: 'went negative and nobody has acted on them' }
   };
   function acFocusRows(rows) { var f = AC_FOCUS[AC.focus]; return f ? rows.filter(f.pick) : rows; }
+  function acWinWords() { return AC.win === 'today' ? 'today' : AC.win === 'yesterday' ? 'yesterday' : 'the last ' + AC.lastDays + ' days'; }
+  /* the ROAS rule: \u00a33 or more spent over the window and under \u00a33 of credited sales for each \u00a31 of it */
+  function acLowRoas(r) { var sp = acNum(r.spend_14d) || 0, ro = r.roas_14d; return sp >= 3 && ro != null && Number(ro) < 3; }
+  function acLowIntro(r) {
+    return { intro: 'This row is red: ROAS ' + (Number(r.roas_14d) || 0).toFixed(1) + '\u00d7 over ' + acWinWords() + ' \u2014 ' + acGBP(r.rev_14d) + ' of sales credited to the ad against ' + acGBP(r.spend_14d) + ' spent, under the 3\u00d7 line. Its Product history, in the page\u2019s own order:' };
+  }
   var AC_NEG_TYPE = 'WENT NEGATIVE YESTERDAY';
   /* the window in words, for every heading that names it: today, yesterday, the dates picked, or the last N days */
   function acWin(d) {
@@ -311,7 +320,13 @@ VIEW_CSS.push(
      and its actions; a red row's box carries the waste sentence */
   function acIntroFor(el) {
     var key = el && el.getAttribute ? el.getAttribute('data-ac-neg') : '', s = key ? acNegFind(key) : null;
-    return s ? { intro: acNegIntro(s), acts: acNegActs(s) } : null;
+    if (s) { return { intro: acNegIntro(s), acts: acNegActs(s) }; }
+    if (el && el.getAttribute && el.getAttribute('data-ac-low')) {
+      var id = String(el.getAttribute('data-ac-det') || ''), r = null;
+      AC.items.forEach(function (x) { if (String(x.item_id) === id) { r = x; } });
+      return r ? acLowIntro(r) : null;
+    }
+    return null;
   }
   /* ── 27 Nov (owner): "build and present this graph on the Advertising overview and the Ads command
      centre after Today by account: ad spend red, the order earning from the advertised sales green,
@@ -629,7 +644,8 @@ VIEW_CSS.push(
           '<div class="mono" style="font-size:9.5px;color:var(--text-3)">' + esc(id) + ' \u00b7 ' + esc(String(r.account)) +
           (known ? ' \u00b7 <a class="ac-eb" href="https://www.ebay.co.uk/itm/' + esc(id) + '" target="_blank" rel="noopener noreferrer" title="open on eBay">eBay \u2197</a>' +
             ' \u00b7 <a class="ac-eb" href="#adtoolProduct/' + esc(id) + '" target="_blank" rel="noopener" title="open this listing\u2019s Product history in a new tab">History \u2197</a>' : '') +
-          (r.waste ? ' \u00b7 <b style="color:var(--bad)">\u00a33+ TODAY, NO ORDER \u2014 PAUSE OR FIX</b>' : '') + '</div>' +
+          (r.waste ? ' \u00b7 <b style="color:var(--bad)">\u00a33+ TODAY, NO ORDER \u2014 PAUSE OR FIX</b>'
+            : AC.focus === 'roas' && r.low_roas ? ' \u00b7 <b style="color:var(--bad)">ROAS UNDER 3\u00d7 \u2014 FIX OR PAUSE</b>' : '') + '</div>' +
           (extra ? '<div class="ac-nline">' + extra + '</div>' : '') + '</div></div>';
   }
   function acCol(key) {
@@ -651,7 +667,7 @@ VIEW_CSS.push(
     var col = AC.sort.key ? acCol(AC.sort.key) : null;
     if (!col && AC.focus && AC_FOCUS[AC.focus] && AC_FOCUS[AC.focus].sortKey) {
       var fk = acCol(AC_FOCUS[AC.focus].sortKey);
-      if (fk) { return out.sort(function (a, b) { var wa = a.waste ? 1 : 0, wb = b.waste ? 1 : 0; if (wa !== wb) { return wb - wa; } return (fk.val(b) || 0) - (fk.val(a) || 0); }); }
+      if (fk) { var fd = AC_FOCUS[AC.focus].asc ? -1 : 1; return out.sort(function (a, b) { var wa = a.waste ? 1 : 0, wb = b.waste ? 1 : 0; if (wa !== wb) { return wb - wa; } return fd * ((fk.val(b) || 0) - (fk.val(a) || 0)); }); }
     }
     if (!col) {
       /* Nothing chosen: the board's own order, reproduced key for key — waste rows first, then the
@@ -719,7 +735,7 @@ VIEW_CSS.push(
        tile pressed the board is rows only; the Product history boxes come only behind the Wasting
        tile, and the went-negative block only behind its own tile. */
     var rows = AC.focus === 'neg' ? [] : acFocusRows(all), neg = AC.focus === 'neg' ? negAll : [];
-    var boxes = AC.focus === 'waste';
+    var boxes = AC.focus === 'waste' || AC.focus === 'roas', lowOn = AC.focus === 'roas';
     var focusBar = '';
     if (AC.focus) {
       var F = AC_FOCUS[AC.focus], n = AC.focus === 'neg' ? neg.length : rows.length;
@@ -785,13 +801,14 @@ VIEW_CSS.push(
     if (rows.length) {
       h += '<div class="scroll"><table class="acc-tbl">' + head + '<tbody>';
       acSortRows(rows).forEach(function (r) {
-        h += '<tr' + (r.waste ? ' class="ac-waste"' : '') + '>' +
+        var low = lowOn && r.low_roas && !r.waste;
+        h += '<tr' + (r.waste || low ? ' class="ac-waste"' : '') + '>' +
           cols.map(function (c) { return '<td>' + c.cell(r) + '</td>'; }).join('') + '</tr>';
         /* 20 Nov (owner): a red row carries its Product history underneath, in one box — 23 Nov:
            only on the Wasting tile's own view, never on the plain board */
         var did = String(r.item_id == null ? '' : r.item_id).trim();
-        if (boxes && r.waste && /^\d{9,13}$/.test(did)) {
-          h += '<tr class="ac-sub"><td colspan="' + cols.length + '"><div class="ac-d" data-ac-det="' + esc(did) + '">' + acDetailHtml(did) + '</div></td></tr>';
+        if (boxes && (r.waste || low) && /^\d{9,13}$/.test(did)) {
+          h += '<tr class="ac-sub"><td colspan="' + cols.length + '"><div class="ac-d" data-ac-det="' + esc(did) + '"' + (low ? ' data-ac-low="1"' : '') + '>' + acDetailHtml(did, low ? acLowIntro(r) : null) + '</div></td></tr>';
         }
       });
       h += '</tbody></table></div>';
@@ -840,11 +857,13 @@ VIEW_CSS.push(
           '<div class="k">' + k + '</div><div class="v">' + v + '</div>' + (sub ? '<div class="s">' + sub + '</div>' : '') +
           '<div class="go">' + (AC.focus === key ? 'SHOWING BELOW \u00b7 CLICK TO SHOW ALL' : 'SHOW THESE \u2193') + '</div></div>';
       };
+      var lowN = acSpendOnly(d) ? -1 : (d.items || []).filter(function (r) { return r && acLowRoas(r); }).length;
       var h = '<div class="ac-tiles">' +
         tile('spend', 'gold', 'Spend today · all accounts', acGBP(c.spend_today), '') +
         tile('clicks', '', 'Clicks today', (c.clicks_today || 0), '') +
         tile('sold', '', 'Sold via ads today', (c.sold_today || 0), '') +
         tile('waste', c.waste_n ? 'bad' : '', 'Wasting £3+ · no order', (c.waste_n || 0), '') +
+        (lowN < 0 ? '' : tile('roas', lowN ? 'bad' : '', 'ROAS under 3\u00d7 \u00b7 ' + esc(acWin(d)), lowN, 'on \u00a33+ of ad spend')) +
         tile('neg', '', 'Went negative yesterday · not acted on', '<span id="acNegN">\u2026</span>', '<span id="acNegS"></span>') +
         tile('window', '', 'Spend · ' + esc(acWin(d)), acGBP(c.spend_14d), '') +
       '</div>';
@@ -883,6 +902,7 @@ VIEW_CSS.push(
       }).join('') + '</div>';
       /* the per-item board is painted on its own so a sort can redraw it without asking the engine again */
       AC.items = (d.items || []).filter(function (r) { return r && typeof r === 'object'; });
+      AC.items.forEach(function (r) { r.low_roas = acLowRoas(r); });
       AC.lastDays = Number(d.days) || 14;
       /* the sentence travels with the board so the per-item table, which is painted on its own when
          a sort redraws it, says the same thing as the line above it */
