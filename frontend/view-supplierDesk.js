@@ -55,6 +55,7 @@
   function sdLink(u, label) { var safe = (typeof safeUrl === 'function') ? safeUrl(u) : sdS(u); if (!safe) { return esc(sdS(label || u).slice(0, 60)); } return '<a href="' + esc(safe) + '" target="_blank" rel="noopener noreferrer">' + esc(label || sdHost(u)) + '</a>'; }
   function sdTone(v) { return v === null || v === undefined ? 'sd-mute' : (sdN(v) < 0 ? 'sd-up' : 'sd-down'); }
   function sdItemLink(id, text) { return '<a href="#supplierDesk/' + esc(sdS(id)) + '" data-sd-open="' + esc(sdS(id)) + '">' + esc(text || sdS(id)) + '</a>'; }
+  function sdCanAdopt() { var u = STATE.user || {}; return !!(u.super || ['Management', 'Ops Head'].indexOf(sdS(u.role)) >= 0); }
   function sdTier(t) { var cls = t === 'serious' || t === 'red' || t === 'critical' ? 'bad' : (t === 'moderate' ? 'warn' : ''); return '<span class="sd-pill ' + cls + '">' + esc(SD_TIER[t] || t || 'under 10p') + '</span>'; }
 
   VIEWS.supplierDesk = {
@@ -148,13 +149,15 @@
       h += '<div class="sd-sup main"><div class="t"><span>Working supplier · from the orders</span><span>' + (w.on_file ? 'on file as supplier ' + w.on_file : '<span class="sd-pill warn" style="margin:0">not in the three on file</span>') + '</span></div>' +
         '<div>' + sdLink(w.url, sdHost(w.url) + (w.ali_item ? ' · ' + w.ali_item : '')) + '</div>' +
         '<div class="cost">' + (w.paid ? sdM(w.paid) : '—') + '<small>paid a unit, average</small></div>' +
-        '<div class="f">Bought on <b>' + w.orders + '</b> of the last ' + (d.orders || []).length + ' orders' + (w.last_used ? ' · last ' + esc(w.last_used) : '') + '</div></div>';
+        '<div class="f">Bought on <b>' + w.orders + '</b> of the last ' + (d.orders || []).length + ' orders' + (w.last_used ? ' · last ' + esc(w.last_used) : '') + '</div>' +
+        (!w.on_file && sdCanAdopt() ? '<div><button class="minibtn" id="sdAdopt" data-url="' + esc(sdS(w.url)) + '">Adopt as supplier 1</button> <span class="sd-sub">saves this link into the portal\'s supplier slot 1 for this item</span></div>' : '') + '</div>';
     }
     for (var i = 0; i < 3; i++) {
       var s = sups[i];
       h += '<div class="sd-sup"><div class="t"><span>' + (i === 0 ? 'Supplier 1 · on file' : 'Supplier ' + (i + 1) + ' · on file') + '</span>' + (s ? '<span>' + esc(sdS(s.src)) + '</span>' : '') + '</div>';
       if (!s) { h += '<div class="sd-mute" style="font-size:12.5px">none on file</div></div>'; continue; }
-      h += '<div>' + sdLink(s.url, sdHost(s.url) + (s.ali_item ? ' · ' + s.ali_item : '')) + '</div>' +
+      var dup = sups.filter(function (x, k) { return k < i && x.ali_item && x.ali_item === s.ali_item; }).length ? ' <span class="sd-pill" style="margin:0">same item as an earlier slot</span>' : '';
+      h += '<div>' + sdLink(s.url, sdHost(s.url) + (s.ali_item ? ' · ' + s.ali_item : '')) + dup + '</div>' +
         '<div class="cost">' + (s.cost_now ? sdM(s.cost_now) : '—') + (s.cost_now_source ? '<small>' + esc(s.cost_now_source) + '</small>' : '') + '</div>' +
         '<div class="f">Used on <b>' + s.orders_via + '</b> of the last ' + (d.orders || []).length + ' orders' + (s.paid_via ? ' · paid <b>' + sdM(s.paid_via) + '</b> a unit' : '') + (s.last_used ? ' · last ' + esc(s.last_used) : '') + '</div>' +
         (s.link_price ? '<div class="f">price carried in the link <b>' + sdM(s.link_price) + '</b></div>' : '') + '</div>';
@@ -227,6 +230,14 @@
     }
     var sa = $('sdAcct');
     if (sa) { sa.onchange = function () { SD.acct = sa.value; sdPaintBoard(); }; }
+    var ad = $('sdAdopt');
+    if (ad) {
+      ad.onclick = function () {
+        var url = ad.getAttribute('data-url'); ad.disabled = true; ad.textContent = 'Saving…';
+        api('sourcingSave', { item_id: SD.id, slot: 1, url: url }).then(function () { toast('Saved as supplier 1 — the portal link wins over the sheet.'); sdLoad(SD.id); })
+          .catch(function (e) { ad.disabled = false; ad.textContent = 'Adopt as supplier 1'; toast(sdS(e.message).replace(/^SAY:\s*/, '')); });
+      };
+    }
   }
 
   /* ---------- the board ---------- */
