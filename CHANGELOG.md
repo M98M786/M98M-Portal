@@ -5,6 +5,7 @@
 - **Ads command centre**: two new columns, *ROAS today* and *ROAS · window*, on every listing row (green at 5× or better, amber under, red where the ad brought nothing, a dash where nothing was spent; the credited revenue in the tooltip). The item column now takes a fixed share of the width, so the figures sit closer to the listing. The *Day by day* and *Account to account* tables are gone from the centre.
 - **Advertising overview**: the *Account to account · spend / revenue / ROAS per day* table now ends the page.
 - **Business overview**: the *Profitability* section is gone.
+- **Business overview → Extras**: the *Organic vs promoted sales · settled days* card (promoted = eBay-attributed revenue in the nightly books) moved from the Advertising dashboard block to the Extras page, under the live listings.
 - Engine: `adsBoard` rows carry `rev_today`, `roas_today`, `rev_14d`, `roas_14d` (stripped for spend-only readers; the column is then left out).
 
 ## 2026-11-26 - BUSINESS OVERVIEW, ALL ACCOUNT LISTINGS, PRODUCT RETURNS: the owner's five-part list

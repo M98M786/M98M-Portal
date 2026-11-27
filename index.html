@@ -1076,7 +1076,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261127-1644';
+var BUILD = '20261127-1659';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -31837,24 +31837,9 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         '<span class="v">' + oGBP(a.spend) + '</span>' +
         '<span class="rank-d ' + (a.roas === null ? '' : a.roas >= 5 ? 'up' : 'dn') + '" style="min-width:64px">ROAS ' + (a.roas === null ? '—' : oN(a.roas).toFixed(1)) + '</span></div>';
     }).join('');
-    /* R7-8 (Hasib): organic vs promoted sales "everywhere" — the 7-day split on the home. */
-    var sp = O.ov.split_7d || {}, splitCard = '';
-    /* split_7d is a pre-summed all-accounts aggregate (no per-account breakdown), so it is only
-       truthful in the All-accounts view — hidden when the page is scoped to one account. */
-    if (!O.acct && oN(sp.total_rev) > 0) {
-      var pPct = Math.max(0, Math.min(100, oN(sp.promoted_pct)));
-      /* The card is rollup-only on purpose (promoted revenue needs ads_rev, which today's live
-         orders have not got yet). Say the window out loud — an unlabelled "last 7 days" here
-         next to a live "last 7 days" tile is what made the two totals look like a bug. */
-      var spThrough = sp.through ? ' \u00b7 through ' + esc(String(sp.through)) : '';
-      splitCard = '<div class="o-card" style="margin-top:12px"><span class="card-t">Organic vs promoted sales \u00b7 settled days' + spThrough + '</span>' +
-        '<div class="ov-splitbar"><i style="width:' + pPct + '%"></i></div>' +
-        '<div class="ov-splitlg"><span><b style="color:var(--gold-a)">Promoted</b> ' + oGBP(sp.promoted_rev) + ' · ' + pPct.toFixed(1) + '%</span>' +
-        '<span><b style="color:var(--ok,#2fb170)">Organic</b> ' + oGBP(sp.organic_rev) + ' · ' + (100 - pPct).toFixed(1) + '%</span>' +
-        '<span style="margin-left:auto;color:var(--text-3);font-weight:800">Total ' + oGBP(sp.total_rev) + '</span></div>' +
-        '<div class="kpi-s" style="margin-top:8px">promoted = eBay-attributed ad revenue; organic is the rest' +
-          (sp.basis ? ' \u00b7 ' + esc(String(sp.basis)) : '') + '</div></div>';
-    }
+    /* 27 Nov (owner): the settled-days organic-versus-promoted card moved to the Extras page
+       (oSplitCardHtml below); the Business overview carries the CPC / Dynamic / organic chart */
+    var splitCard = '';
     box.innerHTML = '<div class="split"><div class="o-card"><span class="card-t">' + esc(winLabel) + (perDay ? ' day by day' : ' per account') + ' · real spend</span>' +
       '<div class="mini-rows">' + (rows || '<div class="empty">No spend recorded ' + (isYday ? 'yesterday' : 'in this window') + (isYday ? ' — two accounts still need the marketing re-consent.' : '.') + '</div>') + '</div>' +
       (!isYday && r.to >= ukToday() ? '<div class="kpi-s" style="margin-top:8px">today\u2019s spend is the intraday figure; its revenue settles with the nightly books</div>' : '') + '</div>' +
@@ -31862,6 +31847,23 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
       '<div class="g-side"><b>Blended ROAS · ' + esc(winLabel.toLowerCase()) + '</b><span>' + (roas === null ? '—' : roas.toFixed(1)) + '</span>' +
       '<b style="margin-top:8px">SOP target</b><span>≥ 5</span></div></div>' +
       '<div class="kpi-s" style="margin-top:10px">revenue ÷ real ad spend · per-item attribution lands with the fee feed</div></div></div>' + splitCard;
+  }
+
+  /* R7-8 (Hasib): organic vs promoted sales "everywhere" — the settled-days split, promoted being
+     what eBay attributes to the ads in the nightly books. 27 Nov (owner): it lives on the Extras
+     page now. split_7d is a pre-summed all-accounts aggregate, so it is always the fleet's figure. */
+  function oSplitCardHtml(sp) {
+    sp = sp || {};
+    if (!(oN(sp.total_rev) > 0)) { return '<div class="o-card"><div class="empty">No settled days to split yet.</div></div>'; }
+    var pPct = Math.max(0, Math.min(100, oN(sp.promoted_pct)));
+    var spThrough = sp.through ? ' \u00b7 through ' + esc(String(sp.through)) : '';
+    return '<div class="o-card"><span class="card-t">Organic vs promoted sales \u00b7 settled days' + spThrough + '</span>' +
+      '<div class="ov-splitbar"><i style="width:' + pPct + '%"></i></div>' +
+      '<div class="ov-splitlg"><span><b style="color:var(--gold-a)">Promoted</b> ' + oGBP(sp.promoted_rev) + ' · ' + pPct.toFixed(1) + '%</span>' +
+      '<span><b style="color:var(--ok,#2fb170)">Organic</b> ' + oGBP(sp.organic_rev) + ' · ' + (100 - pPct).toFixed(1) + '%</span>' +
+      '<span style="margin-left:auto;color:var(--text-3);font-weight:800">Total ' + oGBP(sp.total_rev) + '</span></div>' +
+      '<div class="kpi-s" style="margin-top:8px">promoted = eBay-attributed ad revenue; organic is the rest' +
+        (sp.basis ? ' \u00b7 ' + esc(String(sp.basis)) : '') + '</div></div>';
   }
 
   // ---------- returns & cases ----------
@@ -32289,9 +32291,11 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
     icon: '<path d="M4 6h16M4 12h16M4 18h10"/>',
     render: function () {
       return '<div class="ov2">' +
-        '<div class="hgroup enter d1"><h1>Extras</h1><span class="sub">the live listings table that left the Business overview</span>' +
+        '<div class="hgroup enter d1"><h1>Extras</h1><span class="sub">what left the Business overview: the live listings table and the settled-days sales split</span>' +
           '<button class="minibtn" id="o2XRefresh" style="margin-left:auto">Refresh</button></div>' +
         '<div class="sec enter d1"><div class="sec-h"><h2>Live listings — current data</h2><span class="primary-tag">THE PORTAL\'S PRIMARY PURPOSE</span><span class="hint">profit · price · AliExpress cost · per-item ads — role-scoped server-side</span></div><div id="o2LL"><div class="empty">Loading…</div></div></div>' +
+        /* 27 Nov (owner): the settled-days organic-versus-promoted card, moved here from the Business overview */
+        '<div class="sec enter d2"><div class="sec-h"><h2>Organic vs promoted sales — settled days</h2><span class="hint">all accounts · the nightly books only, today lands after tonight\u2019s rollup</span></div><div id="o2XSplit"><div class="o-card"><div class="empty">Loading…</div></div></div></div>' +
         '</div>';
     },
     init: function () {
@@ -32307,6 +32311,8 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
         O.listings = null; oPaintListings();
         oFeed('activeListings', {}, 0).then(function (d) { O.listings = (d && d.rows) || []; oPaintListings(); })
           .catch(function (e) { var b = $('o2LL'); if (b) { b.innerHTML = '<div class="o-card"><div class="empty">Could not load the live listings. <span style="color:var(--text-3);font-size:12px">' + esc((e && e.message) || 'no answer') + '</span></div></div>'; } });
+        oFeed('mgmtOverview', {}, 0).then(function (d) { var b = $('o2XSplit'); if (b) { b.innerHTML = oSplitCardHtml(d && d.split_7d); } })
+          .catch(function (e) { var b = $('o2XSplit'); if (b) { b.innerHTML = '<div class="o-card"><div class="empty">Could not load the split. <span style="color:var(--text-3);font-size:12px">' + esc((e && e.message) || 'no answer') + '</span></div></div>'; } });
       };
       var rf = $('o2XRefresh'); if (rf) { rf.onclick = load; }
       load();
