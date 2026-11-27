@@ -1076,7 +1076,7 @@ var CACHE_TTL_MS = 24*60*60*1000;
    stamps this constant and writes the same stamp to version.txt; the poller below notices when
    the deployed stamp moves ahead of the running page and reloads once (sessions live in
    localStorage now, so a reload lands straight back on the same screen, signed in). */
-var BUILD = '20261127-1934';
+var BUILD = '20261127-1937';
 /* R5 EMERGENCY (Hasib: a Product Hunter's half-typed submission was eaten by an auto-update
    reload). Two defences, both here in the shell so every screen gets them:
    1. THE DRAFT KEEPER — every keystroke into any portal field is saved (per view, survives
@@ -36136,16 +36136,16 @@ function ibMs(v) { var t = Date.parse(String(v || '')); return isNaN(t) ? 0 : t;
        its own paid cost, from the same engine read as the Price revision card */
     var vr = (d.variations || {}).rows || [];
     if (vr.length > 1 || ((d.variations || {}).multi && vr.length)) {
-      var spTd = function (v, right) { return '<td style="padding:5px 8px;border-bottom:1px solid var(--gold-line);' + (right ? 'text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap' : '') + '">' + v + '</td>'; };
-      var spMm = function (v) { return v === null || v === undefined || v === '' ? '—' : '£' + Number(v).toFixed(2); };
-      var spTone = function (v) { return 'color:' + (Number(v) < 0 ? 'var(--bad)' : 'var(--ok)'); };
+      var spvTd = function (v, right) { return '<td style="padding:5px 8px;border-bottom:1px solid var(--gold-line);' + (right ? 'text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap' : '') + '">' + v + '</td>'; };
+      var spvMm = function (v) { return v === null || v === undefined || v === '' ? '—' : '£' + Number(v).toFixed(2); };
+      var spvTone = function (v) { return 'color:' + (Number(v) < 0 ? 'var(--bad)' : 'var(--ok)'); };
       h += '<div style="margin-top:14px"><h3 style="font-size:13px;margin:0 0 6px">By variation <span style="font-size:11px;color:var(--text-3);font-weight:600">· ' + ((d.variations || {}).variations_n || vr.length) + ' sold · each on the cost paid for that variation</span></h3>' +
         '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr>' +
         ['Variation', 'Sold 30d', 'Buyers pay', 'Ali cost', 'Source'].concat(d.spend_only ? [] : ['Actual / unit', 'Target', 'Gap', 'Verdict', 'Must sell at']).map(function (t, k) { return '<th style="text-align:' + (k === 0 || k === 4 || k === 8 ? 'left' : 'right') + ';font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);padding:6px 8px;border-bottom:1px solid var(--gold-line);white-space:nowrap">' + t + '</th>'; }).join('') + '</tr></thead><tbody>' +
         vr.map(function (r) {
           var jv = r.judge || {};
-          return '<tr>' + spTd(esc(spS(r.label).slice(0, 64))) + spTd(r.units_30d, 1) + spTd(r.paid ? spMm(r.paid) : '—', 1) + spTd(jv.ali ? spMm(jv.ali) : '—', 1) + spTd('<span style="color:var(--text-3)">' + esc(spS(jv.ali_source) || 'none') + '</span>') +
-            (d.spend_only ? '' : spTd('<span style="' + spTone(jv.n_actual) + '">' + spMm(jv.n_actual) + '</span>', 1) + spTd(jv.target ? spMm(jv.target) : '—', 1) + spTd('<span style="' + spTone(jv.n_gap) + '">' + spMm(jv.n_gap) + '</span>', 1) + spTd(esc(spS(jv.n_segment).replace(/_/g, ' '))) + spTd(jv.n_required ? spMm(jv.n_required) : '—', 1)) + '</tr>';
+          return '<tr>' + spvTd(esc(spS(r.label).slice(0, 64))) + spvTd(r.units_30d, 1) + spvTd(r.paid ? spvMm(r.paid) : '—', 1) + spvTd(jv.ali ? spvMm(jv.ali) : '—', 1) + spvTd('<span style="color:var(--text-3)">' + esc(spS(jv.ali_source) || 'none') + '</span>') +
+            (d.spend_only ? '' : spvTd('<span style="' + spvTone(jv.n_actual) + '">' + spvMm(jv.n_actual) + '</span>', 1) + spvTd(jv.target ? spvMm(jv.target) : '—', 1) + spvTd('<span style="' + spvTone(jv.n_gap) + '">' + spvMm(jv.n_gap) + '</span>', 1) + spvTd(esc(spS(jv.n_segment).replace(/_/g, ' '))) + spvTd(jv.n_required ? spvMm(jv.n_required) : '—', 1)) + '</tr>';
         }).join('') + '</tbody></table></div><div style="font-size:11px;color:var(--text-3);margin-top:4px">' + esc(spS((d.variations || {}).note)) + '</div></div>';
     }
         box.innerHTML = h;
